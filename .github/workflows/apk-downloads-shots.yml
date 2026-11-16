@@ -1,0 +1,84 @@
+name: APK downloads journey (real data, real screenshots)
+# طلب المالك (15 نوفمبر): صور حقيقية من داخل VANTARA لا تصاميم. يبني Debug ويشغّله على محاكي، يثبّت مصدر أنمي
+# ومصدر مانجا حقيقيين، ويمر بالتحميل كما يلمسه المستخدم: ⋮ ← «تحميل» ← الطابور ← «على الجهاز» ← وضع الطيران
+# ← تشغيل الحلقة وقراءة الفصل من الجهاز. اللقطات من شاشة الجهاز (adb screencap). لا ينشر شيئًا ولا يلمس Stable.
+on:
+  push:
+    branches: ['ccr-3410b0be-20n6v4']
+    paths:
+      - '.github/workflows/apk-downloads-shots.yml'
+      - 'tools/android-debug/downloads-journey.mjs'
+      - 'apps/web/lib/downloads/**'
+      - 'apps/web/v35/downloads.*'
+      - 'android/app/src/main/kotlin/com/vantara/downloads/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apk-downloads-shots-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build Debug APK
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          python3 -c "from pathlib import Path;p=Path('apps/web/lib/config.js');p.write_text(p.read_text().replace('__VANTARA_VERSION__','0.0.9101'))"
+          npx cap sync android
+          cd android && chmod +x gradlew
+          VANTARA_VERSION_NAME=0.0.9101 VANTARA_VERSION_CODE=9101 ./gradlew --no-daemon -q :app:assembleDebug
+          cp "$(find app/build/outputs/apk -name '*.apk' | head -1)" "$GITHUB_WORKSPACE/candidate.apk"
+      - name: Enable KVM for Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Downloads journey on Android
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          heap-size: 512M
+          disk-size: 8G
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            mkdir -p downloads-evidence
+            adb install candidate.apk
+            adb shell pm grant com.vantara.app.debug android.permission.POST_NOTIFICATIONS || true
+            adb logcat -c
+            adb logcat -b all -v threadtime > downloads-evidence/logcat.txt &
+            adb shell am start -W -n com.vantara.app.debug/com.vantara.app.MainActivity
+            sleep 8
+            DEBUG_EVIDENCE=downloads-evidence node tools/android-debug/downloads-journey.mjs || echo "journey exit $?" > downloads-evidence/exit.txt
+            adb shell run-as com.vantara.app.debug ls -laR files 2>/dev/null | grep -A40 VANTARA > downloads-evidence/files.txt || true
+            adb shell ls -laR /sdcard/Android/data/com.vantara.app.debug/files/VANTARA > downloads-evidence/downloads-folder.txt 2>&1 || true
+            adb logcat -b crash -d -v threadtime > downloads-evidence/logcat-crash.txt || true
+      - name: Summarize
+        if: always()
+        run: |
+          f=downloads-evidence/downloads.json
+          [ -f "$f" ] && node -e "const p=require('./'+process.argv[1]);console.log((p.passed?'PASS':'FAIL'));for(const [k,v] of Object.entries(p.steps||{}))console.log('  '+v.result+' '+k+' '+JSON.stringify(v.value??v.error).slice(0,500));console.log('shots: '+p.shots.join(', '))" "$f" | tee -a "$GITHUB_STEP_SUMMARY"
+          cat downloads-evidence/downloads-folder.txt 2>/dev/null | head -40 | tee -a "$GITHUB_STEP_SUMMARY" || true
+          test -f downloads-evidence/exit.txt && exit 1 || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloads-journey
+          path: downloads-evidence/

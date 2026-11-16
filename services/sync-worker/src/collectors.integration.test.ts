@@ -184,3 +184,16 @@ describe('server collectors', () => {
     errors.mockRestore();
   });
 });
+
+// #323 U-17: /health?collectors=1 عام بلا جلسة؛ نص الخطأ لا يخرج
+import worker from './index.ts';
+describe('public collector health', () => {
+  it('reports failing as a flag, never the error text', async () => {
+    const { env } = setup();
+    await env.DB.prepare("INSERT INTO collector_state (source, last_attempt_at, last_success_at, last_error) VALUES ('teamx', 1, 0, 'connect ECONNREFUSED 10.0.0.7:8443 internal-host')").run();
+    const res = await worker.fetch(new Request('https://x/health?collectors=1'), env, { waitUntil() {}, passThroughOnException() {} } as never);
+    const body = await res.json() as { collectors: Array<Record<string, unknown>> };
+    expect(body.collectors).toEqual([{ source: 'teamx', last_attempt_at: 1, last_success_at: 0, failing: true }]);
+    expect(JSON.stringify(body)).not.toContain('ECONNREFUSED');
+  });
+});

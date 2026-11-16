@@ -1,0 +1,180 @@
+package com.vantara.runtime
+
+import android.app.Application
+import android.util.Log
+import androidx.test.platform.app.InstrumentationRegistry
+import com.vantara.plugins.BuiltinSourceRefresh
+import com.vantara.plugins.ExtensionFailure
+import com.vantara.plugins.FILLER_PACKAGES
+import com.vantara.plugins.RepoClient
+import com.vantara.plugins.RepoIndex
+import com.vantara.plugins.ensureEngineInjekt
+import dev.vantara.spike.ContentWarning
+import dev.vantara.spike.FileExtensionLoader
+import dev.vantara.spike.ImagePayloadPolicy
+import dev.vantara.spike.SPIKE_SOURCES
+import dev.vantara.spike.SourceCompatRepairs
+import dev.vantara.spike.SourceSpec
+import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.source.CatalogueSource
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import eu.kanade.tachiyomi.source.online.HttpSource
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.*
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
+import java.io.File
+import java.security.MessageDigest
+
+/**
+ * رحلة حية لكل مصدر مانجا عبر مكوّنات التطبيق نفسها: تحميل الحزمة (المضمّنة بالبصمة، أو من مستودع
+ * Keiyoushi بتوقيعه) ← الرائج ← التفاصيل والفصول ← صفحات أحدث فصل ← تنزيل أول صورة والتحقق أنها صورة
+ * فعلًا (ImagePayloadPolicy كالقارئ). اختياري (`-e vantaraMangaSweep true`) لأنه يطرق المواقع الحقيقية؛
+ * التقرير هو الدليل، وكل خطوة PASS/FAIL مع رمز ExtensionFailure ومالكه. لا إعادة محاولة ولا تصفية.
+ */
+class MangaLiveSweepTest {
+    private suspend fun <T> step(out: JsonObjectBuilder,name: String,ms: Long,block: suspend ()->T): T? {
+        val started=System.nanoTime()
+        return try {
+            val value=withTimeout(ms) { block() }
+            out.put(name,buildJsonObject { put("result","PASS");put("ms",(System.nanoTime()-started)/1_000_000) })
+            value
+        } catch (error: Throwable) {
+            val v=ExtensionFailure.classify(error)
+            out.put(name,buildJsonObject {
+                put("result","FAIL");put("code",v.code);put("owner",v.owner.name.lowercase())
+                put("detail",(error.javaClass.simpleName+": "+(error.message ?: "")).replace(Regex("https?://\\S+"),"<url>").take(200))
+                // عطل محرك (توافق، ربط) يُحسم بسلسلة أسبابه وأعلى إطاراته، لا برسالته وحدها
+                if (v.owner!=ExtensionFailure.Owner.SITE) put("trace",JsonArray(generateSequence(error) { it.cause }.take(5).flatMap { e ->
+                    listOf(JsonPrimitive("! ${e.javaClass.name}: ${(e.message ?: "").replace(Regex("https?://\\S+"),"<url>").take(160)}")) +
+                        e.stackTrace.take(6).map { JsonPrimitive("  ${it.className}.${it.methodName}:${it.lineNumber}") }
+                }.toList()))
+                put("ms",(System.nanoTime()-started)/1_000_000)
+            })
+            null
+        }
+    }
+
+    private fun sha256(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+    @Test fun mangaJourneyReport() = runBlocking {
+        val args=InstrumentationRegistry.getArguments()
+        assumeTrue("Manga live sweep is opt-in",args.getString("vantaraMangaSweep")=="true")
+        val only=args.getString("vantaraOnly")?.split(',')?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }?.toSet()
+        val maxPackages=args.getString("vantaraMaxPackages")?.toIntOrNull()?.coerceIn(1, 5000) ?: 5000
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        ensureEngineInjekt(context.applicationContext as Application)
+        val network=Injekt.get<NetworkHelper>()
+        val loader=FileExtensionLoader(context)
+        val output=File(context.getExternalFilesDir(null),"manga-sweep").apply { mkdirs() }
+        val reports=mutableListOf<JsonObject>()
+        // نافذة أمامية كما عند القارئ: حل Cloudflare الصامت في عميل المانجا يحتاجها (MangaSwat وغيره)
+        val window=androidx.test.core.app.ActivityScenario.launch(com.vantara.app.MainActivity::class.java)
+
+        // المضمّنة (العربية والإنجليزية) ثم عربية Keiyoushi غير المضمّنة، كما يثبّتها المستخدم من المستودع
+        val builtin=(SPIKE_SOURCES+FILLER_PACKAGES).distinctBy { it.pkg }
+        val packages=mutableListOf<Triple<String,SourceSpec,suspend ()->ByteArray>>()
+        val repo=RepoClient(context,network.client)
+        // سلسلة التطبيق نفسها بعد فصل المدمجة عن Debug: نسخة التطبيق (Stable فقط) ← الرابط المثبّت بالبصمة ←
+        // الإصدار الرسمي الحالي من Keiyoushi بمفتاحه المثبّت. الأخير يُختبر بمواصفته (بصمته وإصداره) لا بالمثبّتة
+        val resolved=java.util.concurrent.ConcurrentHashMap<String,SourceSpec>()
+        for (spec in builtin) packages+=Triple("builtin",spec) {
+            runCatching { context.assets.open("extensions/${spec.pkg}.apk").use { it.readBytes() } }.getOrNull()
+                ?.takeIf { sha256(it).equals(spec.sha256,true) }
+                ?: runCatching { network.client.newCall(okhttp3.Request.Builder().url(spec.apkUrl).build()).execute().use { it.body.bytes() } }.getOrNull()
+                    ?.takeIf { sha256(it).equals(spec.sha256,true) }
+                ?: BuiltinSourceRefresh(File(context.cacheDir,"sweep-pins.json")).fromRepository(spec,repo)?.let { (next,bytes) -> resolved[spec.pkg]=next;bytes }
+                ?: error("NO_BUILTIN_COPY")
+        }
+        val index=runCatching { repo.read(BuiltinSourceRefresh.KEIYOUSHI_BASE) }
+        index.exceptionOrNull()?.let { Log.i("VANTARA_MANGA",buildJsonObject { put("repository","FAIL");put("detail",it.toString().take(200)) }.toString()) }
+        index.getOrNull()?.let { (meta,list) ->
+            require(meta.fingerprint==BuiltinSourceRefresh.KEIYOUSHI_KEY) { "Keiyoushi signing key changed" }
+            for (ext in list) {
+                // المضمّنة: إن نشرت Keiyoushi إصدارًا غير المثبّت يُختبر الأحدث أيضًا، فيثبت هل التحديث يصلح عطلها
+                builtin.firstOrNull { it.pkg==ext.pkg }?.let { pinned ->
+                    if (!ext.anime && ext.version!=pinned.versionName) {
+                        val spec=pinned.copy(apkUrl=ext.apkUrl,sha256="",versionName=ext.version,expectedLib=ext.lib)
+                        packages+=Triple("keiyoushi-latest",spec) { repo.downloadSigned(ext.apkUrl,meta.fingerprint) }
+                    }
+                }
+                if (ext.anime || ext.nsfw || ext.pkg in builtin.map { it.pkg } || ext.sources.none { it.lang.equals("ar",true) }) continue
+                val visible=RepoIndex.visibleSources(ext)
+                val spec=SourceSpec(label=ext.name,pkg=ext.pkg,expectedLib=ext.lib,apkUrl=ext.apkUrl,sha256="",versionName=ext.version,
+                    warning=if (ext.nsfw) ContentWarning.MIXED else ContentWarning.SAFE,
+                    arabicSourceIds=visible.map { it.id }.toSet(),arabicSourceNames=visible.map { it.name })
+                packages+=Triple("keiyoushi",spec) { repo.downloadSigned(ext.apkUrl,meta.fingerprint) }
+            }
+        }
+
+        try { for ((origin,base,fetch) in packages.take(maxPackages)) {
+            if (only!=null && base.label.lowercase() !in only) continue
+            val report=buildJsonObject {
+                put("extension",base.label);put("origin",origin);put("version",base.versionName)
+                val bytes=step(this,"download",90_000) { fetch() } ?: return@buildJsonObject
+                val spec=resolved[base.pkg]?.takeIf { origin=="builtin" }?.also { put("resolvedVersion",it.versionName) }
+                    ?: if (base.sha256.isEmpty()) base.copy(sha256=sha256(bytes)) else base
+                val sources=step(this,"load",60_000) {
+                    when (val r=loader.load(spec,bytes)) {
+                        is FileExtensionLoader.Result.Fail -> error("${r.stage}: ${r.reason}")
+                        is FileExtensionLoader.Result.Ok -> r.loaded.sources.filterIsInstance<CatalogueSource>()
+                    }
+                }.orEmpty()
+                // المصادر التي يعرضها التطبيق: المعلنة في البيان، وإلا العربية، وإلا الأولى
+                val shown=sources.filter { it.id.toString() in spec.arabicSourceIds }
+                    .ifEmpty { sources.filter { it.lang=="ar" } }.ifEmpty { sources.take(1) }
+                put("sources",JsonArray(shown.map { source -> buildJsonObject {
+                    put("name",source.name);put("lang",source.lang);put("id",source.id.toString())
+                    val page=step(this,"popular",45_000) { source.getPopularManga(1) }
+                        ?: step(this,"latest",45_000) { source.getLatestUpdates(1) }
+                    put("items",page?.mangas?.size ?: 0)
+                    // كالقارئ: عمل بلا فصول (رواية، قريبًا) يُترك لغيره؛ حتى ثلاثة أعمال قبل الحكم على المصدر
+                    var update:SMangaUpdate?=null;var tried=0
+                    for (candidate in page?.mangas.orEmpty().take(3)) {
+                        tried++
+                        put("sampleTitle",candidate.title.take(80))
+                        update=step(this,"series",60_000) {
+                            try { SourceCompatRepairs.loadSeries(source,candidate) }
+                            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (_: Throwable) { SMangaUpdate(candidate,SourceCompatRepairs.loadChapters(source,candidate)) }
+                        }
+                        if (!update?.chapters.isNullOrEmpty()) break
+                    }
+                    put("worksTried",tried)
+                    put("chapters",update?.chapters?.size ?: 0)
+                    val list=update?.chapters.orEmpty()
+                    if (list.isEmpty()) return@buildJsonObject
+                    // أحدث فصل قد يكون مدفوعًا مقفلًا: الأحدث ثم الأوسط ثم الأقدم حتى فصل له صفحات
+                    var pages:List<eu.kanade.tachiyomi.source.model.Page>?=null
+                    val counts=mutableListOf<Int>()
+                    for (chapter in listOf(list.first(),list[list.size/2],list.last()).distinct()) {
+                        pages=step(this,"pages",60_000) { SourceCompatRepairs.loadPages(source,chapter) }
+                        counts+=pages?.size ?: -1
+                        if (!pages.isNullOrEmpty() && pages.size>2) break
+                    }
+                    put("pageCount",pages?.size ?: 0)
+                    // كل الفصول المجرّبة بصفحتين أو أقل = قراءة ناقصة لا فصل قصير
+                    put("pageCounts",JsonArray(counts.map(::JsonPrimitive)))
+                    val first=pages?.firstOrNull() ?: return@buildJsonObject
+                    step(this,"image",60_000) {
+                        val http=source as? HttpSource ?: error("NOT_HTTP_SOURCE")
+                        first.imageUrl=first.imageUrl ?: http.getImageUrl(first)
+                        http.getImage(first).use { res ->
+                            val body=res.body.bytes()
+                            require(body.size>1024) { "image too small: ${body.size}" }
+                            val verdict=ImagePayloadPolicy.validate(res.header("content-type"),body)
+                            require(verdict.accepted) { "not an image: ${verdict.reason}" }
+                            put("imageBytes",body.size)
+                        }
+                    }
+                } }))
+            }
+            reports+=report
+            Log.i("VANTARA_MANGA",report.toString())
+            File(output,"report.json").writeText(JsonArray(reports).toString())
+        } } finally { window.close() }
+    }
+}

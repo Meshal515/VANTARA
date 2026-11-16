@@ -95,20 +95,34 @@ export function createAnimeDiscover(deps) {
     const face = el('span', 'ag-face');
     face.setAttribute('aria-hidden', 'true');
     c.append(face, el('span', 'ag-name', genreAr(g)));
-    cards.add(c);
+    // تُتبع البطاقة فقط ما دامت الوجوه لم تصل (#311 D-002): كانت كل بطاقة تُضاف للأبد، فإعادة رسم الرئيسية
+    // تحتفظ بأزرار حُذفت من الشاشة بلا حد
+    if (artState !== 'done') {
+      if (cards.size > 4 * GENRE_NAMES.length) for (const old of cards) if (!old.isConnected) cards.delete(old);
+      cards.add(c);
+    }
     paintGenreFace(c);
     return c;
   }
-  let artAsked = false;
+  // 'idle' | 'loading' | 'done'. فشل أول تحميل يعيد المحاولة بعد مهلة (#311 D-017): كان artAsked يمنع أي طلب
+  // آخر طوال الجلسة فتبقى الأنواع بلا وجوه حتى إعادة تشغيل التطبيق.
+  let artState = 'idle';
+  let artRetryAt = 0;
+  const ART_RETRY_MS = 60_000;
   function askGenreArt() {
-    if (artAsked) return;
-    artAsked = true;
+    if (artState !== 'idle' || Date.now() < artRetryAt) return;
+    artState = 'loading';
     void loadGenreArt(GENRE_NAMES).then((art) => {
-      genreArt = art ?? {};
+      // نجاح حقيقي يحمل __none (ولو فارغة)؛ الفشل يعيد المحفوظ أو {} بلا __none
+      const ok = Array.isArray(art?.__none);
+      if (art && Object.keys(art).length) genreArt = art;
+      artState = ok ? 'done' : 'idle';
+      if (!ok) artRetryAt = Date.now() + ART_RETRY_MS;
       for (const c of cards) {
         if (!c.isConnected) cards.delete(c);
         else paintGenreFace(c);
       }
+      if (ok) cards.clear();
     });
   }
   /** شريط الأنواع في الرئيسية: صفّان يمرّران أفقيًا. */
@@ -450,7 +464,25 @@ export function createAnimeDiscover(deps) {
 
   // ───────────── «الكل»: صفحة القائمة ─────────────
 
+  /**
+   * نتائج كل (تصنيف، صيغة، ترتيب) بعقدها (#311 D-001): أكشن ← رومانسي ← أكشن كان يبني الشبكة من الصفر بتسعة
+   * هياكل ويطلب AniList من جديد. خمس دقائق واثنا عشر مفتاحًا (مثل كاش «كل الأعمال» الموحد، D-028).
+   */
+  const shelf = new Map();
+  const SHELF_TTL = 5 * 60_000;
+  const SHELF_MAX = 12;
+  const shelfKey = (c) => JSON.stringify([c.spec.kind, c.spec.genre ?? '', c.spec.title, c.format, c.sort]);
+  function keepShelf(c) {
+    if (!c?.grid || !c.page) return;
+    const cards = [...c.grid.children].filter((n) => !n.classList?.contains('an-skel'));
+    if (!cards.length) return;
+    const key = shelfKey(c);
+    shelf.delete(key);
+    shelf.set(key, { cards, page: c.page, hasNext: c.hasNext, at: Date.now() });
+    while (shelf.size > SHELF_MAX) shelf.delete(shelf.keys().next().value);
+  }
   function openCollection(input) {
+    keepShelf(state.collection);
     const spec = collectionSpec(input, genreAr);
     state.collection = { spec, format: '', sort: spec.filters.sort, page: 0, hasNext: true, loading: false, token: (state.collection?.token ?? 0) + 1 };
     deps.showPage('animeCollection');
@@ -476,6 +508,7 @@ export function createAnimeDiscover(deps) {
       for (const [key, label] of items) {
         const b = button(`ac-tab${key === current ? ' active' : ''}`, label, () => {
           if (key === current) return;
+          keepShelf(c);
           pick(key);
           c.page = 0;
           c.hasNext = true;
@@ -491,13 +524,23 @@ export function createAnimeDiscover(deps) {
     quick.append(tabs([['', 'الكل'], ['TV', 'مسلسلات'], ['MOVIE', 'أفلام'], ['ONA', 'ONA'], ['OVA', 'OVA']], c.format, (k) => (c.format = k)));
     if (c.spec.sortable) quick.append(tabs(SORTS.map((s) => [s, SORT_AR[s]]), c.sort, (k) => (c.sort = k)));
     const grid = el('div', 'an-grid ac-grid');
-    grid.append(...Array.from({ length: 9 }, () => el('div', 'an-skel an-skel-poster')));
+    const kept = shelf.get(shelfKey(c));
+    const fresh = kept && Date.now() - kept.at < SHELF_TTL;
+    if (fresh) {
+      // نفس العقد بصورها المفكوكة: لا هياكل ولا طلب، والصفحات التالية تكمل من حيث وقفت
+      grid.append(...kept.cards);
+      c.page = kept.page;
+      c.hasNext = kept.hasNext;
+    } else {
+      if (kept) shelf.delete(shelfKey(c));
+      grid.append(...Array.from({ length: 9 }, () => el('div', 'an-skel an-skel-poster')));
+    }
     const more = el('div', 'ad-more');
     host.replaceChildren(top, quick, grid, more);
     c.grid = grid;
     c.more = more;
-    watchMore(more, () => void loadCollection());
-    void loadCollection();
+    watchMore(more, () => void loadCollection(), 'collection');
+    if (!fresh) void loadCollection();
   }
 
   async function loadCollection() {
@@ -509,7 +552,8 @@ export function createAnimeDiscover(deps) {
     try {
       const filters = { ...c.spec.filters, sort: c.sort, formats: c.format ? [c.format] : [] };
       const { items, hasNext } = await discoverAnime({ ...filters, page });
-      if (token !== c.token) return;
+      // ردّ تصنيف سابق بعد فتح غيره (#311 D-007): الكائن القديم لا يتغير رمزه، فيُقارن بالحالي أيضًا
+      if (token !== c.token || state.collection !== c) return;
       c.page = page;
       c.hasNext = hasNext;
       const cards = items.map((m, i) => deps.posterCard(m, c.spec.kind === 'season' && !c.format ? { rankInline: (page - 1) * 30 + i + 1 } : {}));
@@ -522,7 +566,7 @@ export function createAnimeDiscover(deps) {
     } finally {
       if (token === c.token) c.loading = false;
     }
-    if (token === c.token && c.hasNext && nearBottom(c.more)) void loadCollection();
+    if (token === c.token && state.collection === c && c.hasNext && nearBottom(c.more)) void loadCollection();
   }
 
   // ───────────── مشترك ─────────────
@@ -531,10 +575,15 @@ export function createAnimeDiscover(deps) {
     const box = node?.getBoundingClientRect?.();
     return Boolean(box) && box.top !== 0 && box.top < (globalThis.innerHeight ?? 800) + 700;
   };
-  function watchMore(node, load) {
+  // مراقب واحد لكل موضع (#311 D-003): كل إعادة رسم كانت تنشئ مراقبًا جديدًا ولا تفصل القديم
+  const watchers = new Map();
+  function watchMore(node, load, slot = 'search') {
+    watchers.get(slot)?.disconnect();
+    watchers.delete(slot);
     if (typeof IntersectionObserver === 'undefined') return;
     const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && load(), { rootMargin: '700px' });
     io.observe(node);
+    watchers.set(slot, io);
   }
 
   return {
@@ -554,6 +603,8 @@ export function createAnimeDiscover(deps) {
     openCollection,
     genreStrip,
     genreCard,
+    /** للاختبار (#311 D-002): بطاقات أنواع ما زالت محفوظة بانتظار الوجوه. */
+    retainedGenreCards: () => cards.size,
     get query() {
       return state.query;
     },

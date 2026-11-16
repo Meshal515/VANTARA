@@ -24,4 +24,13 @@ describe('MANGA Hero: أصدقاؤك يقرؤون', () => {
     expect(rank([read('a', 'x'), read('b', 'x'), read('c', 'y', hour)]).map((w) => w.ref)).toEqual(['ext:x', 'ext:y']);
     expect(rank([])).toEqual([]);
   });
+  it('one work read by two friends under two references (before and after a merge) is one candidate', () => {
+    const canonical = (ref) => (ref === 'ext:demonic emperor' ? 'ext:magic emperor' : ref);
+    const rows = [read('a', 'magic emperor', hour), read('b', 'demonic emperor')];
+    const got = rankFriendsReading(rows, { me: 'me', friendIds: ['a', 'b'], now, canonical });
+    expect(got).toHaveLength(1);
+    expect(got[0].readers).toBe(2);
+    // يُفتح بمرجع آخر قراءة
+    expect(got[0].ref).toBe('ext:demonic emperor');
+  });
 });

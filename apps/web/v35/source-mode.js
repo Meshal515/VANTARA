@@ -2,13 +2,41 @@ import { publicUrl } from "../addons/manifest.js";
 import { pulseView } from "../addons/source-pulse.js";
 import { nativeCover } from "./covers.js";
 import { imageLoadingNode, imageFallbackNode } from "./image-loading.js";
+import { identityKind, knownSourceIdentity, resolveSourceIdentity } from "./source-identity.js";
+
+/** اسم القسم في شريط الصفحة: VANTARA Anime / Cinema / Manga (طلب المالك). */
+export const SECTION_BRAND = { manga: "VANTARA Manga", anime: "VANTARA Anime", cinema: "VANTARA Cinema" };
+const KIND_AR = { manga: "مانجا", anime: "أنمي", cinema: "أفلام ومسلسلات" };
+
+/** القسم الغالب على أعمال مصدر: مصدر متنوع يأخذ اسم أغلب محتواه، وكل عمل يُفتح بنوعه هو. */
+export function dominantKind(items, fallback = "manga") {
+  const count = { manga: 0, anime: 0, cinema: 0 };
+  for (const w of items ?? []) {
+    const t = String(w?.type ?? "").toLowerCase();
+    if (t === "manga") count.manga++;
+    else if (t === "anime") count.anime++;
+    else if (t === "movie" || t === "series" || t === "tv") count.cinema++;
+  }
+  const best = Object.entries(count).sort((a, b) => b[1] - a[1])[0];
+  return best[1] > 0 ? best[0] : fallback;
+}
+
+/** نوع المصدر من أنواعه المعلنة: الأفلام والمسلسلات تغلب «أنمي» المعلن بجانبها (أكوام مثلًا). */
+export function declaredKind(addon) {
+  const types = addon?.contentTypes ?? [];
+  if (types.includes("manga")) return "manga";
+  if (types.some((t) => t === "movie" || t === "series")) return "cinema";
+  if (types.includes("anime")) return "anime";
+  return "cinema";
+}
+const SEARCH_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const node = (tag, cls, text) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
   if (text != null) n.textContent = text;
   return n;
 };
-function sourceLogo(addon) {
+export function sourceLogo(addon) {
   const mark = node("span", "addon-logo");
   mark.setAttribute("aria-hidden", "true");
   const fallback = () => {
@@ -61,6 +89,9 @@ export function renderSourceMode({
   state = { query: "", page: 1, scroll: 0 },
   onOpenWork = () => {},
   onBack = () => {},
+  onKind = () => {},
+  /** تحقّق Cloudflare للمصدر داخل التطبيق: `async () => ({ ok, error })`، أو null حيث لا يتوفر. */
+  onVerify = null,
   pulse = null,
 }) {
   const root = node("div", "addon-hub addon-source"),
@@ -71,8 +102,10 @@ export function renderSourceMode({
     grid = node("div", "addon-source-grid up-list"),
     note = node("p", "addon-source-note");
   root.dir = "rtl";
+  state.page ??= 1;
+  state.query ??= "";
   const fullCatalogue = (addon.contentTypes ?? []).includes("manga") && typeof adapter.catalogue === "function";
-  state.tab ??= fullCatalogue ? "catalogue" : "home";
+
   note.setAttribute("role", "status");
   note.setAttribute("aria-live", "polite");
   let controller = null,
@@ -90,15 +123,18 @@ export function renderSourceMode({
     b.onclick = fn;
     return b;
   };
-  // رأس المصدر: اسمه وحالته الفعلية الآن (من نبضه)، بلا شعار عام
+  // رأس المصدر: شعاره واسمه ونوعه وحالته الفعلية الآن (من نبضه). الاسم هنا وحده؛ شريط الصفحة يحمل VANTARA القسم
   const header = node("section", "addon-source-head"),
     heading = node("div", "addon-source-title"),
     mark = sourceLogo(addon),
-    status = node("p", "addon-pulse");
+    status = node("p", "addon-pulse"),
+    eyebrow = node("p", "addon-eyebrow");
   const name = node("h2", null, addon.name);
   name.dir = "auto";
-  const kind = (addon.contentTypes ?? []).includes("manga") ? "مانجا" : (addon.contentTypes ?? []).includes("anime") ? "أنمي" : "أفلام ومسلسلات";
-  heading.append(node("p", "addon-eyebrow", `مصدر ${kind}`), name, status);
+  let kind = declaredKind(addon);
+  const paintKind = () => { eyebrow.textContent = `مصدر ${KIND_AR[kind]}`; onKind(kind, SECTION_BRAND[kind]); };
+  paintKind();
+  heading.append(eyebrow, name, status);
   header.append(mark, heading);
   const paintStatus = () => {
     if (!pulse || !addon.key) return void (status.hidden = true);
@@ -107,26 +143,39 @@ export function renderSourceMode({
     status.replaceChildren(node("i", "addon-pulse-dot"), node("b", null, st.label));
     if (st.detail) status.append(node("span", null, st.detail));
   };
-  root.append(
-    btn("‹ الإضافات", onBack, "addon-button addon-button-quiet addon-source-back"),
-    header,
-    tabs,
-    filters,
-    form,
-    note,
-    grid,
-  );
+  // البحث أولًا (أعلى الصفحة ويلتصق بها)، ثم رأس المصدر، ثم الأقسام والشبكة. الرجوع من شريط الصفحة وحده.
+  const bar = node("div", "addon-source-bar");
+  bar.append(form);
+  root.append(bar, header, tabs, filters, note, grid);
   input.type = "search";
+  input.enterKeyHint = "search";
+  input.autocomplete = "off";
   input.value = state.query ?? "";
   input.placeholder = `ابحث في ${addon.name}`;
   input.setAttribute("aria-label", input.placeholder);
-  const searchButton = btn(
-    "بحث",
-    () => {},
-    "addon-button addon-button-primary",
-  );
+  const searchButton = node("button", "addon-source-go");
   searchButton.type = "submit";
-  form.append(input, searchButton);
+  searchButton.innerHTML = SEARCH_ICON;
+  searchButton.setAttribute("aria-label", "بحث");
+  const clear = node("button", "addon-source-clear", "×");
+  clear.type = "button";
+  clear.setAttribute("aria-label", "امسح البحث");
+  clear.hidden = !input.value;
+  input.addEventListener("input", () => { clear.hidden = !input.value; });
+  clear.onclick = () => {
+    input.value = "";
+    clear.hidden = true;
+    if (state.query) {
+      state.query = "";
+      state.page = 1;
+      state.skip = 0;
+      if (!adapter.catalog && state.tab === "search") state.tab = choices[0]?.[0] ?? "home";
+      paintFilters();
+      void load();
+    }
+    input.focus?.();
+  };
+  form.append(searchButton, input, clear);
   const catalogs = addon.catalogs ?? [];
   const selectedCatalog = () =>
     catalogs.find((c) => `${c.type}|${c.id}` === state.tab) ?? catalogs[0];
@@ -187,17 +236,24 @@ export function renderSourceMode({
       filters.append(label);
     }
   }
+  // أقسام المصدر كما يقدمها هو (طلب المالك): آخر التحديثات، الرائج، والكل للمانجا. أزرار تتنقل بينها.
   const choices = catalogs.length
     ? catalogs.map((c) => [`${c.type}|${c.id}`, c.name ?? c.id])
     : [
-        ...(fullCatalogue ? [["catalogue", "الكتالوج"]] : []),
-        ...((addon.capabilities ?? []).includes("home")
+        // المانجا: «الكل» أولًا كما كانت (الفهرس الكامل)، ثم آخر التحديثات والرائج
+        ...(fullCatalogue ? [["catalogue", "الكل"]] : []),
+        ...((addon.capabilities ?? []).includes("home") && typeof adapter.home === "function"
           ? [["home", "آخر التحديثات"]]
           : []),
-        ...(addon.bundled && (addon.contentTypes ?? []).includes("manga")
-          ? [["popular", "الرائج"]]
-          : []),
+        ...(typeof adapter.popular === "function" ? [["popular", "الرائج"]] : []),
       ];
+  // القسم الأول للمصدر يفتح أولًا (آخر التحديثات إن قدّمها)، والمحفوظ من زيارة سابقة يبقى
+  if (!catalogs.length && state.tab !== "search" && !choices.some(([tab]) => tab === state.tab))
+    state.tab = choices[0]?.[0] ?? (fullCatalogue ? "catalogue" : "home");
+  // قسم واحد (آخر التحديثات مثلًا) عنوانٌ هادئ لا زر؛ أكثر من قسم = شريط أقسام
+  const paintTabs = () => {
+  tabs.replaceChildren();
+  tabs.classList.toggle("is-single", choices.length < 2);
   for (const [tab, label] of choices) {
     const b = btn(
       label,
@@ -214,8 +270,25 @@ export function renderSourceMode({
       "addon-filter",
     );
     b.dataset.tab = tab;
+    b.dir = "auto";
     tabs.append(b);
   }
+  };
+  paintTabs();
+  // أقسام المصدر كما يعلنها هو (طلب المالك): أقسام CloudStream الرئيسية بأسمائها وترتيبها، و«آخر التحديثات»
+  // لإضافة Aniyomi فقط إن أعلنته. تُقرأ بلا طلب شبكة، ثم يُطلب القسم المختار وحده. محرك أقدم بلا هذه القدرة
+  // يبقى على الأقسام العامة أعلاه.
+  let searchOnly = false;
+  const sectionsReady = !catalogs.length && typeof adapter.sections === "function"
+    ? Promise.resolve().then(() => adapter.sections()).then((list) => {
+        if (closed || !Array.isArray(list)) return;
+        const own = list.filter((x) => x && typeof x.key === "string" && typeof x.name === "string").map((x) => [x.key, x.name]);
+        choices.splice(0, choices.length, ...(fullCatalogue ? [["catalogue", "الكل"]] : []), ...own);
+        searchOnly = !choices.length;
+        if (state.tab !== "search" && !choices.some(([tab]) => tab === state.tab)) state.tab = choices[0]?.[0] ?? "search";
+        paintTabs();
+      }).catch(() => {})
+    : null;
   if (adapter.catalog && selectedCatalog())
     state.tab = `${selectedCatalog().type}|${selectedCatalog().id}`;
   const more = btn("تحميل المزيد", () => {
@@ -231,6 +304,37 @@ export function renderSourceMode({
   const io = typeof IntersectionObserver === "undefined" ? null
     : new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting) && !more.hidden && !pending && autoMore) more.click(); }, { rootMargin: "500px" });
   io?.observe(more);
+  // ذاكرة صفحات الأقسام: الرجوع لقسم فُتح يظهر فورًا، والأقسام الأخرى تُجلب مسبقًا بعد أول قسم.
+  // النتيجة تبقى 5 دقائق؛ الفشل لا يُحفظ.
+  const pageCache = state.pageCache ??= new Map();
+  const PAGE_TTL = 5 * 60_000;
+  // طلب أُلغي (رجوع، تبديل قسم) يُنسى فورًا: لا يُعاد استعمال طلب معلّق بعد العودة
+  const cached = (key, fetch, signal) => {
+    const hit = pageCache.get(key);
+    if (hit && (hit.done || !hit.signal?.aborted) && Date.now() - hit.at < PAGE_TTL) return hit.value;
+    const entry = { at: Date.now(), value: null, signal, done: false };
+    entry.value = Promise.resolve().then(fetch);
+    pageCache.set(key, entry);
+    entry.value.then(() => { entry.done = true; }, () => { if (pageCache.get(key) === entry) pageCache.delete(key); });
+    signal?.addEventListener("abort", () => { if (!entry.done && pageCache.get(key) === entry) pageCache.delete(key); }, { once: true });
+    return entry.value;
+  };
+  const tabFetch = (tab, page, signal) => {
+    const o = signal ? { signal } : {};
+    if (typeof adapter.section === "function" && /^(?:section:\d+|popular|latest)$/.test(tab))
+      return cached(`${tab}|${page}`, () => adapter.section(tab, page, o), signal);
+    if (tab === "catalogue") return cached(`catalogue|${page}`, () => adapter.catalogue(page, o), signal);
+    if (tab === "popular") return cached(`popular|${page}`, () => adapter.popular(page, o), signal);
+    return cached(`home|${page}`, () => adapter.home(page, o), signal);
+  };
+  let prefetched = false;
+  const prefetchTabs = () => {
+    if (prefetched || closed || catalogs.length) return;
+    prefetched = true;
+    // القسمان التاليان فقط: مصدر CloudStream قد يعلن عشرة أقسام، وجلبها كلها مرة إغراق للموقع
+    const at = choices.findIndex(([tab]) => tab === state.tab);
+    for (const [tab] of choices.slice(at + 1, at + 3)) void tabFetch(tab, 1).catch(() => {});
+  };
   const seen = new Set();
   const workKey = (work) => {
     const id = work.id ?? work.url;
@@ -300,12 +404,18 @@ export function renderSourceMode({
         (addon.capabilities ?? []).includes("search")
       )
         out = await adapter.search(state.query, state.page, options);
+      else if (searchOnly) {
+        grid.replaceChildren();
+        note.textContent = "هذا المصدر بلا صفحة رئيسية: اكتب اسم العمل للبحث فيه.";
+        return;
+      } else if (typeof adapter.section === "function" && /^(?:section:\d+|popular|latest)$/.test(state.tab))
+        out = await tabFetch(state.tab, state.page, activeController.signal);
       else if (state.tab === "catalogue" && fullCatalogue)
-        out = await adapter.catalogue(state.page, options);
+        out = await tabFetch("catalogue", state.page, activeController.signal);
       else if (state.tab === "popular" && adapter.popular)
-        out = await adapter.popular(state.page, options);
+        out = await tabFetch("popular", state.page, activeController.signal);
       else if (adapter.home && (addon.capabilities ?? []).includes("home"))
-        out = await adapter.home(state.page, options);
+        out = await tabFetch("home", state.page, activeController.signal);
       else {
         grid.replaceChildren();
         note.textContent = "اكتب اسم العمل للبحث في هذا المصدر.";
@@ -324,6 +434,10 @@ export function renderSourceMode({
         out.hasNext ??
         (catalog?.extra?.some((x) => x.name === "skip") && items.length > 0)
       );
+      if (!append && items.length) {
+        const seen = dominantKind(items, kind);
+        if (seen !== kind) { kind = seen; paintKind(); }
+      }
       // بطاقة «آخر التحديثات» نفسها: الغلاف كاملًا ثم الاسم، ورقم الفصل/الحلقة فقط إن ذكره المصدر
       for (const work of items) {
         const key = workKey(work);
@@ -334,9 +448,14 @@ export function renderSourceMode({
           title = node("b", "up-title", work.title ?? work.name ?? "عمل");
         card.type = "button";
         title.dir = "auto";
-        card.onclick = () => {
+        // الفتح قد يطول (تفاصيل وحلقات من الإضافة): البطاقة تُظهر أنها تعمل، ولا تُفتح مرتين
+        card.onclick = async () => {
+          if (card.dataset.opening) return;
+          card.dataset.opening = "1";
+          card.setAttribute("aria-busy", "true");
           state.scroll = globalThis.scrollY ?? state.scroll ?? 0;
-          onOpenWork(work, { addon, adapter, state });
+          try { await onOpenWork(work, { addon, adapter, state }); }
+          finally { delete card.dataset.opening; card.removeAttribute("aria-busy"); }
         };
         const imageState = (value, label) => {
           art.dataset.imageState = value;
@@ -349,7 +468,8 @@ export function renderSourceMode({
           imageState("failed", "تعذّر تحميل الغلاف");
           art.replaceChildren(imageFallbackNode("—"));
         };
-        const image = work.thumbnail ?? work.thumbnailUrl ?? work.poster;
+        const sourceImage = work.thumbnail ?? work.thumbnailUrl ?? work.poster;
+        const paintImage = (image, official = false) => {
         if (image) {
           imageState("loading", "جارٍ تحميل الغلاف");
           art.style.position = "relative";
@@ -375,7 +495,7 @@ export function renderSourceMode({
             img.onerror = () => {
               if (!closed && root.contains(art)) imageFailed();
             };
-            if (addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
+            if (!official && addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
               // Same source client, cookies, headers and persistent cover cache as the library.
               // A failed native request must stay in that pipeline (including verification).
               void nativeCover(url, addon.sourceId).then(local => {
@@ -393,6 +513,29 @@ export function renderSourceMode({
           imageState("missing", "لا يوجد غلاف من المصدر");
           art.append(imageFallbackNode("—"));
         }
+        };
+        // الغلاف الرسمي (AniList/IMDb) للعمل الموجود هناك، وإلا غلاف المصدر. يُحسم مرة قبل الرسم: المعروف
+        // فورًا، والمجهول ينتظر هويته قليلًا (هيكل بمقاسه) ثم يُرسم مرة واحدة؛ لا تبديل غلاف أمام العين.
+        const officialKind = identityKind(work, addon);
+        const known = officialKind ? knownSourceIdentity(work, addon) : null;
+        const adopt = (identity) => {
+          if (identity?.title) { title.textContent = identity.title; title.dir = "ltr"; }
+          paintImage(identity?.poster ?? sourceImage, Boolean(identity?.poster));
+        };
+        if (!officialKind || known !== undefined) adopt(known);
+        else {
+          imageState("loading", "جارٍ تحميل الغلاف");
+          art.append(imageLoadingNode());
+          let settled = false;
+          const settle = (identity) => {
+            if (settled || closed || !root.contains(art)) return;
+            settled = true;
+            art.replaceChildren();
+            adopt(identity);
+          };
+          void resolveSourceIdentity(work, addon).then(settle);
+          setTimeout(() => settle(null), 3000);
+        }
         card.append(art, title);
         const unit = work.latestChapter ?? work.lastChapter ?? work.latestEpisode;
         if (unit) card.append(node("span", "up-unit", String(unit)));
@@ -408,7 +551,20 @@ export function renderSourceMode({
       failures = 0;
       autoMore = true;
       paintStatus();
+      if (!append && !state.query) setTimeout(prefetchTabs, 400);
     } catch (error) {
+      // المصدر لا يقدّم «آخر التحديثات» (إضافات Aniyomi كثيرة): القسم يُحذف ويُفتح التالي بصمت، لا خطأ للمصدر كله
+      if (run === generation && !activeController.signal.aborted && !append && !state.query && state.tab === "home"
+        && /LATEST_UNSUPPORTED/.test(`${error?.code ?? ""} ${error?.message ?? ""}`) && choices.length > 1) {
+        choices.splice(choices.findIndex(([tab]) => tab === "home"), 1);
+        tabs.querySelector('[data-tab="home"]')?.remove();
+        tabs.classList.toggle("is-single", choices.length < 2);
+        state.tab = choices[0][0];
+        paintFilters();
+        pending = false;
+        queueMicrotask(() => { if (!closed) void load(); });
+        return;
+      }
       if (run === generation && !activeController.signal.aborted) {
         if (append) {
           autoMore = false;
@@ -425,6 +581,25 @@ export function renderSourceMode({
           // الإصلاح الذاتي: محاولة ثانية تلقائية بعد لحظات، ثم زر صريح
           failures++;
           const box = node("div", "addon-source-error");
+          // الموقع يطلب تحققًا بشريًا (Cloudflare): لا فائدة من الإعادة الصامتة؛ زر واحد يفتح صفحة التحقق ثم يعيد الجلب
+          if (onVerify && /cloudflare|CLOUDFLARE|needsHuman|تحقق بشري/i.test(`${error?.code ?? ""} ${error?.message ?? ""}`)) {
+            const verify = btn("تحقّق الآن", async () => {
+              verify.disabled = true;
+              const out = await Promise.resolve().then(onVerify).catch((e) => ({ ok: false, error: e?.message }));
+              if (closed) return;
+              verify.disabled = false;
+              if (out?.ok) { failures = 0; void load(); }
+              else note.textContent = `لم يكتمل التحقق${out?.error ? `: ${String(out.error).slice(0, 120)}` : ""}`;
+            }, "addon-button addon-button-primary");
+            box.append(
+              node("b", null, "الموقع يطلب تحققًا قبل التصفح"),
+              node("p", null, "افتح صفحة التحقق مرة، ثم نعيد جلب المصدر تلقائيًا."),
+              verify,
+            );
+            grid.replaceChildren(box);
+            note.textContent = "";
+            return;
+          }
           box.append(
             node("b", null, failures > 1 ? "المصدر لا يستجيب الآن" : "تعذّر الجلب؛ نعيد المحاولة…"),
             node("p", null, text),
@@ -479,7 +654,8 @@ export function renderSourceMode({
       globalThis.scrollTo?.({ top: state.scroll ?? 0, behavior: "instant" }),
     );
   };
-  paintFilters();
-  void load();
+  const start = () => { if (closed) return; paintFilters(); void load(); };
+  if (sectionsReady) void sectionsReady.then(start);
+  else start();
   return root;
 }

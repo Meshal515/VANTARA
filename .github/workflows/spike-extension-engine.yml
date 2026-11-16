@@ -79,7 +79,7 @@ jobs:
           set -euo pipefail
           # The original upstream release assets can disappear. Reproduce the
           # exact reviewed snapshot from tracked payloads; never refresh pins.
-          python3 tools/generate_arabic_sources.py --local-apk-dir ../../android/app/src/main/assets/extensions
+          python3 tools/generate_arabic_sources.py --local-apk-dir ../../android/app/src/release/assets/extensions
           python3 - <<'PY'
           import json
           p = json.load(open('build/arabic-source-snapshot.json', encoding='utf-8'))

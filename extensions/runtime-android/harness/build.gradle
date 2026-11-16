@@ -1,0 +1,34 @@
+apply plugin: 'com.android.application'
+android {
+    namespace 'dev.vantara.runtime.lab'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'dev.vantara.runtime.lab'
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName 'experimental-1'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    sourceSets.androidTest.assets.srcDir(project(':fixtures').layout.buildDirectory.dir('dexAssets'))
+    sourceSets.androidTest.assets.srcDir(layout.buildDirectory.dir('pinnedPackages'))
+    testOptions { animationsDisabled true }
+    // Multiple test-only OkHttp jars include JVM multi-release OSGi metadata.
+    // Android does not load OSGi manifests; keep all license/notice resources.
+    packaging.resources.excludes.add('META-INF/versions/9/OSGI-INF/MANIFEST.MF')
+}
+dependencies {
+    implementation project(':api')
+    implementation project(':http')
+    implementation project(':executor')
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'com.squareup.okhttp3:mockwebserver:5.3.2'
+    androidTestImplementation 'com.squareup.okhttp3:okhttp-tls:5.3.2'
+}
+tasks.configureEach { task ->
+    // Every AndroidTest consumer (including lint models/analysis) reads the same
+    // generated external DEX assets, not just the merge-assets task.
+    if (task.name.contains('AndroidTest')) task.dependsOn(':fixtures:dex')
+}

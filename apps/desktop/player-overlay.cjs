@@ -25,7 +25,7 @@ function checkedMessage(value) {
   return JSON.parse(text);
 }
 
-function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand = () => {}, onWindow = () => {}, onFullscreen = () => {} }) {
+function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, args = [], onCommand = () => {}, onWindow = () => {}, onFullscreen = () => {} }) {
   let overlay = null, viewport = null, session = null, loaded = null;
   const parentAlive = () => { const w = getWindow(); return w && !w.isDestroyed() ? w : null; };
   function ensure() {
@@ -34,7 +34,7 @@ function createPlayerOverlay({ BrowserWindow, getWindow, preload, url, onCommand
     overlay = new BrowserWindow({
       parent, show: false, frame: false, transparent: true, backgroundColor: '#00000000', resizable: false, movable: false,
       minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: false, focusable: true, thickFrame: false,
-      webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false },
+      webPreferences: { preload, additionalArguments: args, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false },
     });
     overlay.setMenu?.(null);
     onWindow(overlay);

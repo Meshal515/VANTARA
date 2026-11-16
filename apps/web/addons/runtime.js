@@ -12,7 +12,15 @@ import { catalogExtras, matchesStremioResource } from "./stremio-model.js";
 import { publicUrl } from "./manifest.js";
 import { plainObject } from "./contracts.js";
 import { createSourcePulse } from "./source-pulse.js";
+import { notAddedError, onEntitlementChange, visible } from "../lib/source-entitlement.js";
+import { guardTransport, HOST_COOLING, sharedHostBreaker } from "../lib/host-breaker.js";
 
+/** عطل في عقد الإضافة نفسها (لا الموقع ولا الشبكة): وحده يحسب في مراقبة ما بعد التحديث. */
+const contractFailure = (error) => error?.code === "INVALID_RESPONSE" || /لم تُرجع JSON صالحًا|مخالفة للعقد/.test(String(error?.message ?? ""));
+
+// معرّفات إضافات الويب (Stremio/Remote) تبدأ بـ addon|. مصادر CloudStream الأصلية تبدأ بـ addon|cs3| أيضًا
+// لكنها في سجل المحرك الأصلي؛ معاملتها كإضافة ويب جعلت فتح أعمالها يفشل («فتحه غير مدعوم»).
+const webAddonId = (id) => String(id).startsWith("addon|") && !String(id).startsWith("addon|cs3|");
 const section = (m) =>
   m.contentTypes.includes("manga")
     ? "manga"
@@ -24,7 +32,10 @@ export function createAddonRuntime({
   transport = createTransport(),
   store = r?.addonStore ?? r?.store,
   pulse = createSourcePulse(),
+  breaker = sharedHostBreaker(),
 } = {}) {
+  // قاطع دائرة لكل مضيف أمام كل طلبات الإضافات (PWA وويندوز): 429/503 مع Retry-After تُحترم
+  transport = guardTransport(transport, breaker);
   if (!store) throw new Error("مخزن الإضافات غير متاح");
   const runtimeName = r.runtimeName === "desktop" ? "desktop" : r.native ? "apk" : "pwa";
   const capabilitiesFor = m => supportedCapabilities(m, runtimeName)
@@ -42,7 +53,8 @@ export function createAddonRuntime({
   const syncCore = () => {
     core.length = 0;
     core.push(
-      ...r.registry.list().map((d) => ({
+      // المصادر المدمجة سابقًا تظهر فقط لمن أضافها أو لحساب كان يملكها قبل الفصل (lib/source-entitlement.js)
+      ...r.registry.list().filter((d) => visible(d)).map((d) => ({
         key: `core|${d.id}`,
         sourceId: d.id,
         name: d.label,
@@ -53,6 +65,8 @@ export function createAddonRuntime({
         ...(d.repo ? {repositoryName:d.repo} : {}),
         ...(d.domain ? {domain:d.domain} : {}),
         ...(d.domains ? {domains:d.domains} : {}),
+        // غاب من حزمة التعريفات ويعمل من نسخته المحلية (pwa/sources/registry.js)
+        ...(d.inRepository === false ? {inRepository:false, repositoryNote:d.repositoryNote} : {}),
         contentTypes:
           d.content === "cinema" ? ["movie", "series"] : [d.content],
         // «آخر التحديثات» لكل مصدر يقدّم latest فعلًا (كل مصادر الـAPK، ومحرّكات الويب التي تعرفه)
@@ -67,6 +81,8 @@ export function createAddonRuntime({
     );
   };
   const ready = Promise.all([r.ready, registry.ready]).then(syncCore);
+  // تغيّر الحساب أو إضافة/إزالة مصدر من جهاز آخر: القائمة تُعاد دون إعادة تشغيل
+  onEntitlementChange(() => { void ready.then(syncCore).catch(() => {}); });
   const cache = createAddonCache({ store });
   const animeIdentity = createAnimeIdentityResolver({ transport });
   function adapter(key, { diagnostic = false } = {}) {
@@ -74,6 +90,7 @@ export function createAddonRuntime({
     if (key.startsWith("core|")) {
       const sourceDef = r.registry.def(key.slice(5));
       if (!sourceDef) throw new Error("المصدر غير متاح");
+      if (!visible(sourceDef)) throw notAddedError(sourceDef.id);
       const raw = createBundledAdapter({ sourceDef, engine: r.registry });
       // كل تصفح فعلي للمصدر دليل على صحته: يُسجَّل في نبضه
       const measured = (fn, capability) => (...a) => pulse.measure(key, () => fn(...a), {
@@ -128,6 +145,7 @@ export function createAddonRuntime({
             ? Array.isArray(result) && result.some((x) => (x.url || x.infoHash || x.magnet) && streamRouteSupported(x))
             : !Array.isArray(items) || items.length > 0;
           const evidence = { version: c.manifest.version, cacheEpoch: c.cacheEpoch };
+          void registry.observe?.(key, { ok: true });
           if (usable)
             registry.health.success(
               key,
@@ -164,9 +182,10 @@ export function createAddonRuntime({
         } catch (error) {
           // A pre-reinstall request cannot recreate stale health or cooldown.
           if (registry.list().find(addon => addon.key === key)?.cacheEpoch !== c.cacheEpoch) throw error;
+          if (contractFailure(error)) void registry.observe?.(key, { ok: false, structural: true });
           if (error.code === "CONFIG_REQUIRED")
             registry.health.configuration(key, cap, runtimeName, Date.now() - started, { version: c.manifest.version, cacheEpoch: c.cacheEpoch });
-          else if (error.name === "AbortError" || ["UNSUPPORTED_RESOURCE", "REQUIRED_EXTRA", "INVALID_EXTRA"].includes(error.code))
+          else if (error.name === "AbortError" || ["UNSUPPORTED_RESOURCE", "REQUIRED_EXTRA", "INVALID_EXTRA", HOST_COOLING].includes(error.code))
             registry.health.releaseProbe(key, cap, runtimeName);
           else if (error.name !== "CooldownError")
             registry.health.failure(
@@ -196,7 +215,7 @@ export function createAddonRuntime({
           !(x.configuration?.required && !x.configuration.configured),
       );
   function def(id) {
-    if (!id.startsWith("addon|")) return r.registry.def(id);
+    if (!webAddonId(id)) return r.registry.def(id);
     const key = registry.resolveKey(id.slice(6));
     const m = external().find((x) => x.key === key && x.contentTypes.some((t) => ["manga", "anime", "movie", "series"].includes(t)));
     return m
@@ -212,7 +231,7 @@ export function createAddonRuntime({
       : null;
   }
   function source(id) {
-    if (!id.startsWith("addon|")) return r.registry.source(id);
+    if (!webAddonId(id)) return r.registry.source(id);
     const d = def(id);
     if (!d) return null;
     const m = d.manifest,
@@ -389,12 +408,12 @@ export function createAddonRuntime({
     def,
     source,
     async call(id, fn) {
-      if (!id.startsWith("addon|")) return r.registry.call(id, fn);
+      if (!webAddonId(id)) return r.registry.call(id, fn);
       const s = source(id);
       if (!s) throw new Error("الإضافة معطلة أو غير متاحة");
       return fn(s);
     },
-    cooling: (id) => (id.startsWith("addon|") ? false : r.registry.cooling(id)),
+    cooling: (id) => (webAddonId(id) ? false : r.registry.cooling(id)),
   };
   function subtitleProviders() {
     return external()

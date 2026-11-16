@@ -32,6 +32,38 @@ def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
 // بصمة الكود الأصلي (tools/native-fingerprint.mjs). حزمة واجهة تُعرض فقط فوق
 // الـAPK الذي يحمل بصمتها نفسها. «dev» للبناء المحلي: لا تحديثات تلقائية.
 def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
+def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
+
+/**
+ * Debug runtime only: every OkHttpClient.Builder.build() first calls NetworkBridge.adopt (extensions/runtime-android).
+ * Inside an isolated CloudStream worker that ends a provider's own client in VANTARA's broker; elsewhere it is a no-op.
+ */
+abstract class VantaraBrokerHook implements com.android.build.api.instrumentation.AsmClassVisitorFactory<com.android.build.api.instrumentation.InstrumentationParameters.None> {
+    @Override
+    org.objectweb.asm.ClassVisitor createClassVisitor(com.android.build.api.instrumentation.ClassContext context, org.objectweb.asm.ClassVisitor next) {
+        return new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9, next) {
+            @Override
+            org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+                def visitor = super.visitMethod(access, name, descriptor, signature, exceptions)
+                if (name != 'build' || descriptor != '()Lokhttp3/OkHttpClient;') return visitor
+                return new org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9, visitor) {
+                    @Override
+                    void visitCode() {
+                        super.visitCode()
+                        super.visitVarInsn(org.objectweb.asm.Opcodes.ALOAD, 0)
+                        super.visitMethodInsn(org.objectweb.asm.Opcodes.INVOKESTATIC, 'dev/vantara/runtime/cloudstream/NetworkBridge',
+                            'adopt', '(Lokhttp3/OkHttpClient$Builder;)V', false)
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    boolean isInstrumentable(com.android.build.api.instrumentation.ClassData classData) {
+        return classData.className == 'okhttp3.OkHttpClient$Builder'
+    }
+}
 
 android {
     namespace "com.vantara.app"
@@ -74,6 +106,14 @@ android {
             // نسخة الاختبار تعيش بجانب النسخة الموقعة الأساسية على نفس الهاتف.
             applicationIdSuffix '.debug'
             resValue 'string', 'app_name', 'VANTARA اختبار'
+            // Only the protected opt-in debug channel has a persistent signature.
+            // Ordinary local/debug CI builds keep the standard Android debug key.
+            if (System.getenv('VANTARA_SIGN_DEBUG_CHANNEL') == 'true') {
+                if (!keystorePath || !keystorePassword) {
+                    throw new GradleException('Upgradeable debug channel requires the persistent signing key')
+                }
+                signingConfig signingConfigs.release
+            }
         }
         release {
             minifyEnabled false
@@ -148,6 +188,10 @@ repositories {
 }
 
 dependencies {
+    if (runtimeDebug) {
+        debugImplementation 'dev.vantara.runtime:executor:1'
+        debugImplementation 'dev.vantara.runtime:bootstrap:1'
+    }
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
@@ -157,13 +201,17 @@ dependencies {
     // ── محرّك الإضافات: سطح المستضيف الذي تشير إليه إضافات Keiyoushi ──
     // الإصدارات مثبَّتة بقصد وهي نفسها التي أثبتها spike على الجهاز.
     implementation "androidx.core:core-ktx:1.15.0"
+    // إشعارات الجوال والتطبيق مغلق: فحص دوري كل 15 دقيقة (com.vantara.notify)
+    implementation "androidx.work:work-runtime-ktx:2.10.0"
     // `ConfigurableSource.setupPreferenceScreen` يأخذ PreferenceScreen في
     // توقيعه، فغيابه NoClassDefFoundError عند تحميل الصنف لا عند استعماله
     implementation "androidx.preference:preference-ktx:1.2.1"
     // اعتراض Cloudflare المشترك مع الـspike يطابق بصمة Chrome (UserAgentMetadata)
     // عبر WebSettingsCompat؛ نفس الإصدار الذي مرّت به المصادر الست عشرة
     implementation "androidx.webkit:webkit:1.17.0"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+    // 1.11.0 لا 1.8.1: إضافات Keiyoushi الحديثة مبنية عليه وتنادي BuildersKt.runBlockingK (موجود من 1.11.0 فقط،
+    // ويبقى runBlocking القديم للإضافات الأقدم). بدونه NoSuchMethodError داخل اعتراض شبكة الإضافة (فحص المانجا الحي).
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0"
 
     // ── الترجمة على الجوال: ONNX Runtime يشغّل نماذج الرؤية وOCR داخل الجهاز ──
     // الأوزان (~430MB) ليست هنا: تُنزَّل عند الطلب (ModelStore). المكتبة نفسها
@@ -212,12 +260,32 @@ dependencies {
     implementation "com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597"
 
     testImplementation "junit:junit:$junitVersion"
+    testImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
+    // شهادات TLS محلية لاختبار شبكة يحجبها فلتر SNI (CensoredNetworkTest)
+    testImplementation "com.squareup.okhttp3:okhttp-tls:$okhttpVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    // TogetherRoomScreensDeviceTest: خادم غرفة محلي (WebSocket) للقطات غرفة «مشاهدة معًا» الحقيقية
+    androidTestImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 
 apply from: 'capacitor.build.gradle'
+
+if (runtimeDebug) {
+    androidComponents {
+        onVariants(selector().withBuildType('debug')) { variant ->
+            variant.instrumentation.transformClassesWith(VantaraBrokerHook, com.android.build.api.instrumentation.InstrumentationScope.ALL) { }
+            variant.instrumentation.setAsmFramesComputationMode(com.android.build.api.instrumentation.FramesComputationMode.COPY_FRAMES)
+        }
+    }
+    // The app-specific bridge sees existing adapters/Capacitor, but is absent from Release.
+    android.sourceSets.debug.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
+    android.sourceSets.testDebug.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')
+    android.sourceSets.testDebug.resources.srcDir('../../extensions/runtime-android/integration/src/test/resources')
+    android.sourceSets.androidTest.java.srcDir('../../extensions/runtime-android/integration/src/androidTest/kotlin')
+    android.sourceSets.androidTest.assets.srcDir('../../extensions/runtime-android/harness/build/pinnedPackages')
+}
 
 try {
     def servicesJSON = file('google-services.json')

@@ -45,22 +45,54 @@ object Tone {
     var ACCENT_SOFT = 0x293B82F6; private set
     /** حدّ العنصر المختار (الحلقة الحالية، السيرفر المختار). */
     var ACCENT_LINE = 0x6B3B82F6; private set
+    /** نص وأيقونة فوق زر بلون القسم: أبيض على الغامق وأسود على الفاتح (WCAG 4.5:1، نفس onAccent في الويب). */
+    var ON_ACCENT = 0xFFFFFFFF.toInt(); private set
     const val OK = 0xFF34D399.toInt()
     const val WARN = 0xFFFBBF24.toInt()
     const val BAD = 0xFFF87171.toInt()
     const val SCRIM = 0xB3000000.toInt()
 
     /** لون القسم: نفس المشغّل بنفس تصميمه، والسينما بالأحمر الدموي (cinema.css). */
-    fun use(section: String) {
+    fun use(section: String, accent: String? = null) {
         if (section == "cinema") {
             BG = 0xFF0A0707.toInt(); SURFACE = 0xFF141010.toInt(); SURFACE_2 = 0xFF1B1515.toInt(); SURFACE_3 = 0xFF251C1C.toInt()
             LINE = 0x1FFFC8C8; TEXT = 0xFFF7F2F2.toInt(); TEXT_2 = 0xFFCBBDBD.toInt(); TEXT_3 = 0xFF978787.toInt(); TEXT_4 = 0xFF5E5252.toInt()
-            ACCENT = 0xFFC1121F.toInt(); ACCENT_TEXT = 0xFFF26B6B.toInt(); ACCENT_SOFT = 0x29C1121F; ACCENT_LINE = 0x73C1121F
+            ACCENT = 0xFFC1121F.toInt(); ACCENT_TEXT = 0xFFF26B6B.toInt(); ACCENT_SOFT = 0x29C1121F; ACCENT_LINE = 0x73C1121F; ON_ACCENT = onAccent(ACCENT)
         } else {
             BG = 0xFF05070D.toInt(); SURFACE = 0xFF0D111B.toInt(); SURFACE_2 = 0xFF131826.toInt(); SURFACE_3 = 0xFF1B2233.toInt()
             LINE = 0x1FA0BEFF; TEXT = 0xFFF3F6FC.toInt(); TEXT_2 = 0xFFB4BDD0.toInt(); TEXT_3 = 0xFF7D879D.toInt(); TEXT_4 = 0xFF4E576B.toInt()
-            ACCENT = 0xFF3B82F6.toInt(); ACCENT_TEXT = 0xFF8FB8FF.toInt(); ACCENT_SOFT = 0x293B82F6; ACCENT_LINE = 0x6B3B82F6
+            ACCENT = 0xFF3B82F6.toInt(); ACCENT_TEXT = 0xFF8FB8FF.toInt(); ACCENT_SOFT = 0x293B82F6; ACCENT_LINE = 0x6B3B82F6; ON_ACCENT = onAccent(ACCENT)
         }
+        // لون الواجهة (الويب يمرّره دائمًا: المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد) يغلب المصمّم،
+        // والأسطح تأخذ لمسة منه بنسب paletteVars في appearance.js نفسها: المشغّل «نوع من اللون» لا أحمر ثابت
+        val rgb = accent?.removePrefix("#")?.toIntOrNull(16) ?: return
+        ACCENT = (0xFF shl 24) or rgb
+        val r = (rgb shr 16) and 0xFF; val g = (rgb shr 8) and 0xFF; val b = rgb and 0xFF
+        fun lift(c: Int) = c + ((255 - c) * 38) / 100
+        ACCENT_TEXT = (0xFF shl 24) or (lift(r) shl 16) or (lift(g) shl 8) or lift(b)
+        ACCENT_SOFT = (0x29 shl 24) or rgb
+        ACCENT_LINE = (0x6B shl 24) or rgb
+        ON_ACCENT = onAccent(ACCENT)
+        BG = mix(rgb, 4, 0x050508); SURFACE = mix(rgb, 6, 0x0C0C11); SURFACE_2 = mix(rgb, 7, 0x131319); SURFACE_3 = mix(rgb, 8, 0x1B1B23)
+        LINE = (0x1F shl 24) or (mix(rgb, 30, 0xFFFFFF) and 0x00FFFFFF)
+        TEXT = 0xFFF3F3F6.toInt(); TEXT_2 = mix(rgb, 6, 0xBAB8C4); TEXT_3 = mix(rgb, 6, 0x87849A); TEXT_4 = mix(rgb, 6, 0x56536A)
+    }
+
+    private fun luminance(c: Int): Double {
+        fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4) }
+        return 0.2126 * ch((c shr 16) and 0xFF) + 0.7152 * ch((c shr 8) and 0xFF) + 0.0722 * ch(c and 0xFF)
+    }
+    private fun contrast(a: Int, b: Int): Double { val x = luminance(a); val y = luminance(b); return (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05) }
+    /** لون النص فوق [bg]: أبيض إن قرأ بوضوح، وإلا أسود. */
+    fun onAccent(bg: Int): Int = if (contrast(bg, 0xFFFFFFFF.toInt()) >= 4.5) 0xFFFFFFFF.toInt() else if (contrast(bg, 0xFF0B0B0F.toInt()) >= 4.5) 0xFF0B0B0F.toInt() else 0xFF000000.toInt()
+
+    /** color-mix(in srgb, accent p%, base): نفس خلط الويب، معتمًا. */
+    private fun mix(accent: Int, p: Int, base: Int): Int {
+        fun ch(a: Int, b: Int) = (a * p + b * (100 - p)) / 100
+        val r = ch((accent shr 16) and 0xFF, (base shr 16) and 0xFF)
+        val g = ch((accent shr 8) and 0xFF, (base shr 8) and 0xFF)
+        val bl = ch(accent and 0xFF, base and 0xFF)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
     }
 
     /** اللون نفسه بشفافية أخرى (0..255). */
@@ -315,7 +347,7 @@ class VSheet(private val host: FrameLayout) {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             background = GradientDrawable().apply {
-                setColor(if (side) Tone.alpha(Tone.SURFACE, 0xF0) else Tone.SURFACE)
+                setColor(Tone.SURFACE) // معتمة: نصوص الغرفة لا تظهر من خلف الورقة (ملاحظة المالك 15 نوفمبر)
                 val r = dp(22).toFloat()
                 cornerRadii = if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
                 setStroke(dp(1), Tone.LINE)
@@ -352,7 +384,9 @@ class VSheet(private val host: FrameLayout) {
             scrim = s
             panel = p
             p.translationX = width.toFloat() + dp(12)
-            p.animate().translationX(0f).setDuration(240).setInterpolator(DecelerateInterpolator(2f)).start()
+            settleAt = android.os.SystemClock.uptimeMillis() + 260
+            // طبقة GPU طوال الانزلاق: الورقة تُرسم مرة وتتحرك صورة، لا إعادة رسم لكل الصفوف في كل إطار
+            p.animate().translationX(0f).setDuration(240).setInterpolator(DecelerateInterpolator(2f)).withLayer().start()
             s.animate().alpha(1f).setDuration(200).start()
             return
         }
@@ -368,8 +402,23 @@ class VSheet(private val host: FrameLayout) {
         scrim = s
         panel = p
         p.translationY = h * 0.6f
-        p.animate().translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
+        settleAt = android.os.SystemClock.uptimeMillis() + 280
+        p.animate().translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).withLayer().start()
         s.animate().alpha(1f).setDuration(200).start()
+    }
+
+    /**
+     * تحديث مجمّع للمحتوى الذي يتغيّر وحده (سيرفرات تصل تباعًا): بناء واحد كل 250ms على الأكثر، ولا بناء أثناء انزلاق
+     * الورقة. كان كل سيرفر يصل يعيد بناء القائمة كاملة وسط الحركة فتتجمد أجزاء من الثانية (ملاحظة المالك 15 نوفمبر).
+     */
+    private var settleAt = 0L
+    private var refreshQueued = false
+    private val queuedRefresh = Runnable { refreshQueued = false; refresh() }
+    fun refreshSoon() {
+        if (body == null || refreshQueued) return
+        refreshQueued = true
+        val wait = (settleAt - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0L) + 250L
+        host.postDelayed(queuedRefresh, wait)
     }
 
     /** يعيد بناء المحتوى (سيرفر جهز، حالة تغيّرت) بلا إغلاق ولا قفزة. */
@@ -381,6 +430,7 @@ class VSheet(private val host: FrameLayout) {
     }
 
     fun close(animated: Boolean = true) {
+        host.removeCallbacks(queuedRefresh); refreshQueued = false
         val p = panel ?: return
         val s = scrim
         panel = null
@@ -391,8 +441,8 @@ class VSheet(private val host: FrameLayout) {
         if (!animated) {
             host.removeView(p); s?.let(host::removeView)
         } else {
-            if (side) p.animate().translationX(p.width.toFloat() + dp(12)).setDuration(180).withEndAction { host.removeView(p) }.start()
-            else p.animate().translationY(p.height.toFloat()).setDuration(200).withEndAction { host.removeView(p) }.start()
+            if (side) p.animate().translationX(p.width.toFloat() + dp(12)).setDuration(180).withLayer().withEndAction { host.removeView(p) }.start()
+            else p.animate().translationY(p.height.toFloat()).setDuration(200).withLayer().withEndAction { host.removeView(p) }.start()
             s?.animate()?.alpha(0f)?.setDuration(200)?.withEndAction { host.removeView(s) }?.start()
         }
         onClose?.invoke()
@@ -483,3 +533,29 @@ fun Context.chip(text: String, fg: Int, bg: Int): TextView = label(text, 11f, fg
 
 /** يمنع وصول اللمس للطبقات تحت العنصر. */
 fun View.swallowTouches() = setOnTouchListener { _, e: MotionEvent -> true.also { if (e.action == MotionEvent.ACTION_UP) performClick() } }
+
+/** مؤشر قوة السرب (أربعة أعمدة متدرجة) بجانب عدد المشاركين: نفس مؤشر ورقة سيرفرات الكمبيوتر. */
+class SeedMeter(context: Context, private val bars: Int, private val color: Int) : View(context) {
+    private val on = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = this@SeedMeter.color }
+    private val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = 0x33FFFFFF }
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) = setMeasuredDimension(dp(17), dp(13))
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val w = dp(3).toFloat(); val gap = dp(1.6f).toFloat(); val r = dp(1).toFloat()
+        for (i in 0 until 4) {
+            val h = height * (0.35f + 0.65f * i / 3f)
+            val x = i * (w + gap)
+            canvas.drawRoundRect(x, height - h, x + w, height.toFloat(), r, r, if (i < bars) on else off)
+        }
+    }
+    companion object {
+        /** عدد المشاركين من وصف التورنت («👤 156» أو «👤 1.2k»)، أو null إن لم يُعلن. */
+        fun seeders(text: String?): Int? {
+            val m = Regex("👤\\s*([0-9][0-9.,]*)\\s*([kK])?").find(text ?: return null) ?: return null
+            val n = m.groupValues[1].replace(",", "").toDoubleOrNull() ?: return null
+            return (if (m.groupValues[2].isNotEmpty()) n * 1000 else n).toInt()
+        }
+        /** نفس حدود الكمبيوتر (`swarmTier` و`meterBars`): 100+ أربعة، 20+ قوي، 5+ متوسط، 1+ ضعيف. */
+        fun bars(s: Int) = when { s >= 100 -> 4; s >= 20 -> 3; s >= 5 -> 2; s >= 1 -> 1; else -> 0 }
+        fun color(s: Int) = when { s >= 20 -> Tone.OK; s >= 5 -> Tone.WARN; else -> Tone.BAD }
+    }
+}

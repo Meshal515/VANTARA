@@ -1,0 +1,49 @@
+{
+  "commit": "fc6c0e3e14e4dfc8d86fd3183abb63d59cbc221d",
+  "runId": 41308315550,
+  "jobId": 124853220153,
+  "artifactId": 13084227025,
+  "workflowResult": "FAIL",
+  "classification": "LAB_ERROR",
+  "nativeTest": {
+    "class": "com.vantara.plugins.OptionalMangaRepositoriesDeviceTest",
+    "method": "addRemoveAndDismiss",
+    "result": "PASS",
+    "tests": 1,
+    "elapsedSeconds": 9.679,
+    "verifiedOperations": [
+      "register the owner-supplied Keiyoushi repository URL ending in index.pb",
+      "repeat the same Keiyoushi input URL without duplicate repositories",
+      "unlink Keiyoushi repository",
+      "register the owner-supplied Yuzono manga repository URL ending in index.pb",
+      "repeat the same Yuzono input URL without duplicate repositories",
+      "unlink Yuzono repository",
+      "dismiss optional legacy catalogue"
+    ],
+    "logRecords": [
+      "REPOSITORY_PASS owner=keiyoushi;index=protobuf;registeredTwice=true;unlinked=true",
+      "REPOSITORY_PASS owner=yuzono;index=protobuf;registeredTwice=true;unlinked=true"
+    ]
+  },
+  "restartTest": {
+    "method": "dismissalSurvivesProcessRestart",
+    "result": "NOT_TESTED",
+    "reason": "The driver stopped at the proof parser before the second instrumentation process."
+  },
+  "nextRerunStrengthening": {
+    "status": "NOT_TESTED",
+    "changes": [
+      "Second registration uses an independently specified raw.githubusercontent.com alias instead of repeating the same GitHub URL.",
+      "Assert exactly one repository and the independently specified canonical root, without using the production RepoIndex.base normalizer for expected values.",
+      "Remove using the original GitHub URL after registering its raw-content alias.",
+      "Label the next log inputIndex=protobuf: this identifies the supplied URL, not independent proof of the selected wire format."
+    ]
+  },
+  "labFailure": {
+    "code": "ANDROID_INSTRUMENTATION_PROOF_MISSING",
+    "cause": "The driver used am instrument -w without -r, so formatted output omitted INSTRUMENTATION_CODE required by the strict parser.",
+    "fix": "Use am instrument -r -w; retain all strict proof assertions.",
+    "fixValidation": "bash -n passed; all three instrumentation parser tests passed. Emulator rerun pending."
+  },
+  "scope": "Repository registration/removal and catalogue dismissal only. No manga reading or extension execution compatibility is claimed."
+}

@@ -114,3 +114,25 @@ it('bridges more than a head page of new events before resuming the original old
   expect(timeline.mock.calls.map(([, options]) => options.before)).toEqual([null, undefined, 'new-bridge', 'old-page']);
   expect(host.querySelectorAll('.up-card')).toHaveLength(103);
 });
+
+it('#323 O-2: include يقصر الخط الزمني على نوع واحد (المسلسلات دون الأفلام في الموحد)', async () => {
+  const ep = { ...event('7', 'tt-series'), section: 'cinema', kind: 'episode', season: 1 };
+  const movie = { ...event('1', 'tt-movie'), section: 'cinema', kind: 'movie' };
+  timeline.mockResolvedValueOnce(page([ep, movie]));
+  mount({ section: 'cinema', include: (g) => g.kind !== 'movie' });
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+  expect(host.textContent).toContain('tt-series');
+  expect(host.textContent).not.toContain('tt-movie');
+});
+
+it('every press gets a visible answer: nothing new, or the end of the feed', async () => {
+  timeline.mockResolvedValueOnce(page([event('1')])).mockResolvedValueOnce(page([event('1')])).mockResolvedValueOnce(page([event('2'), event('1')]));
+  mount();
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+  await api.refresh();
+  expect(host.querySelector('.up-status').textContent).toContain('لا جديد');
+  await api.refresh();
+  expect(host.querySelector('.up-status').textContent).toContain('وصل 1 جديد');
+  await api.loadMore();
+  expect(host.querySelector('.up-status').textContent).toBe('وصلت لآخر التحديثات');
+});

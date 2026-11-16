@@ -33,6 +33,13 @@ data class Route(
     val runtimeReady: Boolean = false,
     val sourceName: String? = null,
     val label: String? = null,
+    /** "torrent" حين كل روابطه تذاكر تورنت (من أي محوّل): الورقة تعرضه تورنت لا رابطًا مباشرًا. */
+    val type: String? = null,
+    /**
+     * هوية السيرفر الثابتة بين الجلسات: «btih:hash:idx» للتورنت، وإلا معرّف الطريق بلا معرّف الجلسة.
+     * [id] و[code] يتغيّران مع كل تجهيز (الرمز بترتيب الوصول: TRR ثم TRR2…)، فلا يصلحان لتثبيت اختيار.
+     */
+    val fingerprint: String? = null,
 )
 
 /** ما يرسله المحوّل عن سيرفر: مفتاحه عنده، واسمه، وحالته. */

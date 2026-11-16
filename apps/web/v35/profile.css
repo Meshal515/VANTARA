@@ -755,6 +755,7 @@
 .v35 .pe-banner:active .pe-cam--banner,
 .v35 .pe-face:active .pe-cam--face {
   background: var(--accent);
+  color: var(--on-accent, #fff);
 }
 
 .v35 .pe-id {

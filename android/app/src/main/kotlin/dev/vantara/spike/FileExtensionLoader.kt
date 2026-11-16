@@ -61,16 +61,50 @@ class FileExtensionLoader(private val context: Context) {
     }
 
     /**
-     * يرجع APK المحلي فقط إذا بقيت بايتاته مطابقة للبصمة المثبّتة.
-     * بذلك لا نعتمد على GitHub في كل تشغيل، ولا نثق بملف cache لمجرد وجوده.
+     * مخزن الإضافات المستمر: كل إصدار في ملف باسم بصمته `vault/<pkg>/<sha256>.apk`، يُكتب مرة ولا
+     * يُستبدل أبدًا. تحديث الإضافة يضيف ملفًا جديدًا بجانب القديم، فالنسخة العاملة السابقة تبقى على
+     * الجهاز حتى يثبت الجديد (docs/addons/PERSISTENT_PLUGINS.md §3.1). كان الملف الواحد `<pkg>.apk`
+     * يُحذف قبل التحقق من الجديد، فتحديث تالف كان يمحو آخر نسخة سليمة.
+     */
+    fun vaultFile(pkg: String, sha256: String): File {
+        // الاسم يدخل في مسار ملف: «..» أو «/» من فهرس معادٍ كان سيكتب خارج المخزن
+        require(PKG.matches(pkg)) { "invalid package name" }
+        require(SHA.matches(sha256.lowercase())) { "invalid sha256" }
+        return File(File(dir, "vault/$pkg"), "${sha256.lowercase()}.apk")
+    }
+
+    /**
+     * يرجع APK المحلي فقط إذا بقيت بايتاته مطابقة للبصمة المثبّتة: من المخزن أولًا، ثم ملف الإصدار
+     * السابق للمخزن (`<pkg>.apk`) لترحيل الأجهزة الحالية. لا نعتمد على GitHub في كل تشغيل، ولا نثق
+     * بملف لمجرد وجوده.
      */
     fun readVerifiedCache(spec: SourceSpec): ByteArray? {
-        val apk = File(dir, "${spec.pkg}.apk")
-        if (!apk.isFile) return null
-        val bytes = runCatching { apk.readBytes() }.getOrNull() ?: return null
-        return bytes.takeIf {
-            spec.sha256.equals(sha256(it), ignoreCase = true)
+        if (!PKG.matches(spec.pkg) || !SHA.matches(spec.sha256.lowercase())) return null
+        for (apk in listOf(vaultFile(spec.pkg, spec.sha256), File(dir, "${spec.pkg}.apk"))) {
+            if (!apk.isFile) continue
+            val bytes = runCatching { apk.readBytes() }.getOrNull() ?: continue
+            if (spec.sha256.equals(sha256(bytes), ignoreCase = true)) return bytes
         }
+        return null
+    }
+
+    /**
+     * يحذف من مخزن الحزمة كل إصدار غير المذكور في [keep] (البصمات)، والملف القديم `<pkg>.apk`.
+     * يُستدعى بعد تفعيل إصدار وثبوته فقط، فلا يُحذف ما قد نحتاج الرجوع إليه.
+     */
+    fun prune(pkg: String, keep: Set<String>) {
+        if (!PKG.matches(pkg)) return
+        val wanted = keep.map { it.lowercase() }.toSet()
+        File(dir, "vault/$pkg").listFiles()?.forEach { f ->
+            if (f.name.removeSuffix(".apk") !in wanted) { f.setWritable(true, true); f.delete() }
+        }
+        File(dir, "$pkg.apk").let { if (it.exists()) { it.setWritable(true, true); it.delete() } }
+    }
+
+    /** يحذف كل إصدارات الحزمة من الجهاز (إزالة الإضافة بأمر المستخدم). */
+    fun erase(pkg: String) {
+        prune(pkg, emptySet())
+        File(dir, "vault/$pkg").delete()
     }
 
     fun load(spec: SourceSpec, apkBytes: ByteArray): Result {
@@ -83,14 +117,17 @@ class FileExtensionLoader(private val context: Context) {
             )
         }
 
-        val apk = File(dir, "${spec.pkg}.apk")
+        // بعنوان المحتوى: الملف إن وُجد هو نفس البايتات (تحققنا من البصمة)، فلا يُعاد كتابته ولا
+        // يُمس إصدار آخر. الكتابة لملف مؤقت ثم إعادة تسمية: انقطاع الكهرباء لا يترك ملفًا نصفيًا.
+        val apk = runCatching { vaultFile(spec.pkg, actual) }.getOrElse { return Result.Fail("identity", it.message ?: "invalid package") }
         try {
-            // ملفٌ قديم قد يكون read-only من تحميل سابق، فالكتابة عليه تفشل
-            if (apk.exists()) {
-                apk.setWritable(true, true)
-                apk.delete()
+            if (!apk.isFile || !sha256(apk.readBytes()).equals(actual, ignoreCase = true)) {
+                apk.parentFile?.mkdirs()
+                if (apk.exists()) { apk.setWritable(true, true); apk.delete() }
+                val tmp = File(apk.parentFile, "${apk.name}.${System.nanoTime()}.part")
+                tmp.writeBytes(apkBytes)
+                if (!tmp.renameTo(apk)) { tmp.delete(); return Result.Fail("write", "cannot place apk into the vault") }
             }
-            apk.writeBytes(apkBytes)
         } catch (t: Throwable) {
             return Result.Fail("write", "cannot write apk into private storage", t)
         }
@@ -214,5 +251,8 @@ class FileExtensionLoader(private val context: Context) {
         const val METADATA_LIB = "tachiyomix.extensionLib"
         const val LIB_MIN = 1.4
         const val LIB_MAX = 1.6
+        /** اسم حزمة Java/Android: مقاطع تبدأ بحرف، لا «..» ولا فواصل مسار. */
+        val PKG = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
+        val SHA = Regex("^[0-9a-f]{64}$")
     }
 }

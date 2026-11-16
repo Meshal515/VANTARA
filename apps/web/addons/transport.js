@@ -35,6 +35,8 @@ export function createTransport({
       if (!res.ok)
         throw Object.assign(new Error(`HTTP ${res.status}`), {
           status: res.status,
+          // طلب الموقع بالتوقف (429/503) يصل لقاطع الدائرة (lib/host-breaker.js)
+          retryAfter: res.headers?.get?.("retry-after") ?? null,
         });
       if (Number(res.headers.get("content-length") ?? 0) > limit)
         throw new RangeError("حجم");
@@ -82,6 +84,7 @@ export function createTransport({
       if (e.status)
         throw Object.assign(new Error(`الإضافة أعادت HTTP ${e.status}`), {
           status: e.status,
+          retryAfter: e.retryAfter ?? null,
         });
       throw new Error(
         "تعذّر الاتصال بالإضافة؛ قد تكون CORS أو حماية أو إعادة توجيه غير مسموحة",

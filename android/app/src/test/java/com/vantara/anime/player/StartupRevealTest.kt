@@ -6,7 +6,7 @@ import org.junit.Test
 
 class StartupRevealTest {
     @Test fun `ready before the first frame keeps the logo on screen`() {
-        assertFalse(StartupReveal.hideOnReady(firstFrameShown = false, hasVideo = true))
+        assertFalse(StartupReveal.hideOnReady(firstFrameShown = false, audioOnlyAdvancing = false))
     }
 
     @Test fun `the first frame reveals the picture even before ready`() {
@@ -19,15 +19,15 @@ class StartupRevealTest {
     }
 
     @Test fun `a stall during watching ends on ready as before`() {
-        assertTrue(StartupReveal.hideOnReady(firstFrameShown = true, hasVideo = true))
+        assertTrue(StartupReveal.hideOnReady(firstFrameShown = true, audioOnlyAdvancing = false))
     }
 
     @Test fun `a server switch waits for the new first frame again`() {
         // start() يعيد firstFrameShown=false مع كل سيرفر جديد
-        assertFalse(StartupReveal.hideOnReady(firstFrameShown = false, hasVideo = true))
+        assertFalse(StartupReveal.hideOnReady(firstFrameShown = false, audioOnlyAdvancing = false))
     }
 
-    @Test fun `audio only media never renders a frame so ready ends the wait`() {
-        assertTrue(StartupReveal.hideOnReady(firstFrameShown = false, hasVideo = false))
+    @Test fun `confirmed audio output ends the wait without a video frame`() {
+        assertTrue(StartupReveal.hideOnReady(firstFrameShown = false, audioOnlyAdvancing = true))
     }
 }

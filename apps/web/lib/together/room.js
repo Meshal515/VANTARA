@@ -22,7 +22,8 @@ const HEARTBEAT_MS = 5_000;
 const SILENCE_MS = 12_000;
 const ECHO_MS = 2_500;
 const WATCH_MS = 500;
-const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+// أول إعادة فورية (انقطاع لحظي: تبدّل شبكة)، ثم تتباعد إن فشلت. كانت تنتظر ثانية كاملة قبل أول محاولة
+const BACKOFF_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 
 /**
  * ينشئ غرفة لمن اخترتهم (invite: معرّفات أو '*') ويُرجع رمزها الداخلي. الرمز لا يراه
@@ -59,9 +60,9 @@ export function parseInvite(hash) {
 
 /**
  * joinRoom({baseUrl, code, getToken}) ← room
- *   room.on(event, fn): welcome | state | roster | status | joined | left | host | room | presence | full | gone | uninvited | denied
+ *   room.on(event, fn): welcome | state | roster | status | joined | left | host | room | presence | full | gone | uninvited | kicked | denied
  *   room.command('play'|'pause'|'seek'|'load', {pos, media})
- *   room.report({...})، room.setMode('sync'|'free')، room.settings({control})، room.invite(userIds)، room.giveHost(userId)
+ *   room.report({...})، room.setMode('sync'|'free')، room.settings({control})، room.invite(userIds)، room.giveHost(userId)، room.kick(userId)
  *   room.clock، room.timeline، room.roster، room.info، room.me، room.isHost، room.close()
  */
 export function joinRoom({
@@ -81,6 +82,7 @@ export function joinRoom({
   let status = 'connecting';
   let lastRx = 0;
   let awaitingSince = null;
+  let proto = 1;
 
   const emit = (event, payload) => {
     for (const fn of listeners.get(event) ?? []) try { fn(payload); } catch { /* مستمع معطوب لا يوقف الغرفة */ }
@@ -152,10 +154,13 @@ export function joinRoom({
       clearPending();
       ws = null;
       if (closed) return;
-      // 4003 ممتلئة، 4001 دخلت من جهاز آخر، 1008/4004 لا غرفة أو لا صلاحية: لا إعادة محاولة
-      if (event?.code === 4003 || event?.code === 4001 || event?.code === 4004 || event?.code === 1008) {
+      // 4003 ممتلئة، 4001 دخلت من جهاز آخر، 4005 غير مدعو، 4006 أخرجك المضيف،
+      // 1008/4004 لا غرفة أو لا صلاحية: لا إعادة محاولة
+      const final = { 4003: 'full', 4001: 'replaced', 4004: 'gone', 1008: 'gone', 4005: 'uninvited', 4006: 'kicked' }[event?.code];
+      if (final) {
         closed = true;
-        setStatus(event.code === 4003 ? 'full' : event.code === 4001 ? 'replaced' : 'gone');
+        setStatus(final);
+        if (final === 'kicked' || final === 'uninvited') emit(final, {});
         return;
       }
       setStatus('reconnecting');
@@ -173,6 +178,7 @@ export function joinRoom({
         return;
       case 'welcome':
         me = msg.you;
+        proto = Number.isFinite(msg.proto) ? msg.proto : 1;
         info = msg.room;
         roster = msg.roster ?? [];
         // تقدير أولي للساعة من رسالة الترحيب حتى تصل عينات ping
@@ -200,6 +206,7 @@ export function joinRoom({
       case 'full':
       case 'gone':
       case 'uninvited':
+      case 'kicked':
         // نهائي: لا إعادة محاولة، حتى لو لم يصل رمز الإغلاق
         closed = true;
         clearPending();
@@ -220,9 +227,19 @@ export function joinRoom({
     }
   }
 
+  // الخادم القديم (proto 1، المنشور مع Stable) يختم كل أمر بـ«وصوله + 300ms» ليؤجّله عمدًا. تأجيل ثابت معروف:
+  // نعيده للحظة وصوله فينفّذ الجميع الأمر فور استلامه — نفس سلوك proto 2 بلا نشر خادم ولا Stable (قرار المالك).
+  // العدّ التنازلي للبداية (ثوانٍ) لا يُمس: يُعرف بأن موعده أبعد من التأجيل الثابت.
+  const OLD_LEAD_MS = 300;
+  function normalize(state) {
+    if (proto >= 2 || !clock.ready || !Number.isFinite(state.at)) return state;
+    const lead = state.at - clock.serverNow();
+    return lead > 0 && lead <= OLD_LEAD_MS + 150 ? { ...state, at: state.at - OLD_LEAD_MS } : state;
+  }
   function acceptState(state, by = null) {
     if (!state || !Number.isFinite(state.seq) || !Number.isFinite(state.pos)) return;
     if (timeline && state.seq <= timeline.seq) return;
+    state = normalize(state);
     timeline = state;
     emit('state', { state, by });
   }
@@ -235,8 +252,9 @@ export function joinRoom({
       listeners.get(event).add(fn);
       return () => listeners.get(event)?.delete(fn);
     },
-    command(op, { pos, media, countdownMs } = {}) {
-      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}) });
+    /** at: لحظة الضغط بساعة الغرفة (clock.serverNow) — الخادم يختم الأمر بها بدل لحظة وصوله. */
+    command(op, { pos, media, countdownMs, at } = {}) {
+      const sent = send({ t: 'cmd', op, ...(Number.isFinite(pos) ? { pos } : {}), ...(media ? { media } : {}), ...(Number.isFinite(countdownMs) ? { countdownMs } : {}), ...(Number.isFinite(at) ? { at: Math.round(at) } : {}) });
       if (sent) expectReply();
       return sent;
     },
@@ -246,6 +264,8 @@ export function joinRoom({
     setMode(mode) { return send({ t: 'mode', mode }); },
     settings(s) { return send({ t: 'settings', ...s }); },
     giveHost(userId) { return send({ t: 'host', userId }); },
+    /** المضيف يُخرج شخصًا؛ لا يعود إلا بدعوة جديدة. */
+    kick(userId) { return send({ t: 'kick', userId }); },
     invite(userIds) { return send({ t: 'invite', ...(userIds === '*' ? { all: true } : { userIds }) }); },
     close() {
       closed = true;
@@ -261,6 +281,8 @@ export function joinRoom({
     get info() { return info; },
     get me() { return me; },
     get status() { return status; },
+    /** المتحكّم يطبّق أمره فورًا: الخادم الجديد يختمه بلحظة ضغطه، والقديم يُعاد تأجيله الثابت عند الاستلام (normalize). */
+    get instant() { return true; },
     get isHost() { return Boolean(me) && info?.hostUserId === me; },
     get canControl() { return Boolean(me) && (info?.hostUserId === me || info?.control === 'all'); },
   };

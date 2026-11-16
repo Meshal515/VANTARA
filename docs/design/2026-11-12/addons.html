@@ -1,0 +1,106 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/v35/core.css"><link rel="stylesheet" href="/v35/unified-view.css"><link rel="stylesheet" href="/mock/mock.css">
+<style>
+/* الإضافات بلا حاويات: صفوف على الخلفية نفسها، فواصل شعرية، والفعل نص ملوّن */
+.ad-head{padding:40px 20px 0;display:flex;align-items:center;gap:10px}
+.ad-head h1{flex:1;margin:0;font-size:26px;font-weight:850}
+.ad-head .add{height:36px;padding:0 14px;border-radius:999px;background:var(--surface-2);display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:700}
+.ad-head .add svg,.ad-search svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+.ad-tabs{display:flex;gap:22px;padding:18px 20px 0;border-bottom:1px solid var(--line)}
+.ad-tabs span{padding-bottom:12px;font-size:14.5px;font-weight:700;color:var(--text-3);position:relative}
+.ad-tabs span i{font-style:normal;font-size:12px;color:var(--text-4);margin-inline-start:4px}
+.ad-tabs span.on{color:var(--text-1)}
+.ad-tabs span.on::after{content:'';position:absolute;inset:auto 0 -1px 0;height:2px;border-radius:2px;background:var(--accent)}
+.ad-search{display:flex;align-items:center;gap:10px;margin:14px 20px 0;height:44px;padding:0 14px;border-radius:999px;background:var(--surface-1);color:var(--text-3);font-size:14px}
+.ad-kinds{display:flex;gap:8px;padding:12px 20px 4px}
+.ad-kinds span{height:30px;padding:0 13px;border-radius:999px;display:inline-flex;align-items:center;font-size:12.5px;font-weight:700;color:var(--text-3)}
+.ad-kinds span.on{background:var(--text-1);color:var(--bg)}
+.ad-verify{display:flex;align-items:center;gap:12px;margin:10px 20px 0;padding:12px 14px;border-radius:14px;background:linear-gradient(90deg,rgba(242,183,91,.14),transparent);font-size:13px}
+.ad-verify b{color:var(--warning)}
+.ad-verify span{flex:1;color:var(--text-2)}
+.ad-verify em{font-style:normal;font-weight:800;color:var(--warning)}
+.ad-sec{padding:20px 20px 6px;font-size:12px;font-weight:800;color:var(--text-3);letter-spacing:.02em}
+.ad-row{display:flex;align-items:center;gap:14px;padding:12px 20px;position:relative}
+.ad-row+.ad-row::before{content:'';position:absolute;top:0;inset-inline:78px 20px;height:1px;background:var(--line)}
+.ad-ic{width:44px;height:44px;border-radius:12px;overflow:hidden;flex:none;display:grid;place-items:center;font-weight:850;font-size:16px;color:#fff}
+.ad-ic img{width:100%;height:100%;object-fit:cover}
+.ad-m{flex:1;min-width:0}
+.ad-m b{display:block;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-m span{display:block;font-size:12px;color:var(--text-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-m span i{font-style:normal;color:var(--success)}
+.ad-m span u{text-decoration:none;color:var(--warning)}
+.ad-act{font-size:14px;font-weight:800;color:var(--accent-text);padding:8px 2px}
+.ad-act.get{color:var(--text-1);background:var(--surface-2);padding:8px 14px;border-radius:999px;font-size:13px}
+.ad-act.busy{color:var(--text-3)}
+/* صفحة المصدر على التصميم الموحد */
+.sp-head{padding:34px 16px 0;display:flex;align-items:center;gap:12px}
+.sp-head .ic{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2)}
+.sp-head .ic svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2}
+.sp-head .who{flex:1;display:flex;align-items:center;gap:10px}
+.sp-head .who .ad-ic{width:36px;height:36px;border-radius:10px;font-size:14px}
+.sp-head .who b{font-size:17px;font-weight:800;display:block}.sp-head .who span{font-size:11.5px;color:var(--text-3)}
+.sp-hero{position:relative;margin:16px 16px 0;height:228px;border-radius:22px;overflow:hidden}
+.sp-hero img.bg{width:100%;height:100%;object-fit:cover}
+.sp-hero::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 35%,rgba(0,0,0,.85))}
+.sp-hero .in{position:absolute;inset:auto 16px 14px 16px;z-index:2}
+.sp-hero .lg{height:44px;object-fit:contain;object-position:right;filter:drop-shadow(0 2px 10px #000)}
+.sp-hero .meta{font-size:12px;color:var(--text-2);margin-top:8px}
+.sp-dots{display:flex;gap:5px;justify-content:center;margin-top:10px}.sp-dots i{width:6px;height:6px;border-radius:3px;background:var(--surface-3)}.sp-dots i.on{width:18px;background:var(--text-1)}
+.uv-sh h2{font-size:18px}
+</style></head>
+<body class="v35">
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+<symbol id="back" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+</defs></svg>
+
+<!-- قائمة الإضافات: المثبتة -->
+<section class="phone" id="a-installed">
+  <div class="ad-head"><h1>الإضافات</h1><span class="add"><svg><use href="#plus"/></svg>أضف</span></div>
+  <div class="ad-tabs"><span class="on">المثبتة<i>6</i></span><span>اكتشف<i>148</i></span><span>المستودعات<i>2</i></span></div>
+  <div class="ad-search"><svg><use href="#search"/></svg>ابحث في إضافاتك</div>
+  <div class="ad-kinds"><span class="on">الكل</span><span>مانجا</span><span>أنمي</span><span>سينما</span></div>
+  <div class="ad-verify"><b>!</b><span>مصدر واحد يحتاج تحقق من الموقع</span><em>تحقق</em></div>
+  <div class="ad-sec">أنمي</div>
+  <div class="ad-row"><span class="ad-ic" style="background:#2b6cff">AR</span><span class="ad-m"><b>AnimeRift</b><span>CloudStream · re-3arabi · <i>يعمل</i></span></span><span class="ad-act">فتح</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#8a3ffc">AW</span><span class="ad-m"><b>AnimeWitcher</b><span>CloudStream · re-3arabi · <i>يعمل</i></span></span><span class="ad-act">فتح</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#e5484d">4U</span><span class="ad-m"><b>Anime4Up</b><span>CloudStream · re-3arabi · <u>بطيء اليوم</u></span></span><span class="ad-act">فتح</span></div>
+  <div class="ad-sec">مانجا</div>
+  <div class="ad-row"><span class="ad-ic"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30002-Cul4OeN7bYtn.jpg"></span><span class="ad-m"><b>Rocks Manga</b><span>Keiyoushi · عربي · <i>يعمل</i></span></span><span class="ad-act">فتح</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#2f3640">D</span><span class="ad-m"><b>Dilar</b><span>مدمج سابقًا · <u>تحتاج تحديث</u></span></span><span class="ad-act">حدّث</span></div>
+  <div class="ad-sec">سينما</div>
+  <div class="ad-row"><span class="ad-ic" style="background:#1a1a1a">T</span><span class="ad-m"><b>Torrentio</b><span>Stremio · بث · <i>يعمل</i></span></span><span class="ad-act">إعداد</span></div>
+</section>
+
+<!-- قائمة الإضافات: اكتشف (من المستودعات) -->
+<section class="phone" id="a-discover">
+  <div class="ad-head"><h1>الإضافات</h1><span class="add"><svg><use href="#plus"/></svg>أضف</span></div>
+  <div class="ad-tabs"><span>المثبتة<i>6</i></span><span class="on">اكتشف<i>148</i></span><span>المستودعات<i>2</i></span></div>
+  <div class="ad-search"><svg><use href="#search"/></svg>مصدر، موقع، أو مستودع</div>
+  <div class="ad-kinds"><span>الكل</span><span class="on">مانجا</span><span>أنمي</span><span>سينما</span></div>
+  <div class="ad-sec">عربي · Keiyoushi</div>
+  <div class="ad-row"><span class="ad-ic" style="background:#c2410c">LS</span><span class="ad-m"><b>Lava Scans</b><span>مانجا · عربي · 2.1 MB</span></span><span class="ad-act get">تثبيت</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#0f766e">SM</span><span class="ad-m"><b>SayManhwa</b><span>مانهوا · عربي · 1.8 MB</span></span><span class="ad-act busy">جارٍ التثبيت…</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#334155">TX</span><span class="ad-m"><b>Team X</b><span>مانجا · عربي · مثبتة</span></span><span class="ad-act">فتح</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#6d28d9">AZ</span><span class="ad-m"><b>Azora</b><span>مانجا · عربي · 1.2 MB</span></span><span class="ad-act get">تثبيت</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#9f1239">OD</span><span class="ad-m"><b>Oduto</b><span>مانجا · عربي · 1.4 MB</span></span><span class="ad-act get">تثبيت</span></div>
+  <div class="ad-row"><span class="ad-ic" style="background:#1d4ed8">KW</span><span class="ad-m"><b>Kawii</b><span>مانجا · عربي · 1.1 MB</span></span><span class="ad-act get">تثبيت</span></div>
+</section>
+
+<!-- صفحة مصدر على التصميم الموحد (DD-1) -->
+<section class="phone" id="a-source">
+  <div class="sp-head"><span class="ic"><svg><use href="#back"/></svg></span><span class="who"><span class="ad-ic" style="background:#2b6cff">AR</span><span><b>AnimeRift</b><span>مصدر أنمي · CloudStream</span></span></span><span class="ic"><svg><use href="#search"/></svg></span></div>
+  <div class="sp-hero"><img class="bg" src="https://artworks.thetvdb.com/banners/v4/series/424536/backgrounds/64e6cbe29d9c0.jpg">
+    <div class="in"><img class="lg" src="https://artworks.thetvdb.com/banners/v4/series/424536/clearlogo/696a802a5aa22.png"><div class="meta">الحلقة 28 · مترجم · أُضيف اليوم</div></div></div>
+  <div class="sp-dots"><i class="on"></i><i></i><i></i><i></i></div>
+  <section class="uv-sec" style="margin-top:22px"><header class="uv-sh" style="padding:0 16px"><h2>الأحدث في AnimeRift</h2></header>
+    <div class="uv-rail" style="padding:0 16px">
+      <a class="uv-po"><span class="uv-art"><img src="https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-qQTzQnEJJ3oB.jpg" style="width:100%;height:100%;object-fit:cover"></span><b class="uv-t1">Frieren</b><span class="uv-t2">الحلقة 28</span></a>
+      <a class="uv-po"><span class="uv-art"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx105398-b673Vt5ZSuz3.jpg" style="width:100%;height:100%;object-fit:cover"></span><b class="uv-t1">Solo Leveling</b><span class="uv-t2">الحلقة 12</span></a>
+      <a class="uv-po"><span class="uv-art"><img src="https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30013-BeslEMqiPhlk.jpg" style="width:100%;height:100%;object-fit:cover"></span><b class="uv-t1">One Piece</b><span class="uv-t2">الحلقة 1150</span></a>
+    </div></section>
+  <section class="uv-sec" style="margin-top:28px"><header class="uv-sh" style="padding:0 16px"><h2>التصنيفات</h2></header>
+    <div class="ad-kinds" style="flex-wrap:wrap;padding:0 16px"><span class="on">أكشن</span><span>مغامرة</span><span>كوميديا</span><span>دراما</span><span>فانتازيا</span><span>رومانسي</span></div></section>
+</section>
+</body></html>

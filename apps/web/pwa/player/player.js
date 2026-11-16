@@ -1,3 +1,5 @@
+import { diagnosticsUi } from '../../lib/diagnostics-ui.js';
+import { accentOf } from '../../v35/appearance.js';
 /**
  * مشغّل الويب (بديل المشغّل الأصلي في الـAPK) — بنفس تصميمه.
  *
@@ -24,6 +26,7 @@ import { createTogetherPlayer } from './together-player.js';
 import { createVideoOffsetControls } from '../../lib/together/offset-controls.js';
 import { connectionLabel } from '../../v35/together.js';
 import { renderLobby, pendingInvitees } from './together-lobby.js';
+import { sectionAccent } from '../../lib/together/lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
 import { activeSegment, loadSkipTimes, skipStatusText } from './skip-times.js';
 
@@ -227,6 +230,14 @@ export function openPlayer(args) {
 
   const root = el('div', 'pwa-player');
   root.dataset.tone = args.section === 'cinema' ? 'cinema' : 'anime';
+  // لون القسم الذي اختاره المستخدم (المظهر) يسري على المشغّل، وإلا لون القسم المصمّم
+  const picked = accentOf(args.section === 'cinema' ? 'cinema' : 'anime');
+  if (picked) {
+    root.style.setProperty('--accent', picked);
+    root.style.setProperty('--accent-text', `color-mix(in srgb, ${picked} 62%, #fff)`);
+    root.style.setProperty('--accent-soft', `color-mix(in srgb, ${picked} 16%, transparent)`);
+    root.style.setProperty('--accent-line', `color-mix(in srgb, ${picked} 42%, transparent)`);
+  }
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', args.title || 'المشغّل');
   const video = el('video', 'pp-video');
@@ -371,11 +382,11 @@ export function openPlayer(args) {
     const inviteMedia = together.session.media ?? {};
     let art = { banner: inviteMedia.banner ?? inviteMedia.cover ?? args.poster ?? null, logo: inviteMedia.logo ?? null, title: inviteMedia.title ?? args.title ?? '', episodeTitle: inviteMedia.episodeTitle ?? null };
     let artEpisode = null;
-    const refreshArt = () => {
-      if (artEpisode === state.episode) return;
-      artEpisode = state.episode;
-      const same = Number(inviteMedia.episode) === state.episode;
-      const media = { ...inviteMedia, episode: state.episode, ...(same ? {} : { banner: null, episodeTitle: null }) };
+    const refreshArt = (episode) => {
+      if (artEpisode === episode) return;
+      artEpisode = episode;
+      const same = Number(inviteMedia.episode) === episode;
+      const media = { ...inviteMedia, episode, ...(same ? {} : { banner: null, episodeTitle: null }) };
       if (!same) art = { ...art, banner: inviteMedia.cover ?? args.poster ?? art.banner, episodeTitle: null };
       void resolveArt(media).then((a) => {
         if (artEpisode !== media.episode || state.closed) return;
@@ -391,7 +402,9 @@ export function openPlayer(args) {
         lobby.hidden = !l.visible;
         root.classList.toggle('pp--lobby', l.visible);
         if (!l.visible) return;
-        refreshArt();
+        // الحلقة التي في الغرفة الآن: أثناء تجهيز حلقة المضيف الجديدة لا تبقى «الحلقة 1» مكتوبة
+        const episode = l.episode ?? state.episode;
+        refreshArt(episode);
         const media = together.session.media ?? {};
         const c = state.current;
         renderLobby(lobby, {
@@ -400,8 +413,8 @@ export function openPlayer(args) {
           art,
           kindText: mediaKind(media),
           // لون القسم: أحمر السينما، بنفسجي المانجا، ولون الأنمي للأنمي
-          accent: media.kind === 'manga' ? '#8f5cff' : media.kind === 'anime' ? '#3b82f6' : '#c1121f',
-          episodeText: episodeLine(media, state.episode),
+          accent: sectionAccent(media.kind),
+          episodeText: episodeLine(media, episode),
           connectionText: connectionLabel(l.connection),
           pending: pendingInvitees(l.invited, l.roster, l.me, (id) => hub.person(id)),
           server: c ? { code: c.code, quality: fmtQ(c.quality ?? currentHeight()) } : null,
@@ -1099,9 +1112,16 @@ export function openPlayer(args) {
       ...(q ? [['إطارات ساقطة', `${q.droppedVideoFrames} من ${q.totalVideoFrames}`, q.totalVideoFrames && q.droppedVideoFrames / q.totalVideoFrames > 0.02 ? 'warn' : 'ok']] : []),
     ];
   }
+  const releaseDiagnostics = diagnosticsUi.subscribe(() => {
+    if (diagnosticsUi.visible()) return;
+    if (sheet.querySelector('[data-diagnostic-sheet]')) closeSheet();
+    sheet.querySelectorAll('[data-diagnostic-tool]').forEach(node => node.remove());
+  });
   function showNetwork() {
+    if (!diagnosticsUi.visible()) return;
     const render = (body) => {
       body.replaceChildren();
+      body.dataset.diagnosticSheet = '';
       for (const [name, value, tone] of networkRows()) {
         const r = el('div', `pp-metric${tone ? ` pp-metric--${tone}` : ''}`);
         const v = el('b', null, value);
@@ -1163,7 +1183,10 @@ export function openPlayer(args) {
       if (subtitleSession.available()) body.append(sheetRow('الترجمة', null, { onClick: () => { closeSheet(); showSubtitles(); } }));
       if (isAnime) body.append(sheetRow('تخطي المقدمة والنهاية', skipStatusText(state.skip.result, state.skip.pending, clock), { onClick: () => { closeSheet(); showSkips(); } }));
       body.append(sheetRow('السرعة', state.speed === 1 ? 'عادية' : `${state.speed}×`, { onClick: () => { closeSheet(); showSpeed(); } }));
-      body.append(sheetRow('الشبكة', 'السيرفر، الطريق، المخزَّن، والإطارات', { onClick: () => { closeSheet(); showNetwork(); } }));
+      if (diagnosticsUi.visible()) {
+        const network = sheetRow('الشبكة', 'السيرفر، الطريق، المخزَّن، والإطارات', { onClick: () => { closeSheet(); showNetwork(); } });
+        network.dataset.diagnosticTool = ''; body.append(network);
+      }
       const desktop = matchMedia('(hover: hover) and (pointer: fine)').matches;
       if (desktop) body.append(sheetRow('اختصارات الكيبورد', 'مسافة، الأسهم، F، M، S…', { onClick: () => { closeSheet(); showShortcuts(); } }));
       else body.append(sheetRow('قفل الشاشة', 'يمنع اللمس الخاطئ أثناء المشاهدة', { onClick: () => { closeSheet(); setLocked(true); } }));
@@ -1558,6 +1581,7 @@ export function openPlayer(args) {
     if (state.closed) return;
     if (notify) report(true);
     state.closed = true;
+    releaseDiagnostics();
     releaseTogether();
     clearInterval(countdown);
     clearInterval(watchdog);

@@ -31,6 +31,7 @@ const clock = (ms) => {
  *   avatar?: string|null, initial?: string, cancelLabel?: string|null, solid?: boolean,
  *   submit: (pin: string) => Promise<{ ok?: boolean, error?: string, retryAt?: number|null }>,
  *   onCancel?: () => void, onDone?: () => void, mount?: HTMLElement,
+ *   forgot?: (key: string) => Promise<{ ok?: boolean, message?: string }>,
  * }} opts
  */
 export function pinPad(opts) {
@@ -91,7 +92,66 @@ export function pinPad(opts) {
     pad.append(b);
   }
 
-  panel.append(face, title, subtitle, lengths, dots, note, pad);
+  // «نسيت الرقم؟»: مفتاح استعادة من المالك (يرسله لك؛ لا يعرف رقمك ولا يراه أحد)
+  let keyMode = false;
+  const forgotLink = el('button', 'vpin__forgot', 'نسيت الرقم؟');
+  forgotLink.type = 'button';
+  const keyBox = el('div', 'vpin__keybox');
+  keyBox.hidden = true;
+  const keyInput = el('input', 'vpin__keyinput');
+  keyInput.type = 'text';
+  keyInput.dir = 'ltr';
+  keyInput.autocomplete = 'off';
+  keyInput.spellcheck = false;
+  keyInput.placeholder = 'VNTR-XXXX-XXXX-XXXX-XXXX';
+  keyInput.setAttribute('aria-label', 'مفتاح الاستعادة');
+  const keyRow = el('div', 'vpin__keyrow');
+  const keyBack = el('button', 'vpin__keybtn vpin__keybtn--ghost', 'رجوع');
+  keyBack.type = 'button';
+  const keyDone = el('button', 'vpin__keybtn', 'تم');
+  keyDone.type = 'button';
+  keyRow.append(keyBack, keyDone);
+  keyBox.append(el('p', 'vpin__keyhelp', 'الصق مفتاح الاستعادة اللي أرسله لك المالك. بعد الدخول تحط رقمًا جديدًا.'), keyInput, keyRow);
+  const setKeyMode = (on) => {
+    keyMode = on;
+    keyBox.hidden = !on;
+    for (const part of [lengths, dots, pad, forgotLink]) part.hidden = on;
+    subtitle.textContent = on ? 'مفتاح الاستعادة' : opts.subtitle ?? '';
+    note.textContent = '';
+    note.classList.remove('vpin__note--error');
+    if (on) setTimeout(() => keyInput.focus(), 60);
+  };
+  forgotLink.onclick = () => setKeyMode(true);
+  keyBack.onclick = () => setKeyMode(false);
+  const submitKey = async () => {
+    const key = keyInput.value.trim();
+    if (!key || busy) return;
+    busy = true;
+    keyDone.disabled = true;
+    let out;
+    try {
+      out = await opts.forgot(key);
+    } catch {
+      out = { message: 'ما فيه اتصال. حاول مرة ثانية' };
+    }
+    busy = false;
+    keyDone.disabled = false;
+    if (out?.ok) {
+      root.classList.add('vpin--done');
+      setTimeout(() => close(), 160);
+      opts.onDone?.();
+      return;
+    }
+    note.classList.add('vpin__note--error');
+    note.textContent = out?.message ?? 'المفتاح غير صحيح أو انتهى';
+  };
+  keyDone.onclick = () => void submitKey();
+  keyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') void submitKey();
+  });
+
+  const forgotParts = opts.forgot && mode === 'enter' ? [forgotLink, keyBox] : [];
+  panel.append(face, title, subtitle, lengths, dots, note, pad, ...forgotParts);
   root.append(panel);
   mount.append(root);
   requestAnimationFrame(() => root.classList.add('vpin--in'));
@@ -236,6 +296,14 @@ export function pinPad(opts) {
   }
 
   function onKey(e) {
+    // مفتاح الاستعادة يُكتب في حقله: الأرقام لا تذهب للوحة
+    if (keyMode) {
+      if (e.key === 'Escape') {
+        setKeyMode(false);
+        e.preventDefault();
+      }
+      return;
+    }
     if (/^[0-9٠-٩]$/.test(e.key)) press(String('0123456789٠١٢٣٤٥٦٧٨٩'.indexOf(e.key) % 10));
     else if (e.key === 'Backspace') erase();
     else if (e.key === 'Escape') cancel();

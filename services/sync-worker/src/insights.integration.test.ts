@@ -33,7 +33,13 @@ describe('per-work insights privacy and attribution', () => {
     const mine = await (await call(env, A, `/v1/insights/${A}`)).json() as any;
     expect(mine.totalMs).toBe(60000);
     expect(mine.content[0]).toMatchObject({ seriesRef: 'anime:123', activeMs: 60000, completed: 1 });
-    expect((await call(env, B, `/v1/insights/${A}`)).status).toBe(403);
+    // مقفل: لا أعمال ولا عناوين، لكن مجموع الوقت ظاهر
+    const locked = await (await call(env, B, `/v1/insights/${A}`)).json() as any;
+    expect(locked).toMatchObject({ locked: true, totalMs: 60000, content: [] });
+    // ساعاته لكل قسم ظاهرة (قرار المالك)، بلا عنوان ولا مرجع عمل
+    expect(locked.sections).toEqual({ manga: 0, anime: 60000, cinema: 0 });
+    expect(JSON.stringify(locked)).not.toContain('Private Anime');
+    expect(JSON.stringify(locked)).not.toContain('anime:123');
     expect((await call(env, B, `/v1/stats/${A}`)).status).toBe(403);
     const oldSync = await (await call(env, B, '/v1/sync?since=0')).text();
     expect(oldSync).not.toContain('Private Anime');
@@ -46,7 +52,7 @@ describe('per-work insights privacy and attribution', () => {
     const progressOnly = await (await call(env, B, `/v1/insights/${A}?work=anime%3A123`)).json() as any;
     expect(progressOnly.content[0]).toMatchObject({ activeMs: 0, completed: 1, title: null });
     await op(env, A, 'settings.patch', { fields: { shareInsights: false } });
-    expect((await call(env, B, `/v1/insights/${A}?work=anime%3A123`)).status).toBe(403);
+    expect(await (await call(env, B, `/v1/insights/${A}?work=anime%3A123`)).json()).toMatchObject({ locked: true, content: [] });
     expect((await call(env, A, `/v1/insights/${A}`)).status).toBe(200);
   });
 
@@ -71,5 +77,18 @@ describe('per-work insights privacy and attribution', () => {
     await op(env, A, 'settings.patch', { fields: { shareInsights: true, shareInsightTime: true } });
     const shared = await (await call(env, B, '/v1/week')).json() as any;
     expect(shared.content.people.find((p: any) => p.userId === A)?.activeMs).toBe(120000);
+  });
+
+  it('hides a work from everyone (owner included) for good, while its time stays in the total', async () => {
+    const { env } = sqliteEnv({ VANTARA_SESSION_SECRET: SECRET });
+    await op(env, A, 'usage.work', { seriesRef: 'manga:keep', section: 'manga', seriesTitle: 'Keep', activeMs: 30000 });
+    await op(env, A, 'usage.work', { seriesRef: 'manga:gone', section: 'manga', seriesTitle: 'Gone', activeMs: 20000 });
+    await op(env, A, 'settings.patch', { fields: { shareInsights: true, shareInsightTime: true } });
+    expect((await call(env, A, '/v1/insights/hide', { seriesRef: 'manga:gone' })).status).toBe(200);
+    for (const viewer of [A, B]) {
+      const r = await (await call(env, viewer, `/v1/insights/${A}`)).json() as any;
+      expect(r.content.map((c: any) => c.seriesRef)).toEqual(['manga:keep']);
+      expect(r.totalMs).toBe(50000);
+    }
   });
 });

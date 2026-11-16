@@ -12,6 +12,20 @@ class VerificationPolicyTest {
         }
     }
 
+    @Test fun challengeMayMoveWithinTheSameSiteOnly() {
+        fun e(host: String) = VerificationPolicy.endpoint("https://$host/")!!
+        assertTrue(VerificationPolicy.sameSite(e("www.okanime.xyz"), e("ww3.okanime.xyz")))
+        assertTrue(VerificationPolicy.sameSite(e("example.com"), e("www.example.com")))
+        assertTrue(VerificationPolicy.sameSite(e("zeta.site.co.uk"), e("eva.site.co.uk")))
+        assertFalse("A different site is never the challenged site", VerificationPolicy.sameSite(e("witanime.cyou"), e("witanime.you")))
+        assertFalse(VerificationPolicy.sameSite(e("site.co.uk"), e("other.co.uk")))
+        assertFalse(VerificationPolicy.sameSite(e("site.com.sa"), e("other.com.sa")))
+        // Without OkHttp's public-suffix list (JVM tests), the fallback alone decides the same way.
+        assertEquals("okanime.xyz", VerificationPolicy.registrableFallback("ww3.okanime.xyz"))
+        assertEquals("site.co.uk", VerificationPolicy.registrableFallback("zeta.site.co.uk"))
+        assertNull("A bare public suffix is never a site", VerificationPolicy.registrableFallback("co.uk"))
+    }
+
     @Test fun clearanceImportCannotInjectAttributesOrOtherCookies() {
         assertEquals("abc-123_.$", VerificationPolicy.clearance("other=value; cf_clearance=abc-123_.$; session=secret"))
         assertNull(VerificationPolicy.clearance("session=secret"))
@@ -87,9 +101,20 @@ class VerificationPolicyTest {
         val ledger = VerificationLedger(2, 100)
         val first = ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
         assertNotNull(ledger.begin("example.org", 1))
-        assertEquals("required", ledger.expire(100).single().state)
+        // A stuck session (the page died without answering) still frees the slot, counted from when it began
+        assertTrue(ledger.expire(100).isEmpty())
+        assertEquals("required", ledger.expire(101).single().state)
         assertFalse(ledger.snapshot().any { it.state == "active" })
         assertNull(ledger.finish("example.org", first.token))
-        assertNotNull(ledger.begin("example.org", 101))
+        assertNotNull(ledger.begin("example.org", 102))
+    }
+
+    // جهاز المالك (15 نوفمبر): طلب تحقق قديم ثم تحقق المستخدم قرب نهاية مهلة الطلب؛ تجدد الطلب أثناء التحقق فرُفض نجاحه
+    @Test fun aCheckStartedNearTheRequestsAgeIsNotRejectedMidway() {
+        val ledger = VerificationLedger(2, 100)
+        ledger.require("example.org", "https://example.org", "https://example.org/", "ua", "cloudflare", "Example", 0)!!
+        val active = ledger.begin("example.org", 95)!!
+        assertTrue("still within the user's own session", ledger.expire(150).isEmpty())
+        assertEquals(active.token, ledger.finish("example.org", active.token)?.token)
     }
 }

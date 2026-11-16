@@ -1,0 +1,20 @@
+/* «أسطوري»: الصورة ثابتة مكانها، والمحتوى طبقة تصعد فوقها وتغطيها شيئًا فشيئًا، والأقسام ترتفع وهي تدخل */
+article.aw[data-look=unified] .aw-hero { position: sticky !important; top: 0 !important; z-index: 0; }
+article.aw[data-look=unified] .aw-main, .cn-detail[data-look=unified] .cn-detail-body { position: relative; z-index: 2; background: linear-gradient(180deg, rgba(8,7,12,0) 0, rgba(8,7,12,.82) 90px, var(--bg) 170px); }
+.cn-detail[data-look=unified] .cn-detail-art { position: sticky !important; top: 0 !important; z-index: 0; }
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* الصورة لا تتحرك؛ تخفت قليلًا كلما غطاها المحتوى */
+    article.aw[data-look=unified] .aw-hero :is(.aw-bg, .aw-bg-img), .cn-detail[data-look=unified] .cn-detail-art > .cn-img {
+      animation: u-cover-dim linear both !important; animation-timeline: scroll(root block) !important; animation-range: 0 45vh !important; }
+    @keyframes u-cover-dim { from { opacity: 1; filter: brightness(1); } to { opacity: .4; filter: brightness(.55); } }
+  }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* كل قسم يرتفع وهو يدخل الشاشة */
+    :is(article.aw, .cn-detail)[data-look=unified] :is(.aw-about, .u-tabs, .u-seasons, .an-seasons, .an-er, .cn-about, .cn-ep, .aw-genres, .u-go, #cinemaPlay) {
+      animation: u-rise linear both; animation-timeline: view(); animation-range: entry 0% entry 70%; }
+    @keyframes u-rise { from { transform: translateY(46px); opacity: .15; } to { transform: none; opacity: 1; } }
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideUpdate, dismissedRecently, isNewer } from './updater.js';
+import { decideUpdate, dismissedRecently, isNewer, manifestForChannel, DEBUG_MANIFEST_URL, MANIFEST_URL } from './updater.js';
 
 const manifest = (over = {}) => ({
   format: 2,
@@ -94,5 +94,49 @@ describe('manual web staging ownership', () => {
       expect(await stageWeb({ url: 'https://x/web.zip', version: '0.0.9', sha256: 'a'.repeat(64) })).toBe(true);
       expect(requested.userInitiated).toBe(true);
     } finally { globalThis.Capacitor = previous; }
+  });
+});
+
+describe('upgradeable debug APK channel', () => {
+  it('checks its own debug feed, never Stable', () => {
+    expect(manifestForChannel('debug')).toBe(DEBUG_MANIFEST_URL);
+    expect(manifestForChannel('stable')).toBe(MANIFEST_URL);
+    expect(manifestForChannel()).toBe(MANIFEST_URL);
+  });
+  it('permits an APK update with the same native fingerprint on debug only', () => {
+    const debug = manifest({
+      channel: 'debug',
+      apk: {url:'https://github.com/Meshal515/VANTARA/releases/download/debug-channel/VANTARA-debug.apk',sha256:'a'.repeat(64),size:1234},
+      web: null,
+    });
+    const installed = device({channel:'debug',versionCode:6,webVersion:'0.0.6',official:true});
+    expect(decideUpdate(debug,installed).apk).toMatchObject({versionCode:9,required:false});
+    expect(decideUpdate(debug,installed).web).toBeNull();
+    expect(decideUpdate(debug,device({channel:'stable'})).apk).toBeNull();
+    expect(decideUpdate(manifest(),installed).apk).toBeNull();
+    expect(decideUpdate(debug,{...installed,official:false}).apk).toBeNull();
+    expect(decideUpdate({...debug,apk:{...debug.apk,url:manifest().apk.url}},installed).apk).toBeNull();
+    expect(decideUpdate({...debug,versionCode:6},installed).apk).toBeNull();
+  });
+});
+
+describe('تشخيص فشل تحديث الـAPK', () => {
+  it('سطر النسخة يبيّن الرقم وحالة التوقيع واسم الحزمة', async () => {
+    const { versionLine } = await import('./updater.js');
+    expect(versionLine({ versionName: '0.0.3037', versionCode: 3037, official: true, package: 'com.vantara.anime.debug' })).toBe('0.0.3037 (3037) · توقيع رسمي · com.vantara.anime.debug');
+    expect(versionLine({ versionName: '0.0.3050', versionCode: 3050, official: false, signer: 'a1b2c3d4e5f6' })).toBe('0.0.3050 (3050) · توقيع آخر a1b2c3d4e5f6');
+    expect(versionLine(null)).toBe(null);
+  });
+  it('رسالة أندرويد الحرفية تصل للواجهة مع نتيجة التثبيت', async () => {
+    const { installApk } = await import('./updater.js');
+    const listeners = {};
+    globalThis.Capacitor = { Plugins: { AppUpdate: {
+      addListener: async (name, fn) => { listeners[name] = fn; return { remove() {} }; },
+      installApk: async () => { listeners.installResult({ status: 'conflict', message: 'INSTALL_FAILED_DUPLICATE_PERMISSION: x' }); return { started: true }; },
+    } } };
+    const seen = [];
+    await installApk({ url: 'https://x', sha256: 'a', size: 1 }, { onResult: (s, m) => seen.push([s, m]) });
+    expect(seen).toEqual([['conflict', 'INSTALL_FAILED_DUPLICATE_PERMISSION: x']]);
+    delete globalThis.Capacitor;
   });
 });

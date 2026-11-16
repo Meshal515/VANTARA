@@ -63,7 +63,19 @@ it('continue-watching rows get a ⋮ beside the title: list and remove work, fav
   expect(row.querySelector('.an-hc-poster img').getAttribute('src')).toBe('p.jpg');
   expect(row.querySelector('[aria-label="احذف من السجل"]')).toBeNull();
   expect(root.querySelector('.an-clear')).toBeTruthy();
-  const more = row.querySelector('.cw-name .cw-more');
+  // «مسح الكل» يسأل أولًا: «لا، خلّه» لا يمسح شيئًا، والتأكيد وحده يمسح (#323 U-04)
+  root.querySelector('.an-clear').onclick();
+  expect(deps.openSheet).toHaveBeenCalledTimes(1);
+  expect(sheet.querySelector('h3').textContent).toBe('تمسح سجل المشاهدة؟');
+  sheet.querySelector('.btn-secondary').onclick();
+  expect(JSON.parse(store.get(key))[5]).toBeTruthy();
+  root.querySelector('.an-clear').onclick();
+  sheet.querySelector('[data-key="confirm-clear"]').onclick();
+  expect(JSON.parse(store.get(key) || '{}')[5]).toBeUndefined();
+  store.set(key, JSON.stringify({ 5: { id: 5, title: 'Frieren', poster: 'p.jpg', episode: 3, at: 1, episodes: { 3: { position: 60_000, duration: 1_440_000 } } } }));
+  anime.renderLibrary();
+  deps.openSheet.mockClear();
+  const more = root.querySelector('.an-hc .cw-name .cw-more');
   expect(more).toBeTruthy();
   more.onclick({ stopPropagation() {}, preventDefault() {} });
   expect(deps.openSheet).toHaveBeenCalledTimes(1);
@@ -91,4 +103,22 @@ it('signed in: the ⋮ sheet adds to favorites through the account', () => {
   expect(deps.sync.enqueue).toHaveBeenCalledWith('favorite.set', expect.objectContaining({ seriesRef: 'anime:5', member: true }));
   sheet.querySelector('[data-key="remove"]').onclick();
   expect(deps.sync.enqueue).toHaveBeenCalledWith('view.remove', { seriesRef: 'anime:5' });
+});
+
+// #323 U-15: سجل بلا غلاف (صف view.add بـcoverUrl null) كان يرسم بلاطة فارغة داكنة فوق صورة الحلقة
+it('a history row without a cover shows the title initial, and a cover that fails to load falls back to it', async () => {
+  const { root, anime, store } = setup();
+  store.set('vantara.anime.watch.v2.guest', JSON.stringify({
+    5: { id: 5, title: 'Frieren', poster: null, episode: 3, at: 2, episodes: { 3: { position: 60_000, duration: 1_440_000 } } },
+    6: { id: 6, title: 'Dandadan', poster: 'https://img/broken.jpg', episode: 1, at: 1, episodes: { 1: { position: 1, duration: 1_440_000 } } },
+  }));
+  anime.renderLibrary();
+  const [noCover, broken] = [...root.querySelectorAll('.an-hc')];
+  expect(noCover.querySelector('.an-hc-poster img')).toBeNull();
+  expect(noCover.querySelector('.an-hc-poster').textContent).toBe('F');
+  const img = broken.querySelector('.an-hc-poster img');
+  expect(img).toBeTruthy();
+  img.onerror();
+  expect(broken.querySelector('.an-hc-poster img')).toBeNull();
+  expect(broken.querySelector('.an-hc-poster').textContent).toBe('D');
 });

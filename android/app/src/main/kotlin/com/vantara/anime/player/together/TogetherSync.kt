@@ -24,6 +24,8 @@ data class Timeline(
     val at: Double,
     val rate: Double,
     val seq: Int,
+    /** anime | cinema | manga: يبقى نوع الغرفة كما هو عند الانتقال لحلقة أخرى. */
+    val mediaKind: String? = null,
 )
 
 data class Decision(val playing: Boolean, val rate: Double, val seekTo: Long?, val error: Double?, val reason: String)

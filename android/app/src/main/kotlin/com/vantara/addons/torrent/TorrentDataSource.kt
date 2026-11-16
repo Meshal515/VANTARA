@@ -9,7 +9,7 @@ import androidx.media3.datasource.TransferListener
 import java.io.IOException
 
 /** Progressive Media3 source. Every seek opens another bounded byte range, not another video prepare. */
-internal class TorrentDataSource(private val engine: TorrentEngine) : BaseDataSource(true) {
+internal class TorrentDataSource(private val engine: TorrentEngine, private val preview: Boolean = false) : BaseDataSource(true) {
     @Volatile private var cancelled = false
     @Volatile private var lease: TorrentEngine.Lease? = null
     private var current: Uri? = null
@@ -20,7 +20,7 @@ internal class TorrentDataSource(private val engine: TorrentEngine) : BaseDataSo
         if (cancelled) throw IOException("Torrent reader already closed")
         current = dataSpec.uri
         transferInitializing(dataSpec)
-        val acquired = engine.acquire(dataSpec.uri) { cancelled }
+        val acquired = if (preview) engine.acquirePreview(dataSpec.uri) { cancelled } else engine.acquire(dataSpec.uri) { cancelled }
         lease = acquired
         if (cancelled) { acquired.close(); lease = null; throw IOException("Torrent reader closed") }
         if (dataSpec.position > acquired.file.size) { close(); throw IOException("Torrent seek exceeds video size") }
@@ -44,13 +44,13 @@ internal class TorrentDataSource(private val engine: TorrentEngine) : BaseDataSo
         lease?.close(); lease = null; current = null
         if (started) { started = false; transferEnded() }
     }
-    class Factory(private val engine: TorrentEngine, private val delegate: DataSource.Factory) : DataSource.Factory {
+    class Factory(private val engine: TorrentEngine, private val delegate: DataSource.Factory, private val preview: Boolean = false) : DataSource.Factory {
         override fun createDataSource(): DataSource = object : DataSource {
             private val listeners = ArrayList<TransferListener>()
             @Volatile private var active: DataSource? = null
             override fun addTransferListener(listener: TransferListener) { listeners.add(listener); active?.addTransferListener(listener) }
             override fun open(dataSpec: DataSpec): Long {
-                val source = if (dataSpec.uri.scheme == TorrentEngine.SCHEME) TorrentDataSource(engine) else delegate.createDataSource()
+                val source = if (dataSpec.uri.scheme == TorrentEngine.SCHEME) TorrentDataSource(engine, preview) else delegate.createDataSource()
                 active = source
                 listeners.forEach(source::addTransferListener)
                 return source.open(dataSpec)

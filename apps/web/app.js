@@ -26,14 +26,20 @@ import { canManageDangerZone } from './lib/identity.js';
 import { pinPad } from './screens/pin-pad.js';
 import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
 import { frameIdFromLink } from './lib/frame.js';
+import { createPhoneNotify, notificationLinkTarget, phoneWanted } from './lib/phone-notify.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
+import { glyph } from './v35/icons.js';
+import { buildCelebration, celebrationFor, markCelebrated } from './lib/celebrate.js';
 import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
 import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
+// الفصل المحمّل يُقرأ من الجهاز أينما فُتح؛ نفس الكائن الذي تجهّز به صفحة العمل الفصل التالي
+import { readerEngine } from './lib/reader-engine.js';
 import {
   APK_ERRORS,
+  versionLine,
   activateStaged,
   canInstall,
   deviceInfo,
@@ -47,11 +53,14 @@ import {
 } from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
+import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
 import {
   NOTIFICATION_LABELS,
   popupPatch,
   popupSettings,
+  togetherInvite,
   toastable,
+  describeNotification,
   unreadCount,
 } from './lib/notifications.js';
 
@@ -73,6 +82,34 @@ globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, re
 // Capacitor injects native plugins before user JS. On normal web this is
 // undefined, so the bridge is a no-op without requiring a browser npm import.
 const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
+
+/**
+ * من يرى مصادر المانجا التي كانت مدمجة في التطبيق (lib/source-entitlement.js): القرار من صف
+ * الحساب المتزامن (`created_at`) واختياراته في `settings`، لا من مخزن الجهاز.
+ */
+function refreshSourceEntitlement() {
+  const standalone = !syncConfigured();
+  const userId = sync.user?.userId;
+  setChoiceOwner(standalone ? 'standalone' : userId ? `account:${userId}` : null);
+  setEntitlement(decide({
+    standalone,
+    account: userId ? sync.rows('accounts', (row) => row.user_id === userId)[0] ?? null : null,
+    settings: standalone ? readLocalChoices() : userId ? sync.row('settings', userId)?.data ?? null : null,
+  }));
+}
+setChoiceWriter(async (fields, context) => {
+  const local = !syncConfigured();
+  const userId = sync.user?.userId;
+  // Read the actual session again at dispatch, including before a delayed session event is delivered.
+  setChoiceOwner(local ? 'standalone' : userId ? `account:${userId}` : null);
+  assertChoiceContext(context);
+  if (local) writeLocalChoices(fields);
+  else if (!userId) throw new Error('سجّل الدخول لتضيف مصدرًا لحسابك');
+  else await sync.enqueue('settings.patch', { fields }, { requireDurable: true });
+  refreshSourceEntitlement();
+});
+refreshSourceEntitlement();
+void sync.ready.then(refreshSourceEntitlement, () => {});
 
 const state = {
   route: { name: 'gate' },
@@ -1429,6 +1466,7 @@ let v35 = null;
 async function switchToAccountGate() {
   try {
     if (!await sync.signOut()) throw new Error('session_storage_full');
+    if (localMode) leaveLocalMode();
     dropV35();
     await go({ name: 'gate' });
   } catch {
@@ -1439,6 +1477,47 @@ async function switchToAccountGate() {
 function dropV35() {
   v35?.destroy();
   v35 = null;
+}
+
+/**
+ * «على جهازي»: فتح التطبيق بلا إنترنت ولا جلسة.
+ *
+ * الحسابات والجلسة تُصدر من الخادم، فبوابة «من يتابع؟» لا تعمل بلا اتصال. لكن التحميلات على
+ * الجهاز (فصول وحلقات وترجمات) لا تحتاج خادمًا ولا حسابًا: ندخل إليها مباشرة. وحين يعود الاتصال
+ * يظهر تنبيه «اختر حسابك»؛ والدخول يهدم هذه الواجهة فلا يرث الحساب شيئًا منها.
+ */
+let localMode = false;
+let onlineAgain = null;
+
+function leaveLocalMode() {
+  localMode = false;
+  if (onlineAgain) window.removeEventListener('online', onlineAgain);
+  onlineAgain = null;
+  dropV35();
+}
+
+async function screenLocal() {
+  if (sync.signedIn) return go({ name: 'home' });
+  if (!localMode) {
+    // واجهة من جلسة سابقة (خروج) لا تُستعمل هنا
+    dropV35();
+    localMode = true;
+    onlineAgain = () => {
+      showToast({
+        title: 'رجع الاتصال',
+        body: 'اضغط لاختيار حسابك',
+        lifetimeMs: 12_000,
+        onOpen: () => {
+          leaveLocalMode();
+          void go({ name: 'gate' });
+        },
+      });
+    };
+    window.addEventListener('online', onlineAgain);
+  }
+  screenV35('library');
+  state.screen = 'LOCAL';
+  await v35?.openDownloads?.('device');
 }
 
 function screenV35(page) {
@@ -1484,9 +1563,15 @@ function screenV35(page) {
           resync: () => sync.resync(),
           checkUpdate: () => checkUpdates({ force: true }),
           resetWeb: () => resetWeb(),
-          apkVersion: async () => (await deviceInfo())?.versionName ?? null,
+          apkVersion: async () => versionLine(await deviceInfo()),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
-          setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
+          setPopups: (next) => {
+            sync.enqueue('settings.patch', { fields: popupPatch(next) });
+            // إشعارات الجوال تتبع المفتاح فورًا، لا بعد دورة مزامنة
+            const userId = sync.user?.userId ?? null;
+            void phone.ensure(sync.signedIn ? userId : null, next.phone !== false);
+          },
+          phone: () => phone,
           labels: NOTIFICATION_LABELS,
           endpoints: () => endpoints(),
           setEndpoints: (next) => setEndpoints(next),
@@ -1529,7 +1614,8 @@ function screenSmartReader(target) {
   const reader = openSmartReader(
     {
       sync,
-      engine,
+      // فصل من «التحميلات» يُقرأ من الجهاز بمحرك محلي بنفس الواجهة؛ غيره من المصادر
+      engine: target.engine ?? readerEngine,
       // الترجمة المرئية تمرّ من خادم المحتوى (وكيل إلى عامل جهاز البيت)
       api,
       mount,
@@ -1564,7 +1650,7 @@ function attachBackButton() {
   app.addListener('backButton', () => {
     if (state.back?.()) return;
     const { name } = state.route ?? {};
-    if (name === 'gate' || name === 'home' || name === 'v35') {
+    if (name === 'gate' || name === 'home' || name === 'v35' || name === 'local') {
       void app.exitApp?.();
       return;
     }
@@ -1583,14 +1669,19 @@ async function go(route) {
         sync,
         mount,
         onSignedIn: async () => {
+          // واجهة «على جهازي» بُنيت بلا حساب: لا تُورَّث للحساب الذي دخل
+          if (localMode) leaveLocalMode();
           startHeartbeat();
           void sync.pull();
           await go({ name: 'home' });
         },
+        onLocal: () => go({ name: 'local' }),
       });
       state.teardown = teardown;
       return;
     }
+    case 'local':
+      return screenLocal();
     case 'home':
       return screenV35('home');
     case 'library':
@@ -1983,11 +2074,8 @@ async function checkUpdates({ force = false } = {}) {
   }
   // لويندوز قناة مستقلة لا تعرض تحديث APK باعتباره مثبتًا للكمبيوتر.
   if (globalThis.VantaraDesktopUpdates) {
+    // التحديث المتاح يظهر في بطاقة update-check (تنزيل بموافقة)؛ «محدثة» يعرضها زر الإعدادات.
     const result = await globalThis.VantaraDesktopUpdates.check({ force });
-    if (force && !result.update) {
-      showToast({ title: 'تحديث ويندوز', body: result.status === 'current'
-        ? 'نسخة ويندوز عندك محدثة' : 'تعذر التحقق من تحديث ويندوز' });
-    }
     return result.update ? { desktop: result.update } : null;
   }
   const found = await findUpdate({ force });
@@ -2034,11 +2122,13 @@ function showApkUpdate(apk) {
       onProgress: (p) => {
         go.textContent = `${Math.round(p * 100)}%`;
       },
-      onResult: (status) => {
+      onResult: (status, message) => {
+        // سبب أندرويد الحرفي يظهر مع الرسالة: «تعارض» لا يعني دائمًا مفتاحًا مختلفًا
+        const why = message ? ` (${message})` : '';
         if (status === 'cancelled') idle('ألغيت التثبيت. اضغط «تثبيت» متى ما بغيت');
-        else if (status === 'storage') idle('المساحة ما تكفي. فضّ مساحة وجرّب');
-        else if (status === 'conflict') idle(APK_ERRORS.INSTALLED_DIFFERENT_KEY);
-        else if (status !== 'success') idle('ما اكتمل التثبيت. جرّب مرة ثانية');
+        else if (status === 'storage') idle(`المساحة ما تكفي. فضّ مساحة وجرّب${why}`);
+        else if (status === 'conflict') idle(`أندرويد رفض التحديث لتعارض مع النسخة المثبتة${why}`);
+        else if (status !== 'success') idle(`ما اكتمل التثبيت${why}. جرّب مرة ثانية`);
       },
     });
     if (out.needsPermission) {
@@ -2051,7 +2141,7 @@ function showApkUpdate(apk) {
       };
       document.addEventListener('visibilitychange', resume);
     } else if (out.error) {
-      idle(APK_ERRORS[out.error] ?? 'ما اكتمل التنزيل. جرّب مرة ثانية');
+      idle(APK_ERRORS[out.error] ?? `ما اكتمل التنزيل. جرّب مرة ثانية (${String(out.error).slice(0, 80)})`);
     } else {
       sub.textContent = 'أكّد «تحديث» في شاشة أندرويد';
       go.textContent = 'تثبيت';
@@ -2089,7 +2179,7 @@ if ('serviceWorker' in navigator) {
     reloading = true;
     window.location.reload();
   });
-  if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(showWhatsNew, 1500));
+  if (supports('webUpdate')) void import('./pwa/update.js').then((m) => m.justUpdated() && setTimeout(() => !document.querySelector('.vcele') && !celebrationFor('pwa') && showWhatsNew(), 1500));
 }
 
 /** نتيجة الفحص اليدوي: تأكيد تطبيق نسخة PWA الجاهزة. */
@@ -2115,6 +2205,36 @@ function showWebUpdate(apply) {
   card.append(copy, go, later);
   bar.append(card);
   document.body.append(bar);
+}
+
+/**
+ * احتفال التحديث الكبير (lib/celebrate.js): مرة واحدة بعد الدخول لكل إصدار موسوم. هادئ وفخم:
+ * الشعار بتوهج لون القسم، والعنوان، والجديد يدخل بندًا بندًا، وزر واحد.
+ */
+function maybeCelebrate() {
+  if (!sync.signedIn || document.querySelector('.vcele')) return;
+  // ويندوز والمتصفح: بنود الكمبيوتر والويب؛ الأندرويد: بنوده
+  const platform = globalThis.VantaraDesktop || supports('webUpdate') ? 'pwa' : 'apk';
+  const release = celebrationFor(platform);
+  if (release) showCelebration(release);
+}
+
+function showCelebration(release) {
+  const { layer, button } = buildCelebration(document, release, glyph);
+  const previousBack = state.back;
+  const close = () => {
+    markCelebrated(release.version);
+    state.back = previousBack;
+    document.removeEventListener('keydown', onKey);
+    layer.classList.add('vcele--out');
+    setTimeout(() => layer.remove(), 260);
+  };
+  const onKey = (event) => event.key === 'Escape' && close();
+  button.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  state.back = () => (close(), true);
+  document.body.append(layer);
+  button.focus({ preventScroll: true });
 }
 
 /** «ما الجديد» مرة بعد تحديث طبّقه الشخص: المشترك + ما يخص منصته. */
@@ -2149,6 +2269,67 @@ function showWhatsNew() {
 /** ما عُرض في هذه الجلسة. الحالة في D1 تتأخر دورة مزامنة، فلا نعيد العرض. */
 const toastedIds = new Set();
 
+/** إشعارات الجوال والتطبيق مغلق (Android فقط؛ lib/phone-notify.js). */
+const phone = createPhoneNotify({
+  plugin: globalThis.Capacitor?.Plugins?.PhoneNotify ?? null,
+  endpoint: String(config.sync ?? '').replace(/\/+$/, ''),
+  authHeader: () => sync.authorizationHeader,
+});
+function syncPhoneNotify() {
+  const userId = sync.user?.userId ?? null;
+  void phone.ensure(sync.signedIn ? userId : null, phoneWanted(userId ? sync.row('settings', userId) : null));
+}
+
+/** المتصفح في الخلفية: إشعار النظام، إن سمح به صاحبه وأبقى «إشعارات الجهاز». */
+function browserNotify(row) {
+  const viewerId = sync.user?.userId;
+  if (!viewerId || toastedIds.has(row.id) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!phoneWanted(sync.row('settings', viewerId))) return;
+  const actorRow = sync.row('profiles', row.actor_id);
+  const told = describeNotification(row, actorRow?.display_name ?? 'صديق');
+  toastedIds.add(row.id);
+  try {
+    const shown = new Notification(told.title, { body: told.body, tag: row.id, icon: told.image ?? actorRow?.avatar_key ?? '/icons/icon-192.png' });
+    shown.onclick = () => {
+      globalThis.focus?.();
+      openNotificationTarget(notificationLinkTarget(`${row.link ?? 'vantara://notifications'}`) , row.id);
+      shown.close();
+    };
+    sync.enqueue('notification.seen', { id: row.id });
+  } catch {
+    toastedIds.delete(row.id);
+  }
+}
+
+/** فتح ما يشير إليه الإشعار (من الجوال أو المتصفح)، وتعليمه مقروءًا. */
+function openNotificationTarget(target, readId = target?.read) {
+  if (!target) return;
+  if (readId) sync.enqueue('notification.read', { id: readId });
+  const open = target.open;
+  if (open.name === 'together') {
+    screenV35(null);
+    const invite = sync.rows('together_invites', (x) => x.code === open.code)[0] ?? null;
+    void v35?.together?.joinByCode?.(open.code, invite);
+  } else if (open.name === 'series') {
+    screenV35(null);
+    v35?.openRef?.(open.ref);
+  } else if (open.name === 'frame') void go({ name: 'frame', id: open.id });
+  else if (open.name === 'majlis') void go({ name: 'majlis' });
+  else void go({ name: 'notifications' });
+}
+// التطبيق كان مغلقًا وفُتح من الإشعار: الرابط يُقرأ بعد أن تقوم الواجهة
+void globalThis.Capacitor?.Plugins?.App?.getLaunchUrl?.()?.then?.((launch) => {
+  const target = notificationLinkTarget(launch?.url);
+  if (target) setTimeout(() => sync.signedIn && openNotificationTarget(target), 1500);
+})?.catch?.(() => {});
+globalThis.Capacitor?.Plugins?.App?.addListener?.('appUrlOpen', (event) => {
+  const target = notificationLinkTarget(event?.url);
+  if (target) openNotificationTarget(target);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') phone.nudge();
+});
+
 function toastNewNotifications() {
   const viewerId = sync.user?.userId;
   if (!viewerId) return;
@@ -2158,6 +2339,13 @@ function toastNewNotifications() {
     { viewerId, settings },
   );
 
+  // التطبيق في الخلفية: لا منبثق لا يراه أحد ثم يُعلَّم «معروضًا». في Android يعرضه الجوال
+  // (فحص فوري)، وفي المتصفح إشعار النظام إن سمح به؛ وإلا يبقى لأول ما يرجع
+  if (document.visibilityState !== 'visible') {
+    if (phone.native) phone.nudge();
+    else for (const row of rows) browserNotify(row);
+    return;
+  }
   for (const row of rows) {
     // `notification.seen` كتابة تمرّ بالطابور: بين العرض ووصول `seen` في
     // السحب التالي قد تصل فروقات أخرى، فبلا هذا الحرس يظهر نفس التنبيه مرتين
@@ -2169,25 +2357,28 @@ function toastNewNotifications() {
     const frameId = frameIdFromLink(row.link);
     const frame = frameId ? sync.row('frames', frameId) : null;
     const majlisKind = String(row.link ?? '').startsWith('vantara://majlis/') ? row.link.split('/')[3] : null;
-    let title;
-    let body = row.body ?? '';
-    if (row.kind === 'FRAME') title = frame?.broadcast ? `${actor} شارك فريمًا مع الجميع` : `${actor} أرسل لك فريم`;
-    else if (row.kind === 'RECOMMENDATION') title = `${actor} رشّح لك`;
-    else if (row.kind === 'REACTION' && majlisKind) {
-      title = `${actor} تفاعل ${row.body ?? ''} مع ${{ frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[majlisKind] ?? 'رسالتك'}`;
-      body = '';
-    } else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    // صياغة واحدة للمنبثق والصندوق وإشعار الجوال (lib/notifications.js)
+    const told = describeNotification(row, actor);
+    const title = row.kind === 'FRAME' && frame?.broadcast ? `${actor} شارك فريمًا مع الجميع` : told.title;
+    const body = told.body;
+    // دعوة «مشاهدة معًا»: الضغط يدخل الغرفة لا صفحة العمل (بلاغ المالك)
+    const togetherCode = togetherInvite(row, actor)?.code ?? null;
     showToast({
       title,
       body,
-      avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : null,
+      avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : told.image ? { src: told.image, name: told.title } : null,
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
-        if (frameId) void go({ name: 'frame', id: frameId });
-        else if (majlisKind) void go({ name: 'majlis' });
+        if (togetherCode) {
+          // الضغط يدخلك الغرفة نفسها (كبطاقة الدعوة في الإشعارات والمجلس)، لا صفحة العمل
+          screenV35(null);
+          const invite = sync.rows('together_invites', (x) => x.code === togetherCode)[0] ?? null;
+          void v35?.together?.joinByCode?.(togetherCode, invite);
+        } else if (frameId) void go({ name: 'frame', id: frameId });
+        else if (majlisKind || row.kind === 'MESSAGE') void go({ name: 'majlis' });
         else if (row.series_ref) {
           screenV35(null);
-          v35.openRef(row.series_ref, row.body ?? undefined);
+          v35.openRef(row.series_ref, row.kind === 'NEW_UNIT' ? told.title : row.body ?? undefined);
         }
         else void go({ name: 'notifications' });
       },
@@ -2199,12 +2390,47 @@ function toastNewNotifications() {
 
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
+  if (tables.some((table) => table === 'accounts' || table === 'settings' || table === 'session')) refreshSourceEntitlement();
   // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
   if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();
   if (tables.includes('accounts')) followAccountState();
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
   if (tables.includes('notifications')) toastNewNotifications();
+  if (tables.some((table) => table === 'session' || table === 'settings' || table === 'accounts')) syncPhoneNotify();
+  if (tables.includes('session')) setTimeout(askNewPinAfterReset, 900);
 });
+
+/** دخل بمفتاح الاستعادة فأُزيل الـPIN: يضع رقمًا جديدًا الآن (يقدر يؤجله من الإعدادات). */
+function askNewPinAfterReset() {
+  let cleared = null;
+  try {
+    cleared = sessionStorage.getItem('vantara.pinCleared');
+  } catch {
+    cleared = null;
+  }
+  if (!cleared || cleared !== sync.user?.userId || sync.locked || document.querySelector('.vpin')) return;
+  try {
+    sessionStorage.removeItem('vantara.pinCleared');
+  } catch {
+    // مرة واحدة على الأقل في هذه الجلسة
+  }
+  const profile = sync.rows('profiles', (p) => p.user_id === cleared)[0];
+  const name = profile?.display_name || sync.user?.displayName || '';
+  pinPad({
+    mode: 'create',
+    title: 'رقم جديد',
+    subtitle: 'انشال رقمك القديم. اختر رقمًا جديدًا لحسابك',
+    avatar: profile?.avatar_key ?? null,
+    initial: [...name][0] || '؟',
+    cancelLabel: 'لاحقًا',
+    submit: async (pin) => {
+      const out = await sync.setPin(pin).catch(() => ({ ok: false }));
+      return out?.ok ? { ok: true } : { error: 'other', message: 'تعذّر الحفظ. حاول مرة ثانية' };
+    },
+    onDone: () => showToast({ title: 'تم', body: 'رقمك الجديد محفوظ' }),
+  });
+}
+syncPhoneNotify();
 setInterval(() => void sync.pull(), 60_000);
 // نبض كل 4 ثوانٍ والتطبيق أمامك: رقمٌ واحد، والسحب فقط حين يتقدّم. رسالة
 // صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة
@@ -2289,6 +2515,16 @@ function showLock(onUnlocked = () => {}) {
         return { error: 'other', message: 'تعذّر فتح الحساب. اختر «تبديل الحساب»' };
       }
     },
+    forgot: async (key) => {
+      try {
+        await sync.signIn(me.userId, { resetKey: key });
+        return { ok: true };
+      } catch (error) {
+        if (error?.code === 'reset_key_wrong') return { message: 'المفتاح غير صحيح أو انتهى أو استُعمل' };
+        if (error?.code === 'account_suspended') return { message: 'هذا الحساب موقوف. كلّم المالك' };
+        return { message: error?.status ? 'تعذّر الدخول. حاول مرة ثانية' : 'ما فيه اتصال. حاول مرة ثانية' };
+      }
+    },
     onDone: () => {
       lockOpen = false;
       onUnlocked();
@@ -2364,6 +2600,7 @@ async function boot() {
     // جلسة قائمة: نفتح على الرئيسية فورًا من المرآة، والشبكة تُصحّح بعدها
     startHeartbeat();
     await go({ name: 'home' });
+    setTimeout(maybeCelebrate, 1200);
     void sync.pull();
     void refreshPresence();
     void startUpdates();

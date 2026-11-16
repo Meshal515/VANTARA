@@ -1,0 +1,7 @@
+# VANTARA reference run (reference-cloudstream.yml). Editing this file on the Debug branch starts a run.
+# One CloudStream plugin per line, by its "name" in Abodabodd/re-3arabi builds/plugins.json.
+# Phase 0 calibration (docs/addons/MEASUREMENT_PLAN_20261106.ar.md): three known sources first.
+# set works=3 episodes=2 round=1
+AnimeRift
+Akwam
+Anime4up

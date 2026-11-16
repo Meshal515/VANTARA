@@ -81,6 +81,9 @@ const OPS = {
   'majlis.delete': { class: STATE, key: (p) => `majlis-delete/${p.scope}/${p.target}` },
   'majlis.read': { class: STATE, key: () => 'majlis-read' },
   'majlis.meta': { class: STATE, key: (p) => `majlis-meta/${Object.keys(p).sort().join(',')}` },
+  // حذف العمل وإعادته: آخر قرار للعمل نفسه يغلب
+  'work.remove': { class: STATE, key: (p) => `work-removal/${p.key}` },
+  'work.restore': { class: STATE, key: (p) => `work-removal/${p.key}` },
   'chapter.complete': { class: CUMULATIVE },
   'usage.add': { class: CUMULATIVE },
   'usage.watch': { class: CUMULATIVE },

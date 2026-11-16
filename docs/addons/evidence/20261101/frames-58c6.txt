@@ -1,0 +1,2 @@
+11-01 07:47:03.293  4672  4687 I VantaraRuntime: LIVE_WITCHER_METRICS:elapsed=30039;advanced=29802;rendered=715;dropped=0;dimensions=848x480;speed=1.0;minimumBuffer=41286;bufferingSamples=0
+11-01 07:47:06.488  4672  4687 I VantaraRuntime: LIVE_WITCHER_PLAYER:existing Activity/transport; elapsed=30000; advanced=29802; rendered=715; dropped=0; dimensions=848x480; forward/backward passed

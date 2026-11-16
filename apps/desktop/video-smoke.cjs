@@ -103,7 +103,7 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     await window.webContents.executeJavaScript('document.querySelector(".pl-choose-server").click()');
     await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".an-pick.ss")'));
     assert.equal((await videoHost.inspect()).visible,false);report.sharedServerPicker=true;
-    await window.webContents.executeJavaScript('document.querySelector(".an-pick-back").click();document.querySelector(".pp-lobby .pl-go:not(.pl-choose-server)").click()');
+    await window.webContents.executeJavaScript('document.querySelector(".an-pick-back").click();document.querySelector(".pp-lobby .pl-start").click()');
     await until(()=>window.webContents.executeJavaScript('!!document.querySelector(".pl-count")'));
     assert.equal((await videoHost.inspect()).visible,false);
     await until(async()=>{const gone=await window.webContents.executeJavaScript('document.querySelector(".pp-lobby").hidden');return gone&&(await videoHost.inspect()).visible;});report.sharedCountdown=true;

@@ -48,7 +48,16 @@ data class TogetherLaunch(
     val logo: String? = null,
     val episodeTitle: String? = null,
     val season: Int? = null,
+    /** صورة الحلقة لزر «البدء» (الخلفية فن العمل نفسه — تصميم الغرفة المعتمد 14 نوفمبر). */
+    val episodeImage: String? = null,
+    /** تقييم الحلقة («8.7») ومدتها («43 دقيقة») تحت اسمها في الغرفة؛ كلاهما اختياري. */
+    val rating: String? = null,
+    /** مصدر التقييم: «IMDb» للأفلام والمسلسلات؛ بلا مصدر لا يُعرض تقييم الأنمي المخمَّن. */
+    val ratingSource: String? = null,
+    val duration: String? = null,
     val invitees: List<Invitee> = emptyList(),
+    /** الغرفة أولًا: دخل بلا سيرفر، فالغرفة تعرض «اختر سيرفر» حتى يختار (لا اختيار تلقائي). */
+    val pick: Boolean = false,
 )
 
 @Serializable
@@ -89,8 +98,15 @@ class TogetherPlayer(
         fun leaveRoom() {}
         /** «غيّر» في شاشة الغرفة: ورقة السيرفرات. */
         fun openServers() {}
+        /** ورقة الحلقات في المشغّل (زر «الحلقات» في الغرفة للمضيف). */
+        fun openEpisodes() {}
+        fun hasEpisodes(): Boolean = false
         /** «OKRU · 1080p» للسيرفر الحالي. */
         fun serverLabel(): String? = sourceName()
+        /** تقدّم تجهيز فيديوك الحقيقي 0..1 (مراحل المصدر والتورنت والمشغّل) لامتلاء الشعار ومراحل الغرفة. */
+        fun loadProgress(): Float = 0f
+        /** المضيف نقل الغرفة لعمل آخر (موسم ثانٍ): يُغلق المشغّل وتفتح الواجهة غرفة الموسم الجديد للاختيار. */
+        fun switchWork(key: String, label: String?) {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -107,11 +123,32 @@ class TogetherPlayer(
     private var lobbyBar: LinearLayout? = null
     private var lobbyConn: TextView? = null
     private var lobbyMore: View? = null
+    /** بطاقة «البدء» الكبيرة فوق الشريط (المضيف وحده): صورة الحلقة ودائرة تشغيل. */
+    private var lobbyStart: FrameLayout? = null
     private var lobbyCount: TextView? = null
     private var countdownAt = 0.0
+    private var markFill: View? = null
+    private var markRtl = false
+    private var stepBars: List<View> = emptyList()
+    private var stepText: TextView? = null
+    private var progressShown = 0f
+    private var lobbySig = ""
+    /** «الحلقة N» وعنوانها في شاشة الغرفة: يتحدّثان حين ينقل المضيف الغرفة لحلقة أخرى. */
+    private var lobbyEpisode: TextView? = null
+    private var lobbyEpisodeTitle: TextView? = null
+    /** الحلقة التي فُتح عليها المشغّل: عنوانها من الدعوة لا يُكتب على حلقة أخرى. */
+    private var initialEpisode = -1
+    /** «أخرج» يحتاج ضغطة تأكيد ثانية خلال 4 ث. */
+    private var confirmKick: String? = null
+    /** الغرفة أولًا: لم يختر سيرفره بعد. تبقى الغرفة ظاهرة (حتى لو بدأت) لأنه لا فيديو يُشاهد بلا سيرفر. */
+    private var awaitingPick = launch.pick
     /** لون القسم: أحمر السينما، ولون الأنمي للأنمي. */
-    private val accent: Int get() = if (launch.kindText == "أنمي") 0xFF3B82F6.toInt() else 0xFFC1121F.toInt()
+    // لون الواجهة نفسه الذي لبسه المشغّل (Tone.use)، لا أزرق/أحمر ثابت
+    private val accent: Int get() = com.vantara.anime.player.Tone.ACCENT
     private fun serverNow() = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
+    private var intentSeq = -1
+    private var intentUntil = 0L
+    private fun holdIntent(t: Timeline) { intentSeq = t.seq; intentUntil = SystemClock.elapsedRealtime() + 2000 }
     /** الغرفة بدأت لكن لحظة البدء المشتركة لم تأتِ: العدّ 3-2-1. */
     private fun counting(t: Timeline? = client.timeline) = synced && t != null && t.started && t.at - serverNow() > 400
     private var strip: LinearLayout? = null
@@ -124,6 +161,10 @@ class TogetherPlayer(
     private val synced get() = client.mode == "sync"
     private fun mediaKey(ep: Int = hooks.episode()) = "${launch.mediaPrefix}#$ep"
     private fun episodeOf(key: String?) = key?.substringAfterLast('#', "")?.toIntOrNull()
+    /** حلقة الغرفة الآن (قد تسبق حلقة المشغّل أثناء تجهيز ما اختاره المضيف). */
+    private fun roomEpisode() = client.timeline?.mediaKey?.takeIf { it.startsWith("${launch.mediaPrefix}#") }?.let { episodeOf(it) } ?: hooks.episode()
+    /** خط الغرفة الزمني يخص الحلقة المعروضة عندي؟ لا = لا يُطبَّق أبدًا (لا تشغيل الحلقة 2 على وقت الحلقة 1). */
+    private fun sameEpisode(t: Timeline?) = t != null && episodeOf(t.mediaKey) == hooks.episode()
 
     // ───────────── ديلاي الفيديو الشخصي ─────────────
     // لك وحدك: مصدرك فيه مقدمة 10 ث زيادة؟ +10 ث تجعل فيديوك متقدّمًا عن وقت الغرفة،
@@ -157,11 +198,12 @@ class TogetherPlayer(
     }
 
     fun start() {
+        initialEpisode = hooks.episode()
         client.connect()
         main.post(tick)
         // غرفة متزامنة: شاشة الغرفة من أول لحظة (الأصدقاء، سيرفرك وزر «غيّر»)، لا شاشة سوداء
         // تنتظر الإطار الأول. إن كانت الغرفة بدأت فعلًا يخفيها الترحيب ويقفز للثانية الحالية.
-        if (launch.mode == "sync") showLobby()
+        if (launch.mode == "sync" || awaitingPick) showLobby()
     }
 
     fun destroy() {
@@ -192,6 +234,8 @@ class TogetherPlayer(
     // ───────────── أحداث المشغّل ─────────────
 
     fun onPreparing() {
+        awaitingPick = false
+        progressShown = 0f
         ready = false
         failedSource = null
         if (synced && client.timeline?.started != true) { mute(true); showLobby() }
@@ -204,7 +248,8 @@ class TogetherPlayer(
         if (!ready) {
             ready = true
             preparedEpisode = hooks.episode()
-            if (synced && t?.started != true) {
+            // الغرفة على حلقة غير حلقتي (انتقال لم يكتمل) = انتظار أيضًا: لا نشغّل على وقت حلقة أخرى
+            if (synced && (t?.started != true || !sameEpisode(t))) {
                 // غرفة الانتظار: جاهز عند الإطار الأول، متوقف عند البداية (مع ديلايك) حتى «ابدأ».
                 // حالة الغرفة لم تصل بعد (السيرفر أسرع من الاتصال)؟ نفس الشيء؛ الترحيب يقفز إن كانت بدأت.
                 withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
@@ -228,16 +273,21 @@ class TogetherPlayer(
 
     /** انتهت الحلقة: المضيف ينقل الغرفة للتالية، والبقية ينتظرونه. يعيد true إن تولّى Together الأمر. */
     fun onEnded(): Boolean {
+        // المنفصلة: كل واحد بوقته، وبطاقة «الحلقة التالية» العادية
+        if (!synced) return false
         if (!client.isHost) {
-            if (synced) hooks.message("بانتظار المضيف للحلقة التالية…")
-            return synced
+            hooks.message("بانتظار المضيف للحلقة التالية…")
+            return true
         }
         if (!hooks.hasNextEpisode()) return false
         val next = hooks.episode() + 1
-        client.command("load", 0.0, mediaKey(next), "الحلقة $next")
+        if (!client.command("load", 0.0, mediaKey(next), "الحلقة $next")) { hooks.message("انتظر عودة الاتصال بالغرفة"); return true }
         hooks.switchToEpisode(next)
         return true
     }
+
+    /** هل يبدأ الفيديو وحده عند تحميل سيرفر؟ في غرفة متزامنة لم تبدأ: لا، ينتظر «ابدأ» (onReady يقف عند البداية). */
+    fun mayAutoplay(): Boolean = !synced || client.timeline?.started == true
 
     /** المستخدم ضغط تشغيل/إيقاف. المضيف يأمر الغرفة؛ غيره في المتزامن لا يحرّكها. */
     fun onUserPlayPause(playing: Boolean): Boolean {
@@ -245,7 +295,13 @@ class TogetherPlayer(
         val t = client.timeline ?: return false
         if (!synced) return false
         if (client.canControl) {
-            if (!t.started && playing) client.command("play", 0.0) else client.command(if (playing) "play" else "pause", roomPos())
+            if (!t.started && playing) {
+                // من غرفة الانتظار: «ابدأ» بعدّ 3-2-1 مشترك، ولا يشتغل عندي قبل الجميع
+                if (ready) client.command("play", 0.0, countdownMs = 3000L) else hooks.message("نجهّز فيديوك…")
+                withApplying { hooks.player.playWhenReady = false }
+                return true
+            }
+            client.command(if (playing) "play" else "pause", roomPos(), at = serverNow()); holdIntent(t)
             return false
         }
         hooks.message("المضيف يتحكم بالتشغيل")
@@ -256,7 +312,7 @@ class TogetherPlayer(
     /** المستخدم قدّم/رجّع. */
     fun onUserSeek(toMs: Long) {
         if (applying || !synced) return
-        if (client.canControl) client.command("seek", roomPos(toMs))
+        if (client.canControl) { client.timeline?.let { holdIntent(it) }; client.command("seek", roomPos(toMs), at = serverNow()) }
         else hooks.message("المضيف يتحكم بالتشغيل — نرجّعك معهم")
     }
 
@@ -267,9 +323,10 @@ class TogetherPlayer(
         // Reconcile that first frame with the room instead of playing behind the lobby.
         val t = client.timeline
         // دخول متأخر (الغرفة بدأت) أو غرفة منفصلة: لا شاشة انتظار
-        if (counting(t)) startCountdown(t!!.at) else if (!synced || t?.started == true) hideLobby() else showLobby()
+        if (awaitingPick) showLobby()
+        else if (counting(t)) startCountdown(t!!.at) else if (!synced || t?.started == true) hideLobby() else showLobby()
         if (synced && ready && t != null) {
-            if (!t.started) withApplying { hooks.player.playWhenReady = false; hooks.player.seekTo(max(0L, offsetMs)) }
+            if (!t.started || !sameEpisode(t)) withApplying { hooks.player.playWhenReady = false; if (!t.started) hooks.player.seekTo(max(0L, offsetMs)) }
             else jumpToRoom(t)
         }
         paintStrip()
@@ -277,13 +334,20 @@ class TogetherPlayer(
     }
 
     override fun onState(timeline: Timeline, by: String?) {
+        // عمل آخر (موسم ثانٍ مثلًا): لا يُقارن رقم الحلقة وحده، وإلا شغّل «الحلقة 1» من الموسم القديم
+        val prefix = timeline.mediaKey?.substringBeforeLast('#', "")?.takeIf { it.isNotEmpty() }
+        if (prefix != null && prefix != launch.mediaPrefix) {
+            if (synced || by == client.hostUserId) { ready = false; hooks.switchWork(timeline.mediaKey!!, timeline.mediaLabel) }
+            return
+        }
         val ep = episodeOf(timeline.mediaKey)
         // الحلقة التالية (أو أي حلقة اختارها المضيف): كل واحد يجهّزها بسيرفره
         if (ep != null && ep != hooks.episode()) {
             if (synced || by == client.hostUserId) { ready = false; hooks.switchToEpisode(ep) }
             return
         }
-        if (counting(timeline)) { mute(false); startCountdown(timeline.at) }
+        if (awaitingPick) showLobby()
+        else if (counting(timeline)) { mute(false); startCountdown(timeline.at) }
         else if (timeline.started) { hideLobby(); mute(false) } else if (synced && ready) showLobby()
         if (synced && timeline.started && ready && by != client.me) jumpToRoom(timeline)
         paintLobby()
@@ -292,7 +356,7 @@ class TogetherPlayer(
     override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) hooks.refreshPanel() }
     override fun onMode(mode: String) {
         hooks.message(if (mode == "sync") "صارت المشاهدة متزامنة" else "صارت المشاهدة منفصلة: كل واحد بوقته")
-        if (mode != "sync") { hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
+        if (mode != "sync") { if (!awaitingPick) hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
     }
     override fun onStatus(userId: String, name: String, state: String, source: String?) {
         if (userId == client.me) return
@@ -304,18 +368,64 @@ class TogetherPlayer(
     }
     override fun onConnection(live: Boolean) { connected = live; paintLobby() }
     override fun onJoined(name: String) = hooks.message("$name دخل")
-    override fun onLeft(name: String) = hooks.message("$name طلع")
+    override fun onLeft(name: String, kicked: Boolean) = hooks.message(if (kicked) "المضيف أخرج $name" else "$name طلع")
+    /**
+     * «البدء»: الحالة تُقرأ لحظة اللمس لا لحظة رسم الزر، وكل نتيجة لها أثر: عدّ 3-2-1 عند الجميع، أو رسالة بالسبب.
+     */
+    private var startSentAt = 0L
+    private val startWatch = Runnable {
+        if (startSentAt != 0L && client.timeline?.started != true && lobbyCount == null) hooks.message(TogetherStart.NO_REPLY)
+        startSentAt = 0L
+    }
+    private fun guestsWaiting() = TogetherStart.notReady(client.roster, client.me, client.timeline?.mediaKey)
+    private fun pressStart() {
+        val waiting = guestsWaiting()
+        val gate = TogetherStart.gate(ready, connected, awaitingPick, waiting.size)
+        if (gate == TogetherStart.Gate.GUESTS) { hooks.message(TogetherStart.waitingText(waiting.map { it.name })); paintLobby(); return }
+        if (gate != TogetherStart.Gate.SEND) { hooks.message(TogetherStart.message(gate)!!); paintLobby(); return }
+        if (!client.command("play", 0.0, countdownMs = TogetherStart.COUNTDOWN_MS)) { hooks.message(TogetherStart.SEND_FAILED); return }
+        startSentAt = android.os.SystemClock.uptimeMillis()
+        main.removeCallbacks(startWatch)
+        main.postDelayed(startWatch, TogetherStart.REPLY_TIMEOUT_MS)
+    }
+
+    override fun onDenied(reason: String?, waiting: List<String>) {
+        startSentAt = 0L
+        main.removeCallbacks(startWatch)
+        hooks.message(if (reason == "not_ready") TogetherStart.waitingText(waiting) else TogetherStart.DENIED)
+        paintLobby()
+    }
+
     override fun onHost(userId: String) { if (userId == client.me) hooks.message("صرت المضيف"); paintLobby() }
     override fun onClosed(reason: String) {
-        hooks.message(when (reason) { "full" -> "الغرفة ممتلئة"; "gone" -> "انتهت الغرفة"; "uninvited" -> "هالغرفة لأشخاص محددين"; "replaced" -> "دخلت الغرفة من جهاز ثاني"; else -> "انقطعت الغرفة" })
+        hooks.message(when (reason) { "full" -> "الغرفة ممتلئة"; "gone" -> "انتهت الغرفة"; "uninvited" -> "هالغرفة لأشخاص محددين"; "replaced" -> "دخلت الغرفة من جهاز ثاني"; "kicked" -> "المضيف أخرجك من الغرفة"; else -> "انقطعت الغرفة" })
         hideLobby()
+        mute(false)
+        strip?.visibility = View.GONE
         withApplying { hooks.player.setPlaybackSpeed(1f) }
     }
 
     // ───────────── المزامنة ─────────────
 
+    private fun paintProgress() {
+        val p = when { ready -> 1f; awaitingPick || failedSource != null -> 0f; else -> hooks.loadProgress().coerceIn(0f, 0.97f) }
+        progressShown = max(progressShown, p) // لا ينقص داخل نفس الحلقة
+        markFill?.let { f ->
+            if (f.width > 0) {
+                val w = (f.width * progressShown).toInt()
+                f.clipBounds = if (markRtl) android.graphics.Rect(f.width - w, 0, f.width, f.height) else android.graphics.Rect(0, 0, w, f.height)
+            }
+        }
+        val done = when { awaitingPick || failedSource != null -> 0; ready -> STEPS.size; else -> STEPS.count { it < 1f && progressShown >= it } }
+        stepBars.forEachIndexed { i, v ->
+            v.background = rounded(when { i < done -> 0xCCFFFFFF.toInt(); i == done && !awaitingPick && failedSource == null -> accent; else -> 0x29FFFFFF }, context.dp(2).toFloat())
+        }
+        stepText?.text = when { awaitingPick -> "بانتظار سيرفرك"; failedSource != null -> "تعذّر سيرفرك"; ready -> "جاهز للبدء"; else -> STEP_NAMES[min(done, STEP_NAMES.size - 1)] + "…" }
+    }
+
     private val tick = object : Runnable {
         override fun run() {
+            if (lobby != null) paintProgress()
             step()
             main.postDelayed(this, 500)
         }
@@ -325,7 +435,10 @@ class TogetherPlayer(
         val p = hooks.player
         val t = client.timeline
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
-        if (t != null && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
+        // أمر المتحكّم نفسه (إيقاف/تشغيل/تقديم) نُفّذ عنده فورًا: حتى يصل صداه (seq أكبر) لا يُرجعه المؤقت للحالة
+        // القديمة. كان الإيقاف من الجوال يعود تشغيلًا لحظة قبل وصول البث (بلاغ المالك 14 نوفمبر).
+        val pendingOwn = t != null && intentSeq == t.seq && SystemClock.elapsedRealtime() < intentUntil
+        if (t != null && !pendingOwn && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
             val pos = p.currentPosition.toDouble()
             val d = ctl.step(
                 t, pos, at,
@@ -350,6 +463,7 @@ class TogetherPlayer(
     }
 
     private fun jumpToRoom(t: Timeline, force: Boolean = false) {
+        if (!sameEpisode(t)) return
         val at = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
         if (at < t.at) {
             // Apply the scheduled command at the shared instant, not on receipt.
@@ -488,12 +602,14 @@ class TogetherPlayer(
     private fun headline(): Pair<String, Boolean> {
         fun names(list: List<String>) = list.take(2).joinToString(" و") + if (list.size > 2) " و${list.size - 2} غيرهم" else ""
         if (!connected) return "جاري الاتصال بالغرفة…" to false
+        if (awaitingPick) return "اختر سيرفرك عشان نبدأ" to false
         if (failedSource != null) return "تعذّر سيرفرك · اختر سيرفرًا آخر" to true
         if (!ready) return "نجهّز فيديوك…" to false
         val others = client.roster.filter { it.userId != client.me }
         val waiting = pending().map { it.displayName }
         val broken = others.filter { it.state == "failed" }.map { it.name }
-        val preparing = others.filter { it.state == "preparing" }.map { it.name }
+        // غير الجاهزين على حلقة الغرفة (يجهّز، أو تقريره من حلقة سابقة)؛ المتعذّر له سطره
+        val preparing = TogetherStart.notReady(others, client.me, client.timeline?.mediaKey).filter { it.state != "failed" }.map { it.name }
         return when {
             waiting.isNotEmpty() -> "${names(waiting)} ${if (waiting.size > 1) "ما دخلوا" else "ما دخل"} بعد" to false
             broken.isNotEmpty() -> "سيرفر ${names(broken)} تعذّر" to false
@@ -536,7 +652,10 @@ class TogetherPlayer(
                 )
                 if (tags.isNotEmpty()) where.addView(context.label(tags.joinToString(" · "), 11f, Tone.TEXT_3))
                 row.addView(where)
-                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(6) })
+                val tools = client.isHost && m.userId != client.me
+                body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(if (tools) 2 else 6) })
+                // المضيف: «اجعله المضيف» و«أخرج» (بضغطتين حتى لا يقع خطأً)
+                if (tools) body.addView(hostTools(m), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(8) })
             }
             for (p in pending()) {
                 val row = LinearLayout(context).apply {
@@ -557,7 +676,80 @@ class TogetherPlayer(
         }
     }
 
-    fun panelClosed() { panelOpen = false }
+    fun panelClosed() { panelOpen = false; confirmKick = null }
+
+    private fun hostTools(m: Member): View = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL or Gravity.END
+        layoutDirection = View.LAYOUT_DIRECTION_RTL
+        setPadding(context.dp(10), 0, context.dp(10), 0)
+        addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+        fun pill(text: String, fg: Int, bg: Int, stroke: Int, desc: String, onClick: () -> Unit) = context.label(text, 12.5f, fg, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(context.dp(12), context.dp(7), context.dp(12), context.dp(7))
+            background = rounded(bg, context.dp(16).toFloat(), context.dp(1), stroke)
+            contentDescription = desc
+            setOnClickListener { onClick() }
+        }
+        addView(pill("اجعله المضيف", 0xD9FFFFFF.toInt(), 0x0AFFFFFF, 0x2EFFFFFF, "اجعل ${m.name} المضيف") { client.giveHost(m.userId) })
+        val armed = confirmKick == m.userId
+        addView(pill(if (armed) "تأكيد الإخراج" else "أخرج", if (armed) Color.WHITE else 0xFFFF8B8E.toInt(), if (armed) 0xFFE5484D.toInt() else 0x00000000, if (armed) 0xFFE5484D.toInt() else 0x59FF6B6E, "أخرج ${m.name} من الغرفة") {
+            if (confirmKick != m.userId) {
+                val id = m.userId
+                confirmKick = id
+                main.postDelayed({ if (confirmKick == id) { confirmKick = null; if (panelOpen) hooks.refreshPanel() } }, 4000)
+            } else { confirmKick = null; client.kick(m.userId) }
+            if (panelOpen) hooks.refreshPanel()
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = context.dp(8) })
+    }
+
+    /**
+     * الغرفة انتقلت لحلقة أخرى: لا سيرفر يُختار تلقائيًا ولا تشغيل (قرار المالك، 15 نوفمبر). الكل يرجع لشاشة الغرفة
+     * و«اختر سيرفر» كما عند دخولها، والسيرفرات تتجهّز في الخلفية للورقة.
+     */
+    fun awaitPick() {
+        awaitingPick = true
+        ready = false
+        failedSource = null
+        progressShown = 0f
+        mute(false)
+        showLobby()
+        report("preparing", force = true)
+        paintLobby()
+    }
+
+    /**
+     * المضيف نقل الغرفة لموسم آخر: الواجهة تجهّز مشغّل الموسم الجديد تحت هذا المشغّل، وهذا يبقى ظاهرًا بشاشة الغرفة
+     * حتى يأخذ الجديد مكانه. يُغلق اتصاله الآن (الجديد يدخل الغرفة بالحساب نفسه).
+     */
+    fun handOff(label: String?) {
+        main.removeCallbacksAndMessages(null)
+        client.close()
+        awaitingPick = true
+        ready = false
+        showLobby()
+        paintLobby()
+        hooks.message(listOfNotNull("ننقل الغرفة", label?.takeIf { it.isNotBlank() }).joinToString(" · ") + "…")
+    }
+
+    /** اختيار حلقة من ورقة المشغّل داخل غرفة متزامنة: المضيف ينقل الغرفة كلها، والصديق يُبلَّغ. منفصلة: تبديل محلي. */
+    /** الموسم من ورقة الحلقات: المضيف ينقل الغرفة كلها لأول حلقة في الموسم (`anime:<id>#1`)؛ الصديق يُبلَّغ. */
+    fun requestWork(prefix: String, label: String): Boolean {
+        if (!synced) return false
+        if (!client.isHost) { hooks.message("المضيف يختار الموسم"); return true }
+        if (prefix == launch.mediaPrefix) return true
+        client.command("load", 0.0, "$prefix#1", label)
+        return true
+    }
+
+    fun requestEpisode(n: Int): Boolean {
+        if (!synced) return false
+        // «إعادة المحاولة» لنفس الحلقة: محلية، لا تعيد الغرفة كلها لغرفة الانتظار
+        if (n == hooks.episode() && n == roomEpisode()) return false
+        if (!client.isHost) { hooks.message("المضيف يختار الحلقة"); return true }
+        if (!client.command("load", 0.0, mediaKey(n), "الحلقة $n")) hooks.message("انتظر عودة الاتصال بالغرفة")
+        return true
+    }
 
     private fun button(text: String, primary: Boolean, onClick: () -> Unit) = context.label(text, 14f, Color.WHITE, bold = true).apply {
         gravity = Gravity.CENTER
@@ -632,13 +824,22 @@ class TogetherPlayer(
                 background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0x00050507, 0x00050507, 0x00050507, 0x8C050507.toInt(), 0xFF050507.toInt()))
             }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             root.addView(bannerBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END))
-            root.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
-                val h = v.height
-                val w = minOf(v.width, h * 16 / 9)
-                val lp = bannerBox.layoutParams as FrameLayout.LayoutParams
-                if (h > 0 && (lp.width != w || lp.height != h)) bannerBox.post { lp.width = w; lp.height = h; bannerBox.layoutParams = lp }
+            // تعتيم يساري تكيّفي (LobbyDim): بنر Cinemeta لأعمال مثل أركين أبيض ناصع في نصفه الأيسر فيضيع عليه زر الإغلاق
+            // والبطاقة والشريط. يُقاس من إضاءة اليسار بعد وصول الصورة؛ البنر الغامق لا يُمسّ. الجهة اليمنى لها تدرجها المستقل.
+            val dim = View(context).apply {
+                background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(0xDB050507.toInt(), 0xB8050507.toInt(), 0x66050507, 0x14050507, 0x00050507))
+                alpha = 0f
             }
-            images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp -> if (bmp != null) { banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start() } }
+            images.load(launch.banner, context.resources.displayMetrics.widthPixels) { bmp ->
+                if (bmp != null) {
+                    banner.setImageBitmap(bmp); banner.animate().alpha(1f).setDuration(420).start()
+                    val small = android.graphics.Bitmap.createScaledBitmap(bmp, 32, 18, true)
+                    val px = IntArray(32 * 18)
+                    small.getPixels(px, 0, 32, 0, 0, 32, 18)
+                    dim.animate().alpha(LobbyDim.strength(LobbyDim.leftLuma(px, 32, 18))).setDuration(420).start()
+                }
+            }
+            root.addView(dim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             // تعتيم خفيف من الأسفل حيث الشريط فقط
             root.addView(View(context).apply {
                 background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0xEB050507.toInt(), 0x66050507, 0x00050507, 0x00050507, 0x00050507))
@@ -666,27 +867,66 @@ class TogetherPlayer(
             }, LinearLayout.LayoutParams(context.dp(40), context.dp(40)))
             root.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
-            // الشعار أو الاسم، وسطر واحد تحته
+            // الشعار يُحسم مرة (CLAUDE.md): صورة الشعار إن وصلت خلال 1.2 ث وإلا الاسم، ومكانه محجوز ومخفي حتى الحسم —
+            // لا يظهر الاسم ثم يُستبدل بالشعار. طبقتان: رمادية تحت وملوّنة فوق تنكشف بقدر التجهيز الحقيقي في اتجاه كتابتها.
             val hero = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.START }
-            val title = context.label(launch.title ?: "مشاهدة معًا", 28f, Color.WHITE, bold = true).apply {
-                maxLines = 2
-                setShadowLayer(context.dp(14).toFloat(), 0f, context.dp(3).toFloat(), 0x99000000.toInt())
-                textDirection = View.TEXT_DIRECTION_ANY_RTL
-            }
-            hero.addView(title)
-            launch.logo?.let { url ->
-                val logo = ImageView(context).apply { scaleType = ImageView.ScaleType.FIT_START; adjustViewBounds = true; contentDescription = launch.title }
-                images.load(url, context.dp(360)) { bmp ->
-                    if (bmp == null || bmp.width <= 1) return@load
-                    logo.setImageBitmap(bmp)
-                    val i = hero.indexOfChild(title)
-                    if (i >= 0) { hero.removeViewAt(i); hero.addView(logo, i, LinearLayout.LayoutParams(context.dp(280), context.dp(96))) }
+            val mark = FrameLayout(context).apply { visibility = View.INVISIBLE }
+            hero.addView(mark, LinearLayout.LayoutParams(context.dp(240), context.dp(80)))
+            var decided = false
+            fun decide(bmp: android.graphics.Bitmap?) {
+                if (decided) return
+                decided = true
+                fun layer(ghost: Boolean): View = if (bmp != null) ImageView(context).apply {
+                    setImageBitmap(bmp)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    if (ghost) { alpha = 0.3f; colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0f) }) }
+                } else context.label(launch.title ?: "مشاهدة معًا", 28f, Color.WHITE, bold = true).apply {
+                    maxLines = 2
+                    textDirection = View.TEXT_DIRECTION_ANY_RTL
+                    if (ghost) alpha = 0.3f
                 }
+                markRtl = bmp == null && Regex("[\u0600-\u06FF]").containsMatchIn(launch.title.orEmpty())
+                mark.layoutParams = if (bmp != null) {
+                    val h = context.dp(80)
+                    LinearLayout.LayoutParams(min(context.dp(280), h * bmp.width / max(1, bmp.height)), h)
+                } else LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                mark.removeAllViews()
+                mark.addView(layer(true), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                val fill = layer(false)
+                mark.addView(fill, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                markFill = fill
+                fill.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> paintProgress() }
+                mark.visibility = View.VISIBLE
+                paintProgress()
             }
-            val meta = listOfNotNull(launch.kindText, episodeText().takeIf { it != launch.kindText }, launch.episodeTitle).distinct().joinToString(" · ")
-            if (meta.isNotEmpty()) hero.addView(context.label(meta, 14.5f, 0xC7FFFFFF.toInt(), bold = true).apply { setPadding(0, context.dp(8), 0, 0); maxLines = 1; textDirection = View.TEXT_DIRECTION_FIRST_STRONG })
+            val logoUrl = launch.logo
+            if (logoUrl != null) {
+                main.postDelayed({ decide(null) }, 3000) // أول تحميل للشعار على شبكة جوال قد يتجاوز ثانية؛ مكانه مخفي حتى الحسم
+                images.load(logoUrl, context.dp(360)) { bmp -> decide(bmp?.takeIf { it.width > 1 }) }
+            } else decide(null)
+            // النوع صغيرًا، ثم «الحلقة N» بخط كبير، ثم عنوان الحلقة معزول الاتجاه، ثم مراحل التجهيز بأسمائها
+            launch.kindText?.takeIf { it.isNotBlank() && it != episodeText() }?.let {
+                hero.addView(context.label(it, 13.5f, 0x99FFFFFF.toInt(), bold = true).apply { setPadding(0, context.dp(8), 0, 0) })
+            }
+            hero.addView(context.label(episodeText(), 26f, Color.WHITE, bold = true).apply { setShadowLayer(context.dp(12).toFloat(), 0f, context.dp(2).toFloat(), 0x80000000.toInt()) }.also { lobbyEpisode = it })
+            launch.episodeTitle?.takeIf { it.isNotBlank() }?.let {
+                hero.addView(context.label("\u2068$it\u2069", 14f, 0xC7FFFFFF.toInt(), bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; visibility = if (roomEpisode() == initialEpisode) View.VISIBLE else View.GONE }.also { lobbyEpisodeTitle = it })
+            }
+            val steps = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(8), 0, 0) }
+            val bars = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_LTR }
+            stepBars = (0 until STEPS.size).map { View(context).also { v -> bars.addView(v, LinearLayout.LayoutParams(context.dp(20), context.dp(3)).apply { marginEnd = context.dp(4) }) } }
+            steps.addView(bars)
+            stepText = context.label("", 12.5f, 0xB8FFFFFF.toInt(), bold = true).apply { setPadding(context.dp(8), 0, context.dp(8), 0) }
+            steps.addView(stepText)
+            hero.addView(steps)
             root.addView(hero, FrameLayout.LayoutParams((context.resources.displayMetrics.widthPixels * 0.44f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
                 marginStart = context.dp(28); bottomMargin = context.dp(92)
+            })
+            // بطاقة «البدء»: يسار الشاشة (END في الاتجاه RTL) فوق الشريط، ومكانها يُضبط في positionContent
+            val startCard = FrameLayout(context).apply { visibility = View.GONE; elevation = context.dp(6).toFloat() }
+            lobbyStart = startCard
+            root.addView(startCard, FrameLayout.LayoutParams(context.dp(300), context.dp(169), Gravity.BOTTOM or Gravity.END).apply {
+                marginEnd = context.dp(28); bottomMargin = context.dp(102)
             })
 
             // «⋯»: الديلاي (فوق زر «⋯» في نهاية السطر)
@@ -723,6 +963,17 @@ class TogetherPlayer(
                     heroParams.width = heroWidth; heroParams.bottomMargin = heroBottom; heroParams.marginStart = heroStart
                     hero.layoutParams = heroParams
                 }
+                // البطاقة: أفقيًا 300×169 يسارًا بحذاء أسفل المعلومات، وطوليًا بعرض الشاشة (حتى 340) وسط الصفحة فوق المعلومات
+                val cardW = if (portrait) maxOf(context.dp(120), minOf(root.width - context.dp(40), context.dp(340))) else context.dp(300)
+                val cardH = cardW * 9 / 16
+                val cardBottom = if (portrait) heroBottom + hero.height + context.dp(16) else heroBottom
+                val cardGravity = if (portrait) Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL else Gravity.BOTTOM or Gravity.END
+                val cardEnd = if (portrait) 0 else heroStart
+                val cp = startCard.layoutParams as FrameLayout.LayoutParams
+                if (cp.width != cardW || cp.height != cardH || cp.bottomMargin != cardBottom || cp.gravity != cardGravity || cp.marginEnd != cardEnd) {
+                    cp.width = cardW; cp.height = cardH; cp.bottomMargin = cardBottom; cp.gravity = cardGravity; cp.marginEnd = cardEnd
+                    startCard.layoutParams = cp
+                }
                 val moreParams = more.layoutParams as FrameLayout.LayoutParams
                 val moreWidth = minOf(context.dp(380), root.width - context.dp(40))
                 val moreBottom = bar.height + safeBottom + context.dp(10)
@@ -756,7 +1007,7 @@ class TogetherPlayer(
     }
 
     private fun episodeText(): String {
-        val n = hooks.episode()
+        val n = roomEpisode()
         if (launch.kindText == "فيلم") return "فيلم"
         return launch.season?.let { "م$it · الحلقة $n" } ?: "الحلقة $n"
     }
@@ -767,7 +1018,14 @@ class TogetherPlayer(
         lobbyBar = null
         lobbyConn = null
         lobbyMore = null
+        lobbyStart = null
         lobbyCount = null
+        lobbySig = ""
+        lobbyEpisode = null
+        lobbyEpisodeTitle = null
+        markFill = null
+        stepBars = emptyList()
+        stepText = null
         paintStrip()
     }
 
@@ -808,12 +1066,19 @@ class TogetherPlayer(
     }
 
     private fun paintLobby() {
+        // «الحلقة N» من الغرفة نفسها، وعنوان حلقة الدعوة لا يبقى على حلقة أخرى
+        lobbyEpisode?.let { v -> val text = episodeText(); if (v.text.toString() != text) v.text = text }
+        lobbyEpisodeTitle?.visibility = if (roomEpisode() == initialEpisode) View.VISIBLE else View.GONE
         val bar = lobbyBar ?: return
         if (lobbyCount != null) return
-        bar.removeAllViews()
         val root = lobby
         val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
             (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
+        val sig = listOf(connected, ready, failedSource, awaitingPick, client.isHost, hooks.serverLabel(), portrait,
+            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
+        if (sig == lobbySig && bar.childCount > 0) return
+        lobbySig = sig
+        bar.removeAllViews()
         bar.orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         val details = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         bar.addView(details, LinearLayout.LayoutParams(if (portrait) ViewGroup.LayoutParams.MATCH_PARENT else 0, ViewGroup.LayoutParams.WRAP_CONTENT, if (portrait) 0f else 1f))
@@ -844,10 +1109,13 @@ class TogetherPlayer(
         val (line, bad) = headline()
         info.addView(context.label(line, 15f, if (bad) 0xFFFF8B8E.toInt() else Color.WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         val server = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(2), 0, 0) }
-        server.addView(context.label(hooks.serverLabel() ?: "سيرفرك", 12.5f, 0xD9FFFFFF.toInt(), bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR; maxLines = 1 })
-        val (stText, stColor) = when { failedSource != null -> "تعذّر" to 0xFFFF8B8E.toInt(); ready -> "جاهز" to 0xFF6FE3A1.toInt(); else -> "يتجهّز…" to 0xFFF5C76A.toInt() }
-        server.addView(context.label("  ·  ", 12.5f, 0x80FFFFFF.toInt()))
-        server.addView(context.label(stText, 12.5f, stColor, bold = true))
+        if (awaitingPick) server.addView(context.label("لم تختر سيرفر بعد", 12.5f, 0xB3FFFFFF.toInt(), bold = true))
+        else {
+            server.addView(context.label(hooks.serverLabel() ?: "سيرفرك", 12.5f, 0xD9FFFFFF.toInt(), bold = true).apply { textDirection = View.TEXT_DIRECTION_LTR; maxLines = 1 })
+            val (stText, stColor) = when { failedSource != null -> "تعذّر" to 0xFFFF8B8E.toInt(); ready -> "جاهز" to 0xFF6FE3A1.toInt(); else -> "يتجهّز…" to 0xFFF5C76A.toInt() }
+            server.addView(context.label("  ·  ", 12.5f, 0x80FFFFFF.toInt()))
+            server.addView(context.label(stText, 12.5f, stColor, bold = true))
+        }
         info.addView(server)
         details.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
@@ -858,7 +1126,7 @@ class TogetherPlayer(
             setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.MORE, Color.WHITE))
             rotation = 90f
             setPadding(context.dp(11), context.dp(11), context.dp(11), context.dp(11))
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x10FFFFFF); setStroke(context.dp(1), 0x24FFFFFF) }
+            background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
             contentDescription = "المزيد"
             setOnClickListener {
                 val m = lobbyMore as? FrameLayout ?: return@setOnClickListener
@@ -867,30 +1135,95 @@ class TogetherPlayer(
             }
         }
         actions.addView(moreBtn, LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { marginEnd = context.dp(10) })
-        val choose = context.label("اختر السيرفر", 14f, Color.WHITE, bold = true).apply {
+        // «الحلقات» للمضيف: ورقة الحلقات، واختياره ينقل الغرفة كلها (requestEpisode ← load)
+        if (client.isHost && hooks.hasEpisodes()) {
+            val episodes = context.label("الحلقات", 14f, Color.WHITE, bold = true).apply {
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setPadding(context.dp(16), 0, context.dp(16), 0)
+                background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+                contentDescription = "الحلقات"
+                setOnClickListener { hooks.openEpisodes() }
+            }
+            actions.addView(episodes, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)).apply { marginEnd = context.dp(10) })
+        }
+        val picking = awaitingPick || failedSource != null
+        val choose = context.label(if (picking) "اختر سيرفر" else hooks.serverLabel() ?: "السيرفر", 14f, if (picking) com.vantara.anime.player.Tone.ON_ACCENT else Color.WHITE, bold = true).apply {
             gravity = Gravity.CENTER
             maxLines = 1
             setPadding(context.dp(18), 0, context.dp(18), 0)
-            background = rounded(0x1AFFFFFF, context.dp(24).toFloat(), context.dp(1), 0x38FFFFFF)
+            // الخطوة الحالية بالأزرق وحدها: قبل الاختيار هذا هو الزر الأزرق الوحيد في الشاشة
+            if (!picking) textDirection = View.TEXT_DIRECTION_LTR
+            background = if (picking) rounded(accent, context.dp(12).toFloat()) else rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
             contentDescription = "اختر السيرفر"
             setOnClickListener { hooks.openServers() }
         }
         actions.addView(choose, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f).apply { marginEnd = context.dp(10) })
-        val action: View = if (client.isHost) LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(context.dp(24), 0, context.dp(24), 0)
-            background = rounded(accent, context.dp(24).toFloat())
-            alpha = if (ready && connected) 1f else 0.45f
-            contentDescription = "ابدأ للجميع"
-            addView(ImageView(context).apply { setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, Color.WHITE)) }, LinearLayout.LayoutParams(context.dp(18), context.dp(18)).apply { marginEnd = context.dp(8) })
-            addView(context.label("ابدأ", 15.5f, Color.WHITE, bold = true))
-            // أول بدء: عدّ 3-2-1 مشترك عند الجميع
-            setOnClickListener { if (ready && connected) client.command("play", 0.0, countdownMs = 3000L) else hooks.message("نجهّز فيديوك…") }
-        } else context.label("بانتظار المضيف", 14f, 0xB3FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; setPadding(context.dp(8), 0, context.dp(8), 0) }
-        actions.addView(action, LinearLayout.LayoutParams(if (portrait) 0 else ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46), if (portrait) 1f else 0f))
+        // البدء: بطاقة كبيرة فوق الشريط (lobbyStart) لا زرًا فيه. غير المضيف يرى «بانتظار المضيف» في الشريط
+        val canStart = TogetherStart.gate(ready, connected, awaitingPick, guestsWaiting().size) == TogetherStart.Gate.SEND
+        val startHost = lobbyStart
+        if (startHost != null) {
+            if (client.isHost) {
+                paintStartCard(startHost, canStart)
+                startHost.visibility = View.VISIBLE
+            } else {
+                startHost.visibility = View.GONE
+            }
+        }
+        if (!client.isHost) actions.addView(context.label("بانتظار المضيف", 14f, 0xB3FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; setPadding(context.dp(8), 0, context.dp(8), 0) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(46)))
         if ((lobbyMore as? FrameLayout)?.visibility == View.VISIBLE) { (lobbyMore as FrameLayout).removeAllViews(); (lobbyMore as FrameLayout).addView(offsetRow()) }
+    }
+
+    /**
+     * بطاقة «البدء»: صورة الحلقة تملأها بحواف 10، وبالنص دائرة 60 بمثلث تشغيل، وبلا كتابة. الدائرة بلون القسم حين
+     * يجهز فيديوك، وقبل ذلك خافتة والصورة تخفت معها.
+     */
+    private fun paintStartCard(card: FrameLayout, canStart: Boolean) {
+        card.removeAllViews()
+        val radius = context.dp(10).toFloat()
+        card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF)
+        card.clipToOutline = true
+        card.contentDescription = "ابدأ للجميع"
+        launch.episodeImage?.let { url ->
+            val thumb = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                if (!canStart) { alpha = 0.6f; colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.35f) }) }
+            }
+            images.load(url, context.dp(480)) { bmp -> if (bmp != null) thumb.setImageBitmap(bmp) }
+            card.addView(thumb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            // تعتيم خفيف يثبّت وضوح الدائرة على أي صورة (فاتحة أو داكنة)
+            card.addView(View(context).apply { setBackgroundColor(if (canStart) 0x2E000000 else 0x4D000000) },
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        val dot = FrameLayout(context).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(if (canStart) accent else 0x8C000000.toInt()) }
+            elevation = if (canStart) context.dp(4).toFloat() else 0f
+        }
+        val glyph = context.dp(28)
+        dot.addView(ImageView(context).apply {
+            setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.PLAY, if (canStart) com.vantara.anime.player.Tone.ON_ACCENT else 0xBFFFFFFF.toInt()))
+            // التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر
+            // الفرق (~2.3% من حجمه) لا أكثر: الإزاحة السابقة (1dp) كانت تضع مركز ثقله أبعد من مركز الدائرة
+            translationX = glyph * 0.023f
+        }, FrameLayout.LayoutParams(glyph, glyph, Gravity.CENTER))
+        val dotSize = context.dp(60)
+        card.addView(dot, FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER))
+        // التقييم بمصدره والمدة: سطر صغير أسفل البطاقة نفسها (لا تحت عنوان الحلقة). لا يظهر ما لا نعرفه ولا يُخترع مصدر.
+        val source = launch.ratingSource?.takeIf { it.isNotBlank() }
+        val ratingText = launch.rating?.takeIf { it.isNotBlank() }?.let { r -> "\u2066★ " + r + (if (source != null) " " + source else "") + "\u2069" }
+        val facts = listOfNotNull(ratingText, launch.duration?.takeIf { it.isNotBlank() })
+        if (facts.isNotEmpty()) {
+            card.addView(View(context).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0x99000000.toInt(), 0x00000000)) },
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(56), Gravity.BOTTOM))
+            card.addView(context.label(facts.joinToString("  ·  "), 12.5f, 0xEBFFFFFF.toInt(), bold = true).apply {
+                maxLines = 1; setShadowLayer(context.dp(4).toFloat(), 0f, 0f, 0xB3000000.toInt())
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+                marginStart = context.dp(14); bottomMargin = context.dp(10)
+            })
+        }
+        // أول بدء: عدّ 3-2-1 مشترك عند الجميع
+        card.setOnClickListener { pressStart() }
     }
 
     companion object {
@@ -898,5 +1231,8 @@ class TogetherPlayer(
         const val BACK_BUFFER_MS = 40_000L
         /** حد ديلاي الفيديو الشخصي: دقيقتان. */
         const val OFFSET_LIMIT_MS = 120_000L
+        /** مراحل التجهيز (نفس عتبات الويب LOBBY_STEPS): اتصال، بيانات الحلقة، أول قطعة، تخزين، أول إطار. */
+        val STEPS = floatArrayOf(0.06f, 0.16f, 0.4f, 0.7f, 1f)
+        val STEP_NAMES = listOf("اتصال", "بيانات الحلقة", "أول قطعة", "تخزين", "أول إطار")
     }
 }

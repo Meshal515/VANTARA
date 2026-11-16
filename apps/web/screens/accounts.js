@@ -77,7 +77,13 @@ function networkFailure(error) {
   return error?.stage === 'session_transport' || error?.name === 'AbortError' || error?.name === 'TimeoutError';
 }
 
-export async function screenAccounts({ sync, mount, onSignedIn }) {
+/** فشل الوصول نفسه (لا نت، أو الخادم لا يرد): ليس ردًّا من الخادم برفض. */
+export function unreachable(error, online = typeof navigator === 'undefined' ? true : navigator.onLine !== false) {
+  if (!online) return true;
+  return !/^http_\d+$/.test(String(error?.message ?? ''));
+}
+
+export async function screenAccounts({ sync, mount, onSignedIn, onLocal = null }) {
   const gate = el('main', 'gate');
   const backdrop = el('div', 'gate__backdrop');
   const canvas = el('canvas', 'gate__canvas');
@@ -119,9 +125,21 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
   let accounts = [];
   try {
     accounts = await sync.accounts();
-  } catch {
+  } catch (error) {
+    // بلا إنترنت: الحسابات في الخادم، لكن ما على الجهاز (التحميلات) لا يحتاجه. ندخل إليه مباشرة
+    // بدل طريق مسدود؛ والعودة لاختيار الحساب حين يرجع الاتصال.
+    if (onLocal && unreachable(error)) {
+      void onLocal();
+      return () => {};
+    }
+    hint.hidden = true;
     message.classList.add('gate__message--error');
     message.textContent = 'تعذّر الوصول إلى الخادم. تحقّق من الاتصال.';
+    if (onLocal) {
+      enter.innerHTML = '<span>على جهازي</span>';
+      enter.setAttribute('aria-label', 'افتح ما على جهازك من تحميلات');
+      enter.addEventListener('click', () => void onLocal(), { once: true });
+    } else enter.hidden = true;
     return () => {};
   }
   if (accounts.length === 0) {
@@ -289,7 +307,9 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
   function measure() {
     const first = faces[0];
     if (!first) return;
-    width = first.getBoundingClientRect().width || 150;
+    // عرض التخطيط لا المرسوم: getBoundingClientRect يشمل تصغير البطاقة ودورانها، فكانت المسافة
+    // تتبع أي حساب يقع أولًا (قريبة مرة وبعيدة مرة)
+    width = first.offsetWidth || 150;
     paint();
   }
 
@@ -382,6 +402,10 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
       return askPin(account);
     }
     message.classList.add('gate__message--error');
+    if (error?.code === 'account_suspended') {
+      message.textContent = 'هذا الحساب موقوف من المالك. كلّمه يرجّعه.';
+      return;
+    }
     message.textContent = storageFailure(error)
       ? 'تعذّر حفظ الدخول في التخزين المحلي. بياناتك محفوظة؛ لا تمسح بيانات التطبيق.'
       : networkFailure(error)
@@ -409,6 +433,19 @@ export async function screenAccounts({ sync, mount, onSignedIn }) {
           if (storageFailure(error)) return { error: 'other', message: 'تعذّر حفظ الدخول في التخزين المحلي. بياناتك محفوظة.' };
           if (networkFailure(error)) return { error: 'network' };
           // جهاز غير معتمد أو حساب حُذف: اللوحة تُغلق والبوابة تشرح
+          deferred = error;
+          return { ok: true };
+        }
+      },
+      // نسيت الرقم: مفتاح استعادة من المالك يدخل مرة ويُزيل الـPIN، فيضع صاحبه رقمًا جديدًا
+      forgot: async (key) => {
+        try {
+          signed = await sync.signIn(account.userId, { resetKey: key });
+          return { ok: true };
+        } catch (error) {
+          if (error?.code === 'reset_key_wrong') return { message: 'المفتاح غير صحيح أو انتهى أو استُعمل' };
+          if (error?.code === 'account_suspended') return { message: 'هذا الحساب موقوف. كلّم المالك' };
+          if (networkFailure(error)) return { message: 'ما فيه اتصال. حاول مرة ثانية' };
           deferred = error;
           return { ok: true };
         }

@@ -9,7 +9,7 @@
  *
  * الآن تُحمَّل الإضافات مرة هنا، ويُتحقق من SHA-256 كل ملف مقابل
  * `GeneratedSources.kt` و`FillerSources.kt` (مصدرا البصمات الوحيدان)، وتُكتب في
- * `android/app/src/main/assets/extensions/<package>.apk`. التطبيق يقرأ منها أولًا،
+ * `android/app/src/release/assets/extensions/<package>.apk`. التطبيق يقرأ منها أولًا،
  * والتنزيل يبقى احتياطًا لا طريقًا.
  */
 
@@ -23,7 +23,7 @@ const SOURCES = [
   // الإضافات الإنجليزية المستقلة (تكملة)
   join(ROOT, 'android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt'),
 ];
-const OUT = join(ROOT, 'android/app/src/main/assets/extensions');
+const OUT = join(ROOT, 'android/app/src/release/assets/extensions');
 
 export function parseSpecs(kotlin) {
   const specs = [];

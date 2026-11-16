@@ -1,3 +1,4 @@
+import { isRemovedAny } from './removed-works.js';
 /**
  * بيانات أعمال VANTARA CINEMA: Cinemeta (قاعدة ستريمو المفتوحة) للبحث والقوائم
  * والمواسم والحلقات، بلا مفتاح ولا حساب. القصة تُعرَّب في الخادم
@@ -44,6 +45,8 @@ export function seasonsOf(videos = []) {
       title: v.name || v.title || null,
       overview: v.overview || v.description || null,
       thumb: v.thumbnail || null,
+      // لقطة metahub الأصلية 1920×1080 (المصدر نفسه بلا تصغير)، و`thumb` 780 بديلها
+      thumbHd: typeof v.thumbnail === 'string' && /^https:\/\/episodes\.metahub\.space\/.+\/w\d+\.jpg$/.test(v.thumbnail) ? v.thumbnail.replace(/\/w\d+\.jpg$/, '/original.jpg') : null,
       rating: Number.parseFloat(v.rating) > 0 ? Number.parseFloat(v.rating) : null,
       // بعض أعمال Cinemeta (Besstydniki) تعطي firstAired بدل released
       released: v.released || v.firstAired ? Date.parse(v.released || v.firstAired) || null : null,
@@ -54,19 +57,49 @@ export function seasonsOf(videos = []) {
     .map(([n, eps]) => ({ n, episodes: eps.sort((a, b) => a.n - b.n) }));
 }
 
+/**
+ * ملصقات IMDb (m.media-amazon.com) تصل من بحث Cinemeta بمقاس 250px (`._V1_SX250.jpg`) فتغبش على الشاشة.
+ * المقاس جزء من الرابط نفسه: نطلب 780px، أوضح بثلاث مرات بنفس الصورة. وmetahub الصغير (240px) إلى المتوسط.
+ */
+export function sharpArt(url, width = 780) {
+  if (typeof url !== 'string' || !url) return url ?? null;
+  if (/m\.media-amazon\.com\/images\//.test(url)) return url.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, `._V1_SX${width}.$1`);
+  return url.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/');
+}
+
+/**
+ * نوع العمل. Cinemeta يردّ على `/meta/movie/<مسلسل>` بنوع «movie» (Cyberpunk: Edgerunners ظهر فيلمًا)، لكن
+ * `slug` يبقى «series/…»: هذا الاتجاه وحده مُثبت. أما «movie/…» فليس حكمًا (Game of Thrones له بذرة فيلم
+ * بـslug «movie/…» بلا حلقات).
+ */
+export function kindOf(m) {
+  if (String(m?.slug ?? '').startsWith('series/')) return 'series';
+  return m?.type === 'series' ? 'series' : 'movie';
+}
+
+/** حلقات العمل نفسه في رد «مسلسل» (videos بمعرّف tt…:موسم:حلقة). */
+const episodesOf = (m, id) => (m?.videos ?? []).filter((v) => String(v?.id ?? '').startsWith(`${id}:`)).length;
+
 /** شكل واحد للعمل في كل الواجهة. */
 export function normalize(m) {
   if (!m?.id || !/^tt\d+$/.test(String(m.imdb_id ?? m.id))) return null;
+  // عمل حذفه المالك من التطبيق: لا يظهر في أي قائمة ولا بحث ولا تفاصيل (كأنه غير موجود)
+  if (isRemovedAny([`cinema:${m.imdb_id ?? m.id}`, String(m.imdb_id ?? m.id)])) return null;
   const rating = Number.parseFloat(m.imdbRating);
+  const type = kindOf(m);
   return {
     id: String(m.imdb_id ?? m.id),
-    type: m.type === 'series' ? 'series' : 'movie',
+    type,
+    // مسلسل بشهادة slug أو حلقاته: يُصحّح بطاقة محفوظة أو ممرَّرة «فيلمًا» (الاتجاه الوحيد المثبت)
+    // مسلسل بحلقتين فأكثر للمعرّف نفسه. slug وحده ليس دليلًا: رد «النوع الخاطئ» قد يكون عملًا آخر
+    // بالرقم نفسه وslug مسلسل (Fight Club ← «NICK …» مسلسل 2002)
+    typeCertain: type === 'series' && episodesOf(m, String(m.imdb_id ?? m.id)) >= 2,
     title: m.name,
-    poster: m.poster || null,
-    background: m.background || null,
+    poster: sharpArt(m.poster) || null,
+    background: m.background ? m.background.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, '._V1_.$1') : null,
     logo: m.logo || null,
     year: year(m),
-    endYear: m.type === 'series' ? endYear(m) : null,
+    endYear: type === 'series' ? endYear(m) : null,
     rating: Number.isFinite(rating) && rating > 0 ? rating : null,
     genres: m.genres ?? m.genre ?? [],
     description: m.description || null,
@@ -103,6 +136,60 @@ export async function detail(type, id, { fetchImpl } = {}) {
   return normalize(data.meta);
 }
 
+const plainName = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '');
+/** الاسم نفسه (أو أحدهما يحوي الآخر، كـ«Cyberpunk: Edgerunners» و«Edgerunners»). */
+function sameWorkName(a, b) {
+  const x = plainName(a);
+  const y = plainName(b);
+  if (!x || !y) return false;
+  return x === y || (Math.min(x.length, y.length) >= 5 && (x.includes(y) || y.includes(x)));
+}
+
+/**
+ * هوية العمل من رقم IMDb، بالنوعين معًا دائمًا. Cinemeta يرد على النوع الخاطئ بعمل **آخر** يحمل
+ * الرقم نفسه (والصور والتقييم من metahub بالرقم، فيبدو صحيحًا):
+ *   - `/meta/series/tt0137523` (Fight Club) ← «NICK …» مسلسل 2002 بحلقة واحدة وslug مسلسل.
+ *   - `/meta/movie/tt12590266` (Cyberpunk: Edgerunners) ← «I See Ice» فيلم كوميدي 1938.
+ *   - `/meta/movie/<مسلسل>` أحيانًا المسلسل نفسه موسومًا فيلمًا (slug series/) أو بذرة بلا حلقات.
+ * الحكم بالترتيب:
+ *   1. الاسم المعروف (من البطاقة/السجل) يطابق أحد الردين وحده ⇒ هو، مؤكد.
+ *   2. رد «مسلسل» بحلقتين فأكثر للرقم نفسه ⇒ مسلسل.
+ *   3. رد «فيلم» بـslug فيلم ⇒ فيلم. وslug مسلسل في رد «فيلم» ⇒ المسلسل نفسه.
+ * `{ work, certain }`: certain=false إن فشل طلب أو بقي الحكم ظنيًا، فلا يُحفظ النوع.
+ * `hint` نوع البطاقة: لا يحكم، يرجّح فقط حين يتعادل كل شيء.
+ */
+export async function resolveWork(id, { title = null, hint = null, fetchImpl } = {}) {
+  const ask = (type) => getJson(`${CINEMETA}/meta/${type}/${id}.json`, fetchImpl).then((d) => ({ meta: d?.meta ?? null }), () => ({ failed: true }));
+  const [movie, series] = await Promise.all([ask('movie'), ask('series')]);
+  const ours = (m) => (m && String(m.imdb_id ?? m.id) === String(id) ? m : null);
+  const mv = ours(movie.meta);
+  const sr = ours(series.meta);
+  const eps = episodesOf(sr, id);
+  const both = !movie.failed && !series.failed;
+  const pick = (meta, isSeries, certain) => {
+    const work = normalize(meta ? { ...meta, type: isSeries ? 'series' : 'movie' } : null);
+    if (work) work.typeCertain = Boolean(certain);
+    return { work, certain: Boolean(work && certain) };
+  };
+  if (title) {
+    const m = sameWorkName(mv?.name, title);
+    const s = sameWorkName(sr?.name, title);
+    if (m !== s) {
+      // فيلم مطابق بالاسم لكنه المسلسل نفسه موسومًا (slug series/) ⇒ مسلسل بحلقاته إن وُجدت
+      if (m && String(mv.slug ?? '').startsWith('series/')) return pick(eps ? sr : mv, true, true);
+      return pick(m ? mv : sr, s, true);
+    }
+  }
+  if (eps >= 2) return pick(sr, true, both || !series.failed);
+  if (mv && String(mv.slug ?? '').startsWith('series/')) return pick(eps ? sr : mv, true, both);
+  if (mv) return pick(mv, false, both && eps < 2 && (!hint || hint === 'movie' || !sr));
+  if (sr) return pick(sr, true, false);
+  return { work: null, certain: false };
+}
+
+/** توافق مع المستدعين القدامى: الحكم نفسه بلا اسم. */
+export const detailAnyType = (id, opts = {}) => resolveWork(id, opts);
+
 /** أسماء الأعمال تبقى كما هي (الإنجليزية)؛ القصة وحدها تُعرَّب. */
 export const displayTitle = (m) => m?.title || '';
 
@@ -120,8 +207,10 @@ export function castPhotos(imdb, { fetchImpl = globalThis.fetch } = {}) {
   if (!castCache.has(imdb)) {
     const query = `SELECT ?name ?img WHERE { ?w wdt:P345 "${imdb}" . ?w wdt:P161 ?p . ?p wdt:P18 ?img . ?p rdfs:label ?name FILTER(lang(?name)="en") }`;
     castCache.set(imdb, fetchImpl(`https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(query)}`, { headers: { Accept: 'application/sparql-results+json' } })
-      .then((r) => (r.ok ? r.json() : null))
+      // 429/503 فشل عابر لا «لا صور» (#311 D-012): كان null يُحفظ قائمة فارغة لا تُطلب ثانية طوال الجلسة
+      .then((r) => { if (!r.ok) throw new Error(`wikidata_${r.status}`); return r.json(); })
       .then((d) => {
+        if (!d || typeof d !== 'object') throw new Error('wikidata_body');
         const out = new Map();
         for (const b of d?.results?.bindings ?? []) {
           const key = normName(b.name?.value);

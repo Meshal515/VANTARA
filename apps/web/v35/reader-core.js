@@ -32,12 +32,40 @@ export function neighbors(sequence, row) {
   return { index: i, prev: sequence[i - 1] ?? null, next: sequence[i + 1] ?? null };
 }
 
-/** اسم الفصل للعرض: اسمه من المصدر، أو رقمه. */
+const NUM = '\\d+(?:[.,]\\d+)?';
+const TOKENS = new RegExp(`(?:\\b(?:vol(?:ume)?|v)\\.?\\s*${NUM}|(?:\\b(?:chapter|chap|ch|episode|ep)\\.?|(?:ال)?فصل|(?:ال)?حلقة|المجلد|مجلد)\\s*[:#]?\\s*${NUM})`, 'gi');
+
+/**
+ * عنوان الفصل الحقيقي من اسمه عند المصدر، بلا رموز المجلد والرقم: «Vol.1 Ch.2 - 2» ⇒ لا عنوان (الرقم نفسه)،
+ * «Chapter 137 - Anger and Grief» ⇒ «Anger and Grief»، «الفصل 201» ⇒ لا عنوان. null إن لم يبقَ عنوان.
+ */
+export function chapterTitle(row) {
+  const name = String(row?.chapter?.name ?? '').trim();
+  if (!name) return null;
+  const n0 = Number.isFinite(row?.number) && row.number >= 0 ? String(row.number) : null;
+  // الرقم نفسه منفردًا داخل الاسم («Soma 315.3 Dessert») ورقم مجموعة الترجمة («Group 2») ليسا عنوانًا
+  const bare = n0 ? new RegExp(`(^|\\s)0*${n0.replace('.', '\\.')}(?=\\s|$|[-–—:|])`, 'g') : null;
+  let text = name.replace(/\bgroup\s*\d+\b/gi, ' ').replace(TOKENS, ' ');
+  if (bare) text = text.replace(bare, ' ');
+  const rest = text.replace(/^[\s\-–—:|·.,#]+|[\s\-–—:|·.,#]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+  if (!rest) return null;
+  const n = Number.isFinite(row?.number) && row.number >= 0 ? row.number : null;
+  if (n != null && Number(rest.replace(',', '.')) === n) return null;
+  return rest;
+}
+
+/**
+ * اسم الفصل للعرض: «الفصل 2» من رقمه دائمًا حين يُعرف، ثم عنوانه الحقيقي إن وُجد («الفصل 137 · Anger and Grief»).
+ * كان يعرض اسم المصدر الخام كما هو («Vol.1 Ch.2 - 2»). بلا رقم: اسم المصدر كما هو.
+ */
 export function chapterLabel(row) {
   if (!row) return '';
+  if (Number.isFinite(row.number) && row.number >= 0) {
+    const title = chapterTitle(row);
+    return title ? `الفصل ${row.number} · ${title}` : `الفصل ${row.number}`;
+  }
   const name = row.chapter?.name?.trim();
-  if (name) return name;
-  return Number.isFinite(row.number) && row.number >= 0 ? `الفصل ${row.number}` : 'فصل';
+  return name || 'فصل';
 }
 
 /** رقم الفصل وحده («113») إن وُجد، وإلا اسمه: نهاية الفصل تعرضه كبيرًا. */
@@ -163,6 +191,14 @@ export function createScheduler({ run, concurrency = 3, backgroundSlots = 1 }) {
         job.priority = priority;
         pump();
       }
+    },
+    /**
+     * ينسى نتيجة منتهية: رابط صورة نجح جلبه ثم فشل عرضه (ملف كاش مسحه النظام، Blob حُرِّر، ملف مبتور)
+     * كان يبقى محفوظًا فتعيد كل محاولة الرابط الميت نفسه. ما زال يعمل لا يُلمس.
+     */
+    forget(key) {
+      const job = jobs.get(key);
+      if (job?.done) jobs.delete(key);
     },
     has: (key) => jobs.has(key),
     isDone: (key) => jobs.get(key)?.done === true,

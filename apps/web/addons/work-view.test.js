@@ -1,5 +1,17 @@
 import { expect, it } from "vitest";
 import { sourceWorkModel } from "./work-view.js";
+it('restores a selected CloudStream season without changing the actual provider work URL',async()=>{
+ const {restoreSourceWork}=await import('./work-view.js');
+ const sourceId='addon|cs3|cs3_123|source',url='https://source.example/work';
+ const addon={key:`core|${sourceId}`,sourceId,bundled:true,enabled:true,contentTypes:['anime']};
+ const one=sourceWorkModel({url,title:'Work',season:1,requestedSeason:1},{addon});
+ const two=sourceWorkModel({url,title:'Work',season:2,requestedSeason:2},{addon});
+ expect(one.id).not.toBe(two.id);
+ let requested;
+ const restored=await restoreSourceWork(`anime:${two.id}`,{addons:{registry:{list:()=>[addon]},adapter:()=>({}),sources:{source:()=>({episodes:async item=>{requested=item;return [{number:1}];}})}}});
+ expect(requested).toMatchObject({url,season:2,requestedSeason:2});
+ expect(restored.id).toBe(two.id);expect(restored._sourceCopy.requestedSeason).toBe(2);
+});
 it("makes a source-only manga copy with its memo instead of title merging", () => {
   const w = sourceWorkModel(
     { url: "chapter-work", title: "Same title", memo: '{"mangaPath":"a"}' },

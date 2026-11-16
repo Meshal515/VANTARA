@@ -33,6 +33,9 @@ export const NOTIFICATION_KINDS = [
   'REACTION',
   'FRIEND_ACTIVITY',
   'SYSTEM',
+  'MESSAGE',
+  'NEW_UNIT',
+  'TOGETHER',
 ] as const;
 
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
