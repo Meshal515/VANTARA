@@ -19,6 +19,9 @@ export const NOTIFICATION_LABELS = {
   REACTION: 'التفاعلات',
   FRIEND_ACTIVITY: 'نشاط الأصدقاء',
   SYSTEM: 'أحداث مهمة',
+  MESSAGE: 'رسائل المجلس',
+  NEW_UNIT: 'جديد المفضلة',
+  TOGETHER: 'دعوات المشاهدة',
 };
 
 export const NOTIFICATION_KINDS = Object.keys(NOTIFICATION_LABELS);
