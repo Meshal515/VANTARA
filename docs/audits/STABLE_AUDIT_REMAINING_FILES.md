@@ -3,7 +3,7 @@
 > ملحق لـ[تقرير الفحص](STABLE_AUDIT_2026-11-16.md). كل ملف في المستودع لم يُقرأ بعد سطرًا سطرًا، مرتبًا حسب الأهمية، وداخل كل قسم من الأكبر إلى الأصغر. لم يُستثنَ أي ملف مهما صغر.
 
 - **المقروء كاملًا حتى الآن:** الإضافات وCloudStream والتورنت (الكود الإنتاجي)، ومعظم التحميلات، ونصف ترجمة المانجا.
-- **المتبقي:** 950 ملفًا، 190,191 سطرًا.
+- **المتبقي:** 927 ملفًا، 184,663 سطرًا (بعد قسم 19: قُرئت ملفات المشاهدة والقراءة معًا كاملة، 23 ملفًا، 5,528 سطرًا، وحُذفت من القائمة).
   - منها كود التطبيق والخادم: 651 ملفًا، 148,647 سطرًا.
   - أدوات التطوير: 121 ملفًا، 12,456 سطرًا.
   - خارج الإنتاج (وثائق وتجارب): 178 ملفًا، 29,088 سطرًا.
@@ -477,30 +477,18 @@
 | الأسطر | الملف |
 | ---: | --- |
 | 1,355 | `apps/web/v35/social.css` |
-| 1,260 | `android/app/src/main/kotlin/com/vantara/anime/player/together/TogetherPlayer.kt` |
 | 1,198 | `apps/web/v35/profile.css` |
 | 1,135 | `apps/web/v35/majlis-chat.js` |
 | 806 | `apps/web/v35/majlis.css` |
 | 766 | `apps/web/v35/majlis.js` |
-| 708 | `apps/web/v35/together.js` |
 | 628 | `apps/web/v35/profile.js` |
 | 576 | `apps/web/v35/friends.js` |
 | 524 | `apps/web/v35/profile-editor.js` |
-| 522 | `services/sync-worker/src/together-core.ts` |
-| 355 | `apps/web/lib/together/lobby.js` |
-| 312 | `android/app/src/main/kotlin/com/vantara/anime/player/together/TogetherClient.kt` |
 | 309 | `services/sync-worker/src/rafiq-profile.ts` |
-| 289 | `apps/web/lib/together/room.js` |
-| 287 | `apps/web/v35/together.css` |
-| 279 | `apps/web/lib/together/art.js` |
-| 263 | `services/sync-worker/src/together.ts` |
 | 197 | `apps/web/v35/media-encode.js` |
-| 188 | `apps/web/lib/together/sync.js` |
 | 180 | `apps/web/v35/voice.js` |
-| 180 | `apps/web/pwa/player/together-player.js` |
 | 173 | `apps/web/v35/profile-appearance.js` |
 | 169 | `apps/web/v35/social-kit.js` |
-| 163 | `android/app/src/main/kotlin/com/vantara/anime/player/together/TogetherSync.kt` |
 | 155 | `apps/web/v35/share.js` |
 | 153 | `services/sync-worker/tools/together-e2e.mjs` |
 | 118 | `apps/web/lib/follow-time.js` |
@@ -508,29 +496,20 @@
 | 99 | `apps/web/v35/profile-color-picker.js` |
 | 86 | `apps/web/v35/profile-contrast.js` |
 | 81 | `services/sync-worker/migrations/0008_social_receipts_and_recommendation_states.sql` |
-| 81 | `android/app/src/main/kotlin/com/vantara/anime/player/together/TogetherImages.kt` |
 | 79 | `packages/domain/src/social.ts` |
 | 75 | `packages/domain/src/majlis.ts` |
-| 71 | `android/app/src/main/kotlin/com/vantara/anime/player/together/TogetherStart.kt` |
-| 70 | `packages/domain/src/read-together.ts` |
 | 69 | `apps/web/lib/celebrate.js` |
 | 59 | `services/sync-worker/migrations/0031_majlis_chat.sql` |
-| 53 | `apps/web/lib/together/follow.js` |
 | 51 | `apps/web/v35/profile-color.js` |
-| 24 | `apps/web/lib/together/offset-controls.js` |
 | 23 | `apps/web/v35/emoji.js` |
 | 22 | `services/sync-worker/migrations/0015_majlis_visibility.sql` |
-| 22 | `android/app/src/main/kotlin/com/vantara/anime/player/together/LobbyDim.kt` |
 | 21 | `services/sync-worker/migrations/0017_majlis_reactions.sql` |
-| 20 | `apps/web/v35/friends-reading.js` |
 | 17 | `services/sync-worker/migrations/0020_majlis_receipts.sql` |
 | 17 | `packages/db/migrations/0006_drop_retired_social.sql` |
 | 16 | `apps/web/v35/profile-top.js` |
-| 15 | `services/sync-worker/migrations/0045_together_invites.sql` |
 | 10 | `services/sync-worker/migrations/0036_majlis_message_receipts.sql` |
 | 6 | `services/sync-worker/migrations/0029_majlis_unsend.sql` |
 | 5 | `services/sync-worker/migrations/0038_profile_colors.sql` |
-| 2 | `apps/web/pwa/player/together-lobby.js` |
 
 ## 10. رفيق — 2 ملف، 1,749 سطر
 
@@ -646,10 +625,8 @@
 | 314 | `apps/desktop/src/torrent-replay-cache.mjs` |
 | 279 | `apps/web/desktop/player.js` |
 | 203 | `apps/desktop/src/torrent-window.mjs` |
-| 195 | `apps/web/desktop/lobby.js` |
 | 183 | `apps/web/desktop/update-check.js` |
 | 178 | `apps/desktop/src/net-unblock.mjs` |
-| 169 | `apps/web/desktop/together-player.js` |
 | 138 | `apps/web/desktop/default-addons.js` |
 | 108 | `apps/web/desktop/boot.js` |
 | 108 | `apps/desktop/native-host/VideoHost.cs` |
