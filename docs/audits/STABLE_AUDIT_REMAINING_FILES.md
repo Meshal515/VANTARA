@@ -2,43 +2,34 @@
 
 > ملحق لـ[تقرير الفحص](STABLE_AUDIT_2026-11-16.md). كل ملف في المستودع لم يُقرأ بعد سطرًا سطرًا، مرتبًا حسب الأهمية، وداخل كل قسم من الأكبر إلى الأصغر. لم يُستثنَ أي ملف مهما صغر.
 
-- **المقروء كاملًا حتى الآن:** الإضافات وCloudStream والتورنت (الكود الإنتاجي)، ومعظم التحميلات، ونصف ترجمة المانجا.
-- **المتبقي:** 919 ملفًا، 181,573 سطرًا (بعد قسم 19: قُرئت ملفات المشاهدة والقراءة معًا كاملة، 23 ملفًا، 5,528 سطرًا، وحُذفت من القائمة. وبعد قسم 20: ملفات التحميلات الباقية، 8 ملفات، 3,090 سطرًا).
-  - منها كود التطبيق والخادم: 651 ملفًا، 148,647 سطرًا.
+- **المقروء كاملًا حتى الآن:** الإضافات وCloudStream والتورنت (الكود الإنتاجي)، والتحميلات، والمشاهدة والقراءة معًا، ومعظم محرك الأنمي وطبقة Cloudflare، ومشغّل الـAPK ومشغّل الويب والقارئ، ونصف ترجمة المانجا.
+- **المتبقي:** 836 ملفًا، 163,588 سطرًا (بعد قسم 25: حُذف من القوائم كل ملف قُرئ كاملًا في الأقسام 19 إلى 25، ومنها ملفات المشغّل والقارئ ومحرك الأنمي وطبقة Cloudflare والتحقق).
+  - منها كود التطبيق والخادم: 537 ملفًا، 122,044 سطرًا.
   - أدوات التطوير: 121 ملفًا، 12,456 سطرًا.
   - خارج الإنتاج (وثائق وتجارب): 178 ملفًا، 29,088 سطرًا.
 - **ترجمة المانجا مؤجلة بأمر المالك.** عند العودة لها يكون التركيز على التبييض، والنصوص المتروكة بلا ترجمة، والسرعة.
 - **أولوية كل قسم (توضيح المالك):** تناقضات تجربة المستخدم بين الأقسام قبل غيرها: ميزة أو قسم موجود في الأنمي وغائب في السينما أو المانجا أو العكس، وخروج أي صفحة عن النمط الموحد، والزر نفسه يتصرف بشكل مختلف بين الأقسام، وحالة تُعرض بخلاف الحقيقة. يُستأنف الفحص يوم الأربعاء.
 
-## 1. التحميلات (الباقي) — 8 ملف، 3,090 سطر
+## 1. التحميلات (الباقي) — اكتملت (قسما 18 و20)
 
 | الأسطر | الملف |
 | ---: | --- |
 
-## 2. الأنمي — 37 ملف، 14,750 سطر
+## 2. الأنمي — 23 ملف، 11,347 سطر
 
 | الأسطر | الملف |
 | ---: | --- |
 | 4,050 | `apps/web/v35/anime.css` |
 | 3,359 | `apps/web/v35/anime.js` |
-| 1,090 | `android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt` |
 | 789 | `apps/web/lib/anime-engine.js` |
-| 764 | `android/app/src/main/kotlin/com/vantara/anime/bridge/AnimeEnginePlugin.kt` |
 | 612 | `apps/web/v35/anime-discover.js` |
-| 507 | `android/app/src/main/kotlin/com/vantara/anime/adapters/Adapters.kt` |
 | 482 | `apps/web/v35/anime-today.js` |
 | 475 | `apps/web/pwa/bridges/anime.js` |
 | 401 | `apps/web/lib/anime-meta.js` |
 | 204 | `android/app/src/main/kotlin/com/vantara/anime/registry/Manifest.kt` |
 | 187 | `android/app/src/main/kotlin/com/vantara/anime/registry/UserAnime.kt` |
-| 180 | `android/app/src/main/kotlin/com/vantara/anime/health/Health.kt` |
-| 164 | `android/app/src/main/kotlin/com/vantara/anime/catalog/CatalogCrawler.kt` |
-| 156 | `android/app/src/main/kotlin/com/vantara/anime/loader/AnimeExtensionLoader.kt` |
-| 141 | `android/app/src/main/kotlin/com/vantara/anime/episodes/EpisodeResolver.kt` |
 | 139 | `apps/web/v35/anime-episodes.js` |
-| 126 | `android/app/src/main/kotlin/com/vantara/anime/matching/WorkMatcher.kt` |
 | 116 | `apps/web/lib/anime-art.js` |
-| 90 | `android/app/src/main/kotlin/com/vantara/anime/episodes/EpisodeAlign.kt` |
 | 81 | `apps/web/lib/anime-imdb.js` |
 | 81 | `apps/web/lib/anime-genre-art.js` |
 | 72 | `android/app/src/main/kotlin/com/vantara/anime/adapters/Trace.kt` |
@@ -46,12 +37,7 @@
 | 56 | `android/app/src/main/kotlin/com/vantara/anime/SearchPages.kt` |
 | 54 | `apps/web/lib/episode-align.js` |
 | 50 | `apps/web/v35/anime-episode-controls.js` |
-| 50 | `android/app/src/main/kotlin/com/vantara/anime/bridge/AniyomiCandidateMedia.kt` |
-| 44 | `android/app/src/main/kotlin/com/vantara/anime/bridge/AniyomiUpdateGate.kt` |
-| 39 | `android/app/src/main/kotlin/com/vantara/anime/adapters/SiteCards.kt` |
 | 27 | `apps/web/lib/anime-title.js` |
-| 27 | `android/app/src/main/kotlin/com/vantara/anime/SearchSlots.kt` |
-| 25 | `android/app/src/main/kotlin/com/vantara/anime/loader/AnimeVersionPolicy.kt` |
 | 21 | `android/app/src/main/kotlin/com/vantara/anime/DiscoveryFailure.kt` |
 | 15 | `android/app/src/main/kotlin/com/vantara/anime/RuntimeSourceBinding.kt` |
 | 13 | `apps/web/v35/anime-episodes.css` |
@@ -114,73 +100,29 @@
 | 26 | `apps/web/v35/image-loading.js` |
 | 14 | `apps/web/v35/card-reconcile.js` |
 
-## 5. المشغّل والبث — 55 ملف، 12,574 سطر
+## 5. المشغّل والبث — 12 ملف، 2,805 سطر
 
 | الأسطر | الملف |
 | ---: | --- |
-| 2,767 | `android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt` |
-| 1,702 | `apps/web/pwa/player/player.js` |
 | 1,255 | `apps/web/pwa/player/player.css` |
-| 561 | `android/app/src/main/kotlin/com/vantara/anime/player/Ui.kt` |
-| 402 | `android/app/src/main/kotlin/com/vantara/anime/hosts/Embeds.kt` |
-| 361 | `android/app/src/main/kotlin/com/vantara/anime/stream/Prepared.kt` |
-| 298 | `android/app/src/main/kotlin/com/vantara/anime/player/SeekPreview.kt` |
-| 298 | `android/app/src/main/kotlin/com/vantara/anime/player/ClipEditor.kt` |
 | 269 | `apps/web/pwa/player/subtitles.js` |
-| 256 | `android/app/src/main/kotlin/com/vantara/anime/stream/StreamProbe.kt` |
-| 255 | `android/app/src/main/kotlin/com/vantara/anime/net/AnimeHostRouter.kt` |
-| 223 | `android/app/src/main/kotlin/com/vantara/anime/stream/Streams.kt` |
-| 213 | `android/app/src/main/kotlin/com/vantara/anime/player/ClipExporter.kt` |
-| 213 | `android/app/src/main/kotlin/com/vantara/anime/net/Domains.kt` |
 | 207 | `android/app/src/main/kotlin/com/vantara/anime/player/PlaybackDiagnostics.kt` |
 | 197 | `apps/web/v35/episode-marks.js` |
-| 174 | `android/app/src/main/kotlin/com/vantara/anime/player/CandidateMediaSources.kt` |
 | 163 | `apps/web/v35/frame-viewer.js` |
-| 158 | `apps/web/lib/skip-times.js` |
-| 156 | `android/app/src/main/kotlin/com/vantara/anime/hosts/WebViewSniffer.kt` |
 | 150 | `android/app/src/main/kotlin/com/vantara/anime/player/LoadingStage.kt` |
-| 143 | `android/app/src/main/kotlin/com/vantara/anime/hosts/Wrappers.kt` |
-| 136 | `android/app/src/main/kotlin/com/vantara/anime/net/AnimeDns.kt` |
-| 135 | `android/app/src/main/kotlin/com/vantara/anime/player/SubtitleText.kt` |
-| 130 | `android/app/src/main/kotlin/com/vantara/anime/player/SkipRepository.kt` |
 | 121 | `apps/web/pwa/player/subtitle-adjustments.js` |
 | 116 | `android/app/src/main/kotlin/com/vantara/anime/player/ClipTimeline.kt` |
 | 106 | `apps/web/lib/frame.js` |
-| 91 | `android/app/src/main/kotlin/com/vantara/anime/player/TimeBar.kt` |
-| 91 | `android/app/src/main/kotlin/com/vantara/anime/net/SniFragment.kt` |
-| 89 | `android/app/src/main/kotlin/com/vantara/anime/net/RateGate.kt` |
-| 88 | `android/app/src/main/kotlin/com/vantara/anime/player/ClipMath.kt` |
 | 84 | `apps/web/pwa/sources/hls-variants.js` |
 | 81 | `android/app/src/main/kotlin/com/vantara/anime/stream/Routes.kt` |
-| 81 | `android/app/src/main/kotlin/com/vantara/anime/player/IntroSkip.kt` |
-| 80 | `android/app/src/main/kotlin/com/vantara/anime/player/NetStats.kt` |
-| 78 | `android/app/src/main/kotlin/com/vantara/anime/hosts/Generic.kt` |
-| 72 | `android/app/src/main/kotlin/com/vantara/anime/player/MediaCache.kt` |
-| 65 | `android/app/src/main/kotlin/com/vantara/anime/stream/MediaEvidenceProbe.kt` |
-| 65 | `android/app/src/main/kotlin/com/vantara/anime/player/Events.kt` |
 | 56 | `android/app/src/main/kotlin/com/vantara/anime/net/AnimeNetworkEvents.kt` |
-| 55 | `android/app/src/main/kotlin/com/vantara/anime/player/SkipLoadState.kt` |
-| 50 | `android/app/src/main/kotlin/com/vantara/anime/player/StageArt.kt` |
-| 44 | `android/app/src/main/kotlin/com/vantara/anime/player/PlaybackStartup.kt` |
-| 40 | `android/app/src/main/kotlin/com/vantara/anime/player/ExternalAudioPlan.kt` |
-| 35 | `android/app/src/main/kotlin/com/vantara/anime/player/SubtitleLabels.kt` |
-| 29 | `android/app/src/main/kotlin/com/vantara/anime/player/RouteGroups.kt` |
-| 28 | `android/app/src/main/kotlin/com/vantara/anime/player/PlaybackBuffering.kt` |
-| 27 | `android/app/src/main/kotlin/com/vantara/anime/stream/MagnetLinks.kt` |
-| 26 | `android/app/src/main/kotlin/com/vantara/anime/player/ExternalAudioFallbackPolicy.kt` |
-| 22 | `android/app/src/main/kotlin/com/vantara/anime/player/PlaybackBudgets.kt` |
-| 14 | `android/app/src/main/kotlin/com/vantara/anime/player/StartupReveal.kt` |
-| 10 | `android/app/src/main/kotlin/com/vantara/anime/player/NextEpisodeWarmup.kt` |
-| 6 | `android/app/src/main/kotlin/com/vantara/anime/player/PlaybackWork.kt` |
-| 2 | `apps/web/pwa/player/skip-times.js` |
 
-## 6. المانجا والقارئ ومصادرها — 41 ملف، 12,514 سطر
+## 6. المانجا والقارئ ومصادرها — 40 ملف، 10,505 سطر
 
 | الأسطر | الملف |
 | ---: | --- |
 | 2,205 | `apps/web/data/manga-aliases.json` |
 | 2,146 | `apps/web/v35/manga.css` |
-| 2,009 | `apps/web/v35/reader.js` |
 | 748 | `apps/web/v35/reader.css` |
 | 500 | `apps/web/pwa/sources/registry.js` |
 | 394 | `apps/web/pwa/sources/hosts.js` |
@@ -220,76 +162,51 @@
 | 13 | `android/app/src/main/kotlin/com/vantara/plugins/ChapterNumbers.kt` |
 | 11 | `apps/web/lib/reader-engine.js` |
 
-## 7. طبقة توافق إضافات Aniyomi/Tachiyomi وCloudflare — 87 ملف، 6,052 سطر
+## 7. طبقة توافق إضافات Aniyomi/Tachiyomi وCloudflare — 62 ملف، 3,248 سطر
 
 | الأسطر | الملف |
 | ---: | --- |
-| 615 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt` |
 | 307 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/online/HttpSource.kt` |
-| 285 | `android/app/src/main/kotlin/dev/vantara/spike/SourceCompatRepairs.kt` |
-| 258 | `android/app/src/main/kotlin/dev/vantara/spike/FileExtensionLoader.kt` |
-| 247 | `android/app/src/main/kotlin/com/vantara/verification/VerificationActivity.kt` |
 | 233 | `android/app/src/main/kotlin/dev/vantara/spike/DilarCryptoCompat.kt` |
 | 205 | `android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt` |
 | 203 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/online/ParsedAnimeHttpSource.kt` |
-| 197 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/BrowserVerificationInterceptor.kt` |
 | 185 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/online/AnimeHttpSource.kt` |
 | 148 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/AnimeCatalogueSource.kt` |
 | 129 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/OkHttpExtensions.kt` |
-| 127 | `android/app/src/main/kotlin/com/vantara/verification/VerificationPlugin.kt` |
-| 120 | `android/app/src/main/kotlin/com/vantara/verification/VerificationPolicy.kt` |
-| 117 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/NetworkHelper.kt` |
 | 110 | `extensions/runtime-android/cs3world/build.gradle` |
 | 107 | `extensions/runtime-core/network-policy.mjs` |
-| 97 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/RateLimitInterceptor.kt` |
 | 90 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/CatalogueSource.kt` |
 | 90 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/Video.kt` |
-| 89 | `android/app/src/main/kotlin/dev/vantara/spike/ProbeResiliencePolicy.kt` |
-| 89 | `android/app/src/main/kotlin/com/vantara/verification/VerificationTunnel.kt` |
 | 87 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/Source.kt` |
 | 83 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/AnimeSource.kt` |
 | 77 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/Requests.kt` |
 | 74 | `extensions/runtime-core/host.mjs` |
-| 74 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/HostCircuitBreaker.kt` |
 | 73 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/AnimeFilter.kt` |
 | 70 | `android/app/src/main/kotlin/dev/vantara/spike/CatalogueFilterPolicy.kt` |
-| 68 | `android/app/src/main/kotlin/dev/vantara/spike/GenreFilterPolicy.kt` |
 | 64 | `android/app/src/main/kotlin/dev/vantara/spike/CatalogueListingResolver.kt` |
-| 63 | `android/app/src/main/kotlin/dev/vantara/spike/ImagePayloadPolicy.kt` |
 | 60 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/SAnime.kt` |
 | 55 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/model/SManga.kt` |
-| 55 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/AndroidCookieJar.kt` |
 | 55 | `android/app/src/main/kotlin/dev/vantara/spike/RxAwait.kt` |
-| 47 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/HttpsUpgradeInterceptor.kt` |
 | 43 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/online/ResolvableAnimeSource.kt` |
 | 41 | `android/app/src/main/kotlin/dev/vantara/spike/BoundedPayloadReader.kt` |
-| 39 | `android/app/src/main/kotlin/com/vantara/verification/VerificationCoordinator.kt` |
-| 37 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/UncaughtExceptionInterceptor.kt` |
 | 36 | `android/app/src/main/kotlin/dev/vantara/spike/HttpStopPolicy.kt` |
 | 35 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/AnimeSourceFactory.kt` |
 | 34 | `extensions/runtime-android/harness/build.gradle` |
 | 34 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/model/SChapter.kt` |
-| 34 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/HostRouting.kt` |
 | 32 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/model/Filter.kt` |
-| 32 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/UserAgentInterceptor.kt` |
-| 32 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/SpecificHostRateLimitInterceptor.kt` |
 | 32 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/ConfigurableAnimeSource.kt` |
 | 31 | `android/app/src/main/kotlin/dev/vantara/spike/CloudflareInteractionPolicy.kt` |
 | 27 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/SEpisode.kt` |
 | 26 | `extensions/runtime-android/cloudstream/build.gradle` |
-| 25 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareRequestPolicy.kt` |
 | 23 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/model/Page.kt` |
 | 23 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/Hoster.kt` |
 | 22 | `extensions/runtime-android/settings.gradle` |
-| 22 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/WebViewActivityHolder.kt` |
 | 22 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/AnimeUpdateStrategy.kt` |
 | 20 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/SAnimeImpl.kt` |
 | 20 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/FetchType.kt` |
 | 20 | `android/app/src/main/kotlin/dev/vantara/spike/ArabicSourceSelection.kt` |
 | 19 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/util/JsoupExtensions.kt` |
 | 18 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/source/SourceFactory.kt` |
-| 18 | `android/app/src/main/kotlin/com/vantara/verification/ForegroundOwner.kt` |
-| 17 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/network/JavaScriptEngine.kt` |
 | 15 | `extensions/runtime-android/executor/build.gradle` |
 | 15 | `android/app/src/main/kotlin/eu/kanade/tachiyomi/animesource/model/SEpisodeImpl.kt` |
 | 15 | `android/app/src/main/kotlin/dev/vantara/spike/ChromeUserAgent.kt` |
@@ -464,7 +381,7 @@
 | 3 | `packages/uchiyomi/src/index.ts` |
 | 2 | `services/sync-worker/migrations/0047_source_latest_lease_token.sql` |
 
-## 9. المجلس والأصدقاء والمشاهدة معًا والملف الشخصي — 55 ملف، 14,448 سطر
+## 9. المجلس والأصدقاء والمشاهدة معًا والملف الشخصي — 34 ملف، 9,284 سطر
 
 | الأسطر | الملف |
 | ---: | --- |
@@ -606,7 +523,7 @@
 | 5 | `android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml` |
 | 3 | `android/capacitor.settings.gradle` |
 
-## 13. ويندوز — 32 ملف، 5,693 سطر
+## 13. ويندوز — 30 ملف، 5,329 سطر
 
 | الأسطر | الملف |
 | ---: | --- |
