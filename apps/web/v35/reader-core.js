@@ -301,3 +301,14 @@ export function createActiveClock(now = () => performance.now()) {
     },
   };
 }
+
+/** مهلة قائمة صفحات الفصل: بعدها يُجرَّب مصدر آخر أو يظهر «إعادة المحاولة» بدل «جارٍ فتح الفصل» للأبد. */
+export const PAGES_TIMEOUT_MS = 20_000;
+/** يرفض الوعد بعد `ms` بخطأ صريح (code: 'timeout'). الوعد الأصلي يكمل في الخلفية ولا يُستعمل. */
+export function withDeadline(promise, ms, message) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error(message), { code: 'timeout' })), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
