@@ -461,7 +461,9 @@ export function withUpdateSources(base, group) {
   }
   const incoming=(group.sources??[]).filter(s=>s?.s&&s.u).map(s=>{
     const old=editions.get(s.s);
-    return {sourceId:s.s,label:old?.label??s.s,manga:{...old?.manga,url:s.u,title:s.t??group.title,thumbnailUrl:group.cover??old?.manga?.thumbnailUrl??null,memo:s.m??old?.manga?.memo??''}};
+    // غلاف الحدث لمصدره وحده (coverSource): كان يُنسب لكل نسخ العمل فيُطلب بترويسات مصدر آخر ويُرفض (حرف بدل غلاف)
+    const ownCover=group.cover&&(group.coverSource==null||group.coverSource===s.s)?group.cover:null;
+    return {sourceId:s.s,label:old?.label??s.s,manga:{...old?.manga,url:s.u,title:s.t??group.title,thumbnailUrl:ownCover??old?.manga?.thumbnailUrl??null,memo:s.m??old?.manga?.memo??''}};
   });
   for(const e of incoming)editions.set(e.sourceId,e);
   return {...base,_work:{...base._work,editions:[...editions.values()]},_updateEditions:incoming,_lockedSources:[...locks.values()]};

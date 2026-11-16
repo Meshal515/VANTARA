@@ -817,15 +817,29 @@ class ExtensionEnginePlugin : Plugin() {
                 val sourceId = call.getString("sourceId")
                 val source = sourceId?.let { runCatching { obtain(it) }.getOrNull() } as? HttpSource
                 val client = source?.client ?: network.client
-                val request = Request.Builder().url(url).apply {
-                    runCatching { source?.headers }.getOrNull()?.let { headers(it) }
-                }.build()
-                val (bytes, contentType) = withContext(Dispatchers.IO) {
-                    client.newCall(request).execute().use { res ->
-                        require(res.isSuccessful) { "cover HTTP ${res.code}" }
-                        res.body.bytes() to res.header("content-type")
-                    }
+                val sourceHeaders = runCatching { source?.headers }.getOrNull()
+                // مصدر الغلاف غير مثبت أو رُفض الطلب: Referer من موقع الصورة قبل الاستسلام (CoverReferers)
+                var lastError: Throwable? = null
+                var fetched: Pair<ByteArray, String?>? = null
+                for (attempt in CoverReferers.attempts(url, sourceHeaders != null)) {
+                    val request = Request.Builder().url(url).apply {
+                        when (attempt) {
+                            CoverReferers.SOURCE_HEADERS -> sourceHeaders?.let { headers(it) }
+                            CoverReferers.NO_REFERER -> Unit
+                            else -> header("Referer", attempt)
+                        }
+                    }.build()
+                    fetched = runCatching {
+                        withContext(Dispatchers.IO) {
+                            client.newCall(request).execute().use { res ->
+                                require(res.isSuccessful) { "cover HTTP ${res.code}" }
+                                res.body.bytes() to res.header("content-type")
+                            }
+                        }
+                    }.onFailure { lastError = it }.getOrNull()?.takeIf { it.first.size > 256 && ImagePayloadPolicy.validate(it.second, it.first).accepted }
+                    if (fetched != null) break
                 }
+                val (bytes, contentType) = fetched ?: throw (lastError ?: IllegalStateException("cover not an image"))
                 require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }
                 val verdict = ImagePayloadPolicy.validate(contentType, bytes)
                 require(verdict.accepted) { "not an image: ${verdict.reason}" }
