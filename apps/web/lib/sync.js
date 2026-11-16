@@ -134,6 +134,9 @@ const KEYS = {
   majlis_reads: (row) => row.user_id,
   majlis_message_receipts: (row) => `${row.message_id}/${row.user_id}`,
   together_invites: (row) => row.code,
+  // «حذف العمل»: أرشيف المالك، والبصمات لكل جهاز
+  removed_works: (row) => row.key,
+  removed_work_tokens: (row) => row.token,
 };
 
 function readJson(key, fallback) {

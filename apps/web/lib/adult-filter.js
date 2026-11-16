@@ -1,3 +1,4 @@
+import { isRemovedKey } from './removed-works.js';
 /**
  * محتوى الكبار لا يظهر في VANTARA أبدًا: هنتاي، سمت، بويز لاف/BL، غيرلز لاف/GL، ياوي ويوري،
  * +18. شرط المالك: يُحذف لا يُغطّى. والإيتشي يبقى (قرار المالك).
@@ -83,7 +84,8 @@ const norm = (k) => String(k ?? '').replace(/^ext:/, '');
 export function setHiddenUser(userOf) {
   currentUser = typeof userOf === 'function' ? userOf : () => userOf;
 }
-export const isHiddenKey = (key) => Boolean(key) && Object.values(hiddenMap()).some((h) => h.keys?.includes(norm(key)));
+// المحذوف من التطبيق كله (المالك) مخفي كأي عمل محذوف، في كل قائمة وبحث يمر من هنا
+export const isHiddenKey = (key) => Boolean(key) && (isRemovedKey(key) || Object.values(hiddenMap()).some((h) => h.keys?.includes(norm(key))));
 /** يخفي العمل من كل القوائم والبحث وآخر التحديثات. */
 export function hideWork({ id, keys = [], title = '', cover = null }) {
   const all = [...new Set([id, ...keys].filter(Boolean).map(norm))];

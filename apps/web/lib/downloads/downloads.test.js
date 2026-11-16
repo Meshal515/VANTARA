@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadManager } from './manager.js';
 import { createMangaDriver, sniffImageType } from './manga-driver.js';
-import { countText, createItem, localWork, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel } from './model.js';
+import { countText, createItem, defaultUnitKey, localWork, mangaUnitNumber, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel, ERROR_LABEL } from './model.js';
 import { rankRoutes, unsupportedReason } from './smart.js';
 import { memoryStore, openStore } from './store.js';
 import { createRateMeter, etaSeconds, formatBytes, formatEta, formatSpeed, progressRatio } from './units.js';
@@ -619,4 +619,22 @@ describe('work art on the device', () => {
     globalThis.URL.createObjectURL ??= () => 'blob:x';
     expect(await artUrl(store, 'ext:solo', 'cover')).toBeTruthy();
   });
+});
+
+describe('manga: the chapter the sheet starts on, and a source that returns no pages', () => {
+  it('an unnumbered row (-1: announcement/prologue) is unknown and never the default chapter', () => {
+    expect(mangaUnitNumber(-1)).toBeNull();
+    expect(mangaUnitNumber(0)).toBe(0);
+    expect(mangaUnitNumber('12.5')).toBe(12.5);
+    expect(mangaUnitNumber(null)).toBeNull();
+    const units = [{ key: 'u:ad', number: null }, { key: 'n:0', number: 0 }, { key: 'n:1', number: 1 }, { key: 'n:2', number: 2 }];
+    // بلا سجل قراءة: أول فصل حقيقي (1) لا الإعلان ولا الفصل 0 الترويجي
+    expect(defaultUnitKey(units)).toBe('n:1');
+    // ما تقرؤه تاليًا يغلب
+    expect(defaultUnitKey(units, 'n:2')).toBe('n:2');
+    // عمل أوله 0 فقط: يبقى 0، وبلا أرقام: الأول
+    expect(defaultUnitKey([{ key: 'n:0', number: 0 }])).toBe('n:0');
+    expect(defaultUnitKey([{ key: 'a', number: null }])).toBe('a');
+  });
+
 });

@@ -18,6 +18,11 @@ const pick = (map, ...langs) => {
   for (const l of langs) if (map[l]) return map[l];
   return Object.values(map)[0] ?? '';
 };
+/** رقم الفصل من MangaDex: الصفر رقم حقيقي (الفصل 0)، وغير الرقمي أو الغائب -1. كان `Number(x) || -1` يحوّل 0 إلى -1. */
+export const chapterNumberOfAttr = (value) => {
+  const n = value === null || value === undefined || value === '' ? NaN : Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : -1;
+};
 const uuidOf = (url) => String(url ?? '').split('/').filter(Boolean).pop()?.split('#')[0] ?? '';
 
 export const mangadex = {
@@ -81,7 +86,7 @@ export const mangadex = {
           const a = c.attributes ?? {};
           const name = [a.volume ? `مجلد ${a.volume}` : '', a.chapter ? `الفصل ${a.chapter}` : 'فصل واحد'].filter(Boolean).join(' · ') + (a.title ? ` - ${a.title}` : '');
           const group = c.relationships?.find((r) => r.type === 'scanlation_group')?.attributes?.name ?? null;
-          return { url: `/chapter/${c.id}`, name, dateUpload: Date.parse(a.publishAt ?? a.readableAt ?? '') || 0, chapterNumber: Number(a.chapter) || -1, scanlator: group };
+          return { url: `/chapter/${c.id}`, name, dateUpload: Date.parse(a.publishAt ?? a.readableAt ?? '') || 0, chapterNumber: chapterNumberOfAttr(a.chapter), scanlator: group };
         });
     }
 
