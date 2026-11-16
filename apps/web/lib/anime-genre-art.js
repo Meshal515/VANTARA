@@ -5,6 +5,7 @@
  * (أسماء مستعارة في GraphQL)، ويُحفظ أسبوعين؛ وكل نوع يأخذ شخصية لم يأخذها نوع
  * قبله، فلا يتكرّر الوجه نفسه في الشريط. بلا شبكة تبقى البطاقة بلونها واسمها.
  */
+import { anilistFetch } from './anilist.js';
 
 const ENDPOINT = 'https://graphql.anilist.co';
 const KEY = 'vantara.anime.genre-art.v1';
@@ -48,7 +49,7 @@ const readCache = (now) => {
 
 let inflight = null;
 /** وجوه الأنواع: المحفوظ فورًا، وإلا طلب واحد (مشترك بين الرئيسية والبحث). */
-export function loadGenreArt(genres, { fetchImpl = globalThis.fetch, now = Date.now() } = {}) {
+export function loadGenreArt(genres, { fetchImpl = anilistFetch, now = Date.now() } = {}) {
   const hit = readCache(now);
   if (hit && genres.every((g) => g in hit || hit.__none?.includes(g))) return Promise.resolve(hit);
   inflight ??= (async () => {

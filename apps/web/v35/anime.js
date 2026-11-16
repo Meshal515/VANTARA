@@ -618,10 +618,22 @@ export function createAnime(deps) {
           patchTitles(full);
         })
         .catch(() => {});
-    } catch {
+    } catch (error) {
       if (token !== state.detailToken) return;
       const eps = q('animeEpisodes');
-      eps?.replaceChildren(el('p', 'an-note', 'تعذّر جلب تفاصيل الأنمي — تحقّق من الاتصال.'));
+      // AniList يحدّ الطلبات (الآن 30 في الدقيقة): ليس انقطاعًا. يُقال ذلك ويُعاد الفتح تلقائيًا بعد الموعد
+      const busy = error?.code === 'anilist_busy' || /anilist_429|too many/i.test(String(error?.message ?? ''));
+      if (busy) {
+        const wait = Math.min(30_000, Math.max(3_000, (error?.retryAt ?? Date.now() + 8_000) - Date.now()));
+        eps?.replaceChildren(el('p', 'an-note', `AniList مزدحم الحين — نعيد المحاولة تلقائيًا خلال ${Math.ceil(wait / 1000)} ثانية.`));
+        setTimeout(() => {
+          if (token === state.detailToken && deps.currentPage() === 'anime') void openAnime(m, { episode, position, clip, play, focusEpisodes, preserveEpisodeControls, local });
+        }, wait);
+      } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        eps?.replaceChildren(el('p', 'an-note', 'ما فيه اتصال بالإنترنت — تحقّق منه وافتح العمل من جديد.'));
+      } else {
+        eps?.replaceChildren(el('p', 'an-note', 'تعذّر جلب تفاصيل الأنمي. حاول مرة ثانية بعد لحظات.'));
+      }
     } finally {
       untouch();
     }
