@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(com.vantara.plugins.StoragePlugin.class);
         registerPlugin(com.vantara.usage.UsagePlugin.class);
         registerPlugin(com.vantara.verification.VerificationPlugin.class);
+        registerPlugin(com.vantara.notify.NotifyPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

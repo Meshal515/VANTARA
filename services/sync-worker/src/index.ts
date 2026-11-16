@@ -13,7 +13,7 @@ import { handleTranslateTextBatch } from './translation-batch.ts';
 
 import { handleSourceReportGet, handleSourceReportPost } from './source-reports.ts';
 import { handleCinemaOverviews, type CinemaEnv } from './cinema.ts';
-import { handleUpdatesList, handleUpdatesObserve, handleUpdatesTwins, type UpdatesEnv } from './updates.ts';
+import { handleUpdatesList, handleUpdatesObserve, handleUpdatesTwins, type CreatedUnit, type UpdatesEnv } from './updates.ts';
 import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
@@ -60,6 +60,7 @@ import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 import type { D1PreparedStatement, Env, ExecutionContext } from './types.ts';
 import { handleRafiqConversations, handleRafiqExternal, handleRafiqFeedback, handleRafiqUsage, handleRafiqMessage, handleRafiqNew, handleRafiqPrefs, handleRafiqState, type RafiqEnv } from './rafiq.ts';
 import { bearerFrom, verifyToken } from './session.ts';
+import { forgetNotifyDevice, markNotifySeen, notifyOwner, pendingNotifications, registerNotifyDevice } from './notify-device.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -831,6 +832,91 @@ function notificationStatements(
         input.rev,
       ),
   );
+}
+
+/**
+ * فصل/حلقة جديدة فعلًا لعمل في مفضلة أحد: إشعار واحد لكل (شخص، عمل) يتجمّع.
+ *
+ * - المصدر محرك التحديثات (حدث جديد لا خط أساس)، فيصل حتى لو جهاز صاحبه لم يفحص.
+ * - التجميع: ما دام الإشعار غير مقروء يتسع مداه (الفصل 118 ← «118–120») ويعود غير معروض؛
+ *   بعد قراءته يبدأ إشعار جديد بالوحدة الجديدة وحدها.
+ * - العمل المحذوف من التطبيق لا يُشعر به أحد.
+ * - النص يُركَّب عند العرض من الجسم (JSON صغير): t العنوان، k النوع، s الموسم، a..b المدى، c الغلاف.
+ */
+/**
+ * رسالة في المجلس: إشعار لكل عضو غير المرسل، واحد لكل (مرسل، مستلم) يتجمّع.
+ * غير المقروء يعدّ (n) ويحمل آخر رسالة (p)؛ المقروء يبدأ من جديد. الصوتية بلا نص (v).
+ * الرابط يحمل معرّف آخر رسالة، فحذفها للجميع يمسح معاينتها من الإشعار أيضًا.
+ */
+function messageNotificationStatements(
+  db: Env['DB'],
+  input: { messageId: string; senderId: string; accounts: readonly string[]; preview: string | null; voice: boolean; now: number; rev: number },
+): D1PreparedStatement[] {
+  const body = JSON.stringify(input.voice ? { v: 1, n: 1 } : { p: (input.preview ?? '').slice(0, 140), n: 1 });
+  return notificationTargets({ accounts: input.accounts, actorId: input.senderId }).map((recipient) =>
+    db
+      .prepare(
+        `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev)
+         SELECT ?, ?, 'MESSAGE', ?, NULL, ?, ?, 0, 0, ?, ?
+          WHERE EXISTS (SELECT 1 FROM majlis_messages WHERE id = ? AND rev = ?)
+         ON CONFLICT (id) DO UPDATE SET
+           body = json_set(excluded.body, '$.n',
+                    CASE WHEN notifications.read = 0 AND json_valid(notifications.body)
+                         THEN COALESCE(json_extract(notifications.body, '$.n'), 1) + 1 ELSE 1 END),
+           link = excluded.link, read = 0, seen = 0, created_at = excluded.created_at, rev = excluded.rev`,
+      )
+      .bind(`msg:${input.senderId}:${recipient}`.slice(0, NOTIFICATION_ID_MAX), recipient, input.senderId, body,
+        `vantara://majlis/msg/${input.messageId}`, input.now, input.rev, input.messageId, input.rev),
+  );
+}
+
+export async function notifyFavoriteUnits(env: Env, now: number, units: readonly CreatedUnit[]): Promise<number> {
+  const byWork = new Map<string, { title: string; cover: string | null; kind: string; section: string; season: number | null; a: number | null; b: number | null }>();
+  for (const u of units) {
+    const cur = byWork.get(u.work);
+    if (!cur) {
+      byWork.set(u.work, { title: u.title, cover: u.cover, kind: u.kind, section: u.section, season: u.season, a: u.number, b: u.number });
+      continue;
+    }
+    cur.cover ??= u.cover;
+    if ((u.season ?? 0) > (cur.season ?? 0)) Object.assign(cur, { season: u.season, a: u.number, b: u.number });
+    else if ((u.season ?? 0) === (cur.season ?? 0) && u.number != null) {
+      cur.a = cur.a == null ? u.number : Math.min(cur.a, u.number);
+      cur.b = cur.b == null ? u.number : Math.max(cur.b, u.number);
+    }
+  }
+  const works = [...byWork.keys()];
+  if (!works.length) return 0;
+  const fans: { user_id: string; series_ref: string }[] = [];
+  for (let i = 0; i < works.length; i += 80) {
+    const chunk = works.slice(i, i + 80);
+    const { results } = await env.DB.prepare(
+      `SELECT c.user_id, c.series_ref FROM collections c
+         JOIN accounts a ON a.user_id = c.user_id AND a.lifecycle = 'ACTIVE'
+        WHERE c.kind = 'favorite' AND c.member = 1 AND c.series_ref IN (${chunk.map(() => '?').join(',')})
+          AND NOT EXISTS (SELECT 1 FROM removed_works rw, json_each(rw.keys_json) j WHERE rw.active = 1 AND j.value = c.series_ref)`,
+    ).bind(...chunk).all<{ user_id: string; series_ref: string }>();
+    fans.push(...(results ?? []));
+  }
+  if (!fans.length) return 0;
+  const same = (field: string) => `json_extract(notifications.body, '$.${field}') IS json_extract(excluded.body, '$.${field}')`;
+  await commitAtNextRevision(env, now, [], (rev) => fans.map((f) => {
+    const w = byWork.get(f.series_ref)!;
+    const body = JSON.stringify({ t: w.title, k: w.kind, s: w.season, a: w.a, b: w.b, ...(w.cover ? { c: w.cover } : {}) });
+    return env.DB.prepare(
+      `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev)
+       VALUES (?, ?, 'NEW_UNIT', NULL, ?, ?, ?, 0, 0, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET
+         body = CASE WHEN notifications.read = 0 AND json_valid(notifications.body) AND ${same('k')} AND ${same('s')}
+                     THEN json_set(excluded.body,
+                            '$.a', min(json_extract(notifications.body, '$.a'), json_extract(excluded.body, '$.a')),
+                            '$.b', max(json_extract(notifications.body, '$.b'), json_extract(excluded.body, '$.b')))
+                     ELSE excluded.body END,
+         read = 0, seen = 0, created_at = excluded.created_at, rev = excluded.rev`,
+    ).bind(`unit:${f.series_ref}:${f.user_id}`.slice(0, NOTIFICATION_ID_MAX), f.user_id, f.series_ref, body,
+      socialLinkFor({ kind: 'work', seriesRef: f.series_ref }), now, rev);
+  }));
+  return fans.length;
 }
 
 function socialActivityStatements(
@@ -1797,6 +1883,7 @@ export function statementsFor(
                ON CONFLICT (id) DO NOTHING`,
             )
             .bind(op.opId, userId, body, replyTo, now, rev),
+          ...messageNotificationStatements(db, { messageId: op.opId, senderId: userId, accounts: ctx.accounts, preview: body, voice: false, now, rev }),
         ];
       }
       if (kind === 'voice') {
@@ -1816,6 +1903,7 @@ export function statementsFor(
                ON CONFLICT (id) DO NOTHING`,
             )
             .bind(op.opId, userId, replyTo, mediaKey, JSON.stringify({ durationMs: Math.round(durationMs), waveform: wave }), now, rev, mediaKey, userId),
+          ...messageNotificationStatements(db, { messageId: op.opId, senderId: userId, accounts: ctx.accounts, preview: null, voice: true, now, rev }),
         ];
       }
       return null;
@@ -1864,6 +1952,13 @@ export function statementsFor(
                 WHERE id = ? AND deleted = 0 AND (sender_id = ? OR ${OWNER})`,
             )
             .bind(userId, userId, rev, id, userId, userId),
+          // معاينة الرسالة المحذوفة لا تبقى في إشعار أحد
+          db
+            .prepare(
+              `UPDATE notifications SET body = json_object('n', COALESCE(json_extract(body, '$.n'), 1), 'x', 1), rev = ?
+                WHERE kind = 'MESSAGE' AND link = ? AND EXISTS (SELECT 1 FROM majlis_messages WHERE id = ? AND rev = ? AND deleted != 0)`,
+            )
+            .bind(rev, `vantara://majlis/msg/${id}`, id, rev),
         ];
       }
       if (kind === 'frame') {
@@ -2362,6 +2457,7 @@ const ACCOUNT_AWARE_KINDS = new Set([
   'episode.complete',
   'library.add',
   'favorite.set',
+  'majlis.send',
 ]);
 
 async function allAccountIds(env: Env): Promise<string[]> {
@@ -3231,18 +3327,32 @@ export default {
         const response = await handleAccounts(env, now);
         return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
       }
+      // فحص الجوال الدوري برمز الإشعارات وحده (لا جلسة): قراءة غير المعروض وتعليمه معروضًا فقط
+      if (path === '/v1/notify/pending' || path === '/v1/notify/seen' || (path === '/v1/notify/device' && request.method === 'DELETE')) {
+        const device = await notifyOwner(env, request, now);
+        if (!device) return json({ error: 'unauthorized' }, { status: 401 }, cors);
+        const response = path === '/v1/notify/pending' && request.method === 'GET'
+          ? await pendingNotifications(env, device.userId, now)
+          : path === '/v1/notify/seen' && request.method === 'POST'
+            ? await markNotifySeen(env, device.userId, request, now)
+            : path === '/v1/notify/device'
+              ? await forgetNotifyDevice(env, device.hash)
+              : json({ error: 'not_found' }, { status: 404 });
+        return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
+      }
       const token = bearerFrom(request);
       const userId = token ? await verifyToken(token, env.VANTARA_SESSION_SECRET) : null;
       if (!userId) return json({ error: 'unauthorized' }, { status: 401 }, cors);
 
       let response: Response | null = null;
       if (path === '/v1/privacy/capabilities' && request.method === 'GET') response = json({ recentViewsRevocable: true });
+      else if (path === '/v1/notify/device' && request.method === 'POST') response = await registerNotifyDevice(env, userId, now);
       else if (path.startsWith('/v1/source-latest') && (request.method === 'GET' || request.method === 'POST')) response = await handleSourceLatest(request, env, path, now);
       // Update Engine: الأجهزة مجسّات تبلّغ ما تراه، والخط الزمني ذاكرة VANTARA الثابتة
       // صحة المصادر من الأجهزة الحقيقية (عدّادات يومية بلا بيانات شخصية)
       else if (path === '/v1/diag/sources' && request.method === 'POST') response = await handleSourceReportPost(request, env, now);
       else if (path === '/v1/diag/sources' && request.method === 'GET') response = await handleSourceReportGet(url, env, now);
-      else if (path === '/v1/updates/observe' && request.method === 'POST') response = await handleUpdatesObserve(request, env as UpdatesEnv, now);
+      else if (path === '/v1/updates/observe' && request.method === 'POST') response = await handleUpdatesObserve(request, env as UpdatesEnv, now, async (units) => { await notifyFavoriteUnits(env, now, units); });
       else if (path === '/v1/updates' && request.method === 'GET') response = await handleUpdatesList(url, env as UpdatesEnv);
       // نفس العمل بأسماء متقاربة في مصادر مختلفة (بدليل أعلى فصل): أسماء بديلة للفهرس
       else if (path === '/v1/updates/twins' && request.method === 'GET') response = await handleUpdatesTwins(env as UpdatesEnv, now);

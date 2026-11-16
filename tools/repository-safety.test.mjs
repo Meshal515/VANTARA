@@ -282,9 +282,12 @@ test('the client and the domain agree on the notification kinds', () => {
 });
 
 test('nothing reaches for an operating-system push channel', () => {
-  // B9 صريح: لا Firebase ولا FCM ولا إذن إشعارات ولا تنبيه والتطبيق مغلق.
+  // B9 كان: لا إشعار من النظام أبدًا. قرار المالك (16 نوفمبر 2026) عدّله: إشعار الجوال
+  // والمتصفح مسموح لكنه محلي فقط — الجهاز يسأل خادم VANTARA ويعرض بنفسه
+  // (com.vantara.notify، lib/phone-notify.js). الممنوع باقٍ: أي خدمة دفع خارجية تمرّ بها
+  // الإشعارات (Firebase/FCM وOneSignal وWeb Push بـPushManager).
   // الحرس على المستودع لا على الوثيقة: إضافة SDK لاحقًا تُسقط CI لا تمرّ بهدوء.
-  const forbidden = /firebase|firebase-messaging|\bFCM\b|onesignal|Notification\.requestPermission|new Notification\(|showNotification\(|PushManager|pushManager/i;
+  const forbidden = /firebase|firebase-messaging|\bFCM\b|onesignal|PushManager|pushManager/i;
   const offenders = trackedFiles()
     .filter(
       (path) =>

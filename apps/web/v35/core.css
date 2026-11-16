@@ -2619,6 +2619,15 @@ html[data-motion='off'] .v35 .dock-scrim {
   position: relative;
   flex: none;
 }
+/* جديد المفضلة: غلاف العمل مكان الوجه، بنفس المقاس ومحجوز قبل وصول الصورة */
+.v35 .notif-face-art {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: var(--surface-3);
+}
 .v35 .notif-kind {
   position: absolute;
   bottom: -2px;

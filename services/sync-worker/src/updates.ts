@@ -183,7 +183,23 @@ export function decide(report: Report, mark: Mark | null, _now: number): { fresh
   return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
 }
 
-export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, now: number): Promise<Response> {
+/** وحدة جديدة فعلًا (لا خط أساس ولا مصدر إضافي لحدث قديم): ما يستحق إشعار من العمل في مفضلته. */
+export interface CreatedUnit {
+  work: string;
+  section: Section;
+  kind: Kind;
+  season: number | null;
+  number: number | null;
+  title: string;
+  cover: string | null;
+}
+
+export async function handleUpdatesObserve(
+  request: Request,
+  env: UpdatesEnv,
+  now: number,
+  onCreated?: (units: CreatedUnit[]) => Promise<void>,
+): Promise<Response> {
   const body = (await request.json().catch(() => null)) as { works?: unknown } | null;
   const reports = (Array.isArray(body?.works) ? body!.works.slice(0, MAX_EVENTS) : []).map((r) => parseReport(r, now)).filter((r): r is Report => r !== null);
   if (!reports.length) return reply({ accepted: 0, created: 0, baselined: 0 });
@@ -224,6 +240,7 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
   let created = 0;
   let baselined = 0;
   const createdIds = new Set<string>();
+  const createdUnits: CreatedUnit[] = [];
   for (const r of reports) {
     const before = marks.get(r.work) ?? null;
     const ownBefore = r.source ? sourceMarks.get(sourceKey(r)) ?? null : before;
@@ -265,6 +282,7 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
       created++;
       known.set(id, { sources: JSON.stringify(add), cover: r.cover, published_at: u.publishedAt });
       insertValues.push([id, r.work, r.section, r.kind, u.season, r.kind === 'movie' ? null : u.number, r.title, r.cover, u.publishedAt ?? now, u.publishedAt, now, JSON.stringify(add), now, u.publishedAt == null ? 1 : 0]);
+      createdUnits.push({ work: r.work, section: r.section, kind: r.kind, season: u.season ?? null, number: r.kind === 'movie' ? null : u.number, title: r.title, cover: r.cover ?? null });
     }
   }
   // D1 counts SQL statements, including statements inside a batch. Pack rows
@@ -305,6 +323,8 @@ export async function handleUpdatesObserve(request: Request, env: UpdatesEnv, no
         ...rows.flatMap(([id,u]) => [id,u.publishedAt]), ...rows.flatMap(([id,u]) => [id,u.publishedAt]), now, ...rows.map(([id]) => id)));
   }
   if (writes.length) await env.DB.batch(writes);
+  // الإشعار بعد ثبوت الأحداث، وفشله لا يُفشل التبليغ: الحدث محفوظ والخط الزمني صحيح
+  if (createdUnits.length && onCreated) await onCreated(createdUnits).catch(() => {});
   return reply({ accepted: reports.length, created, baselined });
 }
 

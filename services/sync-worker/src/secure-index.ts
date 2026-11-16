@@ -7,6 +7,7 @@
  * replace authentication without rewriting sync semantics in the same patch.
  */
 
+import { adminRoute, consumeResetKey, isSuspended } from './admin.ts';
 import {
   CORRELATION_HEADER,
   correlationIdFrom,
@@ -325,6 +326,16 @@ async function issueSession(request: Request, env: Env, now: number): Promise<Re
     .bind(userId)
     .first<AccountRow>();
   if (!account) return json({ error: 'unknown_account' }, { status: 404 });
+  // أوقفه المالك: لا جلسة جديدة حتى يعيده (البيانات باقية)
+  if (await isSuspended(env, userId)) return json({ error: 'account_suspended' }, { status: 403 });
+
+  // «نسيت الرقم»: مفتاح استعادة من المالك بدل الـPIN، من جهاز معتمد لهذا الحساب نفسه.
+  // يُستهلك ويُزال الـPIN، فيضع صاحبه رقمًا جديدًا بعد الدخول
+  let pinCleared = false;
+  if (body?.['pinResetKey'] !== undefined) {
+    if (!(await consumeResetKey(env, userId, body['pinResetKey'], now))) return json({ error: 'reset_key_wrong' }, { status: 401 });
+    pinCleared = true;
+  }
 
   // PIN: يُفحص هنا، عند إصدار الجلسة نفسها. حساب محمي لا جلسة له إلا بـPIN
   // صحيح أو بإذن هذا الجهاز من PIN صحيح سابق (يبقى في ذاكرة التطبيق المفتوح).
@@ -369,6 +380,7 @@ async function issueSession(request: Request, env: Env, now: number): Promise<Re
       pinDigits: pin?.digits ?? null,
     },
     ...(pinGrant ? { pinGrant } : {}),
+    ...(pinCleared ? { pinCleared: true } : {}),
   });
 }
 
@@ -587,7 +599,11 @@ export default {
       if (
         path === '/health' ||
         (path === '/v1/accounts' && request.method === 'GET') ||
-        (path.startsWith('/v1/media/') && request.method === 'GET')
+        (path.startsWith('/v1/media/') && request.method === 'GET') ||
+        // فحص الجوال الدوري: رمز الإشعارات الضيق لا الجلسة، ويفحصه notify-device.ts نفسه
+        ((path === '/v1/notify/pending' && request.method === 'GET') ||
+          (path === '/v1/notify/seen' && request.method === 'POST') ||
+          (path === '/v1/notify/device' && request.method === 'DELETE'))
       ) {
         return legacyWorker.fetch(request, env, ctx);
       }
@@ -600,6 +616,10 @@ export default {
       if (lifecycle === 'DELETED' || lifecycle === undefined) {
         return json({ error: 'account_deleted', state: lifecycle ?? null }, { status: 410 }, cors);
       }
+
+      // لوحة المالك: الشارة تُفحص في القاعدة لكل عملية (admin.ts)
+      const admin = await adminRoute(path, request, env, now, claims.userId);
+      if (admin) return new Response(admin.body, { status: admin.status, headers: { ...JSON_HEADERS, ...cors } });
 
       // Temporary B2 adapter: old sync handlers receive a legacy token generated
       // inside the Worker. The browser never sees or can mint this token. B3 can

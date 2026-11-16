@@ -273,7 +273,7 @@ const PERSONAL: ReadonlyArray<readonly [string, string]> = [
   ['chapter_reads', 'user_id'], ['usage_daily', 'user_id'], ['collections', 'user_id'],
   ['ratings', 'user_id'], ['reactions', 'user_id'], ['comments', 'author_id'],
   ['recommendation_recipients', 'user_id'], ['recommendations', 'from_id'], ['recommendations', 'to_id'],
-  ['notifications', 'user_id'], ['activity_receipts', 'user_id'], ['activity', 'actor_id'], ['activity', 'target_user_id'],
+  ['notifications', 'user_id'], ['notify_devices', 'user_id'], ['pin_reset_keys', 'user_id'], ['pin_reset_keys', 'created_by'], ['activity_receipts', 'user_id'], ['activity', 'actor_id'], ['activity', 'target_user_id'],
   ['settings', 'user_id'],
   ['pairing_tokens', 'user_id'], ['frames', 'from_id'], ['frames', 'to_id'], ['chapter_marks', 'user_id'],
   ['media', 'owner_id'], ['majlis_reactions', 'user_id'], ['majlis_receipts', 'user_id'], ['work_views', 'user_id'],

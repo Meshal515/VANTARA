@@ -868,7 +868,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   }
 
   /** اختيار الحساب هو الدخول، وإثبات الجهاز جزء من إصدار الجلسة. */
-  async function signIn(userId, { pin } = {}) {
+  async function signIn(userId, { pin, resetKey } = {}) {
     const attempt = ++loginAttempt;
     await recovered;
     const generation = sessionGeneration;
@@ -882,7 +882,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     }
     let payload;
     try {
-      payload = await sessionPayload(userId, pin === undefined ? {} : { pin });
+      // «نسيت الرقم»: مفتاح المالك بدل الـPIN (يُستهلك في الخادم ويُزال الـPIN)
+      payload = await sessionPayload(userId, resetKey !== undefined ? { pinResetKey: resetKey } : pin === undefined ? {} : { pin });
     } catch (error) {
       if (!current()) throw stale();
       // التثبيت النظيف يمسح credential. إذا كان هذا Android نفسه سبق اعتماده
@@ -896,6 +897,10 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!current()) throw stale();
     await persistSession(payload);
     if (attempt !== loginAttempt || sessionGeneration !== generation + 1 || !token || user?.userId !== userId) throw stale();
+    // أُزيل الـPIN بمفتاح المالك: الواجهة تطلب رقمًا جديدًا بعد الدخول (app.js)
+    if (payload?.pinCleared) {
+      try { sessionStorage.setItem('vantara.pinCleared', userId); } catch { /* لا يمنع الدخول */ }
+    }
     emit(['session']);
     return user;
   }
@@ -1563,6 +1568,22 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     return { ok: response.ok, status: response.status, data };
   }
 
+  /** لوحة المالك (/v1/admin/*): الشارة يفحصها الخادم؛ هنا النقل وتجديد الجلسة فقط. */
+  async function adminCall(path, body = null, method = body ? 'POST' : 'GET') {
+    const send = () => fetch(`${baseUrl}/v1/admin/${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
+    });
+    let response = await send();
+    if (response.status === 401 && user?.userId) {
+      await refreshSession().catch(() => {});
+      response = await send();
+    }
+    const data = await response.json().catch(() => null);
+    return { ok: response.ok, status: response.status, data };
+  }
+
   /** حساب جديد: من داخل حساب (بالجلسة) أو من «من يتابع؟» (بإثبات الجهاز). */
   async function createAccount({ username, displayName, avatarKey = null }) {
     return accountCall('/v1/accounts/create', { username, displayName, avatarKey }, { withDevice: !token });
@@ -1785,6 +1806,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     createAccount,
     unlock,
     setPin,
+    adminCall,
     removePin,
     deleteAccount,
     restoreAccount,

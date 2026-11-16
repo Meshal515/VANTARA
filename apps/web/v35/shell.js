@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { describeNotification, notificationData } from '../lib/notifications.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -4829,13 +4830,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
     displayName: nameOf(userId),
     avatarKey: sync.rows('profiles', (p) => p.user_id === userId)[0]?.avatar_key ?? null,
   });
-  const KIND_ICON = { FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info', TOGETHER: 'users' };
+  const KIND_ICON = { MESSAGE: 'send', NEW_UNIT: 'book', FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info', TOGETHER: 'users' };
 
   function notificationCopy(row) {
     const frameId = frameIdFromLink(row.link);
     const frame = frameId ? sync.rows('frames', (f) => f.id === frameId)[0] : null;
     const work = row.series_ref ? sync.rows('works', (x) => x.series_ref === row.series_ref)[0] : null;
     switch (row.kind) {
+      case 'MESSAGE': {
+        const told = describeNotification(row, nameOf(row.actor_id));
+        const n = Number(notificationData(row)?.n) || 1;
+        return { text: n > 1 ? `أرسل ${n} رسائل: ${told.body}` : `كتب: ${told.body}`, cover: null, open: () => void deps.go({ name: 'majlis' }) };
+      }
+      case 'NEW_UNIT': {
+        const told = describeNotification(row);
+        return {
+          system: true,
+          face: told.image,
+          text: `${told.body} من`,
+          title: told.title,
+          cover: null,
+          open: () => row.series_ref && void openWork(workFromRef(row.series_ref, told.title, told.image)),
+        };
+      }
       case 'FRAME':
         return {
           text: frame?.broadcast ? 'شارك فريمًا مع الجميع' : 'أرسل لك فريم',
@@ -4898,7 +4915,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const b = el('button', `notif${fresh ? ' notif--unread' : ''}`);
     b.type = 'button';
     const face = el('span', 'notif-face');
-    face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
+    if (copy.face) {
+      const img = el('img', 'notif-face-art');
+      img.src = copy.face;
+      img.alt = '';
+      img.onerror = () => img.replaceWith(everyoneFace(44));
+      face.append(img);
+    } else face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
     const badge = el('span', `notif-kind notif-kind--${(row.kind || '').toLowerCase()}`);
     badge.innerHTML = glyph(KIND_ICON[row.kind] ?? 'bell', { size: 12 });
     face.append(badge);
@@ -6061,6 +6084,148 @@ export function mountV35(deps, { page = 'home' } = {}) {
       paint();
     }, { tone: 'manga' });
   }
+  // ───────────────────────── لوحة المالك ─────────────────────────
+  // الحسابات وأجهزتها ومفاتيح استعادة الـPIN والإيقاف والحذف. الشارة يفحصها الخادم لكل عملية
+  // (services/sync-worker/src/admin.ts)؛ الواجهة تخفي اللوحة عن غيره فقط.
+  const ago = (ms) => (ms ? timeAgo(ms) : 'ما دخل بعد');
+  function adminFace(a, size = 44) {
+    const face = el('span', 'admin-face');
+    face.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;overflow:hidden;flex:none;display:grid;place-items:center;background:var(--surface-3);font-weight:800`;
+    if (a.avatarKey) {
+      const img = el('img');
+      img.src = a.avatarKey;
+      img.alt = '';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+      img.onerror = () => img.replaceWith(document.createTextNode([...String(a.displayName || '؟')][0]));
+      face.append(img);
+    } else face.textContent = [...String(a.displayName || '؟')][0];
+    return face;
+  }
+  function adminStatus(a) {
+    if (a.owner) return 'المالك';
+    if (a.lifecycle === 'PENDING_DELETE') return 'يُحذف الآن';
+    const parts = [a.suspended ? 'موقوف' : `آخر ظهور ${ago(a.lastSeen)}`, `${a.devices} ${a.devices === 1 ? 'جهاز' : 'أجهزة'}`];
+    if (a.pin) parts.push('عليه رقم سري');
+    if (a.keyExpires) parts.push('عنده مفتاح استعادة');
+    return parts.join(' · ');
+  }
+  async function openAdminPanel() {
+    if (!iAmOwner()) return;
+    openSheet((body) => {
+      const paint = async () => {
+        body.replaceChildren(el('h3', null, 'لوحة المالك'), el('p', 'settings-note', 'جارٍ التحميل…'));
+        const out = await sync.adminCall('accounts').catch(() => null);
+        if (!out?.ok) {
+          body.replaceChildren(el('h3', null, 'لوحة المالك'), el('p', 'settings-note', out?.status === 403 ? 'هذه اللوحة للمالك وحده.' : 'تعذّر الوصول للخادم. حاول مرة ثانية.'));
+          return;
+        }
+        const list = el('div', 'settings-list');
+        for (const a of out.data.accounts) {
+          const line = el('button', 'setting');
+          line.type = 'button';
+          line.style.cssText = 'width:100%;text-align:start;gap:12px';
+          const t = el('div');
+          t.style.cssText = 'flex:1;min-width:0';
+          const name = el('strong', null, a.displayName);
+          name.dir = 'auto';
+          const handle = el('small', 'settings-note', `@${a.username} · ${adminStatus(a)}`);
+          handle.style.display = 'block';
+          t.append(name, handle);
+          line.append(adminFace(a), t);
+          if (a.owner) line.disabled = true;
+          else line.onclick = () => openAdminAccount(a, paint);
+          list.append(line);
+        }
+        body.replaceChildren(el('h3', null, 'لوحة المالك'), el('p', 'settings-note', 'الحسابات وأجهزتها. اضغط حسابًا لإدارته.'), list);
+      };
+      void paint();
+    }, { tone: 'manga' });
+  }
+  function openAdminAccount(a, refresh) {
+    const act = async (path, payload, done) => {
+      const out = await sync.adminCall(path, { userId: a.userId, ...payload }).catch(() => null);
+      if (!out?.ok) {
+        toast(out?.status === 403 ? 'للمالك وحده' : 'تعذّر. حاول مرة ثانية');
+        return null;
+      }
+      if (done) toast(done);
+      return out.data;
+    };
+    const confirmThen = (title, text, label, run) => openSheet((body) => {
+      body.append(el('h3', null, title), el('p', null, text));
+      const actions = el('div', 'sheet-actions');
+      const no = el('button', 'btn btn-secondary', 'لا، خلّه');
+      no.type = 'button';
+      no.onclick = () => closeSheet();
+      const yes = el('button', 'btn btn-danger', label);
+      yes.type = 'button';
+      yes.onclick = async () => {
+        yes.disabled = true;
+        await run();
+        closeSheet();
+        void openAdminPanel();
+      };
+      actions.append(no, yes);
+      body.append(actions);
+    });
+    openSheet((body) => {
+      const head = el('div');
+      head.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:12px';
+      const who = el('div');
+      const name = el('h3', null, a.displayName);
+      name.dir = 'auto';
+      name.style.margin = '0';
+      who.append(name, el('small', 'settings-note', `@${a.username} · ${adminStatus(a)}`));
+      head.append(adminFace(a, 52), who);
+      const keyBox = el('div');
+      const list = el('div', 'settings-list');
+      const item = (icon, title, sub, run, danger = false) => {
+        const b = el('button', 'setting');
+        b.type = 'button';
+        b.style.cssText = `width:100%;text-align:start${danger ? ';color:var(--danger, #ff6b7d)' : ''}`;
+        b.innerHTML = glyph(icon);
+        const t = el('div');
+        t.append(el('strong', null, title), el('small', 'settings-note', sub));
+        b.append(t);
+        b.onclick = run;
+        return b;
+      };
+      list.append(
+        item('lock', 'مفتاح استعادة الرقم', 'إذا نسي رقمه: مفتاح لمرة وحدة يدخل فيه ويحط رقمًا جديدًا', async () => {
+          const data = await act('pin-key', {});
+          if (!data?.key) return;
+          const code = el('code', null, data.key);
+          code.dir = 'ltr';
+          code.style.cssText = 'display:block;margin:12px 0 8px;padding:14px;border-radius:14px;background:var(--surface-3);font:700 17px/1.4 ui-monospace,Menlo,monospace;letter-spacing:.06em;text-align:center;user-select:all';
+          const copy = el('button', 'btn btn-primary', 'نسخ المفتاح');
+          copy.type = 'button';
+          copy.style.width = '100%';
+          copy.onclick = async () => {
+            try {
+              await navigator.clipboard.writeText(data.key);
+              toast('نُسخ. أرسله له');
+            } catch {
+              toast('انسخه يدويًا');
+            }
+          };
+          keyBox.replaceChildren(code, copy, el('p', 'settings-note', 'صالح 24 ساعة ولمرة وحدة. ما يكشف رقمه ولا أحد يقدر يشوفه بعد ما تقفل هذه الصفحة.'));
+        }),
+        item(a.suspended ? 'check' : 'pause', a.suspended ? 'إرجاع الحساب' : 'إيقاف الحساب', a.suspended ? 'يقدر يدخل من جديد' : 'ما يقدر يدخل ولا توصله إشعارات، وبياناته باقية', async () => {
+          await act('suspend', { on: !a.suspended }, a.suspended ? 'رجع الحساب' : 'أُوقف الحساب');
+          closeSheet();
+          void openAdminPanel();
+        }),
+        item('logout', 'إخراج من كل الأجهزة', 'كل أجهزته تحتاج اعتمادًا جديدًا منك', () => confirmThen(
+          `تخرج ${a.displayName} من كل أجهزته؟`, 'ما يقدر يرجع إلا إذا اعتمدت جواله من جديد.', 'أخرجه', () => act('signout', {}, 'أُخرج من كل أجهزته'),
+        )),
+        item('trash', 'حذف الحساب', 'يمسح الحساب وكل بياناته نهائيًا', () => confirmThen(
+          `تحذف حساب ${a.displayName}؟`, 'يُمسح الحساب وكل بياناته (المكتبة والتقدم والرسائل) نهائيًا بعد ثوانٍ. ما فيه رجوع.', 'احذفه نهائيًا', () => act('delete', {}, 'حُذف الحساب'),
+        ), true),
+      );
+      body.append(head, list, keyBox);
+      return () => refresh?.();
+    }, { tone: 'manga' });
+  }
   /** فئة الإعدادات المفتوحة: صفحتها بنظام الصفحات نفسه (تلاشٍ ورجوع)، والرئيسية قائمة الفئات. */
   function openSettingsPane(id) {
     if (id === 'addons') return void openAddons();
@@ -6286,25 +6451,47 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     if (api) {
       const popups = api.popups();
-      const kindsOn = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
+      const phone = api.phone?.() ?? null;
+      const setKind = (kind, on) => {
+        const cur = api.popups();
+        api.setPopups({ ...cur, kinds: { ...cur.kinds, [kind]: on } });
+        renderSettings();
+      };
+      const others = Object.keys(api.labels).filter((k) => k !== 'MESSAGE' && k !== 'NEW_UNIT');
+      const othersOn = others.filter((k) => popups.kinds[k] !== false).length;
       if (on('privacy')) group(
-        'التنبيهات',
+        'الإشعارات',
         [
-          toggle('bell', 'التنبيهات المنبثقة', 'لما يوصلك فريم أو ترشيح', popups.enabled, (enabled) => {
+          phone?.native
+            ? toggle('bell', 'إشعارات الجوال', 'تجيك والتطبيق مقفل، خلال ربع ساعة تقريبًا', popups.phone, (next) => {
+              api.setPopups({ ...api.popups(), phone: next });
+              if (next) void phone.requestPermission();
+              renderSettings();
+            })
+            : null,
+          phone?.native && popups.phone
+            ? toggle('lock', 'المحتوى على شاشة القفل', 'مطفأ: يظهر «رسالة جديدة» بلا اسم ولا نص', popups.lockPreview, (next) => {
+              api.setPopups({ ...api.popups(), lockPreview: next });
+              renderSettings();
+            })
+            : null,
+          toggle('spark', 'التنبيهات داخل التطبيق', 'منبثقة لحظة وصولها والتطبيق مفتوح', popups.enabled, (enabled) => {
             api.setPopups({ ...api.popups(), enabled });
             renderSettings();
           }),
-          popups.enabled
-            ? row('sliders', 'وش يطلع لك', null, { value: kindsOn === Object.keys(api.labels).length ? 'الكل' : `${kindsOn} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
-            : null,
+          toggle('send', 'رسائل المجلس', 'لما أحد يكتب في المجلس', popups.kinds.MESSAGE !== false, (v) => setKind('MESSAGE', v)),
+          toggle('book', 'جديد المفضلة', 'فصل أو حلقة جديدة لعمل في مفضلتك', popups.kinds.NEW_UNIT !== false, (v) => setKind('NEW_UNIT', v)),
+          row('sliders', 'باقي الأنواع', 'الترشيحات والدعوات والتفاعلات', { value: othersOn === others.length ? 'الكل' : `${othersOn} من ${others.length}`, run: openPopupKinds }),
+          phone?.native ? row('settings', 'إعدادات الجوال للإشعارات', 'الصوت والاهتزاز لكل نوع', { run: () => phone.openSettings() }) : null,
         ],
-        { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
+        { note: 'اللي تطفيه ما يوصلك منبثقًا ولا على الجوال، ويبقى في صفحة الإشعارات.' },
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
       if (on('playback') && supports('translation')) renderTranslationSettings(group, row, toggle);
       // الأرشيف للمالك وحده (ومن بقي عنده إخفاء محلي قديم): غيره لا يعرف أن أعمالًا حُذفت
       const archived = (iAmOwner() ? sync.rows('removed_works', (r) => Number(r.active) === 1).length : 0) + hiddenWorks().length;
       if (on('privacy') && (iAmOwner() || hiddenWorks().length)) group('المحتوى', [row('trash', 'أرشيف الأعمال المحذوفة', 'المحذوف من التطبيق — أعده متى شئت', { value: archived ? String(archived) : null, run: openHiddenArchive })]);
+      if (on('privacy') && iAmOwner()) group('إدارة VANTARA', [row('shield', 'لوحة المالك', 'الحسابات والأجهزة ومفاتيح استعادة الرقم', { run: () => void openAdminPanel() })]);
       if (!pane) group('المساعدة', [row('flag', 'بلّغ عن مشكلة', 'قل لنا وش صار', { run: () => openProblemSheet() })]);
     }
 
@@ -6469,10 +6656,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openPopupKinds() {
     const api = deps.settings;
     openSheet((body) => {
-      body.append(el('h3', null, 'وش يطلع لك'));
+      body.append(el('h3', null, 'باقي الأنواع'));
       const list = el('div', 'settings-list');
       list.style.marginTop = '12px';
       for (const [kind, label] of Object.entries(api.labels)) {
+        if (kind === 'MESSAGE' || kind === 'NEW_UNIT') continue;
         const d = el('label', 'setting');
         d.innerHTML = glyph(KIND_ICON[kind] ?? 'bell');
         const t = el('div');

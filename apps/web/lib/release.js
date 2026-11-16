@@ -18,8 +18,8 @@
 
 export const RELEASE = Object.freeze({
   product: 'VANTARA',
-  version: '0.2.2',
-  releaseDate: '2026-10-04',
+  version: '0.3.0',
+  releaseDate: '2026-11-16',
 
   /**
    * نسخة مخطط البيانات المحلية (localStorage/IndexedDB). رفعها يعني ترحيلًا
@@ -71,6 +71,19 @@ export const RELEASE = Object.freeze({
   }),
 
   releases: Object.freeze([
+    {
+      version: '0.3.0', date: '2026-11-16',
+      // أكبر تحديث: شاشة احتفال مرة واحدة بعد التحديث (lib/celebrate.js)، والبنود نفسها في «ما الجديد»
+      celebrate: { headline: 'أكبر تحديث في VANTARA', sub: 'كل اللي كنت تنتظره، في مكان واحد' },
+      items: [
+        { kind: 'new', platforms: ['shared'], icon: 'bell', title: 'الإشعارات', text: 'فصل جديد في مفضلتك ورسالة في المجلس توصلك، حتى والتطبيق مقفل على الجوال' },
+        { kind: 'new', platforms: ['shared'], icon: 'downloads', title: 'التحميلات', text: 'تحميل ذكي أو يدوي للمانجا والأنمي والسينما، يكمل في الخلفية، والمانجا تقرأها بلا إنترنت' },
+        { kind: 'new', platforms: ['shared'], icon: 'users', title: 'شاهدوا معًا', text: 'غرفة واحدة، المضيف يبدأ والكل يتابع بنفس اللحظة والحلقة' },
+        { kind: 'new', platforms: ['apk'], icon: 'puzzle', title: 'الإضافات', text: 'مدير إضافات جديد يشغّل CloudStream وAniyomi داخل التطبيق' },
+        { kind: 'improve', platforms: ['shared'], icon: 'palette', title: 'ألوانك', text: 'كل قسم بلونه اللي تختاره، والنص فوقه يضبط نفسه فيبقى واضحًا' },
+        { kind: 'improve', platforms: ['pwa'], icon: 'grid', title: 'الكمبيوتر', text: 'تصميم كامل للشاشات الكبيرة: صفحات غنية، بلا تمرير جانبي' },
+      ],
+    },
     {
       version: '0.2.2', date: '2026-10-04', items: [
         { kind: 'fix', platforms: ['pwa'], text: 'بطاقات سيرفرات الإضافات تعرض اسم الخدمة بدل مفتاحها الداخلي، والأسماء الطويلة تبقى داخل البطاقة على الجوال والكمبيوتر' },
