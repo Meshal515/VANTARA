@@ -40,7 +40,7 @@ export async function notifyOwner(env: Env, request: Request, now: number): Prom
   if (!token) return null;
   const hash = await tokenHash(env, token);
   const row = await env.DB.prepare(
-    `SELECT d.user_id FROM notify_devices d JOIN accounts a ON a.user_id = d.user_id AND a.lifecycle = 'ACTIVE' WHERE d.token_hash = ?`,
+    `SELECT d.user_id FROM notify_devices d JOIN accounts a ON a.user_id = d.user_id AND a.lifecycle = 'ACTIVE' AND a.suspended_at IS NULL WHERE d.token_hash = ?`,
   ).bind(hash).first<{ user_id: string }>();
   if (!row) return null;
   await env.DB.prepare('UPDATE notify_devices SET last_used_at = ? WHERE token_hash = ?').bind(now, hash).run();

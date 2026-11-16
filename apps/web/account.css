@@ -504,3 +504,47 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+
+/* «نسيت الرقم؟»: مفتاح الاستعادة من المالك (screens/pin-pad.js) */
+.vpin .vpin__forgot {
+  margin-top: 14px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 99px;
+  background: none;
+  color: #c9b8ff;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.vpin .vpin__forgot[hidden], .vpin__keybox[hidden] { display: none; }
+.vpin__keybox { width: min(100%, 320px); display: grid; gap: 12px; margin-top: 6px; }
+.vpin__keyhelp { margin: 0; color: #b9b5c6; font-size: 13px; line-height: 1.6; text-align: center; }
+.vpin .vpin__keyinput {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  font: 600 15px/1 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+.vpin .vpin__keyinput:focus { outline: none; box-shadow: inset 0 0 0 2px rgba(143, 92, 255, 0.9); }
+.vpin__keyrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.vpin .vpin__keybtn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(143, 92, 255, 0.95);
+  cursor: pointer;
+}
+.vpin .vpin__keybtn--ghost { background: rgba(255, 255, 255, 0.08); color: #e6e3ef; }
+.vpin .vpin__keybtn:disabled { opacity: 0.6; }

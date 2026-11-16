@@ -39,6 +39,8 @@ class FakeStatement implements D1PreparedStatement {
   }
 
   async first<T = unknown>(): Promise<T | null> {
+    // إيقاف المالك (admin.ts): لا حساب موقوف في هذه البوابة
+    if (this.#sql.startsWith('SELECT suspended_at FROM accounts')) return { suspended_at: null } as T;
     if (this.#sql.includes('FROM trusted_devices')) {
       const [deviceId, userId, credentialHash] = this.#values as [string, string, string];
       const row = this.#db.devices.find(

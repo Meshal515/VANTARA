@@ -402,6 +402,10 @@ export async function screenAccounts({ sync, mount, onSignedIn, onLocal = null }
       return askPin(account);
     }
     message.classList.add('gate__message--error');
+    if (error?.code === 'account_suspended') {
+      message.textContent = 'هذا الحساب موقوف من المالك. كلّمه يرجّعه.';
+      return;
+    }
     message.textContent = storageFailure(error)
       ? 'تعذّر حفظ الدخول في التخزين المحلي. بياناتك محفوظة؛ لا تمسح بيانات التطبيق.'
       : networkFailure(error)
@@ -429,6 +433,19 @@ export async function screenAccounts({ sync, mount, onSignedIn, onLocal = null }
           if (storageFailure(error)) return { error: 'other', message: 'تعذّر حفظ الدخول في التخزين المحلي. بياناتك محفوظة.' };
           if (networkFailure(error)) return { error: 'network' };
           // جهاز غير معتمد أو حساب حُذف: اللوحة تُغلق والبوابة تشرح
+          deferred = error;
+          return { ok: true };
+        }
+      },
+      // نسيت الرقم: مفتاح استعادة من المالك يدخل مرة ويُزيل الـPIN، فيضع صاحبه رقمًا جديدًا
+      forgot: async (key) => {
+        try {
+          signed = await sync.signIn(account.userId, { resetKey: key });
+          return { ok: true };
+        } catch (error) {
+          if (error?.code === 'reset_key_wrong') return { message: 'المفتاح غير صحيح أو انتهى أو استُعمل' };
+          if (error?.code === 'account_suspended') return { message: 'هذا الحساب موقوف. كلّم المالك' };
+          if (networkFailure(error)) return { message: 'ما فيه اتصال. حاول مرة ثانية' };
           deferred = error;
           return { ok: true };
         }

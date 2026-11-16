@@ -2397,7 +2397,39 @@ sync.onChange((tables) => {
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
   if (tables.includes('notifications')) toastNewNotifications();
   if (tables.some((table) => table === 'session' || table === 'settings' || table === 'accounts')) syncPhoneNotify();
+  if (tables.includes('session')) setTimeout(askNewPinAfterReset, 900);
 });
+
+/** دخل بمفتاح الاستعادة فأُزيل الـPIN: يضع رقمًا جديدًا الآن (يقدر يؤجله من الإعدادات). */
+function askNewPinAfterReset() {
+  let cleared = null;
+  try {
+    cleared = sessionStorage.getItem('vantara.pinCleared');
+  } catch {
+    cleared = null;
+  }
+  if (!cleared || cleared !== sync.user?.userId || sync.locked || document.querySelector('.vpin')) return;
+  try {
+    sessionStorage.removeItem('vantara.pinCleared');
+  } catch {
+    // مرة واحدة على الأقل في هذه الجلسة
+  }
+  const profile = sync.rows('profiles', (p) => p.user_id === cleared)[0];
+  const name = profile?.display_name || sync.user?.displayName || '';
+  pinPad({
+    mode: 'create',
+    title: 'رقم جديد',
+    subtitle: 'انشال رقمك القديم. اختر رقمًا جديدًا لحسابك',
+    avatar: profile?.avatar_key ?? null,
+    initial: [...name][0] || '؟',
+    cancelLabel: 'لاحقًا',
+    submit: async (pin) => {
+      const out = await sync.setPin(pin).catch(() => ({ ok: false }));
+      return out?.ok ? { ok: true } : { error: 'other', message: 'تعذّر الحفظ. حاول مرة ثانية' };
+    },
+    onDone: () => showToast({ title: 'تم', body: 'رقمك الجديد محفوظ' }),
+  });
+}
 syncPhoneNotify();
 setInterval(() => void sync.pull(), 60_000);
 // نبض كل 4 ثوانٍ والتطبيق أمامك: رقمٌ واحد، والسحب فقط حين يتقدّم. رسالة
@@ -2481,6 +2513,16 @@ function showLock(onUnlocked = () => {}) {
         if (error?.code === 'pin_wrong' || error?.code === 'pin_locked') return { error: error.code, retryAt: error.retryAt };
         if (!error?.status) return { error: 'network' };
         return { error: 'other', message: 'تعذّر فتح الحساب. اختر «تبديل الحساب»' };
+      }
+    },
+    forgot: async (key) => {
+      try {
+        await sync.signIn(me.userId, { resetKey: key });
+        return { ok: true };
+      } catch (error) {
+        if (error?.code === 'reset_key_wrong') return { message: 'المفتاح غير صحيح أو انتهى أو استُعمل' };
+        if (error?.code === 'account_suspended') return { message: 'هذا الحساب موقوف. كلّم المالك' };
+        return { message: error?.status ? 'تعذّر الدخول. حاول مرة ثانية' : 'ما فيه اتصال. حاول مرة ثانية' };
       }
     },
     onDone: () => {
