@@ -27,6 +27,8 @@ class PreparedEpisode(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val preparationStartedAt = monotonicClock()
+    /** اسم الحلقة كما وجدها أول مصدر: كل المصادر الأخرى تُطابق عليه (EpisodeAlign) فلا تختلط حلقتان في ورقة واحدة. */
+    val episodeAnchor = java.util.concurrent.atomic.AtomicReference<String?>(null)
     private val primaryQuality = HashMap<String, Int?>()
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()

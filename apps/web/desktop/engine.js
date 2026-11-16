@@ -1,3 +1,4 @@
+import { alignEpisode, identifiesEpisode } from '../lib/episode-align.js';
 import { discoverSubtitles } from '../addons/subtitles.js';
 import { createDesktopTogetherPlayer } from './together-player.js';
 import { publicUrl } from '../addons/manifest.js';
@@ -147,8 +148,14 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
           const eps = await sourceCall(runtime, copy.sourceId, src => src.episodes(copy, { signal }));
           if (!valid()) return;
           const matches = eps.filter(e => Number(e.number) === episode && (copy.requestedSeason == null || e.season == null || Number(e.season) === Number(copy.requestedSeason)));
-          const ep = episode < 0 ? eps[0] : matches.length === 1 ? matches[0] : null;
-          if (!ep) throw new Error('الحلقة المطلوبة غير متاحة في هذا المصدر');
+          const byNumber = episode < 0 ? eps[0] : matches.length === 1 ? matches[0] : null;
+          if (!byNumber) throw new Error('الحلقة المطلوبة غير متاحة في هذا المصدر');
+          // نفس الحلقة في كل المصادر: أول مصدر يحدد اسمها، ومصدر بترتيب آخر يعطي الحلقة بالاسم نفسه أو لا يُخلط
+          const anchor = s.episodeAnchor?.episode === episode ? s.episodeAnchor.name : null;
+          const aligned = episode < 0 ? { use: byNumber } : alignEpisode(anchor, byNumber, eps, copy.title);
+          if (aligned?.skip) throw new Error(`الحلقة ${episode} في هذا المصدر حلقة أخرى (ترتيبه مختلف)`);
+          const ep = aligned.use;
+          if (episode >= 0 && !anchor && identifiesEpisode(ep.name, copy.title)) s.episodeAnchor = { episode, name: ep.name };
           const servers = await sourceCall(runtime, copy.sourceId, src => src.servers(ep, { signal }));
           if (!valid()) return;
           if (!servers.length) throw new Error('المصدر لا يوفر سيرفرات لهذا العمل');

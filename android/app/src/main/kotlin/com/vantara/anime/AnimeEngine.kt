@@ -11,6 +11,7 @@ import com.vantara.anime.hosts.WebViewSniffer
 import com.vantara.anime.catalog.CatalogCrawler
 import com.vantara.anime.catalog.CatalogCursor
 import com.vantara.anime.catalog.CatalogStore
+import com.vantara.anime.episodes.EpisodeAlign
 import com.vantara.anime.episodes.EpisodeResolver
 import com.vantara.anime.health.HealthStore
 import com.vantara.anime.loader.AnimeExtensionLoader
@@ -685,10 +686,28 @@ class AnimeEngine(context: Context) {
                                 val c = EpisodeResolver.Copy(copy.sourceId, copy)
                                 val list = resolver.episodes(c)
                                 trace("episodes", "count=${list.size} numbers=${list.take(5).map { it.number }}")
-                                val ep = resolver.pick(list, prep.number) ?: return@withTimeout run {
+                                val byNumber = resolver.pick(list, prep.number) ?: return@withTimeout run {
                                     trace("no-episode", "wanted=${prep.number}")
                                     silent(if (list.isEmpty()) "لم يُرجع المصدر حلقات لهذا العمل"
                                         else "لم يجد المصدر الحلقة ${prep.number.let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }} (عنده ${list.size} حلقة)")
+                                }
+                                // نفس الحلقة في كل المصادر: مصدر يرتّب حلقات العمل بشكل مختلف (قصص منفصلة مثل Tatsuki
+                                // Fujimoto 17-26) تُؤخذ منه الحلقة التي تحمل اسم حلقة أول مصدر، أو لا تُخلط سيرفراته
+                                fun aligned() = if (prep.number < 0f) EpisodeAlign.Result.Use(byNumber, false)
+                                    else EpisodeAlign.align(prep.episodeAnchor.get(), byNumber, list, copy.title)
+                                var decision = aligned()
+                                if (decision is EpisodeAlign.Result.Use && prep.number >= 0f && EpisodeAlign.identifies(decision.episode.name, copy.title) &&
+                                    !prep.episodeAnchor.compareAndSet(null, decision.episode.name) && prep.episodeAnchor.get() != decision.episode.name) decision = aligned()
+                                val ep = when (decision) {
+                                    is EpisodeAlign.Result.Use -> {
+                                        val d = decision as EpisodeAlign.Result.Use
+                                        if (d.realigned) trace("realigned", "wanted=${prep.number} took=${d.episode.number} name=${d.episode.name.take(60)}")
+                                        d.episode
+                                    }
+                                    else -> return@withTimeout run {
+                                        trace("other-episode", "wanted=${prep.number} name=${byNumber.name.take(60)}")
+                                        silent("الحلقة ${prep.number.toInt()} في هذا المصدر حلقة أخرى (ترتيبه مختلف)")
+                                    }
                                 }
                                 val a = adapter(copy.sourceId) ?: return@withTimeout run { trace("no-adapter"); silent("المصدر غير جاهز الآن") }
                                 val scope = this
