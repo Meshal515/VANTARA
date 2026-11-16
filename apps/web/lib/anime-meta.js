@@ -1,3 +1,4 @@
+import { isRemovedAny } from './removed-works.js';
 /**
  * بيانات الأنمي الوصفية — من AniList (GraphQL عام، مجاني، يسمح بالطلب من المتصفح).
  *
@@ -78,6 +79,8 @@ export function airedEpisodes(m) {
 /** عمل AniList بالشكل الذي تعرفه الواجهة. */
 export function normalize(m) {
   if (!m || m.isAdult) return null;
+  // عمل حذفه المالك من التطبيق: لا يظهر في أي قائمة ولا بحث ولا تفاصيل
+  if (isRemovedAny([`anime:${m.id}`, String(m.id)])) return null;
   return {
     id: m.id,
     idMal: m.idMal ?? null,

@@ -1,3 +1,4 @@
+import { isRemovedAny } from '../lib/removed-works.js';
 import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resumeEpisode, stillUpgrade } from './anime-episodes.js';
 import { createEpisodeControls } from './anime-episode-controls.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
@@ -272,7 +273,11 @@ export function createAnime(deps) {
     return meta;
   }
 
+  // عمل حذفه المالك: بطاقته لا تُرسم في أي قائمة (المحفوظ محليًا وسجل المشاهدة لا يمران من AniList)
+  const removedAnime = (m) => isRemovedAny([`anime:${m?.id}`, String(m?.id ?? '')]);
+  const hideIfRemoved = (c, m) => { if (removedAnime(m)) { c.hidden = true; c.style.display = 'none'; } return c; };
   function posterCard(m, { rank, rankInline, onOpen } = {}) {
+    if (removedAnime(m)) return hideIfRemoved(el('button', 'an-card'), m);
     const c = el('button', `an-card${rank ? ' an-card--ranked' : ''}`);
     c.type = 'button';
     c.setAttribute('aria-label', rank ? `${rank}. ${m.title}` : m.title);
@@ -297,6 +302,7 @@ export function createAnime(deps) {
 
   /** بطاقة حلقة: عريضة، الحلقة ومتى نزلت، وزر تشغيل زجاجي. */
   function episodeCard(m) {
+    if (removedAnime(m)) return hideIfRemoved(el('button', 'an-ep-card'), m);
     const c = el('button', 'an-ep-card');
     c.type = 'button';
     c.setAttribute('aria-label', `${m.title} — ${unitLabel(m, m.episode)}`);
@@ -506,6 +512,8 @@ export function createAnime(deps) {
   const SOURCE_AR = { ORIGINAL: 'عمل أصلي', MANGA: 'مانجا', LIGHT_NOVEL: 'رواية خفيفة', WEB_NOVEL: 'رواية ويب', NOVEL: 'رواية', VIDEO_GAME: 'لعبة فيديو', VISUAL_NOVEL: 'رواية مرئية', MANHWA: 'مانهوا', ONE_SHOT: 'قصة قصيرة', OTHER: 'أخرى' };
 
   async function openAnime(m, { episode = null, position = null, clip = null, play = false, focusEpisodes = false, preserveEpisodeControls = false, local = null } = {}) {
+    // محذوف من التطبيق: لا يُفتح (ولا من رابط أو سجل قديم)، بلا ذكر لسبب
+    if (removedAnime(m)) { deps.toast?.('هذا العمل غير متاح'); return; }
     const token = ++state.detailToken;
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة، والحلقات المحمّلة وحدها تُعرض وتُشغَّل من الملف
     state.local = local;
@@ -3044,6 +3052,7 @@ export function createAnime(deps) {
    * اللقطة من ani.zip (مخبّأة) تحلّ محل البنر متى وصلت؛ بلا لقطة يبقى البنر أو الغلاف.
    */
   function historyCard(w) {
+    if (removedAnime(w)) return hideIfRemoved(el('div', 'an-hc'), w);
     const e = w.episodes?.[w.episode] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : e.done ? 1 : 0;
     const c = asButton(el('div', `an-hc${e.done ? ' done' : ''}`), `تابع ${w.title} — ${unitLabel(w, w.episode)}`);

@@ -24,6 +24,7 @@ import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, detail as fetchDetail, detailAnyType, displayTitle, search as searchMeta } from '../lib/cinema-meta.js';
+import { isRemovedAny } from '../lib/removed-works.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
 import { REJECT_AR, STATE, STATE_AR, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
@@ -559,7 +560,10 @@ export function createCinema(deps) {
     state.details.set(key, p);
     return p;
   }
+  // عمل حذفه المالك: بطاقته لا تُرسم في أي قائمة (أكمل المشاهدة، قائمتي، المحفوظ…)
+  const removed = (m) => isRemovedAny([`cinema:${m?.id}`, String(m?.id ?? '')]);
   const opener = (node, m, opts) => {
+    if (removed(m)) { node.hidden = true; node.style.display = 'none'; return node; }
     node.addEventListener('pointerdown', () => void prefetch(m), { passive: true });
     node.onclick = () => void openWork(m, opts);
     return node;
@@ -1571,6 +1575,8 @@ export function createCinema(deps) {
   // ───────────── صفحة العمل ─────────────
 
   async function openWork(m, { autoplay = false, playAt = null, local = null } = {}) {
+    // محذوف من التطبيق: لا يُفتح (ولا من رابط أو سجل قديم)، بلا ذكر لسبب
+    if (removed(m)) { toast('هذا العمل غير متاح'); return; }
     const token = ++state.token;
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة ومواسم/حلقات المحمّل وحده، والتشغيل من الملف
     state.local = local;
