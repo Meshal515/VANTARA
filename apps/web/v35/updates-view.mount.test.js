@@ -30,6 +30,32 @@ it('releases loading after a thrown request and allows a successful retry', asyn
   expect(host.querySelectorAll('.up-card')).toHaveLength(1);
   expect(host.querySelector('.up-load-more').disabled).toBe(false);
 });
+// بلاغ المالك (صورة 16 نوفمبر): بعد الرجوع للتطبيق يبقى «تعذّر جلب آخر التحديثات» حتى «تحديث» باليد
+it('a failed first load recovers by itself: on returning to the app, and on the periodic tick', async () => {
+  let tick;
+  vi.spyOn(globalThis, 'setInterval').mockImplementation((fn) => { tick = fn; return 0; });
+  timeline.mockRejectedValueOnce(new Error('aborted in background'))
+    .mockResolvedValueOnce(page([event('1')]))
+    .mockRejectedValueOnce(new Error('again'))
+    .mockResolvedValueOnce(page([event('2')]));
+  mount();
+  await vi.waitFor(() => expect(host.querySelector('.up-error')).not.toBeNull());
+  document.dispatchEvent(new document.defaultView.Event('visibilitychange'));
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+  expect(host.querySelector('.up-error')).toBeNull();
+  // ثانية: يفشل، ثم الاستطلاع الدوري يعيده بعد المهلة (لا يحتاج ضغطة)
+  api.dispose();
+  timeline.mockClear();
+  const now = vi.spyOn(Date, 'now');
+  now.mockReturnValue(1_000_000);
+  mount();
+  await vi.waitFor(() => expect(host.querySelector('.up-error')).not.toBeNull());
+  await tick();
+  expect(timeline).toHaveBeenCalledTimes(1); // داخل المهلة: لا إلحاح
+  now.mockReturnValue(1_000_000 + 16_000);
+  await tick();
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+});
 it('discards an earlier poll that resolves after a newer manual refresh',async()=>{
   let poll,release;
   vi.spyOn(globalThis,'setInterval').mockImplementation(fn=>{poll=fn;return 0;});
