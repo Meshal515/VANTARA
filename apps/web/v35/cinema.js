@@ -257,6 +257,15 @@ export function createCinema(deps) {
   const TYPES_KEY = 'vantara.cinema.types.v4';
   try { globalThis.localStorage?.removeItem('vantara.cinema.types.v1'); } catch {}
   const types = readJson(TYPES_KEY, {});
+  /** نسخة «أكمل المشاهدة» المحفوظة على الجهاز بنوع خاطئ تُصحَّح حين يُحسم النوع (لا تبقى «فيلمًا»). */
+  const healStoredType = (full) => {
+    if (!full?.id || !full.typeCertain && types[full.id] !== full.type) return;
+    const all = watchAll();
+    const w = all[full.id];
+    if (!w || !w.type || w.type === full.type) return;
+    all[full.id] = { ...w, type: full.type };
+    writeJson(userKey('watch', currentUser()), all);
+  };
   const rememberType = (m) => {
     if (!m?.id || !m.type || types[m.id] === m.type) return;
     types[m.id] = m.type;
@@ -1568,6 +1577,8 @@ export function createCinema(deps) {
   async function openWork(m, { autoplay = false, playAt = null, local = null } = {}) {
     // محذوف من التطبيق: لا يُفتح (ولا من رابط أو سجل قديم)، بلا ذكر لسبب
     if (removed(m)) { toast('هذا العمل غير متاح'); return; }
+    // نوع مؤكد سابقًا (resolveWork) يغلب نوع البطاقة: بطاقة «أكمل المشاهدة» حُفظت أحيانًا بنوع رد خاطئ
+    if (types[m.id] && types[m.id] !== m.type) m = { ...m, type: types[m.id] };
     const token = ++state.token;
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة ومواسم/حلقات المحمّل وحده، والتشغيل من الملف
     state.local = local;
@@ -1590,6 +1601,7 @@ export function createCinema(deps) {
     }
     if (full.type === 'series' && !full.seasons?.some((s) => s.n === state.season)) state.season = full.seasons?.find((s) => s.n !== 0)?.n ?? full.seasons?.[0]?.n ?? 1;
     state.detail = full;
+    healStoredType(full);
     senseSeries(full);
     // لا يُعاد بناء الصفحة وهي تتحرك (تدخل أو تغادر): الرسم بعد انتهاء الحركة، ولا رسم لصفحة غادرها المستخدم
     const page = q('cinema');
@@ -1942,7 +1954,8 @@ export function createCinema(deps) {
       body.append(card);
     }
     body.append(titleMark(m, 'cn-detail-mark'));
-    const line = facts(m, { runtime: true });
+    // قبل حسم النوع لا يُكتب «فيلم/مسلسل» من البطاقة (قد تكون محفوظة بنوع خاطئ)، فلا ينقلب أمامك
+    const line = facts(partial && !types[m.id] ? { ...m, type: null } : m, { runtime: true });
     if (m.type === 'series' && m.seasons) line.append(el('span', null, seasonsAr(m.seasons.filter((s) => s.n !== 0).length)));
     body.append(line);
     // سطر الأنواع محجوز حتى قبل وصول التفاصيل (لا يظهر فجأة فيدفع زر المشاهدة)

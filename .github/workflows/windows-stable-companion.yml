@@ -147,9 +147,23 @@ jobs:
         with:
           name: stable-video-host
           path: ${{ runner.temp }}/video-host
+      # قرار المالك (16 نوفمبر 2026): ويندوز Stable يأخذ Debug كما هو. الفرق الذي جعل Stable سيئًا: بلا محرك
+      # التورنت libtorrent (rqbit وحده). المحرك نفسه من آخر بناء Debug ناجح، بهوية Stable وقناته.
+      - name: Take the verified Debug Windows torrent engine (libtorrent) as-is
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-debug.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          test -n "$run"
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" -n windows-debug-native -D "$RUNNER_TEMP/debug-native"
+          test -s "$RUNNER_TEMP/debug-native/vantara-torrent.exe"
+          test -s "$RUNNER_TEMP/debug-native/vantara-torrent.version.txt"
+          echo "Debug engine from run $run: $(cat "$RUNNER_TEMP/debug-native/vantara-torrent.version.txt")"
       - name: Build release Windows binaries
         run: |
-          node tools/build-windows.mjs --output="$RUNNER_TEMP/stable" --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/video-host/VANTARA.exe"
+          node tools/build-windows.mjs --output="$RUNNER_TEMP/stable" --video-host="$RUNNER_TEMP/video-host/vantara-video-host.exe" --branded-exe="$RUNNER_TEMP/video-host/VANTARA.exe" \
+            --torrent-host="$RUNNER_TEMP/debug-native/vantara-torrent.exe" --torrent-host-version="$(cat "$RUNNER_TEMP/debug-native/vantara-torrent.version.txt")"
           test -s "$RUNNER_TEMP/stable/VANTARA-$VERSION-Windows-x64-Setup.exe"
           (cd "$RUNNER_TEMP/stable" && sha256sum -c SHA256SUMS.txt)
       - uses: actions/upload-artifact@v4
