@@ -825,6 +825,19 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (url === canonical) failedCanonical.set(id, canonical);
     }
     if (container.dataset.imageToken !== token) return null;
+    // كل نسخ العمل فشلت: الغلاف الرسمي بالاسم (AniList ثم Kitsu برقمه) قبل الحرف (بلاغ المالك 16 نوفمبر: «المصدر
+    // عنده غلاف، وخلّ مصادر احتياطية كثيرة»). الحرف آخر شيء، والمحاولات الخلفية تكمل بعده.
+    if (!id.startsWith('anime:') && !id.startsWith('cinema:')) {
+      const official = await officialCover(work);
+      if (container.dataset.imageToken !== token) return null;
+      const img = official && !seen.has(official) ? await tryUrl(official, 9000) : null;
+      if (container.dataset.imageToken !== token) return null;
+      if (img) {
+        if (opts.final) img.classList.add('img-fade');
+        rememberCover(id, official);
+        return show(img, official, official, null);
+      }
+    }
     if (!previewShown) fallbackArt(container, titleOf(work));
     // لا فراغ دائم: الغلاف يُطلب من تفاصيل العمل في الخلفية، والبطاقة تُعاد حين يصل
     waitCover(container, work);
@@ -850,6 +863,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!container.isConnected || container.dataset.imageToken !== token || container.querySelector(':scope > img')) return;
       void mountImage(container, work);
     }, COVER_RETRY_MS[n]);
+  }
+  /** الغلاف الرسمي بعنوان العمل: AniList، ثم Kitsu برقم AniList نفسه. null إن لم يُعرف خلال 6 ثوانٍ. */
+  async function officialCover(work) {
+    const title = work?._work?.title || work?.title?.english || titleOf(work);
+    if (!title) return null;
+    const timeout = (ms) => new Promise((r) => setTimeout(() => r(null), ms));
+    const a = await Promise.race([artFor(title), timeout(6000)]).catch(() => null);
+    if (a?.cover) return a.cover;
+    if (!a?.id) return null;
+    const k = await Promise.race([kitsuArt(a.id), timeout(3000)]).catch(() => null);
+    return k?.cover?.url ?? null;
   }
   /** بطاقات بلا غلاف تنتظر معرفته. محدودة: المنزوعة تُكنس حين تُضاف غيرها (#311 D-006). */
   const waitingCovers = new Map();
