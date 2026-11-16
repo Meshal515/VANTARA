@@ -603,6 +603,16 @@ html,
 }
 .v35 .work-score .icon { width: 11px; height: 11px; color: var(--gold); }
 .v35 .work-score[hidden] { display: none; }
+/* وسم لغة عمل بلا نسخة عربية: نص صغير هادئ بجانب التقييم، لا شارة ملوّنة */
+.v35 .work-lang {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.5;
+}
 .v35 .work-card:active .poster {
   transform: scale(0.97);
 }

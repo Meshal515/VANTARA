@@ -962,6 +962,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     setMeta(m, meta ?? latestLabel(work));
     const facts = el('div', 'work-facts');
     facts.append(score);
+    // عمل بلا نسخة عربية: وسم لغته بصدق («إنجليزي»، «ياباني»…)؛ العربي بلا وسم (قرار المالك، 16 نوفمبر)
+    if (work.foreignLang) facts.append(el('span', 'work-lang', work.foreignLang));
     void mountImage(p, work);
     a.append(frame, t, m, facts);
     if (work._viewAt) a.append(el('div', 'work-when', `آخر قراءة ${agoAr(work._viewAt)}`));
@@ -1052,7 +1054,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (entitlement().state === 'unknown') return null;
     if (section === 'manga') {
       const list = await engine.sources().catch(() => null);
-      return list ? list.filter((s) => !s.filler).length : null;
+      // إضافة غير عربية ثبّتها المستخدم تقرأ فعلًا: تُعدّ، فلا يُقال «أضف مصدرًا» وهي موجودة (UE10)
+      return list ? list.length : null;
     }
     const addons = await getAddonRuntime().catch(() => null);
     if (!addons) return null;
@@ -3053,7 +3056,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const t = el('span', 't');
     const b = el('b', null, plainChapterName(name) ? `الفصل ${chapterNumberText(r)}` : name);
     b.dir = 'auto';
-    t.append(b, el('span', null, [when, r.chapter.scanlator].filter(Boolean).join(' · ')));
+    t.append(b, el('span', null, [r.langLabel, when, r.chapter.scanlator].filter(Boolean).join(' · ')));
     open.append(num, t);
     const picked = Boolean(state.marking?.picked.has(chapterKeyOf(String(w.id), r)));
     if (state.marking) {
@@ -3079,7 +3082,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     open.type = 'button';
     const num = el('b', 'mw-cell-n', chapterNumberText(r));
     num.dir = 'ltr';
-    open.append(num, el('small', 'mw-cell-t', dateLabel(r.chapter?.dateUpload) || ' '));
+    // فصل من نسخة غير عربية: لغته بدل التاريخ («إنجليزي»)، والعربي كما هو
+    open.append(num, el('small', 'mw-cell-t', r.langLabel || dateLabel(r.chapter?.dateUpload) || ' '));
     const mark = el('button', 'mw-cell-mark');
     mark.type = 'button';
     let on = isRead;
@@ -4662,8 +4666,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     grid.replaceChildren(...skeletonCards(6));
     grid.parentNode?.querySelector('.search-refresh')?.remove();
     const snapshot = createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) });
-    // حارس أخير في البحث: عمل بلا نسخة عربية واحدة، أو للكبار، لا يظهر مهما كان مساره
-    const arabicOnly = (items) => items.filter((w) => !w._work || ((w._work.editions ?? []).some((e) => !isFiller(e.sourceId) && (!String(e.sourceId).includes('#') || /\.ar\./.test(String(e.sourceId)))) && !isAdult(w._work)));
+    // حارس أخير في البحث: عمل للكبار لا يظهر مهما كان مساره. عمل بلا نسخة عربية يظهر بوسم لغته (قرار المالك، 16 نوفمبر)
+    const arabicOnly = (items) => items.filter((w) => !w._work || !isAdult(w._work));
     const paintSnapshot = (items) => {
       renderGrid(grid, snapshot.accept(arabicOnly(items)));
       let refresh = grid.parentNode?.querySelector('.search-refresh');

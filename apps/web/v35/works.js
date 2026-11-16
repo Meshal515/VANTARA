@@ -117,6 +117,7 @@ export function toV35Work(work) {
     bannerImage: cover,
     description: undefined,
     staff: { edges: [] },
+    foreignLang: workForeignLang(work),
     _work: work,
   };
 }
@@ -145,7 +146,10 @@ function sources() {
   // إضافة مستودع للكبار لا تُستعمل أبدًا، والإضافة غير العربية تكملة فصول فقط
   sourcesPromise ??= engine.sources().then((list) => {
     const clean = (list ?? []).filter((s) => !(s.user && s.warning && s.warning !== 'SAFE'));
-    for (const s of clean) if (s.filler) fillerIds.add(String(s.id));
+    for (const s of clean) {
+      if (s.filler) fillerIds.add(String(s.id));
+      if (s.lang) langById.set(String(s.id), String(s.lang).toLowerCase());
+    }
     return clean;
   }).catch((error) => {
     sourcesPromise = null;
@@ -413,6 +417,38 @@ export async function cachedWorkChapterCount(v35work) {
  */
 export const isFiller = (sourceId) => String(sourceId ?? '').includes('@') || fillerIds.has(String(sourceId ?? ''));
 
+/**
+ * لغة مصدر غير عربي (قرار المالك، 16 نوفمبر): البطاقة والفصل يقولان «إنجليزي» أو «ياباني»… بصدق؛ العربي بلا وسم.
+ * من المصدر نفسه (lang)، أو لاحقة `@en`، أو مقطع اللغة في اسم حزمة Mihon (`extension.en.`).
+ */
+const LANG_NAMES = {
+  en: 'إنجليزي', ja: 'ياباني', ko: 'كوري', zh: 'صيني', 'zh-hans': 'صيني', 'zh-hant': 'صيني', es: 'إسباني', 'es-419': 'إسباني',
+  pt: 'برتغالي', 'pt-br': 'برازيلي', it: 'إيطالي', fr: 'فرنسي', de: 'ألماني', ru: 'روسي', tr: 'تركي', id: 'إندونيسي',
+  vi: 'فيتنامي', th: 'تايلندي', pl: 'بولندي', uk: 'أوكراني', fa: 'فارسي', hi: 'هندي', ms: 'ماليزي', fil: 'فلبيني', nl: 'هولندي',
+};
+const langById = new Map();
+export function sourceLang(sourceId) {
+  const id = String(sourceId ?? '');
+  const known = langById.get(id);
+  if (known) return known;
+  const suffix = /@([a-z]{2,3}(?:-[a-z0-9]{2,4})?)$/i.exec(id)?.[1];
+  if (suffix && suffix !== 'filler') return suffix.toLowerCase();
+  return /\.extension\.([a-z]{2,3}(?:-[a-z0-9]{2,4})?)\./i.exec(id)?.[1]?.toLowerCase() ?? null;
+}
+/** اسم اللغة بالعربي لمصدر غير عربي، أو null للعربي والمجهول. */
+export function foreignLangName(sourceId) {
+  const lang = sourceLang(sourceId);
+  if (!lang || lang === 'ar' || lang === 'all') return isFiller(sourceId) ? 'أجنبي' : null;
+  return LANG_NAMES[lang] ?? LANG_NAMES[lang.split('-')[0]] ?? 'أجنبي';
+}
+/** عمل بلا نسخة عربية: لغة نسخه (واحدة إن اتفقت، وإلا «أجنبي»)؛ null إن كان فيه عربي. */
+export function workForeignLang(work) {
+  const editions = work?.editions ?? [];
+  if (!editions.length || editions.some((e) => !foreignLangName(e.sourceId))) return null;
+  const names = new Set(editions.map((e) => foreignLangName(e.sourceId)));
+  return names.size === 1 ? [...names][0] : 'أجنبي';
+}
+
 /** A clicked release contributes its provider even when this work is already saved. */
 export function withUpdateSources(base, group) {
   const editions=new Map((base._work?.editions??[]).map(e=>[e.sourceId,e]));
@@ -479,7 +515,13 @@ export function collapseMirrors(list) {
     return f === String(s.id) || best.get(f) === s;
   });
 }
-const listingSources = async ({ query = '', includeFillers = false } = {}) => collapseMirrors((await sources()).filter((s) => query || includeFillers || !s.filler));
+const listingSources = async ({ query = '', includeFillers = false } = {}) => {
+  const all = await sources();
+  void query;
+  // قرار المالك (16 نوفمبر): أعمال الإضافات غير العربية تظهر في كل مكان بوسم لغتها؛ includeFillers باقٍ للتوافق
+  void includeFillers;
+  return collapseMirrors(all);
+};
 /**
  * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
  * القارئ لا يرى لغتين؛ والترجمة تعرف الفصل الإنجليزي من `sourceId`.
@@ -491,14 +533,13 @@ export function localizeFiller(rows, { keepLabel = false } = {}) {
           ...row,
           label: keepLabel ? sourceLabel(row) : null,
           lang: 'en',
+          langLabel: foreignLangName(row.sourceId),
           chapter: { ...row.chapter, name: `الفصل ${row.number}`, originalName: row.chapter?.name ?? null },
         }
       : row,
   );
 }
 
-/** عملٌ كل نسخه تكملة ليس عملًا نعرضه: لا فصل عربي فيه. */
-const hasArabic = (work) => work.editions.some((e) => !isFiller(e.sourceId));
 
 // ───────────────── مانجا ومانهوا ومانها فقط ─────────────────
 //
@@ -604,7 +645,9 @@ function addPage(index, positions, source, value) {
 }
 function ranked(index, positions, kind, { keepWestern = false } = {}) {
   // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
-  const works = index.list().filter((w) => hasArabic(w) && (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w));
+  // قرار المالك (16 نوفمبر، UE10): عمل نسخه كلها من إضافة غير عربية يظهر في كل مكان، وبطاقته تحمل وسم لغته
+  // (foreignLang). ترتيب النسخ يبقي العربي أولًا داخل كل عمل
+  const works = index.list().filter((w) => (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w));
   const byWork = new Map();
   for (const [own, list] of positions) {
     const key = index.keyOf(own);
