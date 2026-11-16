@@ -280,12 +280,29 @@ class RuntimeHost(
     private suspend fun preflightCandidateUpdate(
         o: Owner,generation:Long,pkg:String,
         candidate: RuntimePackageStore.Staged,sources:JsonArray
-    )=withTimeout(90_000L) {
+    ) {
+        // RH8: مهلة لكل مصدر، ونتيجة كل مصدر تُجمع ثم تحكم القاعدة المشتركة (UpdatePreflight) بدل «كل مصدر وإلا رفض»
+        val outcomes=ArrayList<com.vantara.plugins.UpdatePreflight.Outcome>()
         for(raw in sources) {
-            sourceCanary(o,generation,pkg,raw.jsonObject,candidate.dexFile(),
-                candidate.candidate().packageHash(),candidate.candidate().dexHash(),
-                candidate.candidate().entry(),"candidate")
+            outcomes+=try {
+                withTimeout(com.vantara.plugins.UpdatePreflight.PER_SOURCE_MS) {
+                    sourceCanary(o,generation,pkg,raw.jsonObject,candidate.dexFile(),
+                        candidate.candidate().packageHash(),candidate.candidate().dexHash(),
+                        candidate.candidate().entry(),"candidate")
+                }
+                com.vantara.plugins.UpdatePreflight.Outcome.Passed
+            } catch(timedOut:TimeoutCancellationException) {
+                com.vantara.plugins.UpdatePreflight.Outcome.Failed(timedOut)
+            } catch(cancelled:CancellationException) {
+                throw cancelled
+            } catch(failure:Throwable) {
+                currentCoroutineContext().ensureActive()
+                com.vantara.plugins.UpdatePreflight.Outcome.Failed(failure)
+            }
         }
+        val verdict=com.vantara.plugins.UpdatePreflight.decide(outcomes)
+        android.util.Log.i("VantaraRuntime","UPDATE_PREFLIGHT:$pkg:${verdict.code}")
+        if(!verdict.accept) throw IllegalStateException(verdict.code,(outcomes.firstOrNull { it is com.vantara.plugins.UpdatePreflight.Outcome.Failed } as? com.vantara.plugins.UpdatePreflight.Outcome.Failed)?.error)
     }
 
     private val recoveryGate=RuntimeRecoveryGate()
@@ -354,7 +371,7 @@ class RuntimeHost(
                 try { preflightCandidateUpdate(o,generation,pkg,candidate,sources) }
                 catch (timedOut: TimeoutCancellationException) { throw IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_TIMEOUT",timedOut) }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { throw IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_FAILED",failure) }
+                catch (failure: Exception) { throw if(failure.message?.startsWith("RUNTIME_UPDATE_")==true) failure else IllegalStateException("RUNTIME_UPDATE_PREFLIGHT_FAILED",failure) }
             }
             val installed=synchronized(lock) {
                 checkPackage(o,pkg,generation)

@@ -189,7 +189,8 @@ class AnimeEngine(context: Context) {
                 publications.publish(id, generation) {
                     ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds },
                         resolver = embeds, pageEpisodes = { entry(id)?.episodes }).also { a ->
-                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
+                        // DM1: الدومين المعتمد سابقًا (المحفوظ في الصحة) يبقى بعد إعادة التشغيل
+                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl).adopt(AnimeHostRouter.health?.get(com.vantara.anime.health.HealthStore.sourceKey(id))?.domain))
                         adapters[id] = a
                         loadErrors.remove(id)
                         loadDiagnostics.remove(id)
