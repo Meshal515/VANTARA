@@ -1,4 +1,4 @@
-import { alignEpisode, identifiesEpisode } from '../lib/episode-align.js';
+import { alignEpisode, identifiesEpisode, movieListing } from '../lib/episode-align.js';
 import { discoverSubtitles } from '../addons/subtitles.js';
 import { createDesktopTogetherPlayer } from './together-player.js';
 import { publicUrl } from '../addons/manifest.js';
@@ -148,6 +148,8 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
           const eps = await sourceCall(runtime, copy.sourceId, src => src.episodes(copy, { signal }));
           if (!valid()) return;
           const matches = eps.filter(e => Number(e.number) === episode && (copy.requestedSeason == null || e.season == null || Number(e.season) === Number(copy.requestedSeason)));
+          // فيلم من صفحة بحلقات مرقّمة مختلفة (مسلسل أو مجموعة أفلام) ليس هذا الفيلم: لا «الحلقة 1» بدله
+          if (episode < 0 && !movieListing(eps)) throw new Error(`صفحة المصدر فيها ${eps.length} حلقات: ليست هذا الفيلم`);
           const byNumber = episode < 0 ? eps[0] : matches.length === 1 ? matches[0] : null;
           if (!byNumber) throw new Error('الحلقة المطلوبة غير متاحة في هذا المصدر');
           // نفس الحلقة في كل المصادر: أول مصدر يحدد اسمها، ومصدر بترتيب آخر يعطي الحلقة بالاسم نفسه أو لا يُخلط

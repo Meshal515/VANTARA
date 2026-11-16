@@ -1,3 +1,4 @@
+import { liveAccent, onAccent, unifiedLookOn } from '../../v35/appearance.js';
 /**
  * شاشة الغرفة («مشاهدة معًا» قبل البدء) داخل المشغّل — للكمبيوتر والجوال.
  *
@@ -237,7 +238,8 @@ export function renderLobby(host, m, a) {
   clearInterval(host._countdown);
   const moreOpen = host.querySelector('.pl-more')?.hidden === false;
   host.classList.toggle('is-host', m.host);
-  if (m.accent) host.style.setProperty('--pl-accent', m.accent);
+  // لون القسم الذي اختاره المستخدم، ونص أزراره بالتباين (أسود على الفاتح، أبيض على الغامق)
+  if (m.accent) { host.style.setProperty('--pl-accent', m.accent); host.style.setProperty('--pl-on-accent', /^#[\da-f]{6}$/i.test(m.accent) ? onAccent(m.accent) : '#fff'); }
 
   // البنر والشعار يُبنيان مرة لكل عمل وحلقة ويبقيان كما هما بين الرسمات (لا إعادة تحميل ولا تبديل الاسم بالشعار من
   // جديد — بلاغ المالك: الشعار «يتحرك ويتكرر»). ما يتغير بعد ذلك تقدّم الامتلاء وحده.
@@ -344,4 +346,10 @@ export function renderLobby(host, m, a) {
     tick();
     host._countdown = setInterval(tick, 100);
   } else host.classList.remove('is-counting');
+}
+
+/** لون الغرفة: لون القسم كما اختاره المستخدم في المظهر (لا ألوان ثابتة). */
+export function sectionAccent(kind) {
+  const section = kind === 'cinema' ? 'cinema' : kind === 'manga' ? 'manga' : 'anime';
+  try { return liveAccent(section, { unified: unifiedLookOn() }); } catch { return '#8f5cff'; }
 }

@@ -76,3 +76,22 @@ describe('Cinemeta', () => {
     expect(seasonsOf([])).toEqual([]);
   });
 });
+
+import { copyKind, judgeCopy } from './cinema-match.js';
+describe('لا يختلط فيلم بمسلسل (بلاغ المالك 16 نوفمبر)', () => {
+  it('عنوان بلا «فيلم/مسلسل» يُحكم ببنية النسخة: مواسم أو نوع صريح', () => {
+    const movie = { title: 'The Batman', year: 2022, type: 'movie' };
+    expect(judgeCopy({ title: 'The Batman', hasSeasons: true }, movie)).toMatchObject({ ok: false, reason: 'kind' });
+    expect(judgeCopy({ title: 'The Batman', type: 'series' }, movie)).toMatchObject({ ok: false, reason: 'kind' });
+    expect(judgeCopy({ title: 'The Batman 2022', type: 'movie' }, movie)).toMatchObject({ ok: true });
+    const series = { title: 'Arcane', year: 2021, type: 'series', season: 1 };
+    expect(judgeCopy({ title: 'Arcane', type: 'movie' }, series)).toMatchObject({ ok: false, reason: 'kind' });
+    expect(judgeCopy({ title: 'Arcane', hasSeasons: true, seasonNumber: 1 }, series)).toMatchObject({ ok: true });
+  });
+  it('أنواع الإضافات', () => {
+    expect(copyKind({ type: 'AnimeMovie' })).toBe('movie');
+    expect(copyKind({ type: 'TvSeries' })).toBe('series');
+    expect(copyKind({ seasonNumber: 2 })).toBe('series');
+    expect(copyKind({ title: 'x' })).toBeNull();
+  });
+});

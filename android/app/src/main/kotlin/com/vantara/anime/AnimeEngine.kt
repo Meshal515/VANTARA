@@ -689,6 +689,7 @@ class AnimeEngine(context: Context) {
                                 val byNumber = resolver.pick(list, prep.number) ?: return@withTimeout run {
                                     trace("no-episode", "wanted=${prep.number}")
                                     silent(if (list.isEmpty()) "لم يُرجع المصدر حلقات لهذا العمل"
+                                        else if (prep.number < 0f) "صفحة المصدر فيها ${list.size} حلقات: ليست هذا الفيلم"
                                         else "لم يجد المصدر الحلقة ${prep.number.let { if (it % 1f == 0f) it.toInt().toString() else it.toString() }} (عنده ${list.size} حلقة)")
                                 }
                                 // نفس الحلقة في كل المصادر: مصدر يرتّب حلقات العمل بشكل مختلف (قصص منفصلة مثل Tatsuki

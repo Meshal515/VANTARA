@@ -1969,6 +1969,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const cover = q('detailCover');
     if (cover.dataset.for !== String(w.id)) {
       cover.dataset.for = String(w.id);
+      cover.style.removeProperty('--art-bg');
       const glow = q('detailGlow');
       glow?.classList.remove('ready');
       glow?.removeAttribute('src');
@@ -1997,6 +1998,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
         img.onload = () => { if (live()) workReady(); };
         img.src = cachedCover(art.cover) ?? art.cover;
+        // خلفية مموّهة من الفن نفسه تملأ أي فراغ حول الغلاف (نسبة الفن غير نسبة مكانه): لا قص ولا سواد
+        cover.style.setProperty('--art-bg', `url("${String(img.src).replace(/["\\\n]/g, encodeURIComponent)}")`);
         cover.replaceChildren(img);
         // ألواح «ويبتوني» على الكمبيوتر تأخذ الغلاف المحسوم نفسه (لا مسار غلاف ثانٍ)
         for (const panel of document.querySelectorAll('#detail [data-wt-panel]')) panel.src = img.src;

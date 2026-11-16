@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alignEpisode, identifiesEpisode } from './episode-align.js';
+import { alignEpisode, identifiesEpisode, movieListing } from './episode-align.js';
 
 const title = 'Tatsuki Fujimoto 17-26';
 const ep = (number, name) => ({ number, name });
@@ -20,5 +20,13 @@ describe('نفس الحلقة في كل المصادر (Tatsuki Fujimoto 17-26)'
     expect(alignEpisode('Love Is Blind', arabic[0], arabic, title).use).toBe(arabic[0]);
     expect(alignEpisode(null, other[2], other, title).use).toBe(other[2]);
     expect(identifiesEpisode(`${title} Episode 3`, title)).toBe(false);
+  });
+});
+
+describe('فيلم لا يأخذ حلقة مسلسل', () => {
+  it('صفحة بحلقات مرقّمة مختلفة ليست فيلمًا؛ نسخ الفيلم الواحد مقبولة', () => {
+    expect(movieListing([{ number: 1 }])).toBe(true);
+    expect(movieListing([{ number: -1, name: 'مترجم' }, { number: -1, name: 'مدبلج' }])).toBe(true);
+    expect(movieListing([{ number: 1 }, { number: 2 }, { number: 3 }])).toBe(false);
   });
 });

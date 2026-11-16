@@ -745,7 +745,7 @@ html, body, body * { scrollbar-width: none; -ms-overflow-style: none; }
   box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
   transition: transform .16s ease, background .16s ease;
 }
-.frame-bar__send:not(.v35 *) { background: var(--accent); border-color: transparent; }
+.frame-bar__send:not(.v35 *) { background: var(--accent); border-color: transparent; color: var(--on-accent, #fff); }
 .frame-bar__shoot:active:not(.v35 *), .frame-bar__send:active:not(.v35 *) { transform: scale(.97); }
 .frame-bar__send[hidden]:not(.v35 *) { display: none; }
 

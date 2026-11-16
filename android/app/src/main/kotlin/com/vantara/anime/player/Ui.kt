@@ -45,6 +45,8 @@ object Tone {
     var ACCENT_SOFT = 0x293B82F6; private set
     /** حدّ العنصر المختار (الحلقة الحالية، السيرفر المختار). */
     var ACCENT_LINE = 0x6B3B82F6; private set
+    /** نص وأيقونة فوق زر بلون القسم: أبيض على الغامق وأسود على الفاتح (WCAG 4.5:1، نفس onAccent في الويب). */
+    var ON_ACCENT = 0xFFFFFFFF.toInt(); private set
     const val OK = 0xFF34D399.toInt()
     const val WARN = 0xFFFBBF24.toInt()
     const val BAD = 0xFFF87171.toInt()
@@ -55,11 +57,11 @@ object Tone {
         if (section == "cinema") {
             BG = 0xFF0A0707.toInt(); SURFACE = 0xFF141010.toInt(); SURFACE_2 = 0xFF1B1515.toInt(); SURFACE_3 = 0xFF251C1C.toInt()
             LINE = 0x1FFFC8C8; TEXT = 0xFFF7F2F2.toInt(); TEXT_2 = 0xFFCBBDBD.toInt(); TEXT_3 = 0xFF978787.toInt(); TEXT_4 = 0xFF5E5252.toInt()
-            ACCENT = 0xFFC1121F.toInt(); ACCENT_TEXT = 0xFFF26B6B.toInt(); ACCENT_SOFT = 0x29C1121F; ACCENT_LINE = 0x73C1121F
+            ACCENT = 0xFFC1121F.toInt(); ACCENT_TEXT = 0xFFF26B6B.toInt(); ACCENT_SOFT = 0x29C1121F; ACCENT_LINE = 0x73C1121F; ON_ACCENT = onAccent(ACCENT)
         } else {
             BG = 0xFF05070D.toInt(); SURFACE = 0xFF0D111B.toInt(); SURFACE_2 = 0xFF131826.toInt(); SURFACE_3 = 0xFF1B2233.toInt()
             LINE = 0x1FA0BEFF; TEXT = 0xFFF3F6FC.toInt(); TEXT_2 = 0xFFB4BDD0.toInt(); TEXT_3 = 0xFF7D879D.toInt(); TEXT_4 = 0xFF4E576B.toInt()
-            ACCENT = 0xFF3B82F6.toInt(); ACCENT_TEXT = 0xFF8FB8FF.toInt(); ACCENT_SOFT = 0x293B82F6; ACCENT_LINE = 0x6B3B82F6
+            ACCENT = 0xFF3B82F6.toInt(); ACCENT_TEXT = 0xFF8FB8FF.toInt(); ACCENT_SOFT = 0x293B82F6; ACCENT_LINE = 0x6B3B82F6; ON_ACCENT = onAccent(ACCENT)
         }
         // لون الواجهة (الويب يمرّره دائمًا: المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد) يغلب المصمّم،
         // والأسطح تأخذ لمسة منه بنسب paletteVars في appearance.js نفسها: المشغّل «نوع من اللون» لا أحمر ثابت
@@ -70,10 +72,19 @@ object Tone {
         ACCENT_TEXT = (0xFF shl 24) or (lift(r) shl 16) or (lift(g) shl 8) or lift(b)
         ACCENT_SOFT = (0x29 shl 24) or rgb
         ACCENT_LINE = (0x6B shl 24) or rgb
+        ON_ACCENT = onAccent(ACCENT)
         BG = mix(rgb, 4, 0x050508); SURFACE = mix(rgb, 6, 0x0C0C11); SURFACE_2 = mix(rgb, 7, 0x131319); SURFACE_3 = mix(rgb, 8, 0x1B1B23)
         LINE = (0x1F shl 24) or (mix(rgb, 30, 0xFFFFFF) and 0x00FFFFFF)
         TEXT = 0xFFF3F3F6.toInt(); TEXT_2 = mix(rgb, 6, 0xBAB8C4); TEXT_3 = mix(rgb, 6, 0x87849A); TEXT_4 = mix(rgb, 6, 0x56536A)
     }
+
+    private fun luminance(c: Int): Double {
+        fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4) }
+        return 0.2126 * ch((c shr 16) and 0xFF) + 0.7152 * ch((c shr 8) and 0xFF) + 0.0722 * ch(c and 0xFF)
+    }
+    private fun contrast(a: Int, b: Int): Double { val x = luminance(a); val y = luminance(b); return (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05) }
+    /** لون النص فوق [bg]: أبيض إن قرأ بوضوح، وإلا أسود. */
+    fun onAccent(bg: Int): Int = if (contrast(bg, 0xFFFFFFFF.toInt()) >= 4.5) 0xFFFFFFFF.toInt() else if (contrast(bg, 0xFF0B0B0F.toInt()) >= 4.5) 0xFF0B0B0F.toInt() else 0xFF000000.toInt()
 
     /** color-mix(in srgb, accent p%, base): نفس خلط الويب، معتمًا. */
     private fun mix(accent: Int, p: Int, base: Int): Int {

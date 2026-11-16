@@ -409,6 +409,7 @@ html.pwa-playing body {
 }
 .pwa-player .pp-pill-btn--primary {
   background: var(--accent) !important;
+  color: var(--on-accent, #fff);
 }
 .pwa-player .pp-pill-btn--wide {
   width: 100%;
@@ -623,6 +624,7 @@ html.pwa-playing body {
 }
 .pwa-player .pp-ep.is-on {
   background: var(--accent) !important;
+  color: var(--on-accent, #fff);
 }
 
 /* جوال عمودي: الأزرار الجانبية تُخفى ما عدا الأساسي، كي لا يتزاحم الصف */
@@ -1144,7 +1146,7 @@ html.pwa-playing body {
 .pwa-player .pl-icon svg { width: 24px; height: 24px; }
 .pwa-player .pl-go { border-radius: 14px; height: 50px; padding: 0 20px; color: #fff; background: rgba(10, 12, 20, 0.55); border-color: rgba(255, 255, 255, 0.16); }
 .pwa-player .pl-choose-server { padding-inline: 18px; border-color: rgba(255, 255, 255, 0.16); background: rgba(10, 12, 20, 0.55); }
-.pwa-player .pl-go.is-primary { background: var(--pl-accent); border-color: var(--pl-accent); }
+.pwa-player .pl-go.is-primary { background: var(--pl-accent); border-color: var(--pl-accent); color: var(--pl-on-accent, #fff); }
 .pwa-player .pl-server-val { font-weight: 700; font-size: 14px; color: rgba(255, 255, 255, 0.8); }
 /* البدء: صورة الحلقة ← دائرة بمثلث (متمركز بصريًا: المثلث مزاح نحو رأسه) ← «البدء» */
 .pwa-player .pl-start {
@@ -1152,12 +1154,12 @@ html.pwa-playing body {
   border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; background: rgba(10, 12, 20, 0.55);
   color: rgba(255, 255, 255, 0.55); font: inherit; font-size: 16px; font-weight: 900; cursor: pointer;
 }
-.pwa-player .pl-start.is-primary { background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; }
+.pwa-player .pl-start.is-primary { background: var(--pl-accent); border-color: var(--pl-accent); color: var(--pl-on-accent, #fff); }
 .pwa-player .pl-start:disabled { cursor: default; }
 .pwa-player .pl-start-thumb { width: 72px; height: 40px; object-fit: cover; border-radius: 10px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
 .pwa-player .pl-start:not(.is-primary) .pl-start-thumb { filter: grayscale(0.7) brightness(0.55); }
 .pwa-player .pl-start-play { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); }
-.pwa-player .pl-start.is-primary .pl-start-play { background: #fff; color: var(--pl-accent); }
+.pwa-player .pl-start.is-primary .pl-start-play { background: var(--pl-on-accent, #fff); color: var(--pl-accent); }
 .pwa-player .pl-start-play svg { width: 14px; height: 14px; }
 .pwa-player .pl-start-label { padding-inline-end: 4px; }
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
@@ -1201,7 +1203,7 @@ html.pwa-playing body {
     position: relative; z-index: 2; width: clamp(56px, 4.4vw, 84px); height: clamp(56px, 4.4vw, 84px);
     background: var(--pl-accent); color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   }
-  .pwa-player .pl-start.is-primary .pl-start-play { background: var(--pl-accent); color: #fff; }
+  .pwa-player .pl-start.is-primary .pl-start-play { background: var(--pl-accent); color: var(--pl-on-accent, #fff); }
   .pwa-player .pl-start:not(.is-primary) .pl-start-play { background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.78); box-shadow: none; }
   /* التمركز البصري: مركز ثقل المثلث (11.67 من 24) يسبق مركز الإطار قليلًا، فيُزاح نحو رأسه بقدر الفرق (~2.3%) لا أكثر */
   .pwa-player .pl-start-play svg { width: 46%; height: 46%; transform: translateX(2.3%); }

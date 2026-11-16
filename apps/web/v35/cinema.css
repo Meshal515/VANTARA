@@ -105,9 +105,11 @@
 }
 .v35 .cn-btn--play {
   background: var(--accent);
+  color: var(--on-accent, #fff);
 }
 .v35 .cn-btn--play:active {
   background: var(--accent-press);
+  color: var(--on-accent, #fff);
 }
 .v35 .cn-btn--ghost {
   background: var(--surface-2);

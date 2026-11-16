@@ -1469,7 +1469,7 @@ class PlayerActivity : Activity() {
         visibility = View.GONE
     }
 
-    fun pillButton(text: String, primary: Boolean, onClick: () -> Unit): TextView = label(text, 13.5f, Color.WHITE, bold = true).apply {
+    fun pillButton(text: String, primary: Boolean, onClick: () -> Unit): TextView = label(text, 13.5f, if (primary) Tone.ON_ACCENT else Color.WHITE, bold = true).apply {
         gravity = Gravity.CENTER
         textAlignment = View.TEXT_ALIGNMENT_CENTER
         minHeight = dp(40)
@@ -1796,10 +1796,10 @@ class PlayerActivity : Activity() {
                 setPadding(dp(14), dp(10), dp(14), dp(10))
                 background = pressable(Tone.ACCENT, dp(14).toFloat())
                 contentDescription = "شغّل الأفضل"
-                addView(label("▶  شغّل الأفضل", 15.5f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER })
+                addView(label("▶  شغّل الأفضل", 15.5f, Tone.ON_ACCENT, bold = true).apply { gravity = Gravity.CENTER })
                 best?.let { c ->
                     val bits = listOfNotNull(c.quality?.takeIf { it > 0 }?.let { "${it}p" }, c.sourceName.takeIf { it.isNotBlank() }, c.videoSize?.takeIf { it > 0 }?.let { "${it / 1_048_576} MB" })
-                    if (bits.isNotEmpty()) addView(label("\u2068${bits.joinToString(" · ")}\u2069", 11.5f, 0xD9FFFFFF.toInt(), bold = true).apply { gravity = Gravity.CENTER; maxLines = 1 })
+                    if (bits.isNotEmpty()) addView(label("\u2068${bits.joinToString(" · ")}\u2069", 11.5f, (Tone.ON_ACCENT and 0x00FFFFFF) or 0xD9000000.toInt(), bold = true).apply { gravity = Gravity.CENTER; maxLines = 1 })
                 }
                 setOnClickListener { playBest() }
             }
