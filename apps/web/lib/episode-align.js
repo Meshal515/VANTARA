@@ -46,3 +46,9 @@ export function alignEpisode(anchorName, picked, episodes, workTitle = null) {
   }
   return best ? { use: best, realigned: true } : { skip: true };
 }
+
+/** قائمة فيلم: حلقة واحدة، أو نسخ بلا ترقيم/بنفس الرقم. رقمان مختلفان فأكثر = مسلسل أو مجموعة أفلام. */
+export function movieListing(episodes = []) {
+  if (episodes.length <= 1) return true;
+  return new Set(episodes.map((e) => Number(e.number)).filter((n) => Number.isFinite(n) && n > 0)).size <= 1;
+}

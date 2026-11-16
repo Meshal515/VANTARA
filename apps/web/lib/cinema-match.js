@@ -48,6 +48,19 @@ export function readTitle(title) {
   return { season, year: y ? Number(y[1]) : null, kind };
 }
 
+/**
+ * نوع النسخة من بنيتها لا من عنوانها: نوع صريح من الإضافة (movie/series/tv…)، أو مواسم/رقم موسم
+ * (لا يكون للفيلم). null = لا دليل. بلاغ المالك (16 نوفمبر): عنوان بلا «فيلم/مسلسل» كان يُقبل للنوعين،
+ * فتأخذ بطاقة فيلم صفحة مسلسل بنفس الاسم (أو العكس) وتشغّل حلقته الأولى على أنها الفيلم.
+ */
+export function copyKind(c) {
+  const raw = String(c?.type ?? c?.kind ?? c?.contentType ?? '').toLowerCase();
+  if (/^(movie|film|movies|animemovie|anime_movie)$/.test(raw)) return 'movie';
+  if (/^(series|tv|tvseries|tv_series|show|tvshow|anime|ova|ona|asiandrama|asian_drama)$/.test(raw)) return 'series';
+  if (c?.hasSeasons === true || Number(c?.seasonNumber) > 0) return 'series';
+  return null;
+}
+
 /** ذيل الحلقة في عنوان المصدر («الحلقة الاولى 1»، «الحلقة 14 الرابعة عشر»): لا يدخل في الاسم. */
 const EPISODE_TAIL = /(?:^|\s)(?:الحلقة|حلقة)(?:\s+[^A-Za-z\s]+)*\s*$/;
 
@@ -91,6 +104,9 @@ export function judgeCopy(c, criteria, minScore = 0.85) {
   const info = readTitle(c.title);
   if (info.kind === 'collection') return { ok: false, score: 0, reason: 'collection' };
   if (info.kind && info.kind !== type) return { ok: false, score: 0, reason: 'kind' };
+  // البنية دليل أقوى من غياب كلمة في العنوان: صفحة بمواسم ليست فيلمًا، وفيلم صريح ليس مسلسلًا
+  const structural = copyKind(c);
+  if (structural && structural !== type) return { ok: false, score: 0, reason: 'kind' };
   let score = namesScore([title, ...aliases], c.title);
   // اسم ضعيف («Dune» من «Dune: Part One»): يُقبل فقط بنفس السنة مكتوبة في العنوان
   if (score < minScore && criteria.weakAliases?.length) {

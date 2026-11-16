@@ -46,4 +46,11 @@ class EpisodeAlignTest {
         // اسم العمل وحده ليس هوية حلقة
         assertEquals(false, EpisodeAlign.identifies("Tatsuki Fujimoto 17-26 Episode 3", title))
     }
+
+    @Test fun `a movie never plays episode 1 of a series or collection page`() {
+        val resolver = com.vantara.anime.episodes.EpisodeResolver({ null }, com.vantara.anime.health.HealthStore(null))
+        assertEquals(null, resolver.pick(other, -1f))
+        val single = listOf(ep(1, "Inception"))
+        assertSame(single[0], resolver.pick(single, -1f))
+    }
 }

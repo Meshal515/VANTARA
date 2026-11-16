@@ -63,10 +63,15 @@ class EpisodeResolver(
 
     /** نفس الحلقة في قائمة مصدر آخر: بالرقم، مع تسامح للترقيم العشري (12.5). */
     fun pick(episodes: List<SourceEpisode>, number: Float): SourceEpisode? =
-        // رقم سالب = «العمل نفسه» (فيلم): المصادر ترقّم حلقته الوحيدة 0 أو 1 أو لا ترقّم
-        if (number < 0f) episodes.firstOrNull()
+        // رقم سالب = «العمل نفسه» (فيلم): المصادر ترقّم حلقته الوحيدة 0 أو 1 أو لا ترقّم. صفحة بحلقات
+        // مرقّمة مختلفة (مسلسل أو مجموعة أفلام) ليست هذا الفيلم: لا تُشغَّل «الحلقة 1» على أنها هو
+        if (number < 0f) episodes.takeIf { movieListing(it) }?.firstOrNull()
         else episodes.firstOrNull { abs(it.number - number) < 0.01f }
             ?: episodes.firstOrNull { (it.number < 0f || !it.number.isFinite()) && Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
+
+    /** قائمة فيلم: حلقة واحدة، أو نسخ بلا ترقيم/بنفس الرقم (مترجم/مدبلج). رقمان مختلفان فأكثر = مسلسل أو مجموعة. */
+    fun movieListing(episodes: List<SourceEpisode>): Boolean =
+        episodes.size <= 1 || episodes.map { it.number }.filter { it > 0f && it.isFinite() }.distinct().size <= 1
 
     /**
      * [minHosts]: نتوقف حين تتوفر روابط سليمة من هذا العدد من المضيفات المختلفة
