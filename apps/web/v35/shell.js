@@ -617,6 +617,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * قواعد (البطاقات: أول رابط يتحمّل، وصفحة العمل: بالقياس، والفهرس: بشكل الرابط) وأربع ذاكرات.
    */
   const art = createArtStore();
+  // حُذف مصدر: أغلفته المحسومة تُنسى فتُحسم من غيره (قاعدة المالك: الغلاف ثابت إلا بحذف مصدره)
+  // قائمة فارغة لا تُصدَّق (لم تكتمل بعد، أو المحرك غير متاح): لا يُنسى شيء
+  void engine.sources().then((list) => { if (Array.isArray(list) && list.length) art.forgetSources(new Set(list.map((x) => x.id))); }).catch(() => {});
   const failedCanonical = new Map();
   let artActive = 0;
   const artWaiting = [];
@@ -650,8 +653,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
             const more = await Promise.race([kitsuArt(a.id), new Promise((r) => setTimeout(() => r(null), 1200))]);
             return more ? { ...a, more: [{ cover: more.cover?.url ?? null, banner: more.banner?.url ?? null }] } : a;
           }) : null;
-          const sources = await Promise.all(artSources(work).slice(0, 4).map((c) =>
-            Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url)));
+          // كل غلاف يدخل سباق «أول مقبول يفوز» لحظة وصوله (قاعدة المالك 16 نوفمبر)، لا ينتظر أبطأ الأربعة
+          const sources = artSources(work).slice(0, 4).map((c) => ({
+            url: Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url),
+            sid: c.sourceId,
+          }));
           const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);
           resolve(await art.decide(id, { official, sources, wideHint }));
         } catch { resolve(null); } finally {
