@@ -20,7 +20,7 @@ import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 import { noteListed, topChapters } from '../lib/update-engine.js';
-import { adultManga, blockKey, isBlockedKey } from '../lib/adult-filter.js';
+import { adultManga, adultSource, blockKey, isBlockedKey } from '../lib/adult-filter.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -145,7 +145,9 @@ const fillerIds = new Set();
 function sources() {
   // إضافة مستودع للكبار لا تُستعمل أبدًا، والإضافة غير العربية تكملة فصول فقط
   sourcesPromise ??= engine.sources().then((list) => {
-    const clean = (list ?? []).filter((s) => !(s.user && s.warning && s.warning !== 'SAFE'));
+    // المتخصص في الإباحية يختفي؛ العام «المختلط» يبقى وأعماله تُفلتر بـisAdult (قرار المالك، 16 نوفمبر). كان كل مصدر
+    // مختلط ثبّته المستخدم (MangaDex مثلًا) يُستبعد كله
+    const clean = (list ?? []).filter((s) => !adultSource(s));
     for (const s of clean) {
       if (s.filler) fillerIds.add(String(s.id));
       if (s.lang) langById.set(String(s.id), String(s.lang).toLowerCase());
@@ -1271,12 +1273,14 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false 
         variants.some((v) => normalizeTitle(manga.title) === normalizeTitle(v) || titleTwins(manga.title, v))
         || base.some((k) => index.keyOf(k) === index.keyOf(key))
       ));
+      // SRC1: عنوان يطابق حرفيًا أحد أسماء العمل المعروفة (بعد التطبيع) دليل كافٍ وحده، ولو اختلف المفتاح الموحد عن
+      // النسخ المعروفة (عمل عُرف بعنوانه العربي واسمه الإنجليزي بديل). كان يُرفض فلا تظهر إضافة المستخدم في الورقة.
+      const exact = matches.filter(({ manga }) => variants.some((v) => normalizeTitle(manga.title) === normalizeTitle(v)));
+      const sameKey = matches.filter(({ key }) => base.some((k) => index.keyOf(k) === index.keyOf(key)));
       // Several distinct URLs claiming the same work are ambiguous; never
       // silently select whichever result the source happened to return first.
-      if (matches.length !== 1) return null;
-      const hit = matches[0];
-      return base.some((k) => index.keyOf(k) === index.keyOf(hit.key))
-        ? { sourceId: source.id, label: source.label, manga: hit.manga } : null;
+      const hit = exact.length === 1 ? exact[0] : exact.length === 0 && matches.length === 1 && sameKey.length === 1 ? sameKey[0] : null;
+      return hit ? { sourceId: source.id, label: source.label, manga: hit.manga } : null;
     });
     return ok.map((r) => r.value).filter(Boolean);
   })();

@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { adultSource } from '../lib/adult-filter.js';
 
 /* VANTARA V7 live add-on manager.
  * Presentation only: no migration, reset, deletion, or replacement of stored data.
@@ -237,6 +238,13 @@ export function renderV7Addons({
     return [kindName(a),a.arabic||code==="ar"?"العربية":(LANG_AR[code]??code)].filter(Boolean).join(" · ");
   }
   const diagnosticKey=a=>JSON.stringify([a._store?.id,a.key||a.pkg||a.id||a.domain,a.version,a.cacheEpoch]);
+  // AV7: registry.list() يبني كل الإضافات المثبتة بنسخ عميق؛ كان يُنادى مرتين لكل صف (آلاف النداءات في مستودع كبير).
+  // لقطة واحدة لكل رسمة متزامنة، تسقط بعد انتهائها فتبقى البيانات حية.
+  let listSnapshot=null;
+  function registryList(){
+    if(!listSnapshot){listSnapshot=registry.list?.()||[];queueMicrotask(()=>{listSnapshot=null;});}
+    return listSnapshot;
+  }
   function installedState(a){
     if(sourceChallenges(a).length)return {state:"attention",label:"تحتاج انتباه",detail:"المصدر يحتاج تحققًا."};
     if(a.enabled===false)return {state:"attention",label:"تحتاج انتباه",detail:"الإضافة معطلة."};
@@ -247,7 +255,7 @@ export function renderV7Addons({
       return {state:"unavailable",label:"غير متاحة",detail:a.availability.reason||"أكد المحرك أن المصدر غير متاح."};
     // Native packages may expose several canonical sources. Package identity is
     // authoritative; a matching display name never supplies health evidence.
-    const bound=a._store&&a.pkg?(registry.list?.()||[]).filter(x=>x.pkg===a.pkg):[];
+    const bound=a._store&&a.pkg?registryList().filter(x=>x.pkg===a.pkg):[];
     const sources=bound.length?bound:[a],passed=[],untested=[],errors=[];
     let empty=false;
     const recent=(at,age)=>Number.isFinite(at)&&at<=Date.now()&&Date.now()-at<=age;
@@ -558,6 +566,20 @@ export function renderV7Addons({
     installedCount.textContent=String(records.allRemote.length+records.installedNative.length+siteRows.length);
     return records;
   }
+  // AD1: وصول المستودعات واحدًا واحدًا كان يعيد بناء القائمة 2×N مرة تحت الإصبع. ما يأتي من الخلفية في الدفعة نفسها يُجمع في
+  // رسمة واحدة، ويبقى موضع التمرير كما هو.
+  let drawQueued=false;
+  function scheduleDraw(){
+    if(drawQueued||!alive)return;
+    drawQueued=true;
+    queueMicrotask(()=>{
+      drawQueued=false;
+      if(!alive)return;
+      const keep=restoreScroll?null:root.scrollTop;
+      draw();
+      if(keep!=null&&root.scrollTop!==keep)root.scrollTop=keep;
+    });
+  }
   function draw(){
     if(!alive)return;
     const {allRemote,installedNative}=updateCounts();
@@ -586,7 +608,11 @@ export function renderV7Addons({
         }
         const items=repositoryItems(opened);
         if(!ext&&!items.length){if(!failure)body.append(el("p","v7-notice","جارٍ تحميل المصادر…"));return;}
-        const records=filtered(items.filter(x=>!x.nsfw).map(item=>nativeRecord(item,opened.group,opened.data.url)));
+        // قرار المالك (16 نوفمبر): المصدر المتخصص في الإباحية يختفي (لا رسالة حجب)، والعام الموسوم NSFW يبقى وأعماله
+        // تُفلتر واحدًا واحدًا. والعربي أولًا ثم متعدد اللغات ثم البقية، فلا تبحث بين آلاف الإضافات
+        const langRank=x=>{const l=String(x.lang||"").toLowerCase();return l==="ar"?0:l==="all"?1:2;};
+        const records=filtered(items.filter(x=>!adultSource(x)).map(item=>nativeRecord(item,opened.group,opened.data.url)))
+          .map((x,i)=>[x,i]).sort((a,b)=>langRank(a[0])-langRank(b[0])||a[1]-b[1]).map(([x])=>x);
         for(const item of records)list.append(sourceRow(item,"native",opened.data));
         body.append(records.length?list:empty("لا توجد نتائج","غيّر البحث أو نوع المصدر."));
       }else{
@@ -683,7 +709,7 @@ export function renderV7Addons({
         }catch(err){
           if(alive&&job.run===generation){extensionErrors.set(job.repo.key,fmtErr(err));notify(fmtErr(err));}
         }finally{
-          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);if(tab!=="repos"||opened?.key===job.repo.key)draw();else updateCounts();drainRequests();}
+          if(job.run===generation){activeRequests--;requests.delete(job.repo.key);if(tab!=="repos"||opened?.key===job.repo.key)scheduleDraw();else updateCounts();drainRequests();}
           job.resolve();
         }
       })();
@@ -697,7 +723,7 @@ export function renderV7Addons({
     let resolve;
     const promise=new Promise(done=>{resolve=done;});
     requests.set(r.key,promise);queue.push({repo:r,run,resolve});
-    draw();drainRequests();return promise;
+    scheduleDraw();drainRequests();return promise;
   }
   let releaseDiagnosticUi = () => {};
   function cancelDiagnostic(){

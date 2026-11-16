@@ -16,6 +16,7 @@ const ADULT_GENRES = new Set([
   'hentai', 'smut', 'erotica', 'erotic', 'pornographic', 'porn', 'adult', 'adults only', '18+', '+18', 'r18', 'r 18', 'nsfw', 'mature 18+',
   'yaoi', 'yuri', 'shounen ai', 'shonen ai', 'shoujo ai', 'shojo ai', 'boys love', 'boy love', 'boys love (bl)', 'bl', 'girls love', 'girl love', 'gl',
   'lolicon', 'shotacon', 'sexual violence', 'sexual content', 'uncensored',
+  'nudity', 'nude', 'full nudity', 'explicit', 'explicit sex', 'sex', 'عري', 'تعري', 'عاري',
   'هنتاي', 'ياوي', 'يوري', 'شونين اي', 'شونين أي', 'شوجو اي', 'شوجو أي', 'بويز لاف', 'جيرلز لاف',
   'للكبار', 'للبالغين', 'بالغين', 'كبار', 'إباحي', 'اباحي', 'جنسي', 'محتوى جنسي', 'منحرف', '+١٨', '١٨+',
 ]);
@@ -30,6 +31,14 @@ const tags = (genre) =>
 
 export const adultGenre = (genre) => tags(genre).some((t) => ADULT_GENRES.has(t));
 export const adultTitle = (title) => ADULT_TITLE.test(String(title ?? ''));
+/**
+ * مصدر متخصص في الإباحية (قرار المالك، 16 نوفمبر): يختفي كليًا، لا رسالة حجب. المصدر العام الذي فيه بعض هذه
+ * الأعمال (موسوم NSFW في مستودعه مثل MangaDex) يبقى، وأعماله تُفلتر بـ[adultManga]. الحكم من اسم المصدر وحزمته فقط.
+ */
+const ADULT_SOURCE = /(?:hentai|nhentai|porn|xxx|nsfw|smut|erotic|doujin|r[\s._-]?18|18\s?\+|\+\s?18|manhwa[\s._-]?18|hitomi|pururin|luscious|tsumino|8muses|myreadingmanga|manytoon|multporn|hiperdex|toonily|mangahentai|imhentai|koharu|anchira|هنتاي|للكبار)/iu;
+export const adultSource = (source) => Boolean(source) && [source.name, source.label, source.pkg, source.packageName, source.id]
+  .some((v) => typeof v === 'string' && ADULT_SOURCE.test(v));
+
 /** نسخة عمل من مصدر (SManga): بتصنيفها أو بعنوانها. */
 export const adultManga = (manga) => Boolean(manga) && (adultGenre(manga.genre ?? manga.genres) || adultTitle(manga.title));
 

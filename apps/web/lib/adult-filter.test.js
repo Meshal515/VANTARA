@@ -35,3 +35,20 @@ describe('محتوى الكبار لا يظهر في VANTARA', () => {
     expect(groups.map((g) => g.title)).toEqual(['Clean Work']);
   });
 });
+
+import { adultSource as _adultSource, adultGenre as _adultGenre } from './adult-filter.js';
+import { describe as _d, it as _it, expect as _e } from 'vitest';
+_d('owner rule 16 Nov: specialized adult sources vanish, general ones stay', () => {
+  _it('specialized by name or package', () => {
+    for (const s of [{ name: 'NHentai' }, { name: 'HentaiRead' }, { pkg: 'eu.kanade.tachiyomi.extension.all.hitomi' }, { name: 'Manhwa18' }, { name: 'Toonily' }, { label: 'مانجا هنتاي' }])
+      _e(_adultSource(s), JSON.stringify(s)).toBe(true);
+  });
+  _it('general sources flagged NSFW in their repository stay', () => {
+    for (const s of [{ name: 'MangaDex', nsfw: 1 }, { name: 'Team X' }, { name: 'MangaFire', nsfw: 1 }, { pkg: 'eu.kanade.tachiyomi.extension.en.weebcentral' }])
+      _e(_adultSource(s), JSON.stringify(s)).toBe(false);
+  });
+  _it('nudity hides a work; ecchi alone does not', () => {
+    _e(_adultGenre('Action, Ecchi, Nudity')).toBe(true);
+    _e(_adultGenre('Fantasy, Ecchi, Isekai')).toBe(false);
+  });
+});
