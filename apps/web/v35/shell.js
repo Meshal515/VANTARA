@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { describeNotification, notificationData } from '../lib/notifications.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -4829,13 +4830,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
     displayName: nameOf(userId),
     avatarKey: sync.rows('profiles', (p) => p.user_id === userId)[0]?.avatar_key ?? null,
   });
-  const KIND_ICON = { FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info', TOGETHER: 'users' };
+  const KIND_ICON = { MESSAGE: 'send', NEW_UNIT: 'book', FRAME: 'camera', RECOMMENDATION: 'spark', COMMENT_REPLY: 'edit', REACTION: 'heart', FRIEND_ACTIVITY: 'activity', SYSTEM: 'info', TOGETHER: 'users' };
 
   function notificationCopy(row) {
     const frameId = frameIdFromLink(row.link);
     const frame = frameId ? sync.rows('frames', (f) => f.id === frameId)[0] : null;
     const work = row.series_ref ? sync.rows('works', (x) => x.series_ref === row.series_ref)[0] : null;
     switch (row.kind) {
+      case 'MESSAGE': {
+        const told = describeNotification(row, nameOf(row.actor_id));
+        const n = Number(notificationData(row)?.n) || 1;
+        return { text: n > 1 ? `أرسل ${n} رسائل: ${told.body}` : `كتب: ${told.body}`, cover: null, open: () => void deps.go({ name: 'majlis' }) };
+      }
+      case 'NEW_UNIT': {
+        const told = describeNotification(row);
+        return {
+          system: true,
+          face: told.image,
+          text: `${told.body} من`,
+          title: told.title,
+          cover: null,
+          open: () => row.series_ref && void openWork(workFromRef(row.series_ref, told.title, told.image)),
+        };
+      }
       case 'FRAME':
         return {
           text: frame?.broadcast ? 'شارك فريمًا مع الجميع' : 'أرسل لك فريم',
@@ -4898,7 +4915,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const b = el('button', `notif${fresh ? ' notif--unread' : ''}`);
     b.type = 'button';
     const face = el('span', 'notif-face');
-    face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
+    if (copy.face) {
+      const img = el('img', 'notif-face-art');
+      img.src = copy.face;
+      img.alt = '';
+      img.onerror = () => img.replaceWith(everyoneFace(44));
+      face.append(img);
+    } else face.append(copy.system ? everyoneFace(44) : avatarNode(personOf(row.actor_id), 44));
     const badge = el('span', `notif-kind notif-kind--${(row.kind || '').toLowerCase()}`);
     badge.innerHTML = glyph(KIND_ICON[row.kind] ?? 'bell', { size: 12 });
     face.append(badge);
@@ -6286,19 +6309,40 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
     if (api) {
       const popups = api.popups();
-      const kindsOn = Object.keys(api.labels).filter((k) => popups.kinds[k] !== false).length;
+      const phone = api.phone?.() ?? null;
+      const setKind = (kind, on) => {
+        const cur = api.popups();
+        api.setPopups({ ...cur, kinds: { ...cur.kinds, [kind]: on } });
+        renderSettings();
+      };
+      const others = Object.keys(api.labels).filter((k) => k !== 'MESSAGE' && k !== 'NEW_UNIT');
+      const othersOn = others.filter((k) => popups.kinds[k] !== false).length;
       if (on('privacy')) group(
-        'التنبيهات',
+        'الإشعارات',
         [
-          toggle('bell', 'التنبيهات المنبثقة', 'لما يوصلك فريم أو ترشيح', popups.enabled, (enabled) => {
+          phone?.native
+            ? toggle('bell', 'إشعارات الجوال', 'تجيك والتطبيق مقفل، خلال ربع ساعة تقريبًا', popups.phone, (next) => {
+              api.setPopups({ ...api.popups(), phone: next });
+              if (next) void phone.requestPermission();
+              renderSettings();
+            })
+            : null,
+          phone?.native && popups.phone
+            ? toggle('lock', 'المحتوى على شاشة القفل', 'مطفأ: يظهر «رسالة جديدة» بلا اسم ولا نص', popups.lockPreview, (next) => {
+              api.setPopups({ ...api.popups(), lockPreview: next });
+              renderSettings();
+            })
+            : null,
+          toggle('spark', 'التنبيهات داخل التطبيق', 'منبثقة لحظة وصولها والتطبيق مفتوح', popups.enabled, (enabled) => {
             api.setPopups({ ...api.popups(), enabled });
             renderSettings();
           }),
-          popups.enabled
-            ? row('sliders', 'وش يطلع لك', null, { value: kindsOn === Object.keys(api.labels).length ? 'الكل' : `${kindsOn} من ${Object.keys(api.labels).length}`, run: openPopupKinds })
-            : null,
+          toggle('send', 'رسائل المجلس', 'لما أحد يكتب في المجلس', popups.kinds.MESSAGE !== false, (v) => setKind('MESSAGE', v)),
+          toggle('book', 'جديد المفضلة', 'فصل أو حلقة جديدة لعمل في مفضلتك', popups.kinds.NEW_UNIT !== false, (v) => setKind('NEW_UNIT', v)),
+          row('sliders', 'باقي الأنواع', 'الترشيحات والدعوات والتفاعلات', { value: othersOn === others.length ? 'الكل' : `${othersOn} من ${others.length}`, run: openPopupKinds }),
+          phone?.native ? row('settings', 'إعدادات الجوال للإشعارات', 'الصوت والاهتزاز لكل نوع', { run: () => phone.openSettings() }) : null,
         ],
-        { note: 'الإطفاء يوقف التنبيه المنبثق بس. إشعاراتك تبقى في صفحتها.' },
+        { note: 'اللي تطفيه ما يوصلك منبثقًا ولا على الجوال، ويبقى في صفحة الإشعارات.' },
       );
       // الـPWA بلا ترجمة مانجا (قرار المالك): لا إعداد يفعّلها، فلا زرّ في أي مكان
       if (on('playback') && supports('translation')) renderTranslationSettings(group, row, toggle);
@@ -6469,10 +6513,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function openPopupKinds() {
     const api = deps.settings;
     openSheet((body) => {
-      body.append(el('h3', null, 'وش يطلع لك'));
+      body.append(el('h3', null, 'باقي الأنواع'));
       const list = el('div', 'settings-list');
       list.style.marginTop = '12px';
       for (const [kind, label] of Object.entries(api.labels)) {
+        if (kind === 'MESSAGE' || kind === 'NEW_UNIT') continue;
         const d = el('label', 'setting');
         d.innerHTML = glyph(KIND_ICON[kind] ?? 'bell');
         const t = el('div');

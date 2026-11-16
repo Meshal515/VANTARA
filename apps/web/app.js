@@ -26,6 +26,7 @@ import { canManageDangerZone } from './lib/identity.js';
 import { pinPad } from './screens/pin-pad.js';
 import { screenCatalog, screenExtReader, screenFrame, screenWork } from './screens/sources.js';
 import { frameIdFromLink } from './lib/frame.js';
+import { createPhoneNotify, notificationLinkTarget, phoneWanted } from './lib/phone-notify.js';
 import { isAvailable as enginePresent } from './lib/extension-engine.js';
 import { icon } from './lib/icons.js';
 import { mountV35 } from './v35/shell.js';
@@ -57,6 +58,7 @@ import {
   popupSettings,
   togetherInvite,
   toastable,
+  describeNotification,
   unreadCount,
 } from './lib/notifications.js';
 
@@ -1561,7 +1563,13 @@ function screenV35(page) {
           resetWeb: () => resetWeb(),
           apkVersion: async () => versionLine(await deviceInfo()),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
-          setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
+          setPopups: (next) => {
+            sync.enqueue('settings.patch', { fields: popupPatch(next) });
+            // إشعارات الجوال تتبع المفتاح فورًا، لا بعد دورة مزامنة
+            const userId = sync.user?.userId ?? null;
+            void phone.ensure(sync.signedIn ? userId : null, next.phone !== false);
+          },
+          phone: () => phone,
           labels: NOTIFICATION_LABELS,
           endpoints: () => endpoints(),
           setEndpoints: (next) => setEndpoints(next),
@@ -2229,6 +2237,67 @@ function showWhatsNew() {
 /** ما عُرض في هذه الجلسة. الحالة في D1 تتأخر دورة مزامنة، فلا نعيد العرض. */
 const toastedIds = new Set();
 
+/** إشعارات الجوال والتطبيق مغلق (Android فقط؛ lib/phone-notify.js). */
+const phone = createPhoneNotify({
+  plugin: globalThis.Capacitor?.Plugins?.PhoneNotify ?? null,
+  endpoint: String(config.sync ?? '').replace(/\/+$/, ''),
+  authHeader: () => sync.authorizationHeader,
+});
+function syncPhoneNotify() {
+  const userId = sync.user?.userId ?? null;
+  void phone.ensure(sync.signedIn ? userId : null, phoneWanted(userId ? sync.row('settings', userId) : null));
+}
+
+/** المتصفح في الخلفية: إشعار النظام، إن سمح به صاحبه وأبقى «إشعارات الجهاز». */
+function browserNotify(row) {
+  const viewerId = sync.user?.userId;
+  if (!viewerId || toastedIds.has(row.id) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  if (!phoneWanted(sync.row('settings', viewerId))) return;
+  const actorRow = sync.row('profiles', row.actor_id);
+  const told = describeNotification(row, actorRow?.display_name ?? 'صديق');
+  toastedIds.add(row.id);
+  try {
+    const shown = new Notification(told.title, { body: told.body, tag: row.id, icon: told.image ?? actorRow?.avatar_key ?? '/icons/icon-192.png' });
+    shown.onclick = () => {
+      globalThis.focus?.();
+      openNotificationTarget(notificationLinkTarget(`${row.link ?? 'vantara://notifications'}`) , row.id);
+      shown.close();
+    };
+    sync.enqueue('notification.seen', { id: row.id });
+  } catch {
+    toastedIds.delete(row.id);
+  }
+}
+
+/** فتح ما يشير إليه الإشعار (من الجوال أو المتصفح)، وتعليمه مقروءًا. */
+function openNotificationTarget(target, readId = target?.read) {
+  if (!target) return;
+  if (readId) sync.enqueue('notification.read', { id: readId });
+  const open = target.open;
+  if (open.name === 'together') {
+    screenV35(null);
+    const invite = sync.rows('together_invites', (x) => x.code === open.code)[0] ?? null;
+    void v35?.together?.joinByCode?.(open.code, invite);
+  } else if (open.name === 'series') {
+    screenV35(null);
+    v35?.openRef?.(open.ref);
+  } else if (open.name === 'frame') void go({ name: 'frame', id: open.id });
+  else if (open.name === 'majlis') void go({ name: 'majlis' });
+  else void go({ name: 'notifications' });
+}
+// التطبيق كان مغلقًا وفُتح من الإشعار: الرابط يُقرأ بعد أن تقوم الواجهة
+void globalThis.Capacitor?.Plugins?.App?.getLaunchUrl?.()?.then?.((launch) => {
+  const target = notificationLinkTarget(launch?.url);
+  if (target) setTimeout(() => sync.signedIn && openNotificationTarget(target), 1500);
+})?.catch?.(() => {});
+globalThis.Capacitor?.Plugins?.App?.addListener?.('appUrlOpen', (event) => {
+  const target = notificationLinkTarget(event?.url);
+  if (target) openNotificationTarget(target);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') phone.nudge();
+});
+
 function toastNewNotifications() {
   const viewerId = sync.user?.userId;
   if (!viewerId) return;
@@ -2238,6 +2307,13 @@ function toastNewNotifications() {
     { viewerId, settings },
   );
 
+  // التطبيق في الخلفية: لا منبثق لا يراه أحد ثم يُعلَّم «معروضًا». في Android يعرضه الجوال
+  // (فحص فوري)، وفي المتصفح إشعار النظام إن سمح به؛ وإلا يبقى لأول ما يرجع
+  if (document.visibilityState !== 'visible') {
+    if (phone.native) phone.nudge();
+    else for (const row of rows) browserNotify(row);
+    return;
+  }
   for (const row of rows) {
     // `notification.seen` كتابة تمرّ بالطابور: بين العرض ووصول `seen` في
     // السحب التالي قد تصل فروقات أخرى، فبلا هذا الحرس يظهر نفس التنبيه مرتين
@@ -2249,21 +2325,16 @@ function toastNewNotifications() {
     const frameId = frameIdFromLink(row.link);
     const frame = frameId ? sync.row('frames', frameId) : null;
     const majlisKind = String(row.link ?? '').startsWith('vantara://majlis/') ? row.link.split('/')[3] : null;
-    let title;
-    let body = row.body ?? '';
-    if (row.kind === 'FRAME') title = frame?.broadcast ? `${actor} شارك فريمًا مع الجميع` : `${actor} أرسل لك فريم`;
-    else if (row.kind === 'RECOMMENDATION') title = `${actor} رشّح لك`;
-    else if (row.kind === 'REACTION' && majlisKind) {
-      title = `${actor} تفاعل ${row.body ?? ''} مع ${{ frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[majlisKind] ?? 'رسالتك'}`;
-      body = '';
-    } else if (row.kind === 'TOGETHER') title = togetherInvite(row, actor).title;
-    else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    // صياغة واحدة للمنبثق والصندوق وإشعار الجوال (lib/notifications.js)
+    const told = describeNotification(row, actor);
+    const title = row.kind === 'FRAME' && frame?.broadcast ? `${actor} شارك فريمًا مع الجميع` : told.title;
+    const body = told.body;
     // دعوة «مشاهدة معًا»: الضغط يدخل الغرفة لا صفحة العمل (بلاغ المالك)
     const togetherCode = togetherInvite(row, actor)?.code ?? null;
     showToast({
       title,
       body,
-      avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : null,
+      avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : told.image ? { src: told.image, name: told.title } : null,
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
         if (togetherCode) {
@@ -2272,10 +2343,10 @@ function toastNewNotifications() {
           const invite = sync.rows('together_invites', (x) => x.code === togetherCode)[0] ?? null;
           void v35?.together?.joinByCode?.(togetherCode, invite);
         } else if (frameId) void go({ name: 'frame', id: frameId });
-        else if (majlisKind) void go({ name: 'majlis' });
+        else if (majlisKind || row.kind === 'MESSAGE') void go({ name: 'majlis' });
         else if (row.series_ref) {
           screenV35(null);
-          v35.openRef(row.series_ref, row.body ?? undefined);
+          v35.openRef(row.series_ref, row.kind === 'NEW_UNIT' ? told.title : row.body ?? undefined);
         }
         else void go({ name: 'notifications' });
       },
@@ -2293,7 +2364,9 @@ sync.onChange((tables) => {
   if (tables.includes('accounts')) followAccountState();
   if (tables.includes('profiles') || tables.includes('presence')) refreshPresenceInPlace();
   if (tables.includes('notifications')) toastNewNotifications();
+  if (tables.some((table) => table === 'session' || table === 'settings' || table === 'accounts')) syncPhoneNotify();
 });
+syncPhoneNotify();
 setInterval(() => void sync.pull(), 60_000);
 // نبض كل 4 ثوانٍ والتطبيق أمامك: رقمٌ واحد، والسحب فقط حين يتقدّم. رسالة
 // صديقك وتفاعله و«شافه» تصل في ثوانٍ لا بعد دقيقة

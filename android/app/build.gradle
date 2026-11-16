@@ -201,6 +201,8 @@ dependencies {
     // ── محرّك الإضافات: سطح المستضيف الذي تشير إليه إضافات Keiyoushi ──
     // الإصدارات مثبَّتة بقصد وهي نفسها التي أثبتها spike على الجهاز.
     implementation "androidx.core:core-ktx:1.15.0"
+    // إشعارات الجوال والتطبيق مغلق: فحص دوري كل 15 دقيقة (com.vantara.notify)
+    implementation "androidx.work:work-runtime-ktx:2.10.0"
     // `ConfigurableSource.setupPreferenceScreen` يأخذ PreferenceScreen في
     // توقيعه، فغيابه NoClassDefFoundError عند تحميل الصنف لا عند استعماله
     implementation "androidx.preference:preference-ktx:1.2.1"

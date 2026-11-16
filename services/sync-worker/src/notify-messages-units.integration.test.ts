@@ -110,3 +110,47 @@ describe('new chapters of a favorite', () => {
     expect(await notes(env, C, 'NEW_UNIT')).toHaveLength(0);
   });
 });
+
+describe('phone check-in token (no session, notifications only)', () => {
+  async function device(env: E, as: string) {
+    const res = await call(env, as, '/v1/notify/device', { method: 'POST' });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { token: string }).token;
+  }
+  const withToken = (env: E, token: string, path: string, init: RequestInit = {}) =>
+    worker.fetch(new Request(`https://sync.test${path}`, { ...init, headers: { authorization: `Notify ${token}`, 'content-type': 'application/json' } }), env, ctx);
+
+  it('gives ready-to-show text of what is new, and once shown it is not offered again nor toasted in the app', async () => {
+    const { env } = testEnv();
+    const token = await device(env, OWNER);
+    await op(env, B, 'majlis.send', { kind: 'text', body: 'وينك' });
+    const res = await withToken(env, token, '/v1/notify/pending');
+    expect(res.status).toBe(200);
+    const { items, lockPreview } = (await res.json()) as { items: Array<Record<string, unknown>>; lockPreview: boolean };
+    expect(lockPreview).toBe(false);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'MESSAGE', group: 'messages', body: 'وينك', round: true });
+
+    expect((await withToken(env, token, '/v1/notify/seen', { method: 'POST', body: JSON.stringify({ ids: [items[0]!['id']] }) })).status).toBe(200);
+    const again = (await (await withToken(env, token, '/v1/notify/pending')).json()) as { items: unknown[] };
+    expect(again.items).toHaveLength(0);
+    expect((await notes(env, OWNER, 'MESSAGE'))[0]).toMatchObject({ seen: 1, read: 0 });
+  });
+
+  it('cannot sync, write, or read someone else; a forgotten or bogus token is refused', async () => {
+    const { env } = testEnv();
+    const token = await device(env, OWNER);
+    expect((await withToken(env, token, '/v1/sync?since=0')).status).toBe(401);
+    expect((await withToken(env, 'vn_' + 'x'.repeat(43), '/v1/notify/pending')).status).toBe(401);
+    expect((await withToken(env, token, '/v1/notify/device', { method: 'DELETE' })).status).toBe(200);
+    expect((await withToken(env, token, '/v1/notify/pending')).status).toBe(401);
+  });
+
+  it('respects the person\'s switches: phone off, or a kind turned off', async () => {
+    const { env } = testEnv();
+    const token = await device(env, OWNER);
+    await op(env, OWNER, 'settings.patch', { fields: { notifications: { popups: true, kinds: { MESSAGE: false } } } });
+    await op(env, B, 'majlis.send', { kind: 'text', body: 'مطفأ' });
+    expect(((await (await withToken(env, token, '/v1/notify/pending')).json()) as { items: unknown[] }).items).toHaveLength(0);
+  });
+});

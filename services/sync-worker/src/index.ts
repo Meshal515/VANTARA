@@ -60,6 +60,7 @@ import type { CollectionRow, WorkDescriptor } from '@vantara/domain';
 import type { D1PreparedStatement, Env, ExecutionContext } from './types.ts';
 import { handleRafiqConversations, handleRafiqExternal, handleRafiqFeedback, handleRafiqUsage, handleRafiqMessage, handleRafiqNew, handleRafiqPrefs, handleRafiqState, type RafiqEnv } from './rafiq.ts';
 import { bearerFrom, verifyToken } from './session.ts';
+import { forgetNotifyDevice, markNotifySeen, notifyOwner, pendingNotifications, registerNotifyDevice } from './notify-device.ts';
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 
@@ -3326,12 +3327,26 @@ export default {
         const response = await handleAccounts(env, now);
         return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
       }
+      // فحص الجوال الدوري برمز الإشعارات وحده (لا جلسة): قراءة غير المعروض وتعليمه معروضًا فقط
+      if (path === '/v1/notify/pending' || path === '/v1/notify/seen' || (path === '/v1/notify/device' && request.method === 'DELETE')) {
+        const device = await notifyOwner(env, request, now);
+        if (!device) return json({ error: 'unauthorized' }, { status: 401 }, cors);
+        const response = path === '/v1/notify/pending' && request.method === 'GET'
+          ? await pendingNotifications(env, device.userId, now)
+          : path === '/v1/notify/seen' && request.method === 'POST'
+            ? await markNotifySeen(env, device.userId, request, now)
+            : path === '/v1/notify/device'
+              ? await forgetNotifyDevice(env, device.hash)
+              : json({ error: 'not_found' }, { status: 404 });
+        return new Response(response.body, { status: response.status, headers: { ...JSON_HEADERS, ...cors } });
+      }
       const token = bearerFrom(request);
       const userId = token ? await verifyToken(token, env.VANTARA_SESSION_SECRET) : null;
       if (!userId) return json({ error: 'unauthorized' }, { status: 401 }, cors);
 
       let response: Response | null = null;
       if (path === '/v1/privacy/capabilities' && request.method === 'GET') response = json({ recentViewsRevocable: true });
+      else if (path === '/v1/notify/device' && request.method === 'POST') response = await registerNotifyDevice(env, userId, now);
       else if (path.startsWith('/v1/source-latest') && (request.method === 'GET' || request.method === 'POST')) response = await handleSourceLatest(request, env, path, now);
       // Update Engine: الأجهزة مجسّات تبلّغ ما تراه، والخط الزمني ذاكرة VANTARA الثابتة
       // صحة المصادر من الأجهزة الحقيقية (عدّادات يومية بلا بيانات شخصية)
