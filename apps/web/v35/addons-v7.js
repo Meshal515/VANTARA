@@ -321,7 +321,8 @@ export function renderV7Addons({
     let logoBox=logo(a,parent);const info=el("div","v7-info");
     info.append(el("div","v7-name",a.name),el("div","v7-meta",sourceMeta(a)));
     const statusSlot=el("div","v7-status-slot"),stateLabel=status(a);
-    const isAdded=mode==="remote"?true:!!(a.installed||a.builtin||a.update);
+    // RS1: «بانتظار الاستعادة» يغلب علم builtin؛ الحزمة غير موجودة على الجهاز فلا «فتح»
+    const isAdded=mode==="remote"?true:!a.pendingRestore&&!!(a.installed||a.builtin||a.update);
     if(!isAdded&&!a.pendingRestore)stateLabel.classList.remove("visible");
     statusSlot.append(stateLabel);
     const reason=isAdded?why(a):null;if(reason)statusSlot.append(reason);
@@ -367,7 +368,7 @@ export function renderV7Addons({
       flip.onclick=async e=>{
         e.stopPropagation();
         if(flip.disabled)return;
-        if(a.installed||a.builtin||a.update){
+        if(!a.pendingRestore&&(a.installed||a.builtin||a.update)){
           if(onOpenNativeSource)openNative(a);else showDetails(a,"native",parent);
           return;
         }
@@ -840,17 +841,17 @@ export function renderV7Addons({
       if(advancedActions.childElementCount){advanced.append(advancedActions);dialog.append(advanced);}
     }else{
       const acts=el("div","v7-dialog-actions");
-      if(onCheck&&(a.installed||a.builtin||a.update))renderDiagnostics(a,dialog,acts);
+      if(onCheck&&!a.pendingRestore&&(a.installed||a.builtin||a.update))renderDiagnostics(a,dialog,acts);
       const wrongFamily=(a._store?.kind==="anime"&&a.anime===false)||(a._store?.kind==="manga"&&a.anime===true);
       if(wrongFamily){
         dialog.append(el("p","v7-notice",a._store?.kind==="anime"?"هذه إضافة مانجا؛ ثبّتها من مستودع مانجا.":"هذه إضافة أنمي؛ ثبّتها من مستودع أنمي."));
-      }else if(!a.installed&&!a.builtin&&!a.update){
+      }else if(a.pendingRestore||(!a.installed&&!a.builtin&&!a.update)){
         acts.append(btn(a.pendingRestore?"استعادة":"تثبيت","v7-btn primary",async()=>{
           if(busy)return;busy=true;
           try{await installNative(a);closeModal(true);}
           catch(err){notify(fmtErr(err));}finally{busy=false;}
         }));
-        if(a.pendingRestore&&!a.builtin)acts.append(btn("إزالة الاختيار","v7-btn danger",()=>askDelete(a,"native")));
+        if(a.pendingRestore)acts.append(btn("إزالة الاختيار","v7-btn danger",()=>askDelete(a,"native")));
         if(a._store?.kind==="anime"){
           // البديل عكس النوع المعلن: إضافة سينما تُعرض «ثبّت في الأنمي» والعكس
           const other=a.content==="cinema"?"anime":"cinema";

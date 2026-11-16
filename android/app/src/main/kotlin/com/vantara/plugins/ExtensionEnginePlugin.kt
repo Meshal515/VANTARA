@@ -131,10 +131,10 @@ class ExtensionEnginePlugin : Plugin() {
         // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
         // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
         scope.launch {
-            // المصادر المدمجة سابقًا: ما أضافه الحساب الحالي فقط (تبلّغه الواجهة بـsetVisibleBuiltins)،
-            // وقبل أول تبليغ ما له نسخة على الجهاز فقط — فلا يُنزّل حساب جديد حزمًا لم يضفها.
-            val visible = builtinVisibility.read()
-            fun eager(pkg: String) = visible?.contains(pkg) ?: hasLocalCopy(pkg)
+            // المصادر المدمجة سابقًا: ما أضافه الحساب الحالي فقط (تبلّغه الواجهة بـsetVisibleBuiltins). قبل أول تبليغ
+            // لا شيء (EE1): حساب جديد = صفر مصادر، والحساب الموجود تُجهَّز مصادره عند تبليغ اختياره (stageVisible).
+            // يُقرأ الاختيار الحالي في كل نداء: التحديث اليومي بعد دقيقة يرى ما بلّغته الواجهة في الأثناء.
+            fun eager(pkg: String) = builtinVisibility.read()?.contains(pkg) ?: false
             for (spec in SPIKE_SOURCES) {
                 if (spec.blockedReason != null || !eager(spec.pkg)) continue
                 launch { runCatching { obtain(spec.pkg) } }
@@ -362,10 +362,9 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
-    /** Debug's old catalogue is optional. Unlinking it must never uninstall packages. */
+    /** «مصادر جاهزة» قائمة اختيارية في القناتين بعد فصل Stable (RS2). إخفاؤها لا يزيل حزمة ولا مصدرًا. */
     @PluginMethod
     fun removeReadySources(call: PluginCall) {
-        if (!com.vantara.app.BuildConfig.DEBUG) return call.reject("هذه العملية متاحة في Debug فقط")
         try {
             userStore.dismissReadyCatalogue()
             call.resolve()

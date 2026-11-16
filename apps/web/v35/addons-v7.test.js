@@ -813,3 +813,17 @@ it('audit §14 AV7 + owner rule: a 1000-extension repository paints with one reg
   expect(calls).toBeLessThan(10);
   view.close();
 });
+
+it('audit §13 RS1: «استعادة» on a formerly bundled source restores it instead of opening a missing package', async () => {
+  setup();
+  const install = vi.fn(async () => {}); const open = vi.fn();
+  const item = { pkg: 'eu.kanade.tachiyomi.extension.all.mangafire', name: 'MangaFire', lang: 'all', version: '1.4', builtin: true, formerlyBundled: true, selected: true, pendingRestore: true, installed: null };
+  const api = { list: async () => ({ repos: [{ name: 'مصادر جاهزة', url: 'vantara:ready-sources' }], installed: [], pending: [item] }), extensions: async () => [item], install };
+  const view = renderV7Addons({ registry: registry(), repositories: api, onOpenNativeSource: open }); await tick(); browse(view); await tick();
+  const flip = [...view.querySelectorAll('.v7-body .v7-flip')].find((b) => (b.getAttribute('aria-label') || '').includes('MangaFire'));
+  expect(flip.getAttribute('aria-label')).toContain('استعادة');
+  flip.click(); await tick();
+  expect(open).not.toHaveBeenCalled();
+  expect(install).toHaveBeenCalled();
+  view.close();
+});
