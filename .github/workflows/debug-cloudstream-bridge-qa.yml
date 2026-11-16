@@ -1,0 +1,80 @@
+name: VANTARA experimental Debug video source UI and native bridge proof (no publish)
+
+on:
+  push:
+    branches: [codex/vantara-video-repo-debug-20261101, codex/android-video-hardening-20261101]
+    paths:
+      - '.github/workflows/debug-cloudstream-bridge-qa.yml'
+      - '.github/workflows/android-debug.yml'
+      - 'apps/web/v35/server-sheet.js'
+      - 'apps/web/v35/cinema.js'
+      - 'apps/web/lib/route-family.js'
+      - 'apps/web/sw.js'
+      - 'apps/web/lib/route-validity.js'
+      - 'apps/web/lib/route-validity.test.js'
+      - 'apps/web/v35/server-sheet.test.js'
+      - 'apps/web/addons/native-runtime.js'
+      - 'apps/web/addons/cloudstream-runtime.js'
+      - 'extensions/runtime-android/integration/src/main/**'
+      - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/RuntimeBridgeVisibilityDeviceTest.kt'
+      - 'tools/android-debug/verify-cloudstream-debug.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vantara-debug-bridge-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-native-bridge-and-source-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: 'Real server sheet tests: late CloudStream sources + torrent coexistence + source menu'
+        run: pnpm exec vitest run apps/web/v35/server-sheet.test.js apps/web/v35/server-sheet-add-source.test.js apps/web/lib/route-validity.test.js apps/web/v35/cinema.test.js apps/web/addons/native-runtime.test.js
+      - name: Prepare current web UI and runtime-enabled Debug
+        run: |
+          set -euo pipefail
+          npx cap sync android
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+          python3 tools/android-debug/verify-cloudstream-debug.py android/app/build/outputs/apk/debug/app-debug.apk
+      - run: sudo chmod 666 /dev/kvm
+      - name: Launch the real app and assert Capacitor exposes VantaraRuntime
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
+          script: bash android/gradlew -p android :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.vantara.runtime.RuntimeBridgeVisibilityDeviceTest --no-daemon --stacktrace
+      - name: Preserve native failure report and proof without uploading an APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-cloudstream-capacitor-bridge-evidence
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+          retention-days: 14
+          if-no-files-found: warn

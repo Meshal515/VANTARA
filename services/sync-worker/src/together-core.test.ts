@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUTOSTART_COUNTDOWN_MS, createSettings, EMPTY_TTL_MS, HOST_GRACE_MS, LEAD_MS, normalizeCode, parseInvitees, positionAt, roomCode, RoomCore, versionMatch, type Out,
+  AUTOSTART_COUNTDOWN_MS, createSettings, EMPTY_TTL_MS, HOST_GRACE_MS, normalizeCode, PRESS_WINDOW_MS, PROTOCOL_VERSION, parseInvitees, positionAt, roomCode, RoomCore, versionMatch, type Out,
 } from './together-core.ts';
 
 const HOST = 'u-host';
@@ -15,19 +15,26 @@ function room(input: Record<string, unknown> = {}, now = 1_000, allowed: string[
 }
 
 describe('Together room core', () => {
-  it('host commands are scheduled LEAD_MS ahead and carry an increasing seq', () => {
+  it('host commands run on arrival with no artificial lead, stamped at the press time, with an increasing seq', () => {
     const core = room();
     const out = core.handle('c-host', { t: 'cmd', op: 'play', pos: 12_000 }, 5_000);
     const state = of(out, 'state')[0]!.msg['state'] as { playing: boolean; pos: number; at: number; seq: number };
-    expect(state).toMatchObject({ playing: true, pos: 12_000, at: 5_000 + LEAD_MS, seq: 1 });
-    // بعد ثانيتين من الموعد: الموقع المرجعي تقدّم ثانيتين
-    expect(positionAt(core.timeline, 5_000 + LEAD_MS + 2_000)).toBe(14_000);
-    // قبل الموعد لا يُحسب تقدّم سالب
-    expect(positionAt(core.timeline, 5_000)).toBe(12_000);
-    const pause = of(core.handle('c-host', { t: 'cmd', op: 'pause' }, 9_000), 'state')[0]!.msg['state'] as { playing: boolean; pos: number; seq: number };
-    expect(pause.playing).toBe(false);
-    expect(pause.pos).toBe(12_000 + (9_000 + LEAD_MS - (5_000 + LEAD_MS)));
-    expect(pause.seq).toBe(2);
+    // بلا لحظة ضغط: لحظة الوصول نفسها، لا بعدها بـ300ms
+    expect(state).toMatchObject({ playing: true, pos: 12_000, at: 5_000, seq: 1 });
+    expect(positionAt(core.timeline, 7_000)).toBe(14_000);
+    // لحظة الضغط عند المضيف (بساعة الغرفة) قبل وصول الأمر بـ70ms: الخط الزمني يبدأ منها
+    const pause = of(core.handle('c-host', { t: 'cmd', op: 'pause', pos: 16_000, at: 8_930 }, 9_000), 'state')[0]!.msg['state'] as { playing: boolean; pos: number; at: number; seq: number };
+    expect(pause).toMatchObject({ playing: false, pos: 16_000, at: 8_930, seq: 2 });
+    // لحظة مستقبلية (خطأ ساعة) تُقصّ لوقت الوصول، والقديمة جدًا تُرفض لصالح وقت الوصول
+    expect((of(core.handle('c-host', { t: 'cmd', op: 'seek', pos: 1, at: 9_500 }, 9_100), 'state')[0]!.msg['state'] as { at: number }).at).toBe(9_100);
+    expect((of(core.handle('c-host', { t: 'cmd', op: 'seek', pos: 2, at: 9_200 - PRESS_WINDOW_MS - 1 }, 9_200), 'state')[0]!.msg['state'] as { at: number }).at).toBe(9_200);
+  });
+
+  it('welcome announces protocol 2 so clients apply their own commands instantly only on this server', () => {
+    const core = room();
+    const w = of(core.join({ conn: 'c-x', userId: 'u-x', name: 'س', avatarKey: null }, 2_000), 'welcome')[0]!.msg;
+    expect(PROTOCOL_VERSION).toBe(2);
+    expect(w['proto']).toBe(2);
   });
 
   it('أول «ابدأ» يحمل عدًّا تنازليًا مشتركًا (حتى 5 ث)، وما بعده بلا عدّ', () => {
@@ -36,7 +43,7 @@ describe('Together room core', () => {
     expect(first).toMatchObject({ started: true, at: 8_000 });
     core.handle('c-host', { t: 'cmd', op: 'pause' }, 9_000);
     const again = of(core.handle('c-host', { t: 'cmd', op: 'play', countdownMs: 3_000 }, 10_000), 'state')[0]!.msg['state'] as { at: number };
-    expect(again.at).toBe(10_000 + LEAD_MS);
+    expect(again.at).toBe(10_000);
     const capped = room();
     const big = of(capped.handle('c-host', { t: 'cmd', op: 'play', pos: 0, countdownMs: 60_000 }, 1_000), 'state')[0]!.msg['state'] as { at: number };
     expect(big.at).toBe(6_000);
@@ -130,6 +137,24 @@ describe('Together room core', () => {
     expect(back.tick(10_000 + HOST_GRACE_MS).out).toHaveLength(0);
   });
 
+  it('the host who lost hosting while away is still invited and gets back into the room', () => {
+    // غرفة لأصدقاء محددين (الافتراضي في الواجهة)، لا مفتوحة للكل
+    const core = room({}, 1_000, ['u-b', 'u-c']);
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.leave('c-host', 10_000);
+    expect(of(core.tick(10_000 + HOST_GRACE_MS).out, 'host')[0]!.msg['userId']).toBe('u-b');
+    const back = core.join({ conn: 'c-host2', userId: HOST, name: 'المضيف', avatarKey: null }, 10_000 + HOST_GRACE_MS + 5_000);
+    expect(of(back, 'uninvited')).toHaveLength(0);
+    expect(of(back, 'welcome')).toHaveLength(1);
+    // ونقل الاستضافة يدويًا كذلك: من سلّمها يبقى مدعوًا، والمضيف الجديد لا يتكرر في القائمة
+    const manual = room({}, 1_000, ['u-b']);
+    manual.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    manual.handle('c-host', { t: 'host', userId: 'u-b' }, 3_000);
+    expect(manual.roomView().invited).toEqual([HOST]);
+    manual.leave('c-host', 4_000);
+    expect(of(manual.join({ conn: 'c-host3', userId: HOST, name: 'المضيف', avatarKey: null }, 5_000), 'welcome')).toHaveLength(1);
+  });
+
   it('an empty room expires after its TTL', () => {
     const core = room();
     core.leave('c-host', 5_000);
@@ -168,7 +193,7 @@ describe('Together room core', () => {
     const late = core.join({ conn: 'c-late', userId: 'u-late', name: 'متأخر', avatarKey: null }, 65_000);
     const w = of(late, 'welcome')[0]!.msg as { state: { started: boolean; playing: boolean } };
     expect(w.state).toMatchObject({ started: true, playing: true });
-    expect(positionAt(core.timeline, 65_000)).toBe(60_000 - LEAD_MS);
+    expect(positionAt(core.timeline, 65_000)).toBe(60_000);
   });
 
   it('broadcasts state changes at once: preparing → ready → playing, and failed', () => {

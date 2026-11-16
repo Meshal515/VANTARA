@@ -3,24 +3,32 @@ Unicode true
 !include "x64.nsh"
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
-Name "VANTARA"
+; Debug يُبنى بـ-DPRODUCT_NAME="VANTARA Debug": مجلد تثبيت ومفتاح سجل واختصارات مستقلة عن Stable،
+; فلا يكتب أحدهما فوق الآخر ولا يزيله مزيل الآخر.
+!ifndef PRODUCT_NAME
+  !define PRODUCT_NAME "VANTARA"
+!endif
+!ifndef FILE_DESCRIPTION
+  !define FILE_DESCRIPTION "VANTARA for Windows"
+!endif
+Name "${PRODUCT_NAME}"
 OutFile "${OUTFILE}"
-InstallDir "$LOCALAPPDATA\Programs\VANTARA"
-InstallDirRegKey HKCU "Software\VANTARA" "InstallLocation"
+InstallDir "$LOCALAPPDATA\Programs\${PRODUCT_NAME}"
+InstallDirRegKey HKCU "Software\${PRODUCT_NAME}" "InstallLocation"
 RequestExecutionLevel user
 ; Compress files independently so installing to another drive does not need a
 ; full solid archive decompressed into the user's (possibly almost full) TEMP.
 SetCompressor zlib
 VIProductVersion "${PRODUCT_VERSION}"
-VIAddVersionKey "ProductName" "VANTARA"
-VIAddVersionKey "FileDescription" "VANTARA Windows Preview"
+VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
+VIAddVersionKey "FileDescription" "${FILE_DESCRIPTION}"
 VIAddVersionKey "FileVersion" "${APP_VERSION}"
 VIAddVersionKey "LegalCopyright" "VANTARA"
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\VANTARA.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "تشغيل VANTARA"
+!define MUI_FINISHPAGE_RUN_TEXT "تشغيل ${PRODUCT_NAME}"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -81,39 +89,40 @@ Function .onInstSuccess
   ${EndIf}
 FunctionEnd
 
-Section "VANTARA" SEC_MAIN
+Section "${PRODUCT_NAME}" SEC_MAIN
   SetShellVarContext current
   SetRegView 64
   !insertmacro WaitUnlocked "$INSTDIR\VANTARA.exe"
   !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\rqbit.exe"
+  !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\vantara-torrent.exe"
   !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\mpv.exe"
   !insertmacro WaitUnlocked "$INSTDIR\resources\app\native\vantara-video-host.exe"
   SetOutPath "$INSTDIR"
   File /r "${DIST}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  CreateDirectory "$SMPROGRAMS\VANTARA"
-  CreateShortcut "$DESKTOP\VANTARA.lnk" "$INSTDIR\VANTARA.exe" "" "$INSTDIR\VANTARA.exe" 0
-  CreateShortcut "$SMPROGRAMS\VANTARA\VANTARA.lnk" "$INSTDIR\VANTARA.exe" "" "$INSTDIR\VANTARA.exe" 0
-  CreateShortcut "$SMPROGRAMS\VANTARA\إزالة VANTARA.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
-  WriteRegStr HKCU "Software\VANTARA" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "DisplayName" "VANTARA"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "DisplayIcon" "$\"$INSTDIR\VANTARA.exe$\",0"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "NoModify" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA" "NoRepair" 1
+  CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
+  CreateShortcut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\VANTARA.exe" "" "$INSTDIR\VANTARA.exe" 0
+  CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\VANTARA.exe" "" "$INSTDIR\VANTARA.exe" 0
+  CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}\إزالة ${PRODUCT_NAME}.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
+  WriteRegStr HKCU "Software\${PRODUCT_NAME}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayName" "${PRODUCT_NAME}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayIcon" "$\"$INSTDIR\VANTARA.exe$\",0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
   SetRegView 64
-  Delete "$DESKTOP\VANTARA.lnk"
-  Delete "$SMPROGRAMS\VANTARA\VANTARA.lnk"
-  Delete "$SMPROGRAMS\VANTARA\إزالة VANTARA.lnk"
-  RMDir "$SMPROGRAMS\VANTARA"
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\VANTARA"
-  DeleteRegKey HKCU "Software\VANTARA"
+  Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
+  Delete "$SMPROGRAMS\${PRODUCT_NAME}\إزالة ${PRODUCT_NAME}.lnk"
+  RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
+  DeleteRegKey HKCU "Software\${PRODUCT_NAME}"
   !include "${UNINSTALL_FILES}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"

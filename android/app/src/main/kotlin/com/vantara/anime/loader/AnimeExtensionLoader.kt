@@ -38,9 +38,19 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
      * المستودع يحذف الإصدارات القديمة فيصير الرابط المثبّت 404 («تعذّر تنزيل»).
      */
     suspend fun obtain(ref: ExtensionRef): AnimeCatalogueSource {
-        val cached = File(dir, "${ref.pkg}.apk").takeIf { it.isFile }?.readBytes()?.takeIf { sha256(it).equals(ref.sha256, true) }
+        val stored = archive(ref)
+        val cached = sequenceOf(stored, File(dir, "${ref.pkg}.apk"))
+            .mapNotNull { apk -> runCatching { apk.takeIf { it.isFile }?.readBytes() }.getOrNull() }
+            .firstOrNull { sha256(it).equals(ref.sha256, true) }
         val bytes = cached ?: bundled(ref) ?: download(ref)
         return load(ref, bytes)
+    }
+
+    /** Verified, content-addressed APK vault; updates do not overwrite the working version. */
+    private fun archive(ref: ExtensionRef): File {
+        require(ref.pkg.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)+$"))) { "invalid APK package" }
+        require(ref.sha256.matches(Regex("(?i)[a-f0-9]{64}"))) { "invalid APK sha256" }
+        return File(File(dir, "vault/${ref.pkg}"), "${ref.sha256.lowercase()}.apk")
     }
 
     private fun bundled(ref: ExtensionRef): ByteArray? = runCatching {
@@ -48,25 +58,38 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
     }.getOrNull()?.takeIf { sha256(it).equals(ref.sha256, true) }
 
     private suspend fun download(ref: ExtensionRef): ByteArray = try {
-        http.newCall(GET(ref.apk)).awaitSuccess().use { it.body.bytes() }
+        http.newCall(GET(ref.apk)).awaitSuccess().use { response ->
+            response.body.byteStream().use {
+                com.vantara.plugins.readRepositoryBody(it, response.body.contentLength(), 40 * 1024 * 1024)
+            }
+        }
     } catch (t: Throwable) {
         throw LoadException("download", "تعذّر تنزيل ${ref.pkg}", t)
     }
 
-    fun load(ref: ExtensionRef, bytes: ByteArray): AnimeCatalogueSource {
+    /** Enumerates every catalogue source from an actual APK/factory before committing. */
+    fun inspect(ref: ExtensionRef, bytes: ByteArray, expectedVersionCode: Long? = null): List<AnimeCatalogueSource> {
         val actual = sha256(bytes)
         if (!actual.equals(ref.sha256, ignoreCase = true)) {
             throw LoadException("verify", "بصمة مختلفة: متوقع ${ref.sha256.take(12)}… وصل ${actual.take(12)}…")
         }
-        val apk = File(dir, "${ref.pkg}.apk")
+        val apk = archive(ref)
         runCatching {
-            if (apk.exists()) {
-                apk.setWritable(true, true)
-                apk.delete()
+            apk.parentFile?.mkdirs()
+            val existing = runCatching { apk.takeIf { it.isFile }?.readBytes() }.getOrNull()
+            if (existing == null || !sha256(existing).equals(actual, true)) {
+                val stage = File(apk.parentFile, "${actual}.${System.nanoTime()}.part")
+                try {
+                    stage.writeBytes(bytes)
+                    stage.setWritable(false, false)
+                    if (stage.canWrite()) error("staged APK is writable")
+                    if (!stage.renameTo(apk)) error("cannot stage verified APK into vault")
+                } finally {
+                    if (stage.exists()) { stage.setWritable(true, true); stage.delete() }
+                }
             }
-            apk.writeBytes(bytes)
-        }.onFailure { throw LoadException("write", "تعذّرت كتابة الإضافة", it) }
-        apk.setWritable(false, false)
+            apk.setWritable(false, false)
+        }.onFailure { throw LoadException("write", "تعذّرت كتابة الإضافة دون المساس بالإصدار السابق", it) }
         if (apk.canWrite()) throw LoadException("readonly", "الملف ما زال قابلًا للكتابة")
 
         @Suppress("DEPRECATION")
@@ -75,6 +98,13 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
         if (info.packageName != ref.pkg) throw LoadException("identity", "الحزمة ${info.packageName} ليست ${ref.pkg}")
         val lib = info.versionName?.substringBefore('.')?.toIntOrNull()
         if (lib == null || lib !in LIB_MIN..LIB_MAX) throw LoadException("lib", "مكتبة إضافات غير مدعومة: ${info.versionName}")
+        // Admission validates the publisher's display version against signed APK metadata.
+        // Legacy cache restoration omits this new check so a historical label cannot disable working code.
+        if(expectedVersionCode != null) {
+            @Suppress("DEPRECATION")
+            val code = if(android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+            AnimeVersionPolicy.archive(ref.version,expectedVersionCode,info.versionName,code)
+        }
         val meta = info.applicationInfo?.metaData ?: throw LoadException("parse", "لا بيانات وصفية")
         val names = meta.getString(META_CLASS) ?: meta.getString(META_FACTORY)
             ?: throw LoadException("parse", "لا $META_CLASS")
@@ -94,8 +124,23 @@ class AnimeExtensionLoader(context: Context, private val http: OkHttpClient) {
             }
         }
         val catalogue = sources.filterIsInstance<AnimeCatalogueSource>()
-        return (ref.sourceName?.let { n -> catalogue.firstOrNull { it.name == n } } ?: catalogue.firstOrNull { it.lang == "ar" } ?: catalogue.firstOrNull())
-            ?: throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
+        if (catalogue.isEmpty()) throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
+        require(catalogue.map { it.id.toString() }.toSet().size == catalogue.size) {
+            "DUPLICATE_SOURCE_ID: الحزمة تعلن معرّفات مصادر مكررة"
+        }
+        return catalogue
+    }
+
+    fun load(ref: ExtensionRef, bytes: ByteArray): AnimeCatalogueSource {
+        val catalogue = inspect(ref, bytes)
+        val selected = ref.sourceId?.let { id ->
+            catalogue.firstOrNull { it.id.toString() == id }
+                ?: throw LoadException("identity", "المصدر $id غير موجود في حزمة ${ref.pkg}")
+        } ?: ref.sourceName?.let { name ->
+            catalogue.firstOrNull { it.name == name }
+                ?: throw LoadException("identity", "المصدر $name غير موجود في حزمة ${ref.pkg}")
+        } ?: catalogue.firstOrNull { it.lang == "ar" } ?: catalogue.firstOrNull()
+        return selected ?: throw LoadException("instantiate", "الإضافة لا تحمل مصدر كتالوج")
     }
 
     private fun sha256(bytes: ByteArray): String =

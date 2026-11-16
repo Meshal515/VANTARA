@@ -59,7 +59,15 @@ export async function createNativeCatalog(record, {
   plugins = globalThis.Capacitor?.Plugins ?? {}, sourceId, signal,
 } = {}) {
   const family = record?._store?.kind ?? record?.kind;
-  if (/cloudstream/i.test(String(record?.protocol ?? record?.engine ?? family)) || !['manga', 'anime', 'cinema'].includes(family))
+  const cloudstream = /cloudstream/i.test(String(record?.protocol ?? record?.engine ?? family));
+  if (cloudstream) {
+    let measured;
+    try { measured = await nativeCall(() => plugins.VantaraRuntime?.capabilities?.(),signal); }
+    catch (error) { if(error.name==='AbortError')throw error; }
+    if(measured?.cloudstream!==true || measured?.platform!=='android')
+      return incompatible('UNSUPPORTED_NATIVE_ENGINE','محرك هذه الحزمة غير متاح على هذه المنصة.');
+  }
+  if (!['manga', 'anime', 'cinema'].includes(family))
     return incompatible('UNSUPPORTED_NATIVE_ENGINE', 'لا يوجد محرك تشغيل أصلي متوافق لهذه الإضافة في هذا الإصدار.');
   const manga = family === 'manga';
   if ((manga && record.anime === true) || (!manga && record.anime === false))
@@ -80,6 +88,7 @@ export async function createNativeCatalog(record, {
   const explicit = new Set([record.sourceId, ...(Array.isArray(record.sourceIds) ? record.sourceIds : [])].filter(validId));
   const matches = declared.sources.filter(row => {
     if (!validId(row?.id)) return false;
+    if (cloudstream && !row.id.startsWith('addon|cs3|cs3_')) return false;
     const owner = row.pkg ?? row.extension?.pkg;
     if (pkg && owner) return owner === pkg;
     if (explicit.has(row.id)) return true;
@@ -90,13 +99,19 @@ export async function createNativeCatalog(record, {
   const choices = [...new Map(matches.map(row => [row.id, row])).values()];
   if (!choices.length || (sourceId && !choices.some(row => row.id === sourceId)))
     return incompatible('SOURCE_NOT_DECLARED', 'لم يعلن المحرك معرّف مصدر يطابق حزمة الإضافة المثبتة.');
-  if (!sourceId && choices.length > 1) return {
-    status: 'select-source',
-    sources: choices.map(row => ({ sourceId: row.id, name: row.label ?? row.name ?? row.id, pkg, content: manga ? 'manga' : row.content, enabled: row.enabled !== false })),
-  };
-  const selected = choices.find(row => row.id === sourceId) ?? choices[0];
+  const alternatives = choices.map(row => ({ sourceId: row.id, name: row.label ?? row.name ?? row.id, pkg, content: manga ? 'manga' : row.content, enabled: row.enabled !== false }));
+  // «فتح» يفتح المصدر مباشرة: المعرّف المحفوظ للإضافة، ثم المصدر العربي المفعّل، ثم أول مفعّل.
+  // كانت الإضافة متعددة المصادر تُظهر قائمة اختيار بدل المصدر؛ البقية تبقى في alternatives للتبديل من داخله.
+  const arabic = row => String(row.lang ?? '').toLowerCase() === 'ar' || /[\u0600-\u06FF]/.test(String(row.label ?? row.name ?? ''));
+  const enabled = choices.filter(row => row.enabled !== false);
+  const selected = choices.find(row => row.id === sourceId)
+    ?? enabled.find(row => explicit.has(row.id))
+    ?? enabled.find(arabic)
+    ?? enabled[0]
+    ?? choices[0];
   if (selected.enabled === false)
-    return incompatible('NATIVE_SOURCE_DISABLED', 'هذا المصدر معطّل في المحرك الأصلي.');
+    return incompatible('NATIVE_SOURCE_DISABLED', typeof selected.disabledReason==='string' && selected.disabledReason.trim()
+      ? selected.disabledReason.slice(0,300) : 'هذا المصدر معطّل في المحرك الأصلي.');
   const content = manga ? 'manga' : selected.content ?? record.content;
   if (!['manga', 'anime', 'cinema'].includes(content))
     return incompatible('SOURCE_CONTENT_UNDECLARED', 'لم يحدد المحرك نوع محتوى هذا المصدر.');
@@ -135,6 +150,19 @@ export async function createNativeCatalog(record, {
     search: (query, number, options) => listing('search', number, String(query ?? ''), options),
   };
   if (!manga || typeof engine.popular === 'function') adapter.popular = (number, options) => listing('popular', number, '', options);
+  // أقسام المصدر كما يعلنها هو (بلا طلب شبكة): أقسام CloudStream الرئيسية، و«آخر التحديثات» لإضافة Aniyomi إن أعلنته.
+  // محرك أقدم بلا sections يبقى على الرائج والأحدث العامين.
+  if (!manga && typeof engine.sections === 'function') {
+    adapter.sections = async (options = {}) => {
+      const result = await invoke('sections', { sourceId: id }, options);
+      if (!Array.isArray(result?.sections)) throw failure('INVALID_NATIVE_RESPONSE', 'لم يُرجع المصدر أقسامًا صالحة.');
+      return result.sections
+        .filter(row => typeof row?.key === 'string' && /^(?:section:\d{1,3}|popular|latest)$/.test(row.key) && typeof row.name === 'string' && row.name.trim())
+        .slice(0, 40)
+        .map(row => ({ key: row.key, name: row.name.trim().slice(0, 80) }));
+    };
+    adapter.section = (key, number, options) => listing(key, number, '', options);
+  }
   if (manga) {
     adapter.series = async (work, options) => {
       const result = await invoke('series', { sourceId: id, manga: item(work) }, options);
@@ -152,6 +180,15 @@ export async function createNativeCatalog(record, {
       return result.pages;
     };
   } else {
+    if(cloudstream && typeof plugins.VantaraRuntime?.seasons==='function')adapter.seasons=async(work,options={})=>{
+      const result=await nativeCall(()=>plugins.VantaraRuntime.seasons({anime:item(work)}),options.signal);
+      if(!Array.isArray(result?.seasons))throw failure('INVALID_NATIVE_RESPONSE','لم يُرجع المصدر قائمة مواسم صالحة.');
+      return result.seasons.map(season=>{
+        const value=item(season),number=value.requestedSeason;
+        if(!Number.isInteger(number)||number<0)throw failure('INVALID_NATIVE_RESPONSE','أعاد المصدر موسمًا بلا رقم صالح.');
+        return {...value,season:number};
+      });
+    };
     adapter.series = async (work, options) => {
       const result = await invoke('details', { anime: item(work) }, options);
       return { work: item(result?.anime) };
@@ -171,5 +208,5 @@ export async function createNativeCatalog(record, {
     protocol: 'native', enabled: true, bundled: false, user: true, contentTypes: types, capabilities,
     compatibility: { apk: true, apkCapabilities: capabilities, pwa: false, desktop: false },
   };
-  return { status: 'ready', addon, adapter, source: adapter, sourceId: id };
+  return { status: 'ready', addon, adapter, source: adapter, sourceId: id, alternatives };
 }

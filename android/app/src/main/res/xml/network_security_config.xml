@@ -68,8 +68,12 @@
       وحده لهذا النطاق وحده، فوق ثقة النظام (فحص 2026-10-03 من آلة GitHub: verify error 20).
       الوسيط من مُصدره: crt.sectigo.com/SSL2BUYEMEARSADomainValidationSecureServerCA.crt
       sha256 58:F0:F7:56:75:8E:93:FB:0B:6B:17:A3:6A:38:50:47:5D:68:BC:0D:6C:99:CB:E2:2A:1B:18:35:1C:89:FF:1F
+
+      وإضافة Akwam الحالية تعطي روابط http://sNNNd1.downet.net (المسح الحي 15 نوفمبر: 6 روابط كلها
+      CLEARTEXT_POLICY، فلا سيرفر Akwam يعمل). سياسة المالك (6 نوفمبر): رابط المحرك يُشغَّل كما يشغّله المحرك
+      الأصلي، لا رفض لمجرد http. والمسموح هنا ملفات فيديو وحدها، بالاسم كمضيفات صور المانجا: لا حساب ولا هوية.
     -->
-    <domain-config>
+    <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">downet.net</domain>
         <trust-anchors>
             <certificates src="system" />

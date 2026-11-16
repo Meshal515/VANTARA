@@ -976,6 +976,9 @@ export function statementsFor(
       return [
         db
           .prepare(
+            // كتابة لا تتقدم لا تلمس الصف (`WHERE` في آخره، #323 U-21/U-07): كانت تحدّث updated_at
+            // وrev، فتصير نظرة ثوانٍ على فصل قديم مكتمل «آخر قراءة» ويقلب «تابع» إليه، وتسحب الأجهزة
+            // الأخرى تغييرًا فارغًا كل 5 ثوانٍ.
             // `owner_synced = 0`: هذه الكتابة صادرة حتى يُقرّها مالك التقدم.
             // القيمة المدموجة قد تتغير بـMAX هنا، فالإقرار القديم لا يصلح لها —
             // وإلا اعتُبر تقدم لم يره المالك مؤكَّدًا فسقط بلا دفع.
@@ -990,7 +993,8 @@ export function statementsFor(
                owner_synced = CASE
                  WHEN MAX(progress.page, excluded.page) = progress.page
                   AND MAX(progress.ratio, excluded.ratio) = progress.ratio
-                 THEN progress.owner_synced ELSE 0 END`,
+                 THEN progress.owner_synced ELSE 0 END
+             WHERE excluded.page > progress.page OR excluded.ratio > progress.ratio`,
           )
           .bind(userId, chapterKey, seriesRef, normalized.page, normalized.ratio, now, rev),
       ];
@@ -2932,7 +2936,16 @@ async function handleInsights(env: Env, viewerId: string, targetId: string, work
   try { prefs = JSON.parse(account.data ?? '{}') as Record<string, unknown>; } catch { /* fail closed */ }
   const timeShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightTime'] !== false);
   const progressShared = owner || (prefs['shareInsights'] === true && prefs['shareInsightProgress'] !== false);
-  if (!timeShared && !progressShared) return json({ locked: true }, { status: 403 });
+  // المقفل (قرار المالك، 9 نوفمبر): ساعاته ظاهرة للمجموعة، مجموعًا ولكل قسم، أما أعماله فمقفلة.
+  // لا عنوان ولا غلاف ولا مرجع عمل يخرج هنا: مجاميع بالقسم فقط.
+  if (!timeShared && !progressShared) {
+    const rows = await env.DB.prepare('SELECT section, COALESCE(SUM(active_ms), 0) AS t FROM work_insights WHERE user_id = ? GROUP BY section')
+      .bind(targetId).all<{ section: string; t: number }>();
+    const sections: Record<string, number> = { manga: 0, anime: 0, cinema: 0 };
+    for (const r of rows.results ?? []) if (r.section in sections) sections[r.section] = Number(r.t ?? 0);
+    const totalMs = Object.values(sections).reduce((a, b) => a + b, 0);
+    return json({ userId: targetId, locked: true, timeShared: false, progressShared: false, totalMs, sections, content: [] });
+  }
   if (workRef && workRef.length > 200) return json({ error: 'invalid_work' }, { status: 400 });
   const [times, manga, anime] = await env.DB.batch<Record<string, unknown>>([
     timeShared
@@ -2965,8 +2978,20 @@ async function handleInsights(env: Env, viewerId: string, targetId: string, work
   }
   for (const r of manga?.results ?? []) ensure(String(r['series_ref'])).completed = Number(r['n'] ?? 0);
   for (const r of anime?.results ?? []) ensure(String(r['series_ref'])).completed = Number(r['n'] ?? 0);
-  const content = [...items.values()].sort((a, b) => b.activeMs - a.activeMs);
-  return json({ userId: targetId, timeShared, progressShared, totalMs: content.reduce((sum, item) => sum + item.activeMs, 0), content });
+  // المخفي يغيب عن القائمة للجميع، ووقته يبقى في المجموع
+  const totalMs = [...items.values()].reduce((sum, item) => sum + item.activeMs, 0);
+  const hidden = await env.DB.prepare('SELECT series_ref FROM insight_hidden WHERE user_id = ?').bind(targetId).all<{ series_ref: string }>();
+  const gone = new Set((hidden.results ?? []).map((r) => r.series_ref));
+  const content = [...items.values()].filter((item) => !gone.has(item.seriesRef)).sort((a, b) => b.activeMs - a.activeMs);
+  return json({ userId: targetId, timeShared, progressShared, totalMs, content });
+}
+
+async function handleInsightHide(request: Request, env: Env, userId: string, now: number): Promise<Response> {
+  const body = await request.json().catch(() => null) as { seriesRef?: unknown } | null;
+  const ref = typeof body?.seriesRef === 'string' ? body.seriesRef : '';
+  if (!ref || ref.length > 200) return json({ error: 'invalid_work' }, { status: 400 });
+  await env.DB.prepare('INSERT OR IGNORE INTO insight_hidden (user_id, series_ref, hidden_at) VALUES (?, ?, ?)').bind(userId, ref, now).run();
+  return json({ ok: true });
 }
 
 async function handleStats(env: Env, viewerId: string, targetId: string, now: number): Promise<Response> {
@@ -3137,8 +3162,12 @@ export default {
 
     try {
       if (path === '/health' && url.searchParams.get('collectors') === '1') {
-        const rows = await env.DB.prepare('SELECT source, last_attempt_at, last_success_at, last_error FROM collector_state ORDER BY source').all();
-        return json({ ok: true, collectors: rows.results }, { status: 200 }, cors);
+        // عام بلا جلسة: الحالة فقط (#323 U-17). نص last_error قد يحمل مضيفًا داخليًا أو رسالة مزوّد،
+        // فلا يخرج؛ يبقى في الجدول لمن يشغّل الخادم.
+        const rows = await env.DB.prepare('SELECT source, last_attempt_at, last_success_at, last_error IS NOT NULL AS failing FROM collector_state ORDER BY source')
+          .all<{ source: string; last_attempt_at: number | null; last_success_at: number | null; failing: number }>();
+        const collectors = (rows.results ?? []).map((r) => ({ source: r.source, last_attempt_at: r.last_attempt_at, last_success_at: r.last_success_at, failing: Boolean(r.failing) }));
+        return json({ ok: true, collectors }, { status: 200 }, cors);
       }
       if (path === '/health') {
         return json({ ok: true, protocol: SYNC_PROTOCOL, rev: await currentRev(env) }, {}, cors);
@@ -3174,6 +3203,15 @@ export default {
       else if (path === '/v1/presence' && request.method === 'GET') response = await handlePresenceList(env, now);
       else if (path === '/v1/collections' && request.method === 'GET') {
         response = await handleCollection(url, env, userId);
+      }
+      // تقييم السيرفر لعمل: متوسط تقييمات مستخدمي VANTARA من 5 (يبدأ 0). مجموع فقط: لا من قيّم ولا كم قيّم كل واحد
+      else if (path === '/v1/ratings/avg' && request.method === 'GET') {
+        const refs = (url.searchParams.get('refs') ?? '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 4);
+        if (!refs.length) response = json({ score: 0, count: 0 });
+        else {
+          const row = await env.DB.prepare(`SELECT AVG(score) AS a, COUNT(*) AS n FROM ratings WHERE score > 0 AND series_ref IN (${refs.map(() => '?').join(',')})`).bind(...refs).first<{ a: number | null; n: number }>();
+          response = json({ score: row?.a ? Math.round((row.a / 2) * 10) / 10 : 0, count: row?.n ?? 0 });
+        }
       }
       else if (path === '/v1/week' && request.method === 'GET') response = await handleWeek(env, userId, now);
       // نبض خفيف: رقم آخر كتابة فقط. الجهاز يسأله كل ثوانٍ ويسحب حين يتقدّم —
@@ -3234,6 +3272,7 @@ export default {
       else if (path.startsWith('/v1/stats/') && request.method === 'GET') {
         response = await handleStats(env, userId, decodeURIComponent(path.slice('/v1/stats/'.length)), now);
       }
+      else if (path === '/v1/insights/hide' && request.method === 'POST') response = await handleInsightHide(request, env, userId, now);
       else if (path.startsWith('/v1/insights/') && request.method === 'GET') {
         response = await handleInsights(env, userId, decodeURIComponent(path.slice('/v1/insights/'.length)), url.searchParams.get('work'));
       }

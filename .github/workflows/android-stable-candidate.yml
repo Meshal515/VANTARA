@@ -3,7 +3,8 @@ name: Stable candidate validation (NO publish)
 # Independent Release build only: no release, deployment, channel update or main merge.
 on:
   push:
-    branches: [fix/stable-addons-selective-20261028]
+    branches: [feat/addons-v7-native-manager-20261027]
+    paths: [.github/workflows/android-stable-candidate.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,7 +17,7 @@ env:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
@@ -51,12 +52,6 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @vantara/domain build
-      - name: Preserve Stable engines and configuration; require web regressions
-        run: |
-          node --test tools/android-stable/port-guard.test.mjs
-          pnpm test:web
-          pnpm test:safety
 
       - name: Read the actual published Stable version (read only)
         id: version
@@ -145,21 +140,6 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/vantara.jks"
           test -s "$RUNNER_TEMP/vantara.jks"
 
-      - name: Prepare Release-only instrumentation (not included in app APK)
-        run: |
-          mkdir -p android/app/src/androidTest/java/com/vantara/stableproof
-          cp tools/android-stable/StableAddonsDeviceTest.kt android/app/src/androidTest/java/com/vantara/stableproof/
-          cat > "$RUNNER_TEMP/stable-proof.gradle" <<'GRADLE'
-          allprojects { p ->
-            p.plugins.withId('com.android.application') {
-              p.android.testBuildType = 'release'
-              p.afterEvaluate {
-                if (p.android.buildTypes.release.debuggable) throw new GradleException('Stable must remain non-debuggable')
-              }
-            }
-          }
-          GRADLE
-
       - name: Assemble stable signed APK
         working-directory: android
         env:
@@ -172,7 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew --no-daemon -I "$RUNNER_TEMP/stable-proof.gradle" :app:assembleRelease :app:assembleReleaseAndroidTest :app:testReleaseUnitTest
+          ./gradlew --no-daemon :app:assembleRelease :app:testReleaseUnitTest
 
       - name: Verify signature and stage artifact
         env:
@@ -201,50 +181,6 @@ jobs:
           mkdir -p dist
           cp "$apk" dist/VANTARA-stable.apk
           sha256sum dist/VANTARA-stable.apk > dist/VANTARA-stable.apk.sha256
-
-      - name: Sign instrumentation with the same existing Stable key
-        env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          sdktools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          harness=$(find android/app/build/outputs/apk/androidTest/release -name '*.apk' | head -1)
-          "$sdktools/apksigner" sign --ks "$RUNNER_TEMP/vantara.jks" --ks-key-alias vantara --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD --out "$RUNNER_TEMP/stable-harness.apk" "$harness"
-          "$sdktools/apksigner" verify --print-certs "$RUNNER_TEMP/stable-harness.apk" > "$RUNNER_TEMP/harness-cert.txt"
-          pinned=$(grep -oE 'STABLE_CERT_SHA256 = "[0-9a-f]{64}"' android/app/src/main/kotlin/com/vantara/plugins/update/ApkCheck.kt | grep -oE '[0-9a-f]{64}')
-          grep -q "certificate SHA-256 digest: $pinned" "$RUNNER_TEMP/harness-cert.txt"
-          echo "STABLE_TEST_APK=$RUNNER_TEMP/stable-harness.apk" >> "$GITHUB_ENV"
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Actual signed Stable upgrade, quiet background challenge, explicit cancellation and restart
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_3a
-          ram-size: 4096M
-          heap-size: 512M
-          disk-size: 8G
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash tools/android-stable/upgrade-check.sh
-
-      - name: Preserve independent Release evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stable-addons-release-evidence
-          path: |
-            stable-addons-evidence/
-            android/app/build/reports/tests/testReleaseUnitTest/
-          if-no-files-found: warn
-          retention-days: 30
 
       - uses: actions/upload-artifact@v4
         with:

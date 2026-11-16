@@ -1,0 +1,97 @@
+{
+  "repository": "Abodabodd/re-3arabi",
+  "definitionCommit": "e1dc6d9bc454042e4cc9eeff26b06ce94b8fcd73",
+  "buildsCommit": "ff8028446f37776cf858b1525f534b7dd3e4518e",
+  "kind": "read-only-format-observations-not-execution",
+  "packages": [
+    {
+      "name": "AnimeWitcher",
+      "internalName": "Animewitcher",
+      "version": 3,
+      "url": "https://raw.githubusercontent.com/Abodabodd/re-3arabi/ff8028446f37776cf858b1525f534b7dd3e4518e/Animewitcher.cs3",
+      "sha256": "4c639f9392d46e45f4ee84e8799c810cc1d11fba2f13ff7e32865c71987c2fb4",
+      "bytes": 34328,
+      "externalMethodReferences": 139,
+      "cloudstreamAndNiceHttpMethodReferences": 27,
+      "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
+      "warning": "",
+      "executed": false,
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
+    },
+    {
+      "name": "Anime4up",
+      "internalName": "Anime4up",
+      "version": 1,
+      "url": "https://raw.githubusercontent.com/Abodabodd/re-3arabi/ff8028446f37776cf858b1525f534b7dd3e4518e/Anime4up.cs3",
+      "sha256": "30ae4aaab6596ed950a55d5a41dfd44d42721c7d1e9af0fea2eabc61a40ece06",
+      "bytes": 37890,
+      "externalMethodReferences": 190,
+      "cloudstreamAndNiceHttpMethodReferences": 29,
+      "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
+      "warning": "",
+      "executed": false,
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
+    },
+    {
+      "name": "AnimeRift",
+      "internalName": "AnimeRift",
+      "version": 1,
+      "url": "https://raw.githubusercontent.com/Abodabodd/re-3arabi/ff8028446f37776cf858b1525f534b7dd3e4518e/AnimeRift.cs3",
+      "sha256": "986a25407da636b4dd1656712b594ca4f4daba02448103661818edd9dc61ed1e",
+      "bytes": 49807,
+      "externalMethodReferences": 185,
+      "cloudstreamAndNiceHttpMethodReferences": 42,
+      "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
+      "warning": "\u26a0\ufe0f \u062a\u0646\u0628\u064a\u0647: \u064a\u064f\u0631\u062c\u0649 \u0627\u0633\u062a\u062e\u062f\u0627\u0645 VPN \u0644\u062a\u062c\u0646\u0628 \u062d\u0638\u0631 \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u0640 IP \u0627\u0644\u062e\u0627\u0635 \u0628\u0643",
+      "executed": false,
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
+    },
+    {
+      "name": "Witanime",
+      "internalName": "Witanime",
+      "version": 1,
+      "url": "https://raw.githubusercontent.com/Abodabodd/re-3arabi/ff8028446f37776cf858b1525f534b7dd3e4518e/Witanime.cs3",
+      "sha256": "c44a16641dbac196199ca600d69457da0105b62e54a9f6a0760f75d928ff258c",
+      "bytes": 60602,
+      "externalMethodReferences": 337,
+      "cloudstreamAndNiceHttpMethodReferences": 41,
+      "entrySuperclass": "Lcom/lagradost/cloudstream3/plugins/Plugin;",
+      "warning": "",
+      "executed": false,
+      "runtimeExecution": "not_implemented",
+      "expectedInheritedHostLookups": [
+        {
+          "kind": "method",
+          "member": "registerExtractorAPI(Lcom/lagradost/cloudstream3/utils/ExtractorApi;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        },
+        {
+          "kind": "method",
+          "member": "registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+          "externalAncestor": "Lcom/lagradost/cloudstream3/plugins/Plugin;"
+        }
+      ]
+    }
+  ]
+}

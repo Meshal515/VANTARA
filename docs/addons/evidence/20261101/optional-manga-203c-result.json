@@ -1,0 +1,25 @@
+{
+  "commit": "203c6ab533423357d92239e91ad81de5e25d42f5",
+  "runId": 41310624643,
+  "jobId": 124860038101,
+  "artifactId": 13085073899,
+  "workflowResult": "PASS",
+  "platform": "android-emulator-api35-x86_64",
+  "physicalDevice": "NOT_AVAILABLE",
+  "operations": {
+    "ownerSuppliedRepositoryUrls": "PASS",
+    "githubAndRawAliasDeduplication": "PASS",
+    "repositoryUnlink": "PASS",
+    "optionalLegacyCatalogueDismissal": "PASS",
+    "processRestartPersistence": "PASS"
+  },
+  "firstProcessId": 2786,
+  "secondProcessId": 3549,
+  "instrumentation": {
+    "firstPhaseTests": 1,
+    "secondPhaseTests": 1,
+    "bothTerminalCodes": -1,
+    "clearedOrReinstalledBetweenPhases": false
+  },
+  "scope": "Real repository registration, alias deduplication, unlink and optional catalogue dismissal across process death. No manga reading, installed-extension preservation on a populated device, account restore or provider compatibility is claimed."
+}

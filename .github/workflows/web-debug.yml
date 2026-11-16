@@ -1,0 +1,189 @@
+name: Web Debug
+
+# نسخة ويب تجريبية من فرع Debug للتجربة على الكمبيوتر، بأمر المالك. نشر معاينة فقط بفرع ثابت
+# web-debug في مشروع Pages نفسه (رابط ثابت web-debug.<subdomain>)، ولا يلمس production أبدًا:
+# لا يغيّر production_branch ولا إعدادات المشروع، ولا ينشر Workers ولا يمس D1.
+# فرع محرك إضافات الويب (claude/web-plugin-engine) ينشر بفرع معاينة ثابت آخر web-engine، فيجرّبه
+# المالك قبل أن يصل إلى Debug. لا فرع غيرهما ينشر، ولا production أبدًا.
+on:
+  push:
+    branches: [feat/addons-v7-native-manager-20261027, claude/web-plugin-engine]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-debug-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CF_PAGES_PROJECT: vantara
+  CF_PREVIEW_BRANCH: ${{ github.ref_name == 'claude/web-plugin-engine' && 'web-engine' || 'web-debug' }}
+
+jobs:
+  # Deterministic failures are checked before deployment and without Gradle.
+  # Android keeps every existing device/signing/upgrade gate unchanged.
+  fast-checks:
+    if: github.repository == 'Meshal515/VANTARA' && github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Shell integrity, WebView lifecycle and native-input contracts
+        run: |
+          node tools/repository-compat/scope-guard.mjs
+          node --test tools/repository-safety.test.mjs tools/repository-compat/webview-lifecycle.test.mjs tools/repository-compat/debug-native-inputs.test.mjs
+          python3 -m unittest discover -s tools/android-debug -p 'test_*.py' -v
+      - name: Parse production UI and device proof scripts
+        run: |
+          node --check apps/web/v35/anime.js
+          node --check apps/web/v35/work-looks.js
+          node --check apps/web/v35/logo-layer.js
+          node --check apps/web/v35/work-dom.js
+          node --check apps/web/v35/anime-episode-controls.js
+          node --check tools/android-debug/webview-proof.mjs
+      - name: Real compositor motion and layers before Android compilation
+        run: |
+          npm install --prefix "$RUNNER_TEMP/fast-ui" --no-save playwright@1.56.1
+          node tools/repository-compat/anime-logo-ui.mjs \
+            --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/fast-ui-proof" \
+            --playwright-module "$RUNNER_TEMP/fast-ui/node_modules/playwright/index.mjs" \
+            --chromium "$(command -v google-chrome || command -v chromium)"
+
+      - name: Section layer parity and first-frame scroll in the actual shell
+        env:
+          VANTARA_PLAYWRIGHT_MODULE: ${{ runner.temp }}/fast-ui/node_modules/playwright/index.mjs
+          VANTARA_UI_EVIDENCE: ${{ runner.temp }}/section-motion-proof
+        run: |
+          export VANTARA_CHROMIUM="$(command -v google-chrome || command -v chromium)"
+          node tools/repository-compat/section-motion-ui.mjs "$GITHUB_WORKSPACE"
+
+  deploy:
+    needs: [fast-checks]
+    # Preserve the existing web-engine/manual-ref behavior when this Debug-only gate is skipped.
+    if: always() && !cancelled() && (needs.fast-checks.result == 'success' || needs.fast-checks.result == 'skipped')
+    outputs:
+      workspace_build: ${{ steps.workspace-build.outcome }}
+      web_tests: ${{ steps.web-tests.outcome }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # حزم مساحة العمل (@vantara/domain) تُبنى قبل الاختبارات كما في VANTARA CI
+      - id: workspace-build
+        run: pnpm build
+
+      # لا نشر لنسخة اختباراتها فاشلة
+      - name: Web tests
+        id: web-tests
+        run: npx vitest run apps/web
+
+      - name: Verify Cloudflare secrets exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+
+      # نفس تجهيز production: عنوان المزامنة ونسخة الواجهة وبصمة الـservice worker. النسخة تبدأ بـ
+      # web-debug فتُعرف من الإعدادات. المزامنة والجلب تعمل فقط إن كان أصل هذه النسخة في ALLOWED_ORIGINS.
+      - name: Bake endpoints and version
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          API_URL_VAR: ${{ vars.VANTARA_API_URL }}
+        run: |
+          set -euo pipefail
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            | jq -r '.result.subdomain // empty')
+          sync=''
+          if [ -n "$sub" ]; then sync="https://vantara-sync.$sub.workers.dev"; fi
+          SYNC_URL="$sync" API_URL="${API_URL_VAR:-}" PWA_VERSION="$CF_PREVIEW_BRANCH-$(git rev-parse --short=7 HEAD)" python3 - <<'PY'
+          import hashlib, os, pathlib, re
+          path = 'apps/web/lib/config.js'
+          text = open(path, encoding='utf-8').read()
+          text = text.replace('__VANTARA_SYNC_URL__', os.environ['SYNC_URL'])
+          text = text.replace('__VANTARA_API_URL__', os.environ['API_URL'])
+          text = text.replace('__VANTARA_VERSION__', os.environ['PWA_VERSION'])
+          open(path, 'w', encoding='utf-8').write(text)
+          worker = pathlib.Path('apps/web/sw.js')
+          source = worker.read_text()
+          digest = hashlib.sha256()
+          for asset in re.findall(r"^\s*'(/[^']+)',$", source, re.M):
+              digest.update(asset.encode())
+              digest.update(pathlib.Path('apps/web', 'index.html' if asset == '/' else asset[1:]).read_bytes())
+          source = re.sub(r"const SHELL_DIGEST = '[^']+';", f"const SHELL_DIGEST = '{digest.hexdigest()}';", source)
+          worker.write_text(source)
+          PY
+
+      - name: Deploy preview (never production)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test "$CF_PREVIEW_BRANCH" != main
+          case "$CF_PREVIEW_BRANCH" in web-debug|web-engine) ;; *) echo "unknown preview branch"; exit 1;; esac
+          npx --yes wrangler@4 pages deploy apps/web \
+            --project-name="$CF_PAGES_PROJECT" \
+            --branch="$CF_PREVIEW_BRANCH" \
+            --commit-dirty=true
+          sub=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CF_PAGES_PROJECT" \
+            | jq -r '.result.subdomain')
+          echo "Web Debug ($CF_PREVIEW_BRANCH): https://$CF_PREVIEW_BRANCH.$sub" | tee -a "$GITHUB_STEP_SUMMARY"
+
+
+  stop-blocked-debug-build:
+    needs: [fast-checks, deploy]
+    if: >-
+      always() && github.repository == 'Meshal515/VANTARA' &&
+      github.ref == 'refs/heads/feat/addons-v7-native-manager-20261027' &&
+      (needs.fast-checks.result == 'failure' || needs.deploy.outputs.workspace_build == 'failure' || needs.deploy.outputs.web_tests == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Stop only this exact failed commit's Android Debug run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs=$(gh run list --repo "$GH_REPO" --workflow android-debug.yml \
+            --branch feat/addons-v7-native-manager-20261027 --commit "$EXPECTED_SHA" \
+            --limit 10 --json databaseId,headSha,status \
+            --jq '.[] | select(.status != "completed") | .databaseId')
+          for run_id in $runs; do
+            actual=$(gh run view "$run_id" --repo "$GH_REPO" --json headSha --jq .headSha)
+            test "$actual" = "$EXPECTED_SHA"
+            if ! gh run cancel "$run_id" --repo "$GH_REPO"; then
+              status=$(gh run view "$run_id" --repo "$GH_REPO" --json status --jq .status)
+              test "$status" = completed
+            fi
+          done

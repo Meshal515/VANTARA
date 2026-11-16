@@ -55,14 +55,18 @@ object AnimeHostRouter : Interceptor {
         lateinit var route: Route
         route = Route(
             sourceId,
-            DomainInterceptor(plan) { domain ->
-                // الدومين الجديد المقبول يرث الحماية والقياس فورًا
-                val host = bareHost(domain)
-                routes[host] = route
-                hiddenOnly += host
-                dohFirst += host
-                health?.ok(HealthStore.sourceKey(sourceId), 0, domain)
-            },
+            DomainInterceptor(
+                plan,
+                onDomain = { domain ->
+                    // الدومين الجديد المقبول يرث الحماية والقياس فورًا
+                    val host = bareHost(domain)
+                    routes[host] = route
+                    hiddenOnly += host
+                    dohFirst += host
+                    health?.ok(HealthStore.sourceKey(sourceId), 0, domain)
+                },
+                onForeign = { e -> runCatching { android.util.Log.w("AnimeEngine", "FOREIGN_REDIRECT_PASSED:${e.from}->${e.to}") } },
+            ),
         )
         val hosts = plan.knownHosts()
         byId.put(sourceId, route)?.let { old ->
@@ -154,7 +158,7 @@ object AnimeHostRouter : Interceptor {
             }
         }
 
-    private val RESET = Regex("reset|connection (closed|abort)|unexpected end of stream|handshake (aborted|terminated)|EOF", RegexOption.IGNORE_CASE)
+    private val RESET = Regex("reset|connection (closed|abort)|unexpected end of stream|handshake (aborted|terminated)|terminated the handshake|peer shut down|EOF", RegexOption.IGNORE_CASE)
 
     /** أقصى انتظار داخل الطلب لدور المصدر أو لـ`Retry-After`؛ أطول منه يُرمى بسببه. */
     private const val MAX_WAIT_MS = 20_000L
@@ -211,6 +215,9 @@ object AnimeHostRouter : Interceptor {
             }
             val ms = (System.nanoTime() - started) / 1_000_000
             when {
+                // صفحة من دومين أجنبي غير مثبت: تصل للإضافة (كما في Aniyomi)، لكنها ليست دليل صحة
+                // المصدر ولا دليل عطله؛ الإضافة تحكم عليها، ولا يُحجب مصدر انتقل فعلًا
+                response.header(FOREIGN_HOST_HEADER) != null -> Unit
                 response.isSuccessful -> health?.ok(key, ms, route.domains.activeBase())
                 response.code == 404 -> Unit // صفحة غير موجودة ليست عطل مصدر
                 else -> health?.fail(key, "HTTP ${response.code} على $path")

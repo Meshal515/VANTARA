@@ -262,8 +262,22 @@ export const madara = {
         case 'adminAjax':
           if (!id) return [];
           return parseChapters(parseHtml((await fetch.page(`${base}/wp-admin/admin-ajax.php`, { form: { action: 'manga_get_chapters', manga: id }, ...xhr })).text), mangaPath);
-        case 'mangaAjax':
-          return parseChapters(parseHtml((await fetch.page(ajaxUrl, { method: 'POST', body: '', ...xhr })).text), mangaPath);
+        case 'mangaAjax': {
+          // بعض المواقع تقسم القائمة صفحات بـ«?t=N» وتذكر عددها في .pagination (مانجا العاشق: Berserk 386 فصلًا في 9
+          // صفحات): الصفحة الأولى وحدها كانت 50 فصلًا فقط. نتبع الصفحات التي يذكرها الموقع نفسه.
+          const first = parseHtml((await fetch.page(ajaxUrl, { method: 'POST', body: '', ...xhr })).text);
+          const all = parseChapters(first, mangaPath);
+          const last = Math.min(60, Math.max(1, ...qa(first, '.pagination a[data-page], .pagination a[href*="t="]').map((a) =>
+            Number(attr(a, 'data-page') || /[?&]t=(\d+)/.exec(attr(a, 'href') ?? '')?.[1] || 0)).filter(Number.isFinite)));
+          for (let page = 2; page <= last; page += 1) {
+            const res = await fetch.text(`${ajaxUrl}?t=${page}`, { method: 'POST', body: '', ...xhr });
+            if (res.status < 200 || res.status >= 300) break;
+            const list = parseChapters(parseHtml(res.text), mangaPath);
+            if (!list.length) break;
+            all.push(...list);
+          }
+          return [...new Map(all.map((c) => [c.url, c])).values()];
+        }
         case 'paginated': {
           const all = [];
           let last = null;

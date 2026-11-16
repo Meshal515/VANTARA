@@ -55,3 +55,32 @@ it('requires authentication again if the cached home retry session was signed ou
   await vi.waitFor(() => expect(signIn).toHaveBeenCalledTimes(2));
   expect(onSignedIn).toHaveBeenCalledTimes(1);
 });
+
+async function offlineGate(error, { onLocal = vi.fn() } = {}) {
+  const { document } = parseHTML('<html><body></body></html>');
+  vi.stubGlobal('document', document);
+  vi.stubGlobal('localStorage', { getItem: () => null, setItem() {} });
+  const sync = { accountsLimit: 10, accounts: async () => { throw error; } };
+  await screenAccounts({ sync, mount: node => document.body.replaceChildren(node), onSignedIn: async () => {}, onLocal });
+  return { document, onLocal };
+}
+
+it('opens what is on the device straight away when the accounts cannot be reached', async () => {
+  const { onLocal } = await offlineGate(new TypeError('Failed to fetch'));
+  expect(onLocal).toHaveBeenCalledTimes(1);
+});
+
+it('a server refusal is not offline: the gate explains and offers the device', async () => {
+  const { document, onLocal } = await offlineGate(new Error('http_503'));
+  expect(onLocal).not.toHaveBeenCalled();
+  expect(document.querySelector('.gate__message').textContent).toContain('تعذّر الوصول');
+  document.querySelector('.gate__enter').click();
+  expect(onLocal).toHaveBeenCalledTimes(1);
+});
+
+it('reachability: no network or a transport error is unreachable; an HTTP reply is not', async () => {
+  const { unreachable } = await import('./accounts.js');
+  expect(unreachable(new Error('http_500'), false)).toBe(true);
+  expect(unreachable(new TypeError('Failed to fetch'), true)).toBe(true);
+  expect(unreachable(new Error('http_500'), true)).toBe(false);
+});

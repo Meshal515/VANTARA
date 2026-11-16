@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تصميم غرفة المشاهدة</title>
+<!-- نموذج تصميم للموافقة (ليس كود التطبيق): غرفة «مشاهدة معًا» بكل حالاتها على الجوال والكمبيوتر، ببيانات Bleach الحقيقية.
+     ?s=pick|servers|preparing|ready|countdown|episodes|version|player&d=phone|pc
+     قواعد هذه النسخة (ملاحظات المالك 14 نوفمبر):
+     - الأزرق للخطوة التي أنت فيها فقط (زر واحد أزرق في الشاشة)، بلا هالات ولا لمعان.
+     - الترتيب من اليمين بخطوات القراءة: السيرفر أولًا يمينًا، والبدء آخرًا يسارًا.
+     - ما هو زمني أو لاتيني يمشي من اليسار لليمين: تعبئة الشعار، شريط التقدم، الأوقات.
+     - لا عنصر فوق عنصر: البنر في جهة، والمعلومات على خلفية داكنة في الجهة الأخرى.
+     - السيرفرات والحلقات لوحة جانبية بسيطة في الجوال والكمبيوتر. -->
+<style>
+@font-face{font-family:'VS';src:url('/apps/web/fonts/NotoSansArabic.var.woff2') format('woff2');font-weight:100 900}
+@font-face{font-family:'VL';src:url('/apps/web/fonts/Inter-Latin.var.woff2') format('woff2');font-weight:100 900}
+:root{--bg:#07090f;--panel:#0d111a;--row:#131824;--accent:#3b82f6;--accent-soft:rgba(59,130,246,.14);--line:rgba(255,255,255,.08);--t1:#fff;--t2:rgba(255,255,255,.7);--t3:rgba(255,255,255,.45);--ok:#34d399;--warn:#f5b942}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--bg);color:var(--t1);font-family:'VL','VS',system-ui,sans-serif;overflow:hidden}
+bdi{unicode-bidi:isolate}
+.room{position:fixed;inset:0;overflow:hidden;background:var(--bg)}
+.bg{position:absolute;inset:0}
+.bg img{width:100%;height:100%;object-fit:cover;object-position:center 35%}
+.bg::after{content:"";position:absolute;inset:0;background:linear-gradient(to left,rgba(7,9,15,.78) 0%,rgba(7,9,15,.45) 30%,rgba(7,9,15,0) 58%),linear-gradient(to top,rgba(7,9,15,.85) 0%,rgba(7,9,15,0) 32%),linear-gradient(to bottom,rgba(7,9,15,.45) 0%,rgba(7,9,15,0) 16%)}
+.top{position:absolute;top:0;inset-inline:0;display:flex;align-items:center;justify-content:space-between;padding:18px 28px}
+.live{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--t2)}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.icon{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid var(--line);display:grid;place-items:center}
+.icon svg{width:18px;height:18px}
+.hero{position:absolute;inset-inline-start:40px;bottom:104px;width:min(38%,460px);display:grid;gap:12px;justify-items:start}
+.mark{position:relative;width:min(100%,340px);aspect-ratio:3.1/1;direction:ltr}
+.mark img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:left center}
+.mark .ghost{filter:grayscale(1) brightness(.9);opacity:.28}
+.mark .fill{clip-path:inset(0 var(--cut,0%) 0 0)}
+.kind{font-size:13px;font-weight:700;color:var(--t3)}
+.ep{display:grid;gap:4px}
+.ep b{font-size:32px;font-weight:900;line-height:1.1}
+.ep span{font-size:15px;font-weight:600;color:var(--t2)}
+.steps{display:flex;align-items:center;gap:10px;font-size:12.5px;font-weight:700;color:var(--t2);margin-top:2px}
+.steps .bars{display:flex;gap:4px;direction:ltr}.steps .bars i{width:20px;height:3px;border-radius:2px;background:rgba(255,255,255,.14)}
+.steps .bars i.done{background:rgba(255,255,255,.75)}.steps .bars i.now{background:var(--accent)}
+.bar{position:absolute;bottom:0;inset-inline:0;display:flex;align-items:center;gap:10px;padding:16px 40px 24px}
+.btn{height:48px;border-radius:14px;padding:0 18px;display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);backdrop-filter:blur(8px);white-space:nowrap;color:var(--t1)}
+.btn svg{width:19px;height:19px}
+.btn.icononly{width:48px;padding:0;justify-content:center}.btn.icononly svg{width:24px;height:24px}
+.btn.primary{background:var(--accent);border-color:var(--accent)}
+.btn .val{font-family:'VL';font-weight:700;color:var(--t2);font-size:13px}
+.who{flex:1;min-width:0;display:flex;align-items:center;gap:12px}
+.faces{display:flex}.face{width:36px;height:36px;border-radius:50%;border:2px solid var(--bg);background:#1c2333;display:grid;place-items:center;font-weight:800;font-size:14px;margin-inline-start:-9px;position:relative}
+.face:first-child{margin-inline-start:0}.face.wait{opacity:.4}
+.face em{position:absolute;bottom:-1px;inset-inline-start:-1px;width:11px;height:11px;border-radius:50%;border:2px solid var(--bg);background:var(--ok)}
+.face em.busy{background:var(--warn)}
+.status{display:grid;gap:2px;min-width:0}.status strong{font-size:14.5px}.status small{font-size:12.5px;color:var(--t2);font-weight:600}
+.status small .ok{color:var(--ok)}.status small .busy{color:var(--warn)}
+.start{height:48px;border-radius:14px;padding:4px 4px 4px 18px;display:flex;align-items:center;gap:10px;font-weight:900;font-size:15px;border:1px solid rgba(255,255,255,.16);background:rgba(10,12,20,.55);color:var(--t3)}
+.start img{width:70px;height:40px;object-fit:cover;border-radius:10px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);filter:grayscale(.7) brightness(.55)}
+.start .play{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.18);display:grid;place-items:center}
+.start .play svg{width:11px;height:11px;fill:var(--bg);transform:translateX(1.5px)}
+.start span.l{padding-inline-end:6px}
+.start.primary{background:var(--accent);border-color:var(--accent);color:#fff}.start.primary img{filter:none}.start.primary .play{background:#fff}.start.primary .play svg{fill:var(--accent)}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.side{position:absolute;top:0;bottom:0;inset-inline-start:0;width:440px;background:var(--panel);border-inline-end:1px solid var(--line);display:flex;flex-direction:column}
+.side-head{display:flex;align-items:center;gap:12px;padding:16px 18px 10px}
+.side-head .t{flex:1;display:grid;gap:2px}.side-head strong{font-size:17px}.side-head small{font-size:12.5px;color:var(--t2);font-weight:600}
+.filters{display:flex;flex-wrap:wrap;gap:6px;padding:4px 18px 12px;border-bottom:1px solid var(--line)}
+.chip{white-space:nowrap;flex:none;height:32px;padding:0 13px;border-radius:16px;border:1px solid var(--line);display:flex;align-items:center;font-size:13px;font-weight:700;color:var(--t2);font-family:'VL','VS'}
+.chip.on{background:#fff;color:#000;border-color:#fff}
+.chip.sep{border:0;padding:0 2px;color:var(--t3)}
+.list{flex:1;overflow:hidden;padding:8px 10px;display:grid;align-content:start;gap:4px}
+.grp{padding:10px 8px 4px;font-size:12px;color:var(--t3);font-weight:800;display:flex;justify-content:space-between}
+.row{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;border:1px solid transparent}
+.row.on{border-color:var(--accent);background:var(--accent-soft)}
+.row .q{min-width:52px;font-family:'VL';font-weight:800;font-size:13px;color:var(--t2);direction:ltr;text-align:center;border:1px solid var(--line);border-radius:8px;padding:3px 0}
+.row .t{flex:1;min-width:0;display:grid;gap:2px}.row .t b{font-size:14.5px}.row .t small{font-size:12px;color:var(--t2);font-weight:600}
+.row .t b em{font-style:normal;font-size:11px;font-weight:800;color:var(--t2);margin-inline-start:6px}
+.row .p{display:grid;justify-items:end;gap:1px;font-family:'VL';font-weight:800;font-size:13.5px}
+.row .p small{font-family:'VS';font-size:11px;color:var(--t3);font-weight:700}
+.row .p.good{color:var(--ok)}
+.side-foot{padding:12px 14px 16px;border-top:1px solid var(--line)}
+.side-foot .btn{width:100%;justify-content:center;height:50px;border-radius:14px}
+.side-foot small{display:block;text-align:center;margin-top:7px;font-size:12px;color:var(--t3);font-weight:600}
+.eps{display:grid;gap:6px;padding:8px 10px;overflow:hidden}
+.epr{display:flex;gap:12px;align-items:center;padding:6px;border-radius:12px;border:1px solid transparent}
+.epr img{width:112px;aspect-ratio:16/9;object-fit:cover;border-radius:8px}
+.epr div{display:grid;gap:2px}.epr b{font-size:14px}.epr small{font-size:12px;color:var(--t2)}
+.epr.on{border-color:var(--accent);background:var(--accent-soft)}
+.epr .now{font-size:11px;font-weight:800;color:#fff;background:var(--accent);border-radius:6px;padding:1px 7px;justify-self:start}
+.count{position:absolute;inset:0;display:grid;place-items:center;align-content:center;gap:8px;background:rgba(7,9,15,.62);backdrop-filter:blur(3px)}
+.count b{font-size:150px;font-weight:900;font-family:'VL';line-height:1}
+.count small{font-size:16px;font-weight:700;color:var(--t2)}
+.note{position:absolute;inset-inline:40px;bottom:92px;display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:14px;background:var(--row);border:1px solid var(--line)}
+.note i{width:8px;height:8px;border-radius:50%;background:var(--warn);flex:none}
+.note p{flex:1;font-size:13.5px;font-weight:600;color:var(--t2)}.note p b{color:var(--t1)}
+.note .btn{height:36px;padding:0 14px;font-size:13px}
+.version .hero{bottom:176px}
+.vid{position:absolute;inset:0;background:url('https://artworks.thetvdb.com/banners/v4/episode/155071/screencap/63bb5a37e5344.jpg') center/cover}
+.vid::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.85),rgba(0,0,0,0) 40%)}
+.ctl{position:absolute;bottom:0;left:0;right:0;padding:0 28px 26px;z-index:2;direction:ltr}
+.times{display:flex;justify-content:space-between;font-family:'VL';font-weight:700;font-size:13px;margin-top:12px;color:var(--t2)}
+.track{position:relative;height:6px;border-radius:3px;background:rgba(255,255,255,.2)}
+.track .buf{position:absolute;top:0;bottom:0;left:0;width:58%;background:rgba(255,255,255,.35);border-radius:3px}
+.track .pl{position:absolute;top:0;bottom:0;left:0;width:47%;background:var(--accent);border-radius:3px}
+.track .th{position:absolute;top:50%;left:47%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:#fff}
+.pv{position:absolute;bottom:100%;margin-bottom:18px;left:47%;transform:translateX(-50%);display:grid;justify-items:center;gap:6px}
+.pv img{width:220px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;border:1.5px solid rgba(255,255,255,.85)}
+.pv span{background:rgba(13,17,27,.92);border-radius:7px;padding:3px 9px;font-family:'VL';font-weight:800;font-size:13px}
+.label{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700;color:var(--t2);z-index:9}
+
+.phone .top{padding:10px 18px}
+.phone .hero{inset-inline-start:24px;bottom:78px;width:42%;gap:6px}
+.phone .mark{width:min(100%,230px)}
+.phone .ep b{font-size:24px}.phone .ep span{font-size:13px}
+.phone .bar{padding:8px 20px 12px;gap:7px}
+.phone .btn{height:42px;padding:0 13px;font-size:13px}.phone .btn.icononly{width:42px}
+.phone .face{width:32px;height:32px;font-size:12px}
+.phone .status strong{font-size:13px}.phone .status small{font-size:11.5px}
+.phone .start{height:42px;font-size:13.5px;padding:3px 3px 3px 14px}.phone .start img{width:56px;height:34px;border-radius:9px}.phone .btn{border-radius:12px}.phone .start{border-radius:12px}
+.phone .side{width:min(440px,54%)}.phone .filters{flex-wrap:nowrap;overflow:hidden}.phone .side-head .t{display:flex;align-items:baseline;gap:10px}.phone .list{gap:2px;padding:4px 8px}.phone .grp{padding:6px 8px 2px}.phone .side-foot{padding:8px 12px 10px}.phone .side-foot .btn{height:44px}.phone .side-foot small{margin-top:4px}
+.phone .side-head{padding:10px 14px 6px}.phone .filters{padding:2px 14px 8px}.phone .chip{height:28px;font-size:12px;padding:0 10px}
+.phone .row{padding:8px 10px}.phone .row .t b{font-size:13.5px}
+.phone .epr img{width:92px}
+.phone .note{bottom:70px;inset-inline:16px;padding:8px 12px}.phone.version .hero{bottom:142px}
+.phone .count b{font-size:110px}
+
+/* ورقة السيرفرات الجانبية: نسخة من ورقة الكمبيوتر الحالية */
+.ss{position:absolute;top:0;bottom:0;inset-inline-start:0;width:460px;background:#0b0e16;border-inline-end:1px solid var(--line);display:flex;flex-direction:column}
+.ss-top{padding:14px 20px 0;display:grid;gap:10px}
+.ss-back{font-size:26px;line-height:1;color:var(--t2);justify-self:start}
+.ss-tabs{display:flex;gap:22px;font-weight:800;font-size:15px;color:var(--t2);border-bottom:1px solid var(--line);padding-bottom:0;font-family:'VL','VS'}
+.ss-tabs>*{padding-bottom:10px}.ss-tabs b{color:#fff;border-bottom:2px solid var(--accent)}
+.ss-list{flex:1;overflow:hidden;padding:6px 12px;display:grid;align-content:start;gap:2px}
+.ss-grp{display:flex;justify-content:space-between;align-items:baseline;padding:12px 8px 6px;font-size:13px;color:var(--t2)}
+.ss-grp b{font-size:14px;color:#fff}.ss-grp b i{font-style:normal;color:var(--t3);font-weight:700;margin-inline-start:4px}
+.sr{display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:12px;border-bottom:1px solid var(--line)}
+.sr.on{background:rgba(255,255,255,.05);border-bottom-color:transparent}
+.sr-t{flex:1;min-width:0;display:grid;gap:3px}.sr-t b{font-size:15px;font-family:'VL','VS'}.sr-t b em{font-style:normal;color:var(--accent-text,#8fb8ff);font-size:13px;font-weight:800}
+.sr-t small{font-size:12.5px;color:var(--t2);font-weight:600}
+.sr-p{display:flex;align-items:center;gap:6px;font-family:'VL';font-weight:800;font-size:14px}
+.sg{display:flex;gap:2px;align-items:flex-end}.sg i{width:3px;border-radius:1px;background:var(--t2)}.sg i.off{background:rgba(255,255,255,.18)}
+.sr-x{color:var(--t3);font-size:14px}
+.ss-more{padding:12px 8px;font-size:13.5px;font-weight:800;color:var(--t2)}.ss-more.dim{color:var(--t3);border-top:1px solid var(--line);margin-top:6px}
+.ss-foot{padding:12px 16px 16px;border-top:1px solid var(--line)}
+.ss-best{height:56px;border-radius:14px;background:var(--accent);display:flex;align-items:center;justify-content:center;gap:12px}
+.ss-best .pl svg{width:16px;height:16px;fill:#fff}
+.ss-best div{display:grid;gap:1px}.ss-best b{font-size:16px}.ss-best small{font-size:12px;opacity:.85;font-weight:600}
+.phone .ss{width:min(440px,54%)}.phone .ss-top{padding:8px 16px 0;gap:4px}.phone .ss-back{font-size:20px}.phone .ss-tabs{font-size:13.5px}.phone .ss-tabs>*{padding-bottom:7px}
+.phone .sr{padding:7px 8px}.phone .sr-t b{font-size:13.5px}.phone .sr-t small{font-size:11.5px}.phone .ss-grp{padding:6px 8px 2px}.phone .ss-more{padding:7px 8px}
+.phone .ss-foot{padding:8px 12px 10px}.phone .ss-best{height:46px}.phone .ss-best b{font-size:14px}
+
+.pc .hero{inset-inline-start:56px;bottom:124px;width:min(40%,620px);gap:14px}
+.pc .mark{width:min(100%,440px)}
+.pc .kind{font-size:15px}.pc .ep b{font-size:46px}.pc .ep span{font-size:18px}
+.pc .steps{font-size:14px}.pc .steps .bars i{width:26px;height:4px}
+.pc .top{padding:22px 56px}.pc .live{font-size:15px}.pc .icon{width:46px;height:46px}
+.pc .bar{padding:20px 56px 30px;gap:12px}
+.pc .btn{height:56px;font-size:16px;padding:0 22px;border-radius:16px}.pc .btn svg{width:22px;height:22px}.pc .btn.icononly{width:56px}
+.pc .start{height:56px;font-size:17px;border-radius:16px;padding:5px 5px 5px 22px}.pc .start img{width:84px;height:46px;border-radius:11px}
+.pc .start .play{width:32px;height:32px}.pc .start .play svg{width:13px;height:13px}
+.pc .face{width:44px;height:44px;font-size:16px}.pc .status strong{font-size:17px}.pc .status small{font-size:14px}
+.pc .note{inset-inline:56px;bottom:112px;padding:14px 20px}.pc .note p{font-size:15px}
+.pc .count b{font-size:190px}.pc .count small{font-size:19px}
+.pc .ss{width:520px}.pc .ss-tabs{font-size:16px}.pc .sr-t b{font-size:16px}.pc .sr-t small{font-size:13.5px}.pc .ss-best{height:62px}
+.pc .side{width:500px}.pc .epr img{width:132px}.pc .epr b{font-size:15px}
+.pc .pv img{width:280px}
+
+.ss-head{display:flex;align-items:center;gap:10px}.ss-head strong{font-size:17px}.ss-head small{font-size:13px;color:var(--t3);font-weight:700}
+.ss-back{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.06);color:#fff;flex:none}.ss-back svg{width:20px;height:20px}
+.ss-pickers{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.ss-pickers.sp{grid-template-columns:1fr;padding:4px 18px 12px}
+.pk{height:52px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;align-content:center;column-gap:8px;padding:0 14px}
+.pk small{grid-column:1;font-size:11.5px;color:var(--t3);font-weight:700}.pk b{grid-column:1;font-size:15px;font-family:'VL','VS'}.pk svg{grid-column:2;grid-row:1/3;align-self:center;width:18px;height:18px;color:var(--t2)}
+.pk.open{border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.08)}.pk.open svg{transform:rotate(180deg)}
+.ss-top,.side{position:relative}
+.menu{position:absolute;z-index:5;top:122px;inset-inline-start:20px;width:calc(50% - 24px);background:#151a26;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:6px;display:grid;gap:2px;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+.menu.tall{top:126px;inset-inline:18px;width:auto;max-height:62%;overflow:hidden}
+.mi{height:42px;border-radius:10px;display:flex;align-items:center;gap:10px;padding:0 12px;font-weight:700;font-size:14.5px;font-family:'VL','VS'}
+.mi em{font-style:normal;margin-inline-start:auto;color:var(--t3);font-size:12.5px}.mi i{display:grid;width:18px;color:var(--accent)}.mi i svg{width:18px;height:18px}
+.mi.on{background:rgba(255,255,255,.07)}.mi.on em{margin-inline-start:auto}
+.phone .pk{height:44px}.phone .pk b{font-size:13.5px}.phone .ss-head strong{font-size:15px}.phone .ss-back{width:30px;height:30px}
+.phone .menu{top:96px}.phone .menu.tall{top:112px;max-height:66%}.pc .menu.tall{top:142px}.phone .mi{height:36px;font-size:13px}
+.pc .pk{height:58px}.pc .pk b{font-size:16px}
+</style>
+</head>
+<body>
+<script>
+const q=new URLSearchParams(location.search),S=q.get('s')||'pick',D=q.get('d')||'pc';
+document.documentElement.classList.add(D);
+// خلفية العمل بنسبة 16:9 (fanart من ani.zip/TVDB) — بنر AniList شريط عريض جدًا يُقص فيه الوجه على الشاشة الكاملة، فيبقى احتياطًا
+const BANNER='https://artworks.thetvdb.com/banners/fanart/original/74796-1.jpg';
+const LOGO='https://images.metahub.space/logo/medium/tt0434665/img';
+const SHOTS=['https://artworks.thetvdb.com/banners/v4/episode/155071/screencap/63bb5a37e5344.jpg','https://artworks.thetvdb.com/banners/v4/episode/155072/screencap/63bb5a688e7b1.jpg','https://artworks.thetvdb.com/banners/v4/episode/155073/screencap/63bb5a9e8add6.jpg','https://artworks.thetvdb.com/banners/v4/episode/155074/screencap/63bb5b0a87246.jpg'];
+const TITLES=['A Shinigami is Born!','Pay or Play','Sibling Rivalry','And Your Bird Can Speak'];
+const EP=n=>SHOTS[(n-1)%4];
+const ic={server:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>',
+ eps:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M8 10h8M8 14h5"/></svg>',
+ x:'<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+ more:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="4.5" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="19.5" cy="12" r="2.6"/></svg>',
+ back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
+ chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+ play:'<svg viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z"/></svg>'};
+const STAGES=['اتصال','بيانات الحلقة','أول قطعة','تخزين','أول إطار'];
+const conf0={pick:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
+ servers:{n:0,line:'اختر سيرفرك عشان نبدأ',sub:'<span>دحمي يختار سيرفره</span>'},
+ preparing:{n:3,line:'نجهّز فيديوك',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="busy">أول قطعة وصلت</span>'},
+ ready:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'},
+ countdown:{n:5,line:'الكل جاهز',sub:''},episodes:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'},
+ version:{n:5,line:'الكل جاهز',sub:'<bdi>Torrentio · 1080p</bdi> · <span class="ok">جاهز</span>'}};
+const conf=conf0[S]??conf0[S.split('-')[0]];
+const NAMES={pick:'1 · الغرفة أولًا',servers:'2 · السيرفرات','servers-menu':'2ب · قائمة الجودة','episodes-menu':'6ب · قائمة المواسم',preparing:'3 · التجهيز',ready:'4 · جاهز',countdown:'5 · العدّ',episodes:'6 · الحلقات',version:'7 · نسخة مختلفة',player:'8 · الصورة المصغرة'};
+let h='';
+if(S==='player'){
+ h=`<div class="vid"></div><div class="ctl"><div class="track"><i class="buf"></i><i class="pl"></i><i class="th"></i><div class="pv"><img src="${EP(3)}"><span>11:17</span></div></div><div class="times"><span>11:17</span><span>24:00</span></div></div>`;
+}else{
+ const n=conf.n,ready=n===5,picking=S==='pick'||S.startsWith('servers');
+ const bars=STAGES.map((_,i)=>`<i class="${i<n?'done':i===n&&!picking?'now':''}"></i>`).join('');
+ const stepText=picking?'بانتظار سيرفرك':ready?'جاهز للبدء':`${STAGES[n]}…`;
+ h=`<div class="bg"><img src="${BANNER}"></div>
+ <div class="top"><span class="live"><i></i>مشاهدة معًا · متصل</span><span class="icon">${ic.x}</span></div>
+ <div class="hero"><div class="mark" style="--cut:${(1-n/5)*100}%"><img class="ghost" src="${LOGO}"><img class="fill" src="${LOGO}"></div>
+  <span class="kind">أنمي · الموسم 1</span>
+  <div class="ep"><b>الحلقة 1</b><span><bdi>${TITLES[0]}</bdi></span></div>
+  <div class="steps"><span class="bars">${bars}</span><span>${stepText}</span></div></div>
+ <div class="bar">
+  <div class="who"><div class="faces"><span class="face">م<em></em></span><span class="face">د<em class="${ready?'':'busy'}"></em></span><span class="face wait">ن</span></div>
+   <div class="status"><strong>${conf.line}</strong>${conf.sub?`<small>${conf.sub}</small>`:''}</div></div>
+  <span class="btn icononly">${ic.more}</span>
+  <span class="btn">${ic.eps}الحلقات</span>
+  <span class="btn ${picking?'primary':''}">${ic.server}${picking?'اختر سيرفر':'<bdi class="val">Torrentio · 1080p</bdi>'}</span>
+  <span class="start ${ready?'primary':''}"><img src="${EP(1)}"><span class="play">${ic.play}</span><span class="l">البدء</span></span></div>`;
+ if(S==='servers'||S==='servers-menu'){
+  // نفس ورقة سيرفرات الكمبيوتر الحالية (المعتمدة من المالك) كلوحة جانبية: تبويبات الجودة، مجموعات، صف لكل نسخة، «شغّل الأفضل»
+  const sig=n=>`<span class="sg">${[5,8,11,14].map((hh,i)=>`<i style="height:${hh}px" class="${i<n?'':'off'}"></i>`).join('')}</span>`;
+  const row=(q,src,d,p,n,cls='',tag='')=>`<div class="sr ${cls}"><div class="sr-t"><b><bdi>${q}</bdi> <bdi>${src}</bdi>${tag}</b><small><bdi>${d}</bdi></small></div><span class="sr-p"><bdi>${p}</bdi>${sig(n)}</span><span class="sr-x">⌄</span></div>`;
+  h+=`<div class="scrim"></div><div class="ss"><div class="ss-top"><div class="ss-head"><span class="ss-back">${ic.back}</span><strong>اختر سيرفرك</strong><small>الحلقة 1</small></div>
+  <div class="ss-pickers"><span class="pk ${S==='servers-menu'?'open':''}"><small>الجودة</small><b>الكل</b>${ic.chev}</span><span class="pk"><small>المصدر</small><b>كل المصادر</b>${ic.chev}</span></div>
+  ${S==='servers-menu'?`<div class="menu"><span class="mi on">الكل<i>${ic.check}</i></span><span class="mi">1080p<em>64</em></span><span class="mi">720p<em>21</em></span><span class="mi">SD<em>3</em></span></div>`:''}</div>
+  <div class="ss-list"><div class="ss-grp"><b>تورنت <i>76</i></b><span>يبدأ أبطأ · جودة وحجم أعلى</span></div>
+  ${row('1080p','Torrentio','853 MB · ترجمات متعددة','156',4,'on',' <em>مقترح</em>')}
+  ${row('1080p','Torrentio','180 MB · صوت متعدد','113',4)}
+  ${row('1080p','Torrentio','938 MB · صوت متعدد · ترجمات متعددة','23',3)}
+  ${row('1080p','Torrentio','562 MB','18',2)}
+  <div class="ss-more">نسخ إضافية (70) ⌄</div>
+  <div class="ss-grp"><b>مباشر <i>12</i></b><span>يبدأ أسرع</span></div>
+  ${row('1080p','AnimeKai','MegaUp · مترجم عربي','جاهز',4)}
+  <div class="ss-more dim">غير متاح الآن (41) ⌄</div></div>
+  <div class="ss-foot"><div class="ss-best"><span class="pl">${ic.play}</span><div><b>شغّل الأفضل</b><small><bdi>1080p · Torrentio</bdi> · 156 مشارك · سرب قوي · <bdi>853 MB</bdi></small></div></div></div></div>`;
+ }
+ if(S==='episodes'||S==='episodes-menu'){
+  const rows=[1,2,3,4,5].map(k=>`<div class="epr ${k===1?'on':''}"><img src="${EP(k)}"><div>${k===1?'<span class="now">الآن</span>':''}<b>الحلقة ${k}</b><small><bdi>${TITLES[(k-1)%4]}</bdi></small></div></div>`).join('');
+  h+=`<div class="scrim"></div><div class="side"><div class="side-head"><div class="t"><strong>الحلقات</strong><small>اختيارك ينقل الغرفة كلها</small></div><span class="icon">${ic.x}</span></div>
+  <div class="ss-pickers sp"><span class="pk ${S==='episodes-menu'?'open':''}"><small>الموسم</small><b>الموسم 1</b>${ic.chev}</span></div>
+  ${S==='episodes-menu'?`<div class="menu tall">${Array.from({length:24},(_,i)=>`<span class="mi ${i===0?'on':''}">الموسم ${i+1}<em>${[20,22,21,20,24,19,22,21,20,22,21,20,24,19,22,21,20,22,21,20,24,19,22,21][i]} حلقة</em>${i===0?`<i>${ic.check}</i>`:''}</span>`).join('')}</div>`:''}<div class="eps">${rows}</div></div>`;
+ }
+ if(S==='countdown') h+=`<div class="count"><b>3</b><small>نبدأ كلنا مع بعض</small></div>`;
+ if(S==='version'){document.documentElement.classList.add('version');h+=`<div class="note"><i></i><p>نسخة <b>دحمي</b> أقصر من نسختك بـ<b>20 ثانية</b>، غالبًا بدون المقدمة.</p><span class="btn">اضبط الديلاي عنده</span></div>`;}
+}
+document.body.innerHTML=`<div class="room">${h}</div><div class="label">${NAMES[S]} · ${D==='phone'?'الجوال':'الكمبيوتر'}</div>`;
+</script>
+</body>
+</html>

@@ -32,7 +32,8 @@ export const namesOf = (m) => uniq([m?.title, ...(m?.aliases ?? [])]);
 export function mergeWork(clicked, full) {
   if (!full) return null;
   if (clicked?.id && String(full.id) !== String(clicked.id)) return null;
-  if (clicked?.type && full.type && clicked.type !== full.type) return null;
+  // نوع البطاقة يحمي من «فيلم ناقص» لمعرّف مسلسل، إلا إن كان نوع التفاصيل من slug Cinemeta (المرجع)
+  if (clicked?.type && full.type && clicked.type !== full.type && !full.typeCertain) return null;
   const title = clicked?.title || full.title;
   return {
     ...full,

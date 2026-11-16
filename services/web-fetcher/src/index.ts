@@ -34,6 +34,14 @@ const ALLOW: AllowList = allowJson;
 export const USER_AGENT =
   'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36';
 
+/**
+ * هوية التطبيق الصريحة لمن يطلبها: واجهة MangaDex الرسمية وخوادم صورها ترد على هوية متصفح بتحويل لصفحة فحص
+ * الآليين («إن لم تكن متصفحًا فلا ترسل هوية متصفح»)، فكانت MangaDex ميتة في الويب وويندوز. بهوية صريحة تجيب.
+ */
+export const APP_AGENT = 'VANTARA/1.0 (+https://github.com/Meshal515/VANTARA)';
+export const wantsAppAgent = (host: string): boolean =>
+  /^(?:api|uploads)\.mangadex\.org$/i.test(host) || /\.mangadex\.network$/i.test(host);
+
 const UPSTREAM_TIMEOUT_MS = 25_000;
 const MAX_REDIRECTS = 6;
 const MAX_BODY_FOR_POST = 64 * 1024;
@@ -171,7 +179,7 @@ export async function upstream(target: URL, init: UpstreamInit, list: AllowList,
     if (!list.any && !hostAllowed(url.hostname, list)) throw new FetchFailure(hop === 0 ? 'host_not_allowed' : 'foreign_redirect', url.hostname);
     if (hop > 0 && !list.any && !redirectAllowed(previousHost, url.hostname, list)) throw new FetchFailure('foreign_redirect', url.hostname);
     const headers = new Headers(init.headers);
-    if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT);
+    if (!headers.has('user-agent')) headers.set('user-agent', wantsAppAgent(url.hostname) ? APP_AGENT : USER_AGENT);
     if (!headers.has('accept-language')) headers.set('accept-language', 'ar,en;q=0.8');
     if (cookies) headers.set('cookie', cookies);
     if (init.range) headers.set('range', init.range);

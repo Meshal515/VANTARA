@@ -32,24 +32,32 @@ class EpisodeResolver(
 ) {
     data class Copy(val sourceId: String, val anime: SourceAnime)
 
-    private data class Cached(val at: Long, val episodes: List<SourceEpisode>)
+    private data class Cached(val at: Long, val episodes: List<SourceEpisode>, val runtimeAdapter: AnimeAdapter? = null)
     private val episodeCache = ConcurrentHashMap<String, Cached>()
+    /** Revokes only transient entries of the optional new family, never user storage or legacy source caches. */
+    fun revokeRuntimeEpisodes() { episodeCache.keys.removeAll { it.startsWith("addon|cs3|") } }
 
     suspend fun episodes(copy: Copy): List<SourceEpisode> {
-        val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}"
-        episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS }?.let { return it.episodes }
-        val adapter = adapterOf(copy.sourceId) ?: return emptyList()
-        val season = copy.anime.requestedSeason
+        // Every source family can be updated or removed under the same ID.
+        val runtimeAdapter=adapterOf(copy.sourceId) ?: return emptyList()
+        val key = "${copy.sourceId}|${copy.anime.url}|${copy.anime.requestedSeason ?: 0}|${copy.anime.seasonHint ?: 0}"
+        episodeCache[key]?.takeIf { clock() - it.at < EPISODES_TTL_MS && it.runtimeAdapter===runtimeAdapter }?.let { return it.episodes }
+        val adapter = runtimeAdapter
+        // اختيار المستخدم أولًا، ثم موسم هوية العمل من البطاقة العامة: إضافة Aniyomi تقسّم العمل مواسم كانت تُسأل
+        // عن حلقات «الحاوية» نفسها فتعود بلا حلقة، فيسقط المصدر من البطاقة العامة وهو يعمل من صفحته.
+        val season = copy.anime.requestedSeason ?: copy.anime.seasonHint
         val selected = if (season != null && season > 0 && copy.anime.hasSeasons) {
-            adapter.seasons(copy.anime).firstOrNull {
+            val seasons = adapter.seasons(copy.anime)
+            seasons.firstOrNull {
                 if (it.seasonNumber > 0) it.seasonNumber.toInt() == season
                 else com.vantara.anime.matching.TitleNormalizer.key(it.title).season == season
-            } ?: return emptyList()
+            } ?: seasons.singleOrNull()?.takeIf { copy.anime.requestedSeason == null } ?: return emptyList()
         } else copy.anime
         val list = adapter.episodes(selected)
+        if(adapterOf(copy.sourceId)!==adapter)return emptyList()
         // قائمة فارغة قد تكون محلّلًا تغيّر موقعه أو تحديًا عابرًا، لا «عمل بلا حلقات»:
         // لا تُخبّأ فتحجب المحاولة التالية عشر دقائق
-        if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list)
+        if (list.isNotEmpty()) episodeCache[key] = Cached(clock(), list, runtimeAdapter)
         return list
     }
 
@@ -58,7 +66,7 @@ class EpisodeResolver(
         // رقم سالب = «العمل نفسه» (فيلم): المصادر ترقّم حلقته الوحيدة 0 أو 1 أو لا ترقّم
         if (number < 0f) episodes.firstOrNull()
         else episodes.firstOrNull { abs(it.number - number) < 0.01f }
-            ?: episodes.firstOrNull { Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
+            ?: episodes.firstOrNull { (it.number < 0f || !it.number.isFinite()) && Regex("(?<![\\d.])${number.toInt()}(?![\\d.])").containsMatchIn(it.name) && number % 1f == 0f }
 
     /**
      * [minHosts]: نتوقف حين تتوفر روابط سليمة من هذا العدد من المضيفات المختلفة

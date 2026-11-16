@@ -176,7 +176,7 @@ export function unitLabel(g) {
  * يرسم الخط الزمني في `host` ويحمّل المزيد بالتمرير. `open(group)` يفتح العمل.
  * `empty()` ما يُعرض قبل أن يسجّل VANTARA أي تحديث لهذا القسم.
  */
-export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected }) {
+export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected, include = () => true }) {
   mounted.get(host)?.dispose();
   const state = { events: [], next: null, bridgeNext: null, bridgeKnown: null, loading: false, refreshing: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token, active = () => token === state.token;
@@ -190,7 +190,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   status.setAttribute('role', 'status');
   refresh.type = older.type = 'button';
   refresh.onclick = () => void api.refresh();
-  older.onclick = () => void api.loadMore();
+  older.onclick = () => void load({ asked: true });
   more.append(older, refresh, status);
   let inView = false, autoTimer = null, polling = false, headRevision = 0;
   const view = host.ownerDocument?.defaultView;
@@ -201,6 +201,13 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     older.hidden = (state.done && !state.bridgeNext) || !state.polled;
     refresh.textContent = state.refreshing ? 'جارٍ التحديث…' : 'تحديث';
     older.textContent = state.loading ? 'جارٍ التحميل…' : 'تحميل المزيد';
+  }
+  // كل ضغطة لها جواب ظاهر: «تحديث» بلا جديد أو «تحميل المزيد» عند النهاية كانا يمرّان بصمت فيبدو الزر معطلًا
+  let noteTimer = null;
+  function note(text) {
+    clearTimeout(noteTimer);
+    status.textContent = text;
+    noteTimer = setTimeout(() => { if (status.textContent === text) status.textContent = ''; }, 4000);
   }
   function error() {
     status.textContent = 'تعذّر جلب التحديثات. أعد المحاولة.';
@@ -240,7 +247,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   }
   function paint() {
     const before = new Map([...list.children].map(n => [n.dataset.workKey, n]));
-    const next = groupEvents(state.events, canonical?.(state.events) ?? null).map(g => {
+    // include: لسان من قسم (المسلسلات أو الأفلام وحدها من خط السينما في الموحد)
+    const next = groupEvents(state.events, canonical?.(state.events) ?? null).filter(include).map(g => {
       const node = before.get(groupKey(g));
       if (node) { updateCard(node, g); return node; }
       return row(g);
@@ -262,7 +270,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       void load();
     }, 0);
   }
-  const load = async () => {
+  const load = async ({ asked = false } = {}) => {
+    if (asked && state.done && !state.bridgeNext && !state.loading) { note('وصلت لآخر التحديثات'); return false; }
     if (!active() || state.loading || state.refreshing || (state.done && !state.bridgeNext)) return false;
     state.loading = true; controls(); status.textContent = '';
     if (!state.events.length) list.replaceChildren(...Array.from({ length: 6 }, () => el('div', 'up-skel')));
@@ -275,7 +284,9 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       if (!active()) return false;
       if (!page || !Array.isArray(page.events)) { error(); return false; }
       if (page.next && page.next === requestedCursor) { error(); return false; }
+      const before = state.events.length;
       state.events = [...new Map([...state.events, ...page.events].map(e => [e.id, e])).values()];
+      if (asked && state.events.length === before) note(page.next ? 'لا أقدم في هذه الصفحة، نكمل…' : 'وصلت لآخر التحديثات');
       if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
       if (state.bridgeNext) {
         if (!page.next || page.events.some(e => state.bridgeKnown?.has(e.id))) { state.bridgeNext = null; state.bridgeKnown = null; }
@@ -317,8 +328,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     finally { polling = false; }
   }, 5000);
   const api = {
-    dispose() { state.token = {}; clearInterval(timer); clearTimeout(autoTimer); io?.disconnect(); },
-    loadMore: load,
+    dispose() { state.token = {}; clearInterval(timer); clearTimeout(autoTimer); clearTimeout(noteTimer); io?.disconnect(); },
+    loadMore: () => load({ asked: true }),
     async refresh() {
       if (!active() || state.loading || state.refreshing) return false;
       state.refreshing = true; controls(); status.textContent = '';
@@ -335,7 +346,10 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
           // Bridge that gap before resuming the original historical cursor.
           state.bridgeKnown = new Set(state.events.map(e => e.id)); state.bridgeNext = page.next;
         }
+        const known = new Set(state.events.map(e => e.id));
         state.events = reconcileTimelineRefresh(state.events, page.events, page.snapshotAt ?? Date.now());
+        const fresh = state.events.filter(e => !known.has(e.id)).length;
+        if (known.size) note(fresh ? `وصل ${fresh} جديد` : 'لا جديد الآن — أنت على آخر تحديث');
         if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }
         paintWithScrollAnchor(list, paint);
         return true;

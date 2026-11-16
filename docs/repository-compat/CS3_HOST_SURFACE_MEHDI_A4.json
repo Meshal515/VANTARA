@@ -1,0 +1,134 @@
+{
+  "purpose": "Factual public host descriptor inventory from the published Mehdi Anime4Up v4 DEX. No provider source is included and static resolution is not proof of provider execution, networking, media decoding or playback.",
+  "repository": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/Mehdi.json",
+  "index": "https://raw.githubusercontent.com/mehdigm4life/mehdigm-stream/main/plugins.json",
+  "observedAt": "2026-11-01",
+  "plugins": [
+    {
+      "name": "Anime4Up",
+      "internalName": "Anime4Up",
+      "version": 4,
+      "sha256": "58e4d4455120c23a6104dedfe4c9d2fa946d4f5a5586b7eed4b69010a1d9df84",
+      "bytes": 168096,
+      "url": "https://github.com/mehdigm4life/mehdigm-stream/raw/refs/heads/main/build/Anime4Up.cs3",
+      "providerExecutedByThisInspection": false
+    }
+  ],
+  "profiles": [
+    {
+      "name": "mehdi-anime4up-v4",
+      "requiredHostMethods": [
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setDuration(Ljava/lang/Integer;)V",
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setPlot(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setPosterUrl(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setRecommendations(Ljava/util/List;)V",
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setShowStatus(Lcom/lagradost/cloudstream3/ShowStatus;)V",
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setTags(Ljava/util/List;)V",
+        "Lcom/lagradost/cloudstream3/AnimeLoadResponse;->setYear(Ljava/lang/Integer;)V",
+        "Lcom/lagradost/cloudstream3/AnimeSearchResponse;->setPosterUrl(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/Episode;->getData()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/Episode;->getEpisode()Ljava/lang/Integer;",
+        "Lcom/lagradost/cloudstream3/Episode;->setEpisode(Ljava/lang/Integer;)V",
+        "Lcom/lagradost/cloudstream3/Episode;->setName(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/Episode;->setPosterUrl(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/HomePageList;-><init>(Ljava/lang/String;Ljava/util/List;ZILkotlin/jvm/internal/DefaultConstructorMarker;)V",
+        "Lcom/lagradost/cloudstream3/LoadResponse$Companion;->addMalId(Lcom/lagradost/cloudstream3/LoadResponse;Ljava/lang/Integer;)V",
+        "Lcom/lagradost/cloudstream3/LoadResponse$Companion;->addTrailer$default(Lcom/lagradost/cloudstream3/LoadResponse$Companion;Lcom/lagradost/cloudstream3/LoadResponse;Ljava/lang/String;Ljava/lang/String;ZLkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;",
+        "Lcom/lagradost/cloudstream3/MainAPI;-><init>()V",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->addDubStatus(Lcom/lagradost/cloudstream3/AnimeSearchResponse;ZLjava/lang/Integer;)V",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->addEpisodes(Lcom/lagradost/cloudstream3/AnimeLoadResponse;Lcom/lagradost/cloudstream3/DubStatus;Ljava/util/List;)V",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->fixUrlNull(Lcom/lagradost/cloudstream3/MainAPI;Ljava/lang/String;)Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->mainPageOf([Lkotlin/Pair;)Ljava/util/List;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->newAnimeLoadResponse$default(Lcom/lagradost/cloudstream3/MainAPI;Ljava/lang/String;Ljava/lang/String;Lcom/lagradost/cloudstream3/TvType;ZLkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->newAnimeSearchResponse$default(Lcom/lagradost/cloudstream3/MainAPI;Ljava/lang/String;Ljava/lang/String;Lcom/lagradost/cloudstream3/TvType;ZLkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lcom/lagradost/cloudstream3/AnimeSearchResponse;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->newEpisode(Lcom/lagradost/cloudstream3/MainAPI;Ljava/lang/Object;Lkotlin/jvm/functions/Function1;)Lcom/lagradost/cloudstream3/Episode;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->newHomePageResponse(Ljava/lang/String;Ljava/util/List;Ljava/lang/Boolean;)Lcom/lagradost/cloudstream3/HomePageResponse;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->newHomePageResponse(Ljava/util/List;Ljava/lang/Boolean;)Lcom/lagradost/cloudstream3/HomePageResponse;",
+        "Lcom/lagradost/cloudstream3/MainAPIKt;->newSubtitleFile$default(Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;",
+        "Lcom/lagradost/cloudstream3/MainActivityKt;->getApp()Lcom/lagradost/nicehttp/Requests;",
+        "Lcom/lagradost/cloudstream3/MainPageRequest;->getData()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/MainPageRequest;->getName()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/SearchResponse;->getUrl()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/SubtitleFile;->getUrl()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/plugins/BasePlugin;->registerExtractorAPI(Lcom/lagradost/cloudstream3/utils/ExtractorApi;)V",
+        "Lcom/lagradost/cloudstream3/plugins/BasePlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+        "Lcom/lagradost/cloudstream3/plugins/Plugin;-><init>()V",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorApi;-><init>()V",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorApi;->getMainUrl()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorApi;->getName()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorApiKt;->getQualityFromName(Ljava/lang/String;)I",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorApiKt;->loadExtractor(Ljava/lang/String;Ljava/lang/String;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorApiKt;->newExtractorLink(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getExtractorData()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getHeaders()Ljava/util/Map;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getName()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getQuality()I",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getReferer()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getSource()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getType()Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->getUrl()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->setExtractorData(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->setHeaders(Ljava/util/Map;)V",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->setQuality(I)V",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLink;->setReferer(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/utils/JsUnpacker;-><init>(Ljava/lang/String;)V",
+        "Lcom/lagradost/cloudstream3/utils/JsUnpacker;->unpack()Ljava/lang/String;",
+        "Lcom/lagradost/cloudstream3/utils/M3u8Helper$Companion;->generateM3u8$default(Lcom/lagradost/cloudstream3/utils/M3u8Helper$Companion;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Integer;Ljava/util/Map;Ljava/lang/String;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->getValue()I",
+        "Lcom/lagradost/nicehttp/NiceResponse;->getCode()I",
+        "Lcom/lagradost/nicehttp/NiceResponse;->getDocument()Lorg/jsoup/nodes/Document;",
+        "Lcom/lagradost/nicehttp/NiceResponse;->getOkhttpResponse()Lokhttp3/Response;",
+        "Lcom/lagradost/nicehttp/NiceResponse;->getText()Ljava/lang/String;",
+        "Lcom/lagradost/nicehttp/NiceResponse;->getUrl()Ljava/lang/String;",
+        "Lcom/lagradost/nicehttp/Requests;->get$default(Lcom/lagradost/nicehttp/Requests;Ljava/lang/String;Ljava/util/Map;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;ZILjava/util/concurrent/TimeUnit;JLokhttp3/Interceptor;ZLcom/lagradost/nicehttp/ResponseParser;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;",
+        "Lcom/lagradost/nicehttp/Requests;->getBaseClient()Lokhttp3/OkHttpClient;",
+        "Lcom/lagradost/nicehttp/Requests;->post$default(Lcom/lagradost/nicehttp/Requests;Ljava/lang/String;Ljava/util/Map;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/List;Ljava/lang/Object;Lokhttp3/RequestBody;ZILjava/util/concurrent/TimeUnit;JLokhttp3/Interceptor;ZLcom/lagradost/nicehttp/ResponseParser;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;"
+      ],
+      "requiredHostFields": [
+        "Lcom/lagradost/cloudstream3/DubStatus;->Dubbed:Lcom/lagradost/cloudstream3/DubStatus;",
+        "Lcom/lagradost/cloudstream3/DubStatus;->Subbed:Lcom/lagradost/cloudstream3/DubStatus;",
+        "Lcom/lagradost/cloudstream3/LoadResponse;->Companion:Lcom/lagradost/cloudstream3/LoadResponse$Companion;",
+        "Lcom/lagradost/cloudstream3/ShowStatus;->Completed:Lcom/lagradost/cloudstream3/ShowStatus;",
+        "Lcom/lagradost/cloudstream3/ShowStatus;->Ongoing:Lcom/lagradost/cloudstream3/ShowStatus;",
+        "Lcom/lagradost/cloudstream3/TvType;->Anime:Lcom/lagradost/cloudstream3/TvType;",
+        "Lcom/lagradost/cloudstream3/TvType;->AnimeMovie:Lcom/lagradost/cloudstream3/TvType;",
+        "Lcom/lagradost/cloudstream3/TvType;->OVA:Lcom/lagradost/cloudstream3/TvType;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;->M3U8:Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;",
+        "Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;->VIDEO:Lcom/lagradost/cloudstream3/utils/ExtractorLinkType;",
+        "Lcom/lagradost/cloudstream3/utils/M3u8Helper;->Companion:Lcom/lagradost/cloudstream3/utils/M3u8Helper$Companion;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P1080:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P1440:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P2160:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P240:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P360:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P480:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->P720:Lcom/lagradost/cloudstream3/utils/Qualities;",
+        "Lcom/lagradost/cloudstream3/utils/Qualities;->Unknown:Lcom/lagradost/cloudstream3/utils/Qualities;"
+      ]
+    }
+  ],
+  "inheritedHostLookups": [
+    {
+      "pluginReference": "Lcom/anime4up/Anime4UpPlugin;->registerExtractorAPI(Lcom/lagradost/cloudstream3/utils/ExtractorApi;)V",
+      "resolvedHostReference": "Lcom/lagradost/cloudstream3/plugins/BasePlugin;->registerExtractorAPI(Lcom/lagradost/cloudstream3/utils/ExtractorApi;)V"
+    },
+    {
+      "pluginReference": "Lcom/anime4up/Anime4UpPlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V",
+      "resolvedHostReference": "Lcom/lagradost/cloudstream3/plugins/BasePlugin;->registerMainAPI(Lcom/lagradost/cloudstream3/MainAPI;)V"
+    },
+    {
+      "pluginReference": "Lcom/anime4up/Anime4UpVidstackExtractor;->getMainUrl()Ljava/lang/String;",
+      "resolvedHostReference": "Lcom/lagradost/cloudstream3/utils/ExtractorApi;->getMainUrl()Ljava/lang/String;"
+    },
+    {
+      "pluginReference": "Lcom/anime4up/Anime4UpVidstackExtractor;->getName()Ljava/lang/String;",
+      "resolvedHostReference": "Lcom/lagradost/cloudstream3/utils/ExtractorApi;->getName()Ljava/lang/String;"
+    }
+  ],
+  "observedReferenceCounts": {
+    "directHostMethods": 61,
+    "directHostFields": 19,
+    "inheritedHostMethods": 4
+  },
+  "executionEvidence": "NOT_TESTED_BY_THIS_STATIC_INVENTORY"
+}

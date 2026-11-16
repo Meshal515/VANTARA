@@ -1,0 +1,78 @@
+name: VANTARA all-published CloudStream plugin ABI and routing matrix (no publish)
+
+on:
+  push:
+    branches: [codex/vantara-video-repo-debug-20261101]
+    paths:
+      - '.github/workflows/video-registration-matrix-qa.yml'
+      - 'tools/repository-compat/run_registration_sweep.sh'
+      - 'tools/repository-compat/summarize_registration_sweep.mjs'
+      - 'extensions/runtime-android/integration/src/androidTest/kotlin/com/vantara/runtime/PublishedRepoRegistrationTest.kt'
+      - 'extensions/runtime-android/integration/src/main/**'
+      - 'extensions/runtime-android/cloudstream/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vantara-register-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  published-registration-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+      VANTARA_SHARD: ${{ matrix.shard }}
+      VANTARA_SHARD_COUNT: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Build optional runtime APK and instrumentation tests
+        run: |
+          set -euo pipefail
+          npx cap sync android
+          bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
+      - run: sudo chmod 666 /dev/kvm
+      - name: Download and register every publisher plugin in selected shard
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_3a
+          cores: 4
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -noaudio -camera-back none
+          script: bash tools/repository-compat/run_registration_sweep.sh
+      - name: Retain explicit failures, no publishing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-runtime-registration-shard-${{ matrix.shard }}-NOT-media-proof
+          path: |
+            registration-sweep.jsonl
+            registration-summary.md
+            registration-logcat.txt
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+          if-no-files-found: warn
+          retention-days: 14

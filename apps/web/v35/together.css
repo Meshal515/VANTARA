@@ -44,7 +44,7 @@
   display: grid; place-items: center;
   border-radius: 99px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent, #fff);
   font-size: 12px; font-weight: 800;
 }
 .v35 .tg-all { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); border-radius: 99px; }

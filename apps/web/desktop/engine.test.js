@@ -408,3 +408,21 @@ it('يجهّز أفضل تورنت في الخلفية قبل الضغط على 
     await f.engine.closeSession({session:'s'});
   } finally { vi.useRealTimers(); }
 });
+
+it('«رشّح الحلقة لصديق» من مشغّل ويندوز يمر بصندوق صادر كالـAPK، ويسحبه صاحب الحساب وحده مرة واحدة', async () => {
+  const f = fixture();
+  await prepared(f);
+  const best = await f.engine.best({ session: 's' });
+  await f.engine.play({ session: 's', candidate: best.candidate, animeId: '52991', title: 'Frieren', poster: 'https://img/p.jpg', presenceUserId: 'me', friends: [{ userId: 'u2', displayName: 'سارة' }, { displayName: 'بلا معرف' }] });
+  const info = await f.engine.playerState({ session: 's' });
+  expect(info.canRecommend).toBe(true);
+  expect(info.friends).toEqual([{ userId: 'u2', displayName: 'سارة' }]);
+  const pinged = vi.fn(); f.engine.addListener('outbox', pinged);
+  expect(f.engine.queueRecommendation({ session: 's', toId: 'u2' })).toBe(true);
+  expect(pinged).toHaveBeenCalledTimes(1);
+  expect((await f.engine.outbox({ userId: 'other' })).items).toEqual([]);
+  const { items } = await f.engine.outbox({ userId: 'me' });
+  expect(items).toMatchObject([{ type: 'episode', animeId: '52991', title: 'Frieren', episode: 1, toId: 'u2', userId: 'me' }]);
+  expect((await f.engine.outbox({ userId: 'me' })).items).toEqual([]);
+  await f.engine.closeSession({ session: 's' });
+});

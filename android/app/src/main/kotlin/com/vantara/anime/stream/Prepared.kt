@@ -23,8 +23,10 @@ class PreparedEpisode(
     /** يُفحص كل سيرفر جاهز بطلب قصير (السينما). الأنمي بلا فحص كما كان. */
     val probe: Boolean = false,
     val addonGeneration: String = java.util.UUID.randomUUID().toString(),
+    private val monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    private val preparationStartedAt = monotonicClock()
     private val primaryQuality = HashMap<String, Int?>()
     private val byId = LinkedHashMap<String, Route>()
     private val candidates = LinkedHashMap<String, Candidate>()
@@ -42,6 +44,7 @@ class PreparedEpisode(
     @Volatile var job: Job? = null
     @Volatile var done = false
         private set
+    @Volatile private var terminal = false
 
     init { if (probe) session.acceptsCandidate = { candidateProbes[it.id] == true || it.id in runtimeCandidates } }
 
@@ -62,6 +65,8 @@ class PreparedEpisode(
     }
 
     fun report(r: RouteReport) {
+        // No late source report after the absolute preparation deadline.
+        if (terminal) return
         if (r.state != RouteState.READY || r.candidates.isEmpty()) {
             reportQuality(r)
             return
@@ -83,11 +88,17 @@ class PreparedEpisode(
         val route: Route
         val fresh: List<Candidate>
         synchronized(this) {
+            // A cancelled/terminal preparation cannot publish late adapter results.
+            if (terminal || job?.isCancelled == true) return
             val rid = "${r.sourceId}|${r.key}"
+            val measured = r.candidates.map { candidate ->
+                candidate.copy(preparationMs = candidates[candidate.id]?.preparationMs
+                    ?: (monotonicClock() - preparationStartedAt).coerceAtLeast(0))
+            }
             val old = byId[rid]
             val code = old?.code ?: uniqueCode(ServerCodes.code(r.server), r.quality, rid)
-            fresh = r.candidates.filter { it.id !in candidates }
-            for (c in r.candidates) {
+            fresh = measured.filter { it.id !in candidates }
+            for (c in measured) {
                 candidates[c.id] = c
                 routeOfCandidate[c.id] = rid
             }
@@ -106,6 +117,8 @@ class PreparedEpisode(
                 probeMs = old?.probeMs,
                 sourceName = r.candidates.firstOrNull()?.sourceName ?: old?.sourceName,
                 label = r.candidates.firstOrNull()?.label?.takeIf { it.isNotBlank() } ?: old?.label,
+                type = if (r.candidates.isNotEmpty() && r.candidates.all { it.url.startsWith(MagnetLinks.TICKET_SCHEME) }) "torrent" else old?.type,
+                fingerprint = r.candidates.firstNotNullOfOrNull { it.torrent }?.let { "btih:$it" } ?: old?.fingerprint ?: stableRouteId(rid),
             )
             byId[rid] = route
         }
@@ -166,8 +179,8 @@ class PreparedEpisode(
      * دفعة نسخ إضافية (مصدر رد متأخرًا بعد بدء التجهيز): الجلسة نفسها تكبر، ولا
      * يتوقف ما يعمل. يرجع false إن أُغلقت الجلسة.
      */
-    fun beginBatch(): Boolean = synchronized(this) {
-        if (job?.isActive != true) return@synchronized false
+    fun beginBatch(generation: String? = null): Boolean = synchronized(this) {
+        if (terminal || job?.isActive != true || (generation != null && generation != addonGeneration)) return@synchronized false
         pendingBatches++
         done = false
         true
@@ -175,7 +188,7 @@ class PreparedEpisode(
 
     /** Reserve before native preparation launches, including an empty native source batch. */
     fun reserveAddonBatches(sourceIds: List<String>, generation: String = addonGeneration): Int = synchronized(this) {
-        if (generation != addonGeneration || job?.isActive != true) return@synchronized 0
+        if (terminal || generation != addonGeneration || job?.isActive != true) return@synchronized 0
         val fresh = sourceIds.asSequence().filter { it.startsWith("addon|") && it.length <= 4096 }
             .distinct().filter { it !in pendingAddons && it !in completedAddons }.take(128).toList()
         pendingAddons.addAll(fresh)
@@ -186,9 +199,34 @@ class PreparedEpisode(
 
     /** A provider can complete once; foreign/duplicate/closed-session results are ignored. */
     fun claimAddonBatch(sourceId: String, generation: String = addonGeneration): Boolean = synchronized(this) {
-        if (generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
+        if (terminal || generation != addonGeneration || job?.isActive != true || !pendingAddons.remove(sourceId)) return@synchronized false
         completedAddons.add(sourceId)
         true
+    }
+
+    /** Idempotent recovery for a JS→Android bridge failure, scoped to the session generation. */
+    fun settleFailedAddon(sourceId: String, generation: String): Boolean {
+        if (!claimAddonBatch(sourceId, generation)) return false
+        finish()
+        return true
+    }
+
+    /** Terminal watchdog: no JS/WebView failure may leave native preparation unresolved. */
+    fun forceComplete(): Boolean {
+        val changed = synchronized(this) {
+            if (terminal) return@synchronized false
+            terminal = true
+            pendingAddons.clear()
+            pendingBatches = 0
+            val changed = !done
+            done = true
+            changed
+        }
+        if (changed) {
+            session.changes.value = session.changes.value + 1
+            listeners.forEach { runCatching { it(null) } }
+        }
+        return changed
     }
 
     /** Own choices before they are reported, so cancellation cannot leak unselected tickets. */
@@ -204,13 +242,14 @@ class PreparedEpisode(
 
     /** A native torrent ticket is preparable; it is not an HTTP probe or a first frame. */
     fun allowRuntimeCandidate(candidateId: String) {
+        if (terminal) return
         runtimeCandidates.add(candidateId)
         session.changes.value = session.changes.value + 1
     }
 
     /** Promote a warm session once; its existing candidates and player remain intact. */
     fun beginFullPreparation(): Boolean = synchronized(this) {
-        if (fullPreparation) return@synchronized false
+        if (terminal || fullPreparation) return@synchronized false
         fullPreparation = true
         pendingBatches++
         done = false
@@ -232,6 +271,9 @@ class PreparedEpisode(
     }
 
     /** نفس السيرفر مرتين في نفس الجودة (من مصدرين): «MPU» ثم «MPU2». */
+    /** معرّف الطريق بلا معرّف هذه الجلسة (مرشّحات الإضافات تبدأ به)، فيتطابق الطريق نفسه بين جلستين. */
+    private fun stableRouteId(rid: String): String = rid.replace("$id|", "")
+
     private fun uniqueCode(base: String, quality: Int?, rid: String): String {
         val taken = byId.values.filter { it.id != rid && it.quality == quality }.map { it.code }.toSet()
         if (base !in taken) return base
@@ -276,6 +318,27 @@ class PreparedEpisode(
     /** Cinema's search/extraction result is not a playable stream until its probe succeeds. */
     fun playable(list: List<Candidate>): List<Candidate> = if (!probe) list else synchronized(this) {
         list.filter { candidateProbes[it.id] == true || it.id in runtimeCandidates }
+    }
+
+    /**
+     * لاختيار سيرفر بعينه (التنزيل اليدوي): ما لم يُرفض فحصه بعد. السيرفر يظهر «جاهز» في ورقة التحميل وفحص روابطه
+     * ما زال يجري، و[playable] كانت ترجع فارغًا فيقول التنزيل «السيرفر لم يرجع رابطًا» وعنده روابط. التنزيل يفحص
+     * الرابط بنفسه (inspect) قبل أن يكتب بايتًا.
+     */
+    fun notRejected(list: List<Candidate>): List<Candidate> = synchronized(this) {
+        list.filter { candidateProbes[it.id] != false }
+    }
+
+    /** لماذا لا رابط لسيرفر: لا روابط، أو انتهت صلاحيتها، أو رُفضت كلها في الفحص. */
+    fun pickFailure(routeId: String): String {
+        val all = candidatesOf(routeId)
+        val now = clock()
+        return when {
+            all.isEmpty() -> "NO_CANDIDATES"
+            all.all { it.expiresAt <= now } -> "EXPIRED"
+            all.all { session.isFailed(it.id) } -> "FAILED"
+            else -> "PROBE_FAILED"
+        }
     }
 
     fun best(preferCode: String? = null): Candidate? = rank(playable(synchronized(this) { candidates.values.toList() }), preferCode).firstOrNull()

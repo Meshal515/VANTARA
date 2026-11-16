@@ -2,8 +2,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { nativeStore } from './native-runtime.js';
 import { createStore, SPACES } from '../pwa/cache/store.js';
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.resetModules();});
-const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
+// حساب موجود قبل فصل المصادر المدمجة: يرى المصادر نفسها (lib/source-entitlement.js)
+const account=async(created_at)=>{const e=await import('../lib/source-entitlement.js');e.setEntitlement(e.decide({account:{user_id:'u',created_at}}));return e;};
+const setup=async(manifest,extraPlugins={},response=()=>manifest,createdAt=Date.UTC(2026,0,1))=>{
   vi.resetModules();
+  await account(createdAt);
   const memory=new Map();
   vi.stubGlobal('localStorage',{getItem:k=>memory.get(k)??null,setItem:(k,v)=>memory.set(k,v)});
   const requests=[];
@@ -14,6 +17,18 @@ const setup=async(manifest,extraPlugins={},response=()=>manifest)=>{
   return {a,key:p.manifest.key,requests};
 };
 const manifest={id:'org.sub',name:'Sub',version:'1.0.0',resources:['subtitles'],types:['movie'],catalogs:[]};
+it('waits for the selected account before collecting optional CloudStream sources',async()=>{
+  let selected='local';const calls=[];
+  const runtimePlugin={capabilities:async()=>({cloudstream:true,platform:'android'}),setProfile:async({profile})=>{await Promise.resolve();selected=profile;calls.push(profile);},
+    list:async()=>({repos:[],installed:[]}),addRepository:async()=>{},removeRepository:async()=>{},extensions:async()=>({extensions:[]}),install:async()=>{},uninstall:async()=>{},enable:async()=>{}};
+  vi.stubGlobal('fetch',async()=>({json:async()=>({sources:[]})}));
+  const {a}=await setup(manifest,{VantaraRuntime:runtimePlugin,AnimeEngine:{configure:async()=>{},capabilities:async()=>({}),sources:async()=>({sources:selected==='local'?[]:[{id:'addon|cs3|cs3_'+selected+'|provider',name:'Owned source',content:'anime',enabled:true,user:true,pkg:'cs3_'+selected}]})}});
+  a.registry.setProfile('one');await a.reloadSources();
+  expect(a.sources.list('anime').map(x=>x.id)).toEqual(['addon|cs3|cs3_one|provider']);
+  a.registry.setProfile('two');await a.reloadSources();
+  expect(a.sources.list('anime').map(x=>x.id)).toEqual(['addon|cs3|cs3_two|provider']);
+  expect(calls).toEqual(['one','two']);
+});
 it('routes the Team X catalogue through the existing native catalogue contract instead of latest',async()=>{
  const sourceId='eu.kanade.tachiyomi.extension.ar.teamx';
  const catalogue=vi.fn(async({page})=>({mangas:[{url:`/series/work-${page}`,title:`Catalogue ${page}`,memo:'native'}],hasNextPage:page===1}));
@@ -133,4 +148,17 @@ it("APK addons move off the shared localStorage, keep installed addons, and drop
   expect(await store.set("state", "addons.v1", [{ id: "kept" }, { id: "new", blob: "y".repeat(3 * 1024 * 1024) }])).toBe(true);
   expect((await store.get("state", "addons.v1")).value).toHaveLength(2);
   expect(store.failure()).toBe(null);
+});
+it('a new account sees zero formerly bundled manga sources but keeps what it installed, and adding one keeps its old id',async()=>{
+  vi.stubGlobal('fetch',async()=>{throw new Error('core configure failed');});
+  const manga=[{id:'eu.kanade.tachiyomi.extension.ar.azora',name:'Azora'},{id:'eu.kanade.tachiyomi.extension.en.asura#1',name:'Asura',user:true}];
+  const prepare=vi.fn(async()=>({ok:true}));
+  const {a}=await setup(manifest,{ExtensionEngine:{sources:async()=>({sources:manga}),prepare}},()=>manifest,Date.UTC(2027,0,1));
+  expect(a.registry.list().filter(x=>x.bundled).map(x=>x.sourceId)).toEqual(['eu.kanade.tachiyomi.extension.en.asura#1']);
+  expect(()=>a.adapter('core|eu.kanade.tachiyomi.extension.ar.azora')).toThrow(expect.objectContaining({code:'SOURCE_NOT_ADDED'}));
+  expect(prepare).not.toHaveBeenCalled();
+  const e=await import('../lib/source-entitlement.js');
+  e.setEntitlement(e.decide({account:{user_id:'u',created_at:Date.UTC(2027,0,1)},settings:e.choicePatch('eu.kanade.tachiyomi.extension.ar.azora',true)}));
+  await a.ready;await new Promise(r=>setTimeout(r,0));
+  expect(a.registry.list().filter(x=>x.bundled).map(x=>x.sourceId).sort()).toEqual(['eu.kanade.tachiyomi.extension.ar.azora','eu.kanade.tachiyomi.extension.en.asura#1']);
 });

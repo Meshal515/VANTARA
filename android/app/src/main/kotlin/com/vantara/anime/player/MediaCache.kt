@@ -39,6 +39,10 @@ object MediaCache {
         return SimpleCache(d, LeastRecentlyUsedCacheEvictor(MAX_BYTES), provider).also { cache = it }
     }
 
+    /** مشغّل مفتوح يستعمل الكاش الآن (لا يُمسح من إدارة المساحة تحته). */
+    @Synchronized
+    fun inUse(): Boolean = users > 0
+
     /** آخر مستخدم يغلق: الكاش يُحرَّر ويُحذف من القرص. */
     @Synchronized
     fun release(context: Context) {

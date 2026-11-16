@@ -36,7 +36,8 @@ function upstream() {
       {
         id: 'minted-token-id',
         name: 'vantara-test-token',
-        expiresAt: '2026-12-01T00:00:00.000Z',
+        // نسبي لا ثابت (#323 U-24): تاريخ ثابت يكسر الاختبار يوم يمضي، ونسخة main انكسرت فعلًا في 31 أكتوبر
+        expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
         expired: false,
       },
     ]),
@@ -251,7 +252,8 @@ describe('SessionStore identity credential renewal', () => {
 describe('SessionStore upstream credential authority', () => {
   it('persists the exact expiry reported by Uchiyomi token metadata', async () => {
     const service = upstream();
-    const exactExpiry = '2026-10-31T12:34:56.789Z';
+    // تاريخ ثابت كان قنبلة موقوتة: انقضى في 31 أكتوبر 2026 12:34 فصار الرمز «منتهيًا». مستقبل نسبي بدقة الملّي ثانية
+    const exactExpiry = new Date(Math.floor(Date.now() / 1000) * 1000 + 30 * 86_400_000 + 789).toISOString();
     service.listTokens.mockResolvedValue([
       {
         id: 'minted-token-id',

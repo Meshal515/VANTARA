@@ -32,8 +32,11 @@ import { mountV35 } from './v35/shell.js';
 import { openSmartReader } from './v35/reader.js';
 import { openFrameViewer } from './v35/frame-viewer.js';
 import engine from './lib/extension-engine.js';
+// الفصل المحمّل يُقرأ من الجهاز أينما فُتح؛ نفس الكائن الذي تجهّز به صفحة العمل الفصل التالي
+import { readerEngine } from './lib/reader-engine.js';
 import {
   APK_ERRORS,
+  versionLine,
   activateStaged,
   canInstall,
   deviceInfo,
@@ -47,10 +50,12 @@ import {
 } from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
+import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
 import {
   NOTIFICATION_LABELS,
   popupPatch,
   popupSettings,
+  togetherInvite,
   toastable,
   unreadCount,
 } from './lib/notifications.js';
@@ -73,6 +78,34 @@ globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, re
 // Capacitor injects native plugins before user JS. On normal web this is
 // undefined, so the bridge is a no-op without requiring a browser npm import.
 const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
+
+/**
+ * من يرى مصادر المانجا التي كانت مدمجة في التطبيق (lib/source-entitlement.js): القرار من صف
+ * الحساب المتزامن (`created_at`) واختياراته في `settings`، لا من مخزن الجهاز.
+ */
+function refreshSourceEntitlement() {
+  const standalone = !syncConfigured();
+  const userId = sync.user?.userId;
+  setChoiceOwner(standalone ? 'standalone' : userId ? `account:${userId}` : null);
+  setEntitlement(decide({
+    standalone,
+    account: userId ? sync.rows('accounts', (row) => row.user_id === userId)[0] ?? null : null,
+    settings: standalone ? readLocalChoices() : userId ? sync.row('settings', userId)?.data ?? null : null,
+  }));
+}
+setChoiceWriter(async (fields, context) => {
+  const local = !syncConfigured();
+  const userId = sync.user?.userId;
+  // Read the actual session again at dispatch, including before a delayed session event is delivered.
+  setChoiceOwner(local ? 'standalone' : userId ? `account:${userId}` : null);
+  assertChoiceContext(context);
+  if (local) writeLocalChoices(fields);
+  else if (!userId) throw new Error('سجّل الدخول لتضيف مصدرًا لحسابك');
+  else await sync.enqueue('settings.patch', { fields }, { requireDurable: true });
+  refreshSourceEntitlement();
+});
+refreshSourceEntitlement();
+void sync.ready.then(refreshSourceEntitlement, () => {});
 
 const state = {
   route: { name: 'gate' },
@@ -1429,6 +1462,7 @@ let v35 = null;
 async function switchToAccountGate() {
   try {
     if (!await sync.signOut()) throw new Error('session_storage_full');
+    if (localMode) leaveLocalMode();
     dropV35();
     await go({ name: 'gate' });
   } catch {
@@ -1439,6 +1473,47 @@ async function switchToAccountGate() {
 function dropV35() {
   v35?.destroy();
   v35 = null;
+}
+
+/**
+ * «على جهازي»: فتح التطبيق بلا إنترنت ولا جلسة.
+ *
+ * الحسابات والجلسة تُصدر من الخادم، فبوابة «من يتابع؟» لا تعمل بلا اتصال. لكن التحميلات على
+ * الجهاز (فصول وحلقات وترجمات) لا تحتاج خادمًا ولا حسابًا: ندخل إليها مباشرة. وحين يعود الاتصال
+ * يظهر تنبيه «اختر حسابك»؛ والدخول يهدم هذه الواجهة فلا يرث الحساب شيئًا منها.
+ */
+let localMode = false;
+let onlineAgain = null;
+
+function leaveLocalMode() {
+  localMode = false;
+  if (onlineAgain) window.removeEventListener('online', onlineAgain);
+  onlineAgain = null;
+  dropV35();
+}
+
+async function screenLocal() {
+  if (sync.signedIn) return go({ name: 'home' });
+  if (!localMode) {
+    // واجهة من جلسة سابقة (خروج) لا تُستعمل هنا
+    dropV35();
+    localMode = true;
+    onlineAgain = () => {
+      showToast({
+        title: 'رجع الاتصال',
+        body: 'اضغط لاختيار حسابك',
+        lifetimeMs: 12_000,
+        onOpen: () => {
+          leaveLocalMode();
+          void go({ name: 'gate' });
+        },
+      });
+    };
+    window.addEventListener('online', onlineAgain);
+  }
+  screenV35('library');
+  state.screen = 'LOCAL';
+  await v35?.openDownloads?.('device');
 }
 
 function screenV35(page) {
@@ -1484,7 +1559,7 @@ function screenV35(page) {
           resync: () => sync.resync(),
           checkUpdate: () => checkUpdates({ force: true }),
           resetWeb: () => resetWeb(),
-          apkVersion: async () => (await deviceInfo())?.versionName ?? null,
+          apkVersion: async () => versionLine(await deviceInfo()),
           popups: () => popupSettings(sync.row('settings', sync.user?.userId)),
           setPopups: (next) => sync.enqueue('settings.patch', { fields: popupPatch(next) }),
           labels: NOTIFICATION_LABELS,
@@ -1529,7 +1604,8 @@ function screenSmartReader(target) {
   const reader = openSmartReader(
     {
       sync,
-      engine,
+      // فصل من «التحميلات» يُقرأ من الجهاز بمحرك محلي بنفس الواجهة؛ غيره من المصادر
+      engine: target.engine ?? readerEngine,
       // الترجمة المرئية تمرّ من خادم المحتوى (وكيل إلى عامل جهاز البيت)
       api,
       mount,
@@ -1564,7 +1640,7 @@ function attachBackButton() {
   app.addListener('backButton', () => {
     if (state.back?.()) return;
     const { name } = state.route ?? {};
-    if (name === 'gate' || name === 'home' || name === 'v35') {
+    if (name === 'gate' || name === 'home' || name === 'v35' || name === 'local') {
       void app.exitApp?.();
       return;
     }
@@ -1583,14 +1659,19 @@ async function go(route) {
         sync,
         mount,
         onSignedIn: async () => {
+          // واجهة «على جهازي» بُنيت بلا حساب: لا تُورَّث للحساب الذي دخل
+          if (localMode) leaveLocalMode();
           startHeartbeat();
           void sync.pull();
           await go({ name: 'home' });
         },
+        onLocal: () => go({ name: 'local' }),
       });
       state.teardown = teardown;
       return;
     }
+    case 'local':
+      return screenLocal();
     case 'home':
       return screenV35('home');
     case 'library':
@@ -1983,11 +2064,8 @@ async function checkUpdates({ force = false } = {}) {
   }
   // لويندوز قناة مستقلة لا تعرض تحديث APK باعتباره مثبتًا للكمبيوتر.
   if (globalThis.VantaraDesktopUpdates) {
+    // التحديث المتاح يظهر في بطاقة update-check (تنزيل بموافقة)؛ «محدثة» يعرضها زر الإعدادات.
     const result = await globalThis.VantaraDesktopUpdates.check({ force });
-    if (force && !result.update) {
-      showToast({ title: 'تحديث ويندوز', body: result.status === 'current'
-        ? 'نسخة ويندوز عندك محدثة' : 'تعذر التحقق من تحديث ويندوز' });
-    }
     return result.update ? { desktop: result.update } : null;
   }
   const found = await findUpdate({ force });
@@ -2034,11 +2112,13 @@ function showApkUpdate(apk) {
       onProgress: (p) => {
         go.textContent = `${Math.round(p * 100)}%`;
       },
-      onResult: (status) => {
+      onResult: (status, message) => {
+        // سبب أندرويد الحرفي يظهر مع الرسالة: «تعارض» لا يعني دائمًا مفتاحًا مختلفًا
+        const why = message ? ` (${message})` : '';
         if (status === 'cancelled') idle('ألغيت التثبيت. اضغط «تثبيت» متى ما بغيت');
-        else if (status === 'storage') idle('المساحة ما تكفي. فضّ مساحة وجرّب');
-        else if (status === 'conflict') idle(APK_ERRORS.INSTALLED_DIFFERENT_KEY);
-        else if (status !== 'success') idle('ما اكتمل التثبيت. جرّب مرة ثانية');
+        else if (status === 'storage') idle(`المساحة ما تكفي. فضّ مساحة وجرّب${why}`);
+        else if (status === 'conflict') idle(`أندرويد رفض التحديث لتعارض مع النسخة المثبتة${why}`);
+        else if (status !== 'success') idle(`ما اكتمل التثبيت${why}. جرّب مرة ثانية`);
       },
     });
     if (out.needsPermission) {
@@ -2051,7 +2131,7 @@ function showApkUpdate(apk) {
       };
       document.addEventListener('visibilitychange', resume);
     } else if (out.error) {
-      idle(APK_ERRORS[out.error] ?? 'ما اكتمل التنزيل. جرّب مرة ثانية');
+      idle(APK_ERRORS[out.error] ?? `ما اكتمل التنزيل. جرّب مرة ثانية (${String(out.error).slice(0, 80)})`);
     } else {
       sub.textContent = 'أكّد «تحديث» في شاشة أندرويد';
       go.textContent = 'تثبيت';
@@ -2176,14 +2256,22 @@ function toastNewNotifications() {
     else if (row.kind === 'REACTION' && majlisKind) {
       title = `${actor} تفاعل ${row.body ?? ''} مع ${{ frame: 'فريمك', rec: 'ترشيحك', activity: 'نشاطك' }[majlisKind] ?? 'رسالتك'}`;
       body = '';
-    } else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    } else if (row.kind === 'TOGETHER') title = togetherInvite(row, actor).title;
+    else title = NOTIFICATION_LABELS[row.kind] ?? 'إشعار';
+    // دعوة «مشاهدة معًا»: الضغط يدخل الغرفة لا صفحة العمل (بلاغ المالك)
+    const togetherCode = togetherInvite(row, actor)?.code ?? null;
     showToast({
       title,
       body,
       avatar: row.actor_id ? { src: actorRow?.avatar_key ?? null, name: actor } : null,
       onOpen: () => {
         sync.enqueue('notification.read', { id: row.id });
-        if (frameId) void go({ name: 'frame', id: frameId });
+        if (togetherCode) {
+          // الضغط يدخلك الغرفة نفسها (كبطاقة الدعوة في الإشعارات والمجلس)، لا صفحة العمل
+          screenV35(null);
+          const invite = sync.rows('together_invites', (x) => x.code === togetherCode)[0] ?? null;
+          void v35?.together?.joinByCode?.(togetherCode, invite);
+        } else if (frameId) void go({ name: 'frame', id: frameId });
         else if (majlisKind) void go({ name: 'majlis' });
         else if (row.series_ref) {
           screenV35(null);
@@ -2199,6 +2287,7 @@ function toastNewNotifications() {
 
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
+  if (tables.some((table) => table === 'accounts' || table === 'settings' || table === 'session')) refreshSourceEntitlement();
   // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
   if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();
   if (tables.includes('accounts')) followAccountState();

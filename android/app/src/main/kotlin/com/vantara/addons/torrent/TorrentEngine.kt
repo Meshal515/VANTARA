@@ -189,6 +189,82 @@ class TorrentEngine internal constructor(
         tickets[token] = Ticket(request)
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
+    /** طلب التورنت خلف تذكرة تشغيل (`vantara-torrent://…`): للتنزيل الدائم من الاختيار نفسه. */
+    fun requestOf(uri: Uri): TorrentRequest? =
+        if (uri.scheme == SCHEME && uri.path == "/file") uri.host?.let(tickets::get)?.request else null
+
+    /** تقدّم تنزيل تورنت دائم: بايتات الملف المطلوب، المشاركون، والقطع المتحقق منها. */
+    data class PermanentProgress(val done: Long, val total: Long, val peers: Int, val rate: Long, val pieces: Int, val piecesTotal: Int, val file: String?)
+
+    /**
+     * تنزيل دائم (التحميلات): ملف واحد من التورنت كاملًا إلى [dest] — مجلد التحميلات لا كاش البث.
+     *
+     * نفس جلسة libtorrent (DHT وحظر العناوين الداخلية نفسها)، لكن بلا نافذة بث ولا إخلاء قطع: كل قطع الملف
+     * المختار بأولوية عادية وبقية ملفات التورنت IGNORE. libtorrent يتحقق من بصمة كل قطعة قبل عدّها، وعند
+     * الإضافة فوق بيانات موجودة يفحصها ويكمل من الصالح (الاستئناف). عند الاكتمال يُزال من الجلسة والملف باقٍ.
+     * التورنت نفسه وهو يُشغَّل بثًا لا يُضاف مرتين: TORRENT_BUSY بسبب واضح.
+     */
+    fun downloadPermanent(request: TorrentRequest, dest: File, cancelled: () -> Boolean, progress: (PermanentProgress) -> Unit): File {
+        check(!shutdown.get()) { "Torrent engine is closed" }
+        val hash = request.infoHash
+        // حالة بث بلا قارئ (تسخين ورقة السيرفرات، أو مشاهدة انتهت وبقيت للعودة السريعة) لا تمنع التنزيل: تُخلى
+        // ويُنزَّل إلى مجلد التحميلات. كانت أي حالة باقية ترفض بـTORRENT_BUSY ⇒ «المصدر رفض الطلب» بعد مجرد فتح
+        // ورقة السيرفرات. المشغّل المفتوح فعلًا وحده يمنع (لا يُنزَع ملف من تحت فيديو يُشاهَد)
+        val cleared = synchronized(states) {
+            val existing = states[hash] ?: return@synchronized false
+            if (!existing.unused()) throw IOException("TORRENT_BUSY")
+            synchronized(warming) { warming.remove(hash) }
+            states.remove(hash, existing) && run { existing.remove(); true }
+        }
+        // libtorrent يزيل المقبض بلا انتظار: لا يُعاد استعمال مقبض البث وهو يُحذف (حفظه في مجلد الكاش)
+        if (cleared) runCatching { waitFor(cancelled, 5_000, "Torrent handle still closing") { if (manager.find(Sha1Hash(hash))?.isValid == true) null else Unit } }
+        dest.mkdirs()
+        var handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid }
+        if (handle == null) {
+            manager.download(request.magnetUri(), dest, com.frostwire.jlibtorrent.swig.torrent_flags_t())
+            handle = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent session unavailable") { manager.find(Sha1Hash(hash))?.takeIf { it.isValid } }
+        }
+        val h = handle!!
+        try {
+            // كمسار التشغيل (21–45 مشاركًا في الاختبار الحي): بلا حد اتصالات للتورنت، ومتتبّعات الإضافة والقائمة العامة
+            // على المقبض نفسه، وإعلان فوري للمتتبّعات وDHT. كان التنزيل الدائم يكتفي بما في magnet ويبدأ بمشاركَين
+            runCatching { h.swig().set_max_connections(-1); h.unsetFlags(TorrentFlags.AUTO_MANAGED); h.resume() }
+            runCatching {
+                val known = h.trackers().map { it.url() }.toSet()
+                request.announce.filterNot { it in known }.forEach { h.addTracker(AnnounceEntry(it)) }
+                h.forceReannounce()
+                h.forceDHTAnnounce()
+            }
+            val info = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { h.torrentFile()?.takeIf { it.isValid } }
+            val files = info.files()
+            val index = request.fileIdx?.takeIf { it in 0 until files.numFiles() }
+                ?: (0 until files.numFiles()).maxByOrNull { files.fileSize(it) } ?: throw IOException("Torrent has no files")
+            h.prioritizeFiles(Array(files.numFiles()) { if (it == index) Priority.FOUR else Priority.IGNORE })
+            val name = files.filePath(index)
+            var lastDone = -1L
+            var stalledSince = System.currentTimeMillis()
+            while (true) {
+                if (cancelled() || Thread.currentThread().isInterrupted) {
+                    runCatching { h.pause() }
+                    throw InterruptedIOException("Torrent download cancelled")
+                }
+                val st = h.status()
+                val done = st.totalWantedDone()
+                val total = st.totalWanted()
+                progress(PermanentProgress(done, total, st.numPeers(), st.downloadPayloadRate().toLong(), st.numPieces(), info.numPieces(), name))
+                // كل القطع المطلوبة متحقق منها (totalWantedDone يعدّ الموثّق وحده): انتهى، بلا انتظار علم isFinished المتأخر
+                if (total > 0 && done >= total) break
+                if (done != lastDone) { lastDone = done; stalledSince = System.currentTimeMillis() }
+                else if (System.currentTimeMillis() - stalledSince > PERMANENT_STALL_MS) throw IOException(if (st.numPeers() == 0) "NO_PEERS" else "TORRENT_STALLED")
+                try { Thread.sleep(1000) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent download interrupted") }
+            }
+            return File(dest, name)
+        } finally {
+            // الملف يبقى في مجلده؛ الجلسة لا تحتفظ بالتورنت بعد انتهاء العمل أو إيقافه (يُستأنف بإضافته من جديد وفحص قطعه)
+            runCatching { manager.remove(h) }
+        }
+    }
+
     fun release(uri: Uri) {
         val hash = uri.host?.let(tickets::remove)?.request?.infoHash ?: return
         // تذكرة أُغلقت جلستها: أوقف تسخينها المسبق إن لم تعد له تذكرة أخرى
@@ -221,6 +297,21 @@ class TorrentEngine internal constructor(
         return runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece }?.let { (it.finished() + it.writing()) to it.blocksInPiece() } }.getOrNull()
     }
     fun dataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate)
+
+    /**
+     * مصدر معاينة الشريط (طلب المالك 15 نوفمبر: صور لما قدّامك لا لما مررت عليه فقط). قارئ ثانٍ لا يحرّك نافذة المشاهدة
+     * ولا مواعيدها: يطلب القطعة التي يحتاجها إطار المعاينة بأولوية أدنى من النافذة، وينتظرها مهلة قصيرة ثم يتخلى.
+     * يعمل فقط والحلقة نفسها تُشاهد (لا يفتح تورنتًا ولا يختار ملفًا).
+     */
+    fun previewDataSourceFactory(delegate: DataSource.Factory): DataSource.Factory = TorrentDataSource.Factory(this, delegate, preview = true)
+
+    internal fun acquirePreview(uri: Uri, cancelled: () -> Boolean): Lease {
+        if (uri.scheme != SCHEME || uri.path != "/file") throw IOException("Invalid torrent playback ticket")
+        val ticket = tickets[uri.host] ?: throw IOException("Torrent playback ticket expired")
+        val state = states[ticket.request.infoHash] ?: throw IOException("Torrent is not playing")
+        val (file, pieceLength) = state.retainForPreview() ?: throw IOException("Torrent is not playing")
+        return Lease(state, file, pieceLength, { shutdown.get() || cancelled() }, preview = true)
+    }
     /**
      * موضع المشاهدة من المشغّل (كل بضع ثوانٍ): يحرّك النافذة على القرص — يفرّغ ما خلف آخر
      * 50 ثانية ويحدد كم يُنزَّل قدّام حسب المساحة الحرة.
@@ -291,7 +382,7 @@ class TorrentEngine internal constructor(
         }
         return selected
     }
-    internal inner class Lease(private val state: State, val file: TorrentFile, val pieceLength: Int, private val cancelled: () -> Boolean) {
+    internal inner class Lease(private val state: State, val file: TorrentFile, val pieceLength: Int, private val cancelled: () -> Boolean, private val preview: Boolean = false) {
         private val closed = AtomicBoolean(false)
         fun read(position: Long, target: ByteArray, offset: Int, count: Int): Int {
             if (closed.get()) throw InterruptedIOException("Torrent reader closed")
@@ -306,6 +397,12 @@ class TorrentEngine internal constructor(
                 }
             }
             val plan = TorrentPolicy.readAt(file, position, pieceLength, count) ?: return -1
+            if (preview) {
+                val bytes = state.previewPiece(plan.piece) { closed.get() || cancelled() }
+                if (plan.offset + plan.length > bytes.size) throw IOException("Verified piece shorter than selected file range")
+                bytes.copyInto(target, offset, plan.offset, plan.offset + plan.length)
+                return plan.length
+            }
             state.prioritize(file, position, pieceLength)
             val bytes = state.piece(plan.piece) { closed.get() || cancelled() }
             if (plan.offset + plan.length > bytes.size) throw IOException("Verified piece shorter than selected file range")
@@ -364,6 +461,32 @@ class TorrentEngine internal constructor(
         @Volatile var waitingSince = 0L; private set
         fun metadataReady() { if (metadataAt == 0L) metadataAt = android.os.SystemClock.elapsedRealtime() }
         fun retain() = synchronized(monitor) { refs++; idleAt = Long.MAX_VALUE }
+        /** قارئ معاينة: فقط والمشاهدة قائمة (قارئ حقيقي اختار الملف)، فلا يُبدأ تورنت ولا يُعاد اختيار. */
+        fun retainForPreview(): kotlin.Pair<TorrentFile, Int>? = synchronized(monitor) {
+            val f = file
+            if (refs == 0 || f == null || pieceLength <= 0 || torrent == null) null else { refs++; idleAt = Long.MAX_VALUE; f to pieceLength }
+        }
+        /**
+         * قطعة لإطار معاينة: أولوية FIVE بلا موعد (النافذة 6-7 بمواعيد تسبقها دائمًا، وما قدّامها 4)، ولا إعادة بناء لمنطقة
+         * مفرّغة، ومهلة قصيرة. القطعة المنزّلة تبقى على القرص، فالرجوع للمعاينة نفسها فوري.
+         */
+        fun previewPiece(piece: Int, cancelled: () -> Boolean): ByteArray {
+            val start = android.os.SystemClock.elapsedRealtime()
+            synchronized(monitor) {
+                val handle = torrent ?: throw IOException("Torrent session ended")
+                if (evicted(piece)) throw IOException("Preview piece was evicted")
+                if (!handle.havePiece(piece) && piece !in deadlined && piece !in window && piece !in aheadRange) handle.piecePriority(piece, Priority.FIVE)
+                while (true) {
+                    checkCancelled(cancelled)
+                    pieces[piece]?.let { return it }
+                    if (refs == 0) throw InterruptedIOException("Torrent has no active reader")
+                    if (failed.remove(piece)) throw IOException("Torrent piece read failed")
+                    if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
+                    if (android.os.SystemClock.elapsedRealtime() - start >= PREVIEW_WAIT_MS) throw IOException("Preview piece timed out")
+                    try { monitor.wait(100) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent read interrupted") }
+                }
+            }
+        }
         /**
          * Media3 closes and reopens the reader on every extractor seek (MP4 moov / MKV cues / AVI idx1
          * live at the end of the file). Pausing here disconnected every peer on each reopen, so a real
@@ -661,6 +784,8 @@ class TorrentEngine internal constructor(
     }
     private fun allocatedBytes(folder: File): Long = folder.walkTopDown().filter { it.isFile }.sumOf { runCatching { Os.stat(it.path).st_blocks * 512L }.getOrDefault(it.length()) }
     companion object {
+        /** تنزيل دائم بلا أي تقدّم ثلاث دقائق: يُبلَّغ بسببه (لا مشاركين) بدل انتظار بلا نهاية. */
+        const val PERMANENT_STALL_MS = 3 * 60_000L
         const val SCHEME = "vantara-torrent"
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024
@@ -675,6 +800,8 @@ class TorrentEngine internal constructor(
         private const val METADATA_TIMEOUT_MS = 45_000L
         private const val PIECE_STALL_MS = 30_000L
         private const val PIECE_MAX_WAIT_MS = 180_000L
+        /** مهلة قطعة معاينة الشريط: إطار لا يصل خلالها يُترك ويُعاد لاحقًا، والمشاهدة لا تنتظره. */
+        private const val PREVIEW_WAIT_MS = 25_000L
         private const val IDLE_GRACE_MS = 20_000L
         private const val ONE_SECOND_NS = 1_000_000_000L
         private const val PREFETCH_HOLD_MS = 90_000L

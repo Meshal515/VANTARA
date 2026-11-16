@@ -1,0 +1,279 @@
+{
+  "codeSha": "65a66a2a82ca58d4c91718a371ac0765ae360699",
+  "meaning": "Actual per-source observations; nativePlayback PASS does not certify untested mandatory operations. Sources overlap with Aniyomi; do not sum across ecosystems as distinct providers.",
+  "sources": [
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Anime4up",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 1674
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 3631
+        },
+        "details": {
+          "result": "PASS",
+          "ms": 3829
+        },
+        "episodes": {
+          "result": "PASS",
+          "ms": 3313
+        },
+        "videoLinks": {
+          "result": "PASS",
+          "ms": 28015
+        },
+        "nativePlayback": {
+          "result": "FAIL",
+          "reason": "AssertionError: Clock did not advance for 25 seconds",
+          "ms": 65632
+        }
+      },
+      "nativeMeasurements": null,
+      "mediaByteLinks": 2,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "AnimeRift",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 3480
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 5248
+        },
+        "details": {
+          "result": "PASS",
+          "ms": 3165
+        },
+        "episodes": {
+          "result": "PASS",
+          "ms": 2697
+        },
+        "videoLinks": {
+          "result": "PASS",
+          "ms": 23182
+        },
+        "nativePlayback": {
+          "result": "PASS",
+          "ms": 68553
+        }
+      },
+      "nativeMeasurements": "advancedMs=29863;decodedFrames=717;droppedFrames=0;seekForward=true;seekBackward=true;qualities=720,1080;processRestart=NOT_TESTED",
+      "mediaByteLinks": 6,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "AnimeWitcher",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 3279
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 2620
+        },
+        "details": {
+          "result": "PASS",
+          "ms": 1854
+        },
+        "episodes": {
+          "result": "PASS",
+          "ms": 1407
+        },
+        "videoLinks": {
+          "result": "PASS",
+          "ms": 9424
+        },
+        "nativePlayback": {
+          "result": "PASS",
+          "ms": 45168
+        }
+      },
+      "nativeMeasurements": "advancedMs=29784;decodedFrames=713;droppedFrames=1;seekForward=true;seekBackward=true;qualities=1080;processRestart=NOT_TESTED",
+      "mediaByteLinks": 3,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Witanime",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 3437
+      },
+      "operations": {
+        "catalogue": {
+          "result": "FAIL",
+          "reason": "VERIFICATION_REQUIRED",
+          "ms": 5199
+        }
+      },
+      "nativeMeasurements": null,
+      "mediaByteLinks": 0,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Akwam",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 1855
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 13944
+        },
+        "details": {
+          "result": "PASS",
+          "ms": 3123
+        },
+        "episodes": {
+          "result": "PASS",
+          "ms": 2296
+        },
+        "videoLinks": {
+          "result": "PASS",
+          "ms": 5726
+        },
+        "nativePlayback": {
+          "result": "PASS",
+          "ms": 47380
+        }
+      },
+      "nativeMeasurements": "advancedMs=29496;decodedFrames=729;droppedFrames=7;seekForward=true;seekBackward=true;qualities=720;processRestart=NOT_TESTED",
+      "mediaByteLinks": 2,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Cimalight",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 3659
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 3138
+        },
+        "details": {
+          "result": "PASS",
+          "ms": 3110
+        },
+        "episodes": {
+          "result": "PASS",
+          "ms": 1912
+        },
+        "videoLinks": {
+          "result": "PASS",
+          "ms": 4154
+        },
+        "nativePlayback": {
+          "result": "FAIL",
+          "reason": "NO_NATIVE_PREPARED_CANDIDATE",
+          "ms": 5717
+        }
+      },
+      "nativeMeasurements": null,
+      "mediaByteLinks": 0,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Egydead",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 1027
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 7780
+        }
+      },
+      "nativeMeasurements": null,
+      "mediaByteLinks": 0,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Faselhd",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 1283
+      },
+      "operations": {
+        "catalogue": {
+          "result": "FAIL",
+          "reason": "PROVIDER_FAILED",
+          "ms": 1158
+        }
+      },
+      "nativeMeasurements": null,
+      "mediaByteLinks": 0,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    },
+    {
+      "ecosystem": "cloudstream",
+      "provider": "Mycima",
+      "extensionInstall": {
+        "result": "PASS",
+        "ms": 1233
+      },
+      "operations": {
+        "catalogue": {
+          "result": "PASS",
+          "ms": 13709
+        }
+      },
+      "nativeMeasurements": null,
+      "mediaByteLinks": 0,
+      "fullJourney": "NOT_CERTIFIED",
+      "restart": "NOT_TESTED",
+      "search": "NOT_TESTED",
+      "coverDisplay": "NOT_TESTED",
+      "subtitles": "NOT_TESTED"
+    }
+  ]
+}

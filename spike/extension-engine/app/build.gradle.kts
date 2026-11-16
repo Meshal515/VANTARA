@@ -102,7 +102,7 @@ dependencies {
     // توقيعه. أي إضافة تنفّذه تشير إلى androidx.preference، فغيابه يعني
     // NoClassDefFoundError عند تحميل الصنف لا عند استعماله.
     implementation("androidx.preference:preference-ktx:1.2.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // الشبكة. الإصدارات مثبَّتة بقصد: الإضافات مبنيّة على هذه الخطوط.
     implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")

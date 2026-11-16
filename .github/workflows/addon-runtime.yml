@@ -2,7 +2,7 @@ name: Android addon playback runtime
 
 on:
   push:
-    branches: [chatgpt/addon-playback-compatibility-20261009, main, 'claude/**']
+    branches: [feat/addons-v7-native-manager-20261027, chatgpt/addon-playback-compatibility-20261009, main, 'claude/**']
     paths:
       - 'android/app/src/**/addons/**'
       - 'android/app/src/androidTest/assets/addon-*'
