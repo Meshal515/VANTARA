@@ -588,15 +588,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * عقد نُزعت من الصفحة قبل أن تقترب (قائمة أُعيد رسمها) لا تبقى منتظرة ولا مراقبة (#311 D-016): تُكنس حين
    * تكبر الخريطة، فتبقى محدودة بما في الصفحة فعلًا.
    */
+  // البطاقة تطلب غلافها قبل إلحاقها بالقائمة (updates-view وinsights): كنسها في اللحظة نفسها كان يحذف بطاقات الدفعة
+  // التي لم تُلحق بعد، فيبقى هيكلها فارغًا للأبد حتى تخرج وترجع (ST1، وصور المالك 16 نوفمبر). يُكنس فقط ما بقي
+  // منزوعًا بعد مهلة: المنزوعة فعلًا من قائمة أُعيد رسمها، لا المبنية الآن.
+  const registeredAt = new WeakMap();
+  const DETACHED_GRACE_MS = 10_000;
   const sweepDetached = (map, release) => {
     if (map.size < 120) return;
-    for (const node of [...map.keys()]) if (!node.isConnected) { map.delete(node); release?.(node); }
+    const now = Date.now();
+    for (const node of [...map.keys()]) {
+      if (node.isConnected || now - (registeredAt.get(node) ?? 0) < DETACHED_GRACE_MS) continue;
+      map.delete(node); release?.(node);
+    }
   };
   function nearViewport(node) {
     if (!nearObserver) return Promise.resolve();
     return new Promise((resolve) => {
       nearWaiters.get(node)?.();
       sweepDetached(nearWaiters, (n) => nearObserver.unobserve(n));
+      registeredAt.set(node, Date.now());
       nearWaiters.set(node, resolve);
       nearObserver.observe(node);
     });
@@ -651,7 +661,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       // ثمانية أعمال تُحسم في آنٍ: الشبكة تحمّل 30 غلافًا بالتوازي في ربع ثانية، وثلاثة فقط كانت تجعل قائمة من
       // ثلاثين تنتظر عشر جولات متتالية
-      if (artActive < 8) void run();
+      // 16 لا 8: كل حسم ينتظر الرسمي حتى 6 ث، وطلب AniList يجمع 20 عنوانًا، فثمانية كانت تجعل شاشة من ثلاثين غلافًا
+      // تنتظر أربع جولات متتالية (حتى 24 ثانية في «آخر التحديثات»، بلاغ المالك 16 نوفمبر)
+      if (artActive < 16) void run();
       else artWaiting.push(run);
     });
   }
@@ -815,7 +827,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   }
   /** بطاقات بلا غلاف تنتظر معرفته. محدودة: المنزوعة تُكنس حين تُضاف غيرها (#311 D-006). */
   const waitingCovers = new Map();
-  const waitCover = (container, work) => { sweepDetached(waitingCovers); waitingCovers.set(container, work); };
+  const waitCover = (container, work) => { sweepDetached(waitingCovers); registeredAt.set(container, Date.now()); waitingCovers.set(container, work); };
   onCoverKnown((workId, url) => {
     for (const [container, work] of waitingCovers) {
       if (!container.isConnected) {
