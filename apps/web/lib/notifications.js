@@ -103,16 +103,21 @@ export function togetherInvite(row, actor) {
   return { code, title: `${actor} يدعوك ${reading ? 'تقرأ' : 'تشاهد'} معه` };
 }
 
-/** جسم JSON صغير (رسائل وجديد المفضلة)؛ نص قديم أو فاسد = null فيُعرض كما هو. */
+/**
+ * بيانات الإشعار المنظمة (عمود meta: عدد الرسائل، مدى الفصول، العنوان، الغلاف). body يبقى جملة
+ * مقروءة تعرضها النسخ القديمة كما هي. null حين لا بيانات (الأنواع القديمة).
+ */
 export function notificationData(row) {
-  const raw = row?.body;
-  if (typeof raw !== 'string' || !raw.startsWith('{')) return null;
-  try {
-    const v = JSON.parse(raw);
-    return v && typeof v === 'object' ? v : null;
-  } catch {
-    return null;
+  for (const raw of [row?.meta, row?.body]) {
+    if (typeof raw !== 'string' || !raw.startsWith('{')) continue;
+    try {
+      const v = JSON.parse(raw);
+      if (v && typeof v === 'object') return v;
+    } catch {
+      // التالي
+    }
   }
+  return null;
 }
 
 const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);

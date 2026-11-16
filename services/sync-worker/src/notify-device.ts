@@ -87,7 +87,7 @@ export async function pendingNotifications(env: Env, userId: string, now: number
   const settings = phoneSettings((await env.DB.prepare('SELECT data FROM settings WHERE user_id = ?').bind(userId).first<{ data: string }>())?.data);
   if (!settings.phone) return reply({ items: [], lockPreview: settings.lockPreview });
   const { results } = await env.DB.prepare(
-    `SELECT n.id, n.kind, n.actor_id, n.series_ref, n.body, n.link, n.created_at, p.display_name, p.avatar_key
+    `SELECT n.id, n.kind, n.actor_id, n.series_ref, n.body, n.meta, n.link, n.created_at, p.display_name, p.avatar_key
        FROM notifications n LEFT JOIN profiles p ON p.user_id = n.actor_id
       WHERE n.user_id = ? AND n.read = 0 AND n.seen = 0 AND n.created_at >= ?
         AND (n.actor_id IS NULL OR n.actor_id != ?)

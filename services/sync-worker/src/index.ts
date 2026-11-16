@@ -334,7 +334,7 @@ const DELTA_TABLES = [
   ['recommendation_recipients', 'recommendation_id, user_id, state, intent, responded_at, rev'],
   // `seen` يسافر مع الصف: بلا «عُرض» يتكرر التنبيه الجانبي عند كل مزامنة،
   // أو يُعتبر العرضُ قراءةً فيختفي غير المقروء بلا أن يفتحه أحد
-  ['notifications', 'id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev'],
+  ['notifications', 'id, user_id, kind, actor_id, series_ref, body, meta, link, read, seen, created_at, rev'],
   ['activity', 'id, actor_id, verb, series_ref, target_user_id, link, payload, created_at, rev, removed, social_at'],
   ['activity_receipts', 'event_id, user_id, delivered_at, seen_at, rev'],
   ['settings', 'user_id, data, rev'],
@@ -852,22 +852,35 @@ function messageNotificationStatements(
   db: Env['DB'],
   input: { messageId: string; senderId: string; accounts: readonly string[]; preview: string | null; voice: boolean; now: number; rev: number },
 ): D1PreparedStatement[] {
-  const body = JSON.stringify(input.voice ? { v: 1, n: 1 } : { p: (input.preview ?? '').slice(0, 140), n: 1 });
+  // body نص الرسالة كما هو (مقروء في النسخ القديمة)، والعدّ في meta
+  const body = input.voice ? 'رسالة صوتية 🎤' : (input.preview ?? '').slice(0, 140);
+  const meta = JSON.stringify(input.voice ? { v: 1, n: 1 } : { n: 1 });
   return notificationTargets({ accounts: input.accounts, actorId: input.senderId }).map((recipient) =>
     db
       .prepare(
-        `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev)
-         SELECT ?, ?, 'MESSAGE', ?, NULL, ?, ?, 0, 0, ?, ?
+        `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, meta, link, read, seen, created_at, rev)
+         SELECT ?, ?, 'MESSAGE', ?, NULL, ?, ?, ?, 0, 0, ?, ?
           WHERE EXISTS (SELECT 1 FROM majlis_messages WHERE id = ? AND rev = ?)
          ON CONFLICT (id) DO UPDATE SET
-           body = json_set(excluded.body, '$.n',
-                    CASE WHEN notifications.read = 0 AND json_valid(notifications.body)
-                         THEN COALESCE(json_extract(notifications.body, '$.n'), 1) + 1 ELSE 1 END),
+           body = excluded.body,
+           meta = json_set(excluded.meta, '$.n',
+                    CASE WHEN notifications.read = 0 AND json_valid(notifications.meta)
+                         THEN COALESCE(json_extract(notifications.meta, '$.n'), 1) + 1 ELSE 1 END),
            link = excluded.link, read = 0, seen = 0, created_at = excluded.created_at, rev = excluded.rev`,
       )
-      .bind(`msg:${input.senderId}:${recipient}`.slice(0, NOTIFICATION_ID_MAX), recipient, input.senderId, body,
+      .bind(`msg:${input.senderId}:${recipient}`.slice(0, NOTIFICATION_ID_MAX), recipient, input.senderId, body, meta,
         `vantara://majlis/msg/${input.messageId}`, input.now, input.rev, input.messageId, input.rev),
   );
+}
+
+/** «نزل الفصل 120 من Solo Leveling» — نفس صياغة unitLine في الواجهة، جملة كاملة لـbody. */
+function unitSentence(w: { title: string; kind: string; season: number | null; a: number | null; b: number | null }): string {
+  if (w.kind === 'movie' || w.b == null) return `صار متاحًا الآن: ${w.title}`;
+  const many = w.a != null && w.a !== w.b;
+  const range = many ? `${Math.min(w.a!, w.b)}–${Math.max(w.a!, w.b)}` : `${w.b}`;
+  const line = w.kind === 'episode' ? (many ? `نزلت الحلقات ${range}` : `نزلت الحلقة ${range}`) : many ? `نزلت الفصول ${range}` : `نزل الفصل ${range}`;
+  const season = w.kind === 'episode' && w.season != null ? `الموسم ${w.season} · ` : '';
+  return `${season}${line} من ${w.title}`;
 }
 
 export async function notifyFavoriteUnits(env: Env, now: number, units: readonly CreatedUnit[]): Promise<number> {
@@ -899,22 +912,28 @@ export async function notifyFavoriteUnits(env: Env, now: number, units: readonly
     fans.push(...(results ?? []));
   }
   if (!fans.length) return 0;
-  const same = (field: string) => `json_extract(notifications.body, '$.${field}') IS json_extract(excluded.body, '$.${field}')`;
+  const same = (field: string) => `json_extract(notifications.meta, '$.${field}') IS json_extract(excluded.meta, '$.${field}')`;
+  const merge = `notifications.read = 0 AND json_valid(notifications.meta) AND ${same('k')} AND ${same('s')}`;
+  const lo = `min(json_extract(notifications.meta, '$.a'), json_extract(excluded.meta, '$.a'))`;
+  const hi = `max(json_extract(notifications.meta, '$.b'), json_extract(excluded.meta, '$.b'))`;
   await commitAtNextRevision(env, now, [], (rev) => fans.map((f) => {
     const w = byWork.get(f.series_ref)!;
-    const body = JSON.stringify({ t: w.title, k: w.kind, s: w.season, a: w.a, b: w.b, ...(w.cover ? { c: w.cover } : {}) });
+    const meta = JSON.stringify({ t: w.title, k: w.kind, s: w.season, a: w.a, b: w.b, ...(w.cover ? { c: w.cover } : {}) });
+    // body جملة مقروءة (تعرضها النسخ القديمة كما هي)؛ المدى المجمّع يُعاد كتابته في SQL
+    const text = unitSentence(w);
+    const season = w.kind === 'episode' && w.season != null ? `الموسم ${w.season} · ` : '';
+    const many = `${season}${w.kind === 'episode' ? 'نزلت الحلقات ' : 'نزلت الفصول '}`;
     return env.DB.prepare(
-      `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, link, read, seen, created_at, rev)
-       VALUES (?, ?, 'NEW_UNIT', NULL, ?, ?, ?, 0, 0, ?, ?)
+      `INSERT INTO notifications (id, user_id, kind, actor_id, series_ref, body, meta, link, read, seen, created_at, rev)
+       VALUES (?, ?, 'NEW_UNIT', NULL, ?, ?, ?, ?, 0, 0, ?, ?)
        ON CONFLICT (id) DO UPDATE SET
-         body = CASE WHEN notifications.read = 0 AND json_valid(notifications.body) AND ${same('k')} AND ${same('s')}
-                     THEN json_set(excluded.body,
-                            '$.a', min(json_extract(notifications.body, '$.a'), json_extract(excluded.body, '$.a')),
-                            '$.b', max(json_extract(notifications.body, '$.b'), json_extract(excluded.body, '$.b')))
+         body = CASE WHEN ${merge} AND ${lo} < ${hi}
+                     THEN ? || printf('%g', ${lo}) || '–' || printf('%g', ${hi}) || ?
                      ELSE excluded.body END,
+         meta = CASE WHEN ${merge} THEN json_set(excluded.meta, '$.a', ${lo}, '$.b', ${hi}) ELSE excluded.meta END,
          read = 0, seen = 0, created_at = excluded.created_at, rev = excluded.rev`,
-    ).bind(`unit:${f.series_ref}:${f.user_id}`.slice(0, NOTIFICATION_ID_MAX), f.user_id, f.series_ref, body,
-      socialLinkFor({ kind: 'work', seriesRef: f.series_ref }), now, rev);
+    ).bind(`unit:${f.series_ref}:${f.user_id}`.slice(0, NOTIFICATION_ID_MAX), f.user_id, f.series_ref, text, meta,
+      socialLinkFor({ kind: 'work', seriesRef: f.series_ref }), now, rev, many, ` من ${w.title}`);
   }));
   return fans.length;
 }
@@ -1955,7 +1974,7 @@ export function statementsFor(
           // معاينة الرسالة المحذوفة لا تبقى في إشعار أحد
           db
             .prepare(
-              `UPDATE notifications SET body = json_object('n', COALESCE(json_extract(body, '$.n'), 1), 'x', 1), rev = ?
+              `UPDATE notifications SET body = 'حُذفت الرسالة', meta = json_set(CASE WHEN json_valid(meta) THEN meta ELSE '{}' END, '$.x', 1), rev = ?
                 WHERE kind = 'MESSAGE' AND link = ? AND EXISTS (SELECT 1 FROM majlis_messages WHERE id = ? AND rev = ? AND deleted != 0)`,
             )
             .bind(rev, `vantara://majlis/msg/${id}`, id, rev),

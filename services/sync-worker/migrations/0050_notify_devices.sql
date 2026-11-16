@@ -9,3 +9,7 @@ CREATE TABLE IF NOT EXISTS notify_devices (
   last_used_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS notify_devices_user ON notify_devices (user_id, created_at);
+
+-- بيانات الإشعار المنظمة (عدد الرسائل، مدى الفصول، الغلاف) في عمود مستقل، و`body` يبقى جملة
+-- مقروءة دائمًا: نسخ Stable القديمة (وويندوز الذي لا يتحدث) تعرض body كما هو، فلا ترى JSON.
+ALTER TABLE notifications ADD COLUMN meta TEXT;
