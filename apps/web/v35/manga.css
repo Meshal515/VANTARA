@@ -2104,3 +2104,30 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
 
 /* غلاف وصل بعد ظهور صفحة العمل بنسبة غير نسبة مكانه: يبقى المكان كما ظهر ويُعرض الغلاف كاملًا داخله (shell.js) */
 .v35 #detail #detailCover > img.mw-fit { object-fit: contain; }
+
+/* ═════ قبل وصول المعلومات (بلاغ المالك، 16 نوفمبر): لا صناديق سوداء ═════
+ * الغلاف والبنر والاسم كانت تظهر مساحات داكنة مصمتة («سواد») في «ويبتوني» و«الملف» حتى تصل الصور والاسم.
+ * مكانها هيكل هادئ بلون القسم يتنفس، ويختفي وحده لحظة وصول الصورة أو النص. */
+@keyframes mw-skel { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.v35 #detail .mw-cover:empty,
+.v35 #detail .mw-cover > .skeleton,
+.v35 #detail .mw-ban:not(.mw-ban--art):not(.mw-ban--cover) {
+  background:
+    radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+  animation: mw-skel 1.6s ease-in-out infinite;
+}
+.v35 #detail .mw-title:empty::before {
+  content: '';
+  display: inline-block;
+  width: min(60%, 220px);
+  height: 0.8em;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-2));
+  animation: mw-skel 1.6s ease-in-out infinite;
+}
+/* عنوان الشريط العلوي فارغ (المعلومات لم تصل): لا كبسولة فارغة بجانب «رجوع» */
+.v35 #detail .mw-bar .aw-bar-title:not(.has-logo):has(.aw-bar-text:empty) { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .v35 #detail .mw-cover:empty, .v35 #detail .mw-cover > .skeleton, .v35 #detail .mw-ban:not(.mw-ban--art):not(.mw-ban--cover), .v35 #detail .mw-title:empty::before { animation: none; }
+}
