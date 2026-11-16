@@ -52,6 +52,21 @@ describe('Together room client', () => {
     expect(room.clock.ready).toBe(true);
   });
 
+  it('a kick from the host is final: kicked status, no reconnect, and kick() goes on the wire', () => {
+    const { room, sockets, run } = harness();
+    const seen = [];
+    room.on('kicked', () => seen.push('kicked'));
+    sockets[0].open();
+    sockets[0].receive(welcome);
+    room.kick('u2');
+    expect(sockets[0].sent.at(-1)).toEqual({ t: 'kick', userId: 'u2' });
+    sockets[0].drop(4006);
+    run();
+    expect(room.status).toBe('kicked');
+    expect(seen).toEqual(['kicked']);
+    expect(sockets).toHaveLength(1);
+  });
+
   it('reconnects with backoff after a dropped connection', () => {
     const { room, sockets, run } = harness();
     sockets[0].open();

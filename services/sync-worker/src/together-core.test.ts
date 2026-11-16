@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUTOSTART_MS, createSettings, EMPTY_TTL_MS, HOST_GRACE_MS, LEAD_MS, normalizeCode, parseInvitees, positionAt, roomCode, RoomCore, versionMatch, type Out,
+  AUTOSTART_COUNTDOWN_MS, createSettings, EMPTY_TTL_MS, HOST_GRACE_MS, LEAD_MS, normalizeCode, parseInvitees, positionAt, roomCode, RoomCore, versionMatch, type Out,
 } from './together-core.ts';
 
 const HOST = 'u-host';
@@ -182,7 +182,7 @@ describe('Together room core', () => {
     expect(of(core.handle('c-b', { t: 'report', pos: 0, state: 'failed', source: 'okru' }, 3_400), 'status')[0]!.msg).toMatchObject({ state: 'failed', source: 'okru' });
   });
 
-  it('the next episode stays in the same room and starts itself when everyone is ready', () => {
+  it('the next episode stays in the same room and starts itself only when everyone is ready on it', () => {
     const core = room();
     core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
     core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 3_000);
@@ -190,22 +190,74 @@ describe('Together room core', () => {
     core.handle('c-host', { t: 'cmd', op: 'load', media: next }, 1_500_000);
     expect(core.timeline).toMatchObject({ started: false, autoStart: true, playing: false, pos: 0 });
     expect(core.timeline.media?.key).toBe(next.key);
-    core.handle('c-host', { t: 'report', pos: 0, state: 'ready' }, 1_503_000);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready', mediaKey: next.key }, 1_503_000);
     expect(core.timeline.started).toBe(false);
-    const out = core.handle('c-b', { t: 'report', pos: 0, state: 'ready' }, 1_505_000);
+    const out = core.handle('c-b', { t: 'report', pos: 0, state: 'ready', mediaKey: next.key }, 1_505_000);
     expect(of(out, 'state')).toHaveLength(1);
-    expect(core.timeline).toMatchObject({ started: true, playing: true, at: 1_505_000 + LEAD_MS });
+    // عدّ تنازلي مشترك قبل البدء التلقائي
+    expect(core.timeline).toMatchObject({ started: true, playing: true, at: 1_505_000 + AUTOSTART_COUNTDOWN_MS });
   });
 
-  it('a slow participant cannot hold the next episode: it starts after the grace from host ready', () => {
+  it('a stale report from the previous episode never counts as ready', () => {
     const core = room();
     core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 3_000);
     core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:x:e2', kind: 'anime', label: 'x 2' } }, 10_000);
-    core.handle('c-b', { t: 'report', pos: 0, state: 'preparing' }, 10_500);
-    core.handle('c-host', { t: 'report', pos: 0, state: 'ready' }, 11_000);
-    expect(core.nextDeadline()).toBe(11_000 + AUTOSTART_MS);
-    expect(core.tick(11_000 + AUTOSTART_MS - 1).out).toHaveLength(0);
-    expect(of(core.tick(11_000 + AUTOSTART_MS).out, 'state')).toHaveLength(1);
+    // تقرير أُرسل قبل وصول «load» عند الضيف: الحلقة الأولى وهو يشاهد
+    core.handle('c-b', { t: 'report', pos: 50_000, state: 'playing', mediaKey: 'anime:x:e1' }, 10_050);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:x:e2' }, 11_000);
+    expect(core.timeline.started).toBe(false);
+  });
+
+  it('nothing starts by itself: no grace timer, no solo host auto-start, failed guests wait for the host', () => {
+    const core = room();
+    core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:x:e2', kind: 'anime', label: 'x 2' } }, 10_000);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:x:e2' }, 11_000);
+    // المضيف وحده: ينتظر «ابدأ» منه
+    expect(core.timeline.started).toBe(false);
+    expect(core.nextDeadline()).toBeNull();
+    expect(core.tick(11_000 + 120_000).out).toHaveLength(0);
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 12_000);
+    core.handle('c-b', { t: 'report', pos: 0, state: 'failed', mediaKey: 'anime:x:e2' }, 12_500);
+    expect(core.timeline.started).toBe(false);
+    // المضيف يبدأ بنفسه متى شاء
+    core.handle('c-host', { t: 'cmd', op: 'play', pos: 0, countdownMs: 3_000 }, 13_000);
+    expect(core.timeline).toMatchObject({ started: true, at: 16_000 });
+  });
+
+  it('the host can kick someone: closed with 4006, cannot come back until re-invited', () => {
+    const core = room({}, 1_000, ['u-b', 'u-c']);
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.join({ conn: 'c-c', userId: 'u-c', name: 'ج', avatarKey: null }, 2_000);
+    expect(of(core.handle('c-b', { t: 'kick', userId: 'u-c' }, 3_000), 'denied')).toHaveLength(1);
+    expect(core.handle('c-host', { t: 'kick', userId: HOST }, 3_000)).toHaveLength(0);
+    const out = core.handle('c-host', { t: 'kick', userId: 'u-c' }, 3_000);
+    expect(of(out, 'kicked')[0]!.to).toEqual(['c-c']);
+    expect(out).toContainEqual({ close: 'c-c', code: 4006, reason: 'kicked' });
+    expect(of(out, 'left')[0]!.msg).toMatchObject({ userId: 'u-c', kicked: true });
+    expect(core.members.has('c-c')).toBe(false);
+    expect(core.invited('u-c')).toBe(false);
+    const back = core.join({ conn: 'c-c2', userId: 'u-c', name: 'ج', avatarKey: null }, 4_000);
+    expect(back).toContainEqual({ close: 'c-c2', code: 4006, reason: 'kicked' });
+    core.handle('c-host', { t: 'invite', userIds: ['u-c'] }, 5_000);
+    expect(core.invited('u-c')).toBe(true);
+    // غرفة «للكل»: الإخراج يمنع العودة أيضًا
+    const open = room();
+    open.join({ conn: 'c-d', userId: 'u-d', name: 'د', avatarKey: null }, 2_000);
+    open.handle('c-host', { t: 'kick', userId: 'u-d' }, 3_000);
+    expect(open.invited('u-d')).toBe(false);
+  });
+
+  it('kicking the one guest who was still preparing lets the ready ones start', () => {
+    const core = room();
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.join({ conn: 'c-c', userId: 'u-c', name: 'ج', avatarKey: null }, 2_000);
+    core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:x:e2', kind: 'anime', label: 'x 2' } }, 10_000);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:x:e2' }, 11_000);
+    core.handle('c-b', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:x:e2' }, 11_000);
+    core.handle('c-c', { t: 'report', pos: 0, state: 'preparing', mediaKey: 'anime:x:e2' }, 11_000);
+    expect(core.timeline.started).toBe(false);
+    core.handle('c-host', { t: 'kick', userId: 'u-c' }, 12_000);
     expect(core.timeline.started).toBe(true);
   });
 });

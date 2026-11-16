@@ -38,6 +38,13 @@ describe('web Together player uses Android room protocol', () => {
     expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({state:'preparing'}));
     f.bridge.ready(); expect(f.video.currentTime).toBe(42); expect(f.video.paused).toBe(true); f.bridge.destroy();
   });
+  it('the waiting screen shows the episode the host moved the room to, not the old one', () => {
+    vi.useFakeTimers(); const f = fixture(); f.bridge.ready();
+    f.hooks.onEpisode.mockImplementation(() => {}); // التجهيز ما خلص: المشغّل ما زال على الحلقة 1
+    f.receive({ ...f.room.timeline, media: { key: 'anime:42#2', kind: 'anime' }, started: false, seq: 1 });
+    expect(f.hooks.onLobby).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, episode: 2 }));
+    f.bridge.destroy();
+  });
   it('keeps host controls on the wire and guest controls out of it', () => {
     vi.useFakeTimers(); const h = fixture(true); h.bridge.ready(); h.bridge.playPause(true); h.bridge.seek(80000);
     expect(h.room.command).toHaveBeenCalledWith('play', { pos: 0, countdownMs: 3000 }); expect(h.room.command).toHaveBeenCalledWith('seek', { pos: 80000 });

@@ -48,9 +48,9 @@ class TogetherClient(
         fun onMode(mode: String) {}
         fun onStatus(userId: String, name: String, state: String, source: String?) {}
         fun onJoined(name: String) {}
-        fun onLeft(name: String) {}
+        fun onLeft(name: String, kicked: Boolean = false) {}
         fun onHost(userId: String) {}
-        /** نهائي: full | gone | uninvited | replaced. لا إعادة محاولة بعده. */
+        /** نهائي: full | gone | uninvited | replaced | kicked. لا إعادة محاولة بعده. */
         fun onClosed(reason: String) {}
         fun onConnection(live: Boolean) {}
     }
@@ -61,6 +61,8 @@ class TogetherClient(
     private var closed = false
     private var attempt = 0
     private var live = false
+    /** آخر رسالة وصلت (أي رسالة). صمت طويل والاتصال «مفتوح» = اتصال نصف ميت على الجوال. */
+    private var lastRx = 0L
 
     var me: String? = null; private set
     var hostUserId: String? = null; private set
@@ -79,24 +81,31 @@ class TogetherClient(
         val req = Request.Builder().url(url).header("Sec-WebSocket-Protocol", "vantara.together").apply {
             token?.let { header("Authorization", "Bearer $it") }
         }.build()
+        // كل رد نداء يخص اتصاله هو فقط: اتصال قديم يُغلق بعد إعادة الاتصال (مثلًا الخادم
+        // يغلقه بـ4001 لأن نفس الحساب دخل من جديد) لا يُنهي الغرفة ولا يفتح اتصالًا ثالثًا.
         ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 main.post {
+                    if (ws !== webSocket || closed) return@post
                     attempt = 0
+                    lastRx = SystemClock.elapsedRealtime()
                     for (i in 0 until 8) main.postDelayed({ ping() }, i * 150L)
+                    main.removeCallbacks(resync)
                     main.postDelayed(resync, RESYNC_MS)
+                    main.removeCallbacks(heartbeat)
+                    main.postDelayed(heartbeat, HEARTBEAT_MS)
                 }
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
-                main.post { handle(msg) }
+                main.post { if (ws === webSocket && !closed) { lastRx = SystemClock.elapsedRealtime(); handle(msg) } }
             }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 // Complete the server's close handshake so onClosed can schedule reconnect.
                 webSocket.close(code, reason)
             }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { dropped(code) }.let {}
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { dropped(response?.code ?: 1006) }.let {}
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = main.post { if (ws === webSocket) dropped(code) }.let {}
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = main.post { if (ws === webSocket) dropped(response?.code ?: 1006) }.let {}
         })
     }
 
@@ -104,14 +113,32 @@ class TogetherClient(
         override fun run() { ping(); main.postDelayed(this, RESYNC_MS) }
     }
 
+    /** نبضة كل 5 ث؛ إن لم يصل شيء 12 ث والاتصال «مفتوح» فهو ميت: نعيد الاتصال فورًا. */
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            val socket = ws ?: return
+            if (closed) return
+            if (SystemClock.elapsedRealtime() - lastRx > SILENCE_MS) {
+                ws = null
+                runCatching { socket.cancel() }
+                attempt = 0
+                dropped(1006)
+                return
+            }
+            ping()
+            main.postDelayed(this, HEARTBEAT_MS)
+        }
+    }
+
     private fun ping() = send(JSONObject().put("t", "ping").put("t0", SystemClock.elapsedRealtime().toDouble()))
 
     private fun dropped(code: Int) {
         main.removeCallbacks(resync)
+        main.removeCallbacks(heartbeat)
         ws = null
         setLive(false)
         if (closed) return
-        val final = when (code) { 4003 -> "full"; 4001 -> "replaced"; 4004 -> "gone"; 4005 -> "uninvited"; else -> null }
+        val final = when (code) { 4003 -> "full"; 4001 -> "replaced"; 4004 -> "gone"; 4005 -> "uninvited"; 4006 -> "kicked"; else -> null }
         if (final != null) { finish(final); return }
         val wait = BACKOFF[minOf(attempt, BACKOFF.size - 1)]
         attempt++
@@ -128,7 +155,9 @@ class TogetherClient(
         if (closed) return
         closed = true
         main.removeCallbacks(resync)
+        main.removeCallbacks(heartbeat)
         runCatching { ws?.close(1000, reason) }
+        setLive(false)
         listener.onClosed(reason)
     }
 
@@ -158,8 +187,8 @@ class TogetherClient(
             "host" -> { hostUserId = m.optString("userId"); listener.onHost(hostUserId!!) }
             "status" -> listener.onStatus(m.optString("userId"), m.optString("name"), m.optString("state"), m.optString("source").takeIf { it.isNotEmpty() && it != "null" })
             "joined" -> listener.onJoined(m.optString("name"))
-            "left" -> listener.onLeft(m.optString("name"))
-            "full", "gone", "uninvited" -> finish(m.optString("t"))
+            "left" -> listener.onLeft(m.optString("name"), m.optBoolean("kicked"))
+            "full", "gone", "uninvited", "kicked" -> finish(m.optString("t"))
         }
     }
 
@@ -176,7 +205,8 @@ class TogetherClient(
     fun command(op: String, pos: Double? = null, mediaKey: String? = null, mediaLabel: String? = null, countdownMs: Long? = null) = send(JSONObject().put("t", "cmd").put("op", op).apply {
         pos?.let { put("pos", it) }
         countdownMs?.let { put("countdownMs", it) }
-        if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", "anime").put("label", mediaLabel ?: mediaKey))
+        // نوع الغرفة نفسه (سينما تبقى سينما)، لا «أنمي» ثابتًا
+        if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", timeline?.mediaKind ?: "anime").put("label", mediaLabel ?: mediaKey))
     })
 
     fun report(pos: Double, state: String, source: String?, mediaKey: String?, durationMs: Long?, driftMs: Long?, driftP95: Long?) = send(
@@ -188,6 +218,14 @@ class TogetherClient(
 
     fun setMode(next: String) = send(JSONObject().put("t", "mode").put("mode", next))
 
+    /** المضيف يُخرج شخصًا (لا يعود إلا بدعوة جديدة). */
+    fun kick(userId: String) = send(JSONObject().put("t", "kick").put("userId", userId))
+
+    /** المضيف ينقل الاستضافة. */
+    fun giveHost(userId: String) = send(JSONObject().put("t", "host").put("userId", userId))
+
+    val connected get() = live
+
     fun close() {
         closed = true
         main.removeCallbacksAndMessages(null)
@@ -197,6 +235,8 @@ class TogetherClient(
 
     companion object {
         private const val RESYNC_MS = 30_000L
+        private const val HEARTBEAT_MS = 5_000L
+        private const val SILENCE_MS = 12_000L
         private val BACKOFF = longArrayOf(1_000, 2_000, 4_000, 8_000, 15_000)
 
         fun parseTimeline(o: JSONObject?): Timeline? {
@@ -211,6 +251,7 @@ class TogetherClient(
                 at = o.optDouble("at", 0.0),
                 rate = o.optDouble("rate", 1.0),
                 seq = o.optInt("seq"),
+                mediaKind = media?.optString("kind")?.takeIf { it.isNotEmpty() },
             )
         }
 

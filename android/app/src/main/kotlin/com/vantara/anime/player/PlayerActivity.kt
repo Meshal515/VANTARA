@@ -588,7 +588,7 @@ class PlayerActivity : Activity() {
             override fun message(text: String) = this@PlayerActivity.message(text)
             override fun episode() = episodeInt()
             override fun sourceName() = current?.let { codeOf(it) ?: it.server }
-            override fun switchToEpisode(n: Int) = switchEpisode(n)
+            override fun switchToEpisode(n: Int) = switchEpisode(n, fromRoom = true)
             override fun hasNextEpisode() = hasNext()
             override fun openPanel(title: String, build: (LinearLayout) -> Unit) = open(SheetKind.TOGETHER, title, build = build)
             override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
@@ -951,9 +951,15 @@ class PlayerActivity : Activity() {
         warmedEpisode = -1
     }
 
-    private fun switchEpisode(n: Int) {
+    /**
+     * [fromRoom]: الغرفة نفسها نقلتنا (المضيف اختار الحلقة). غير ذلك (القائمة، «التالي»،
+     * نهاية الحلقة) يمر على الغرفة أولًا: في المتزامنة المضيف ينقل الجميع، والضيف لا يبدّل
+     * وحده — وإلا بقيت الغرفة على الحلقة السابقة وشغّل المشغّل حلقتك على وقتها.
+     */
+    private fun switchEpisode(n: Int, fromRoom: Boolean = false) {
         val addonProviders = engine.addonProviders(sessionId)
         if (copies.isEmpty() && addonProviders.isEmpty()) return message("افتح الحلقة من صفحة الأنمي")
+        if (!fromRoom && together?.requestEpisode(n) == true) { sheet.close(); cancelCountdown(); return }
         attemptAbandon()
         attemptBegin()
         cancelCountdown()

@@ -197,6 +197,19 @@
 .v35 .tg-row-state.is-playing, .v35 .tg-row-state.is-ready { color: #6fe3a1; }
 .v35 .tg-row-state.is-buffering, .v35 .tg-row-state.is-preparing { color: #f5c76a; }
 .v35 .tg-row-where { display: grid; justify-items: end; gap: 4px; flex: none; }
+/* أدوات المضيف لكل شخص: سطر تحت الاسم */
+.v35 .tg-row { flex-wrap: wrap; }
+.v35 .tg-row-tools { flex-basis: 100%; display: flex; justify-content: flex-end; gap: 6px; padding-top: 2px; }
+.v35 .tg-mini {
+  height: 32px; padding: 0 12px; border-radius: 99px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-2); font: inherit; font-size: 12.5px; font-weight: 700;
+  transition: background var(--dur, 0.2s) ease, color var(--dur, 0.2s) ease, border-color var(--dur, 0.2s) ease;
+}
+.v35 .tg-mini:active { transform: scale(0.97); }
+.v35 .tg-mini.is-danger { color: #ff8b8e; border-color: rgba(255, 107, 110, 0.35); }
+.v35 .tg-mini.is-danger.is-armed { background: #e5484d; border-color: #e5484d; color: #fff; }
 .v35 .tg-row-pos { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14px; }
 .v35 .tg-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-text); }
 .v35 .tg-badge.is-warn { background: rgba(255, 170, 60, 0.16); color: #ffc070; }

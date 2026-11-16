@@ -53,9 +53,15 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
       driftP95: controller.stats().p95 });
   }
   const countdownTo = () => synced() && !keepPlayingWhileRoomStarts && room.timeline?.started && room.timeline.at - room.clock.serverNow() > 400 ? room.timeline.at : null;
+  // حلقة الغرفة الآن: أثناء الانتقال لحلقة المضيف الجديدة تُكتب هي لا السابقة
+  const roomEpisode = () => {
+    const k = room.timeline?.media?.key ?? '', prefix = `${together.mediaPrefix}#`;
+    const n = k.startsWith(prefix) ? Number(k.slice(prefix.length)) : NaN;
+    return Number.isSafeInteger(n) && n > 0 ? n : episode();
+  };
   function lobby() {
     if (closed) return;
-    onLobby({ visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared || countdownTo() != null), countdownTo: countdownTo(), now: () => room.clock.serverNow(), me: room.me, invited: room.info?.invited ?? together.session.invited ?? null, offset: videoOffsetMs, prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ episode: roomEpisode(), visible: synced() && !keepPlayingWhileRoomStarts && (!room.timeline?.started || !prepared || countdownTo() != null), countdownTo: countdownTo(), now: () => room.clock.serverNow(), me: room.me, invited: room.info?.invited ?? together.session.invited ?? null, offset: videoOffsetMs, prepared, blocked: false, host: room.isHost, connection: room.status, videoOffsetMs, setVideoOffset: ms => api.setVideoOffset(ms),
       roster: room.roster, start: () => api.playPause(true), openPanel: () => together.hub.openPanel() });
   }
   function align(force = false) {

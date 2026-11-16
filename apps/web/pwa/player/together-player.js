@@ -55,10 +55,16 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   }
   // العدّ التنازلي المشترك: الغرفة بدأت لكن لحظة البدء لم تأتِ بعد — الشاشة تبقى بالعدّ
   const countdownTo = () => (synced() && room.timeline?.started && room.timeline.at - room.clock.serverNow() > 400 ? room.timeline.at : null);
+  // حلقة الغرفة الآن (لا حلقة المشغّل): أثناء تجهيز الحلقة التي اختارها المضيف تكتب الشاشة رقمها هي
+  const roomEpisode = () => {
+    const key = room.timeline?.media?.key ?? '';
+    const n = key.startsWith(`${mediaPrefix}#`) ? Number(key.slice(mediaPrefix.length + 1)) : NaN;
+    return Number.isSafeInteger(n) && n > 0 ? n : episode();
+  };
   function paintLobby() {
     if (destroyed) return;
     const cd = countdownTo();
-    onLobby({ visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(), videoOffsetMs: syncOffset(), setVideoOffset: ms => api.setVideoOffset(ms),
+    onLobby({ episode: roomEpisode(), visible: synced() && (!room.timeline?.started || blocked || cd != null), countdownTo: cd, now: () => room.clock.serverNow(), prepared, failed, blocked, host: room.isHost, connection: room.status, roster: room.roster, me: room.me, invited: room.info?.invited ?? null, offset: syncOffset(), videoOffsetMs: syncOffset(), setVideoOffset: ms => api.setVideoOffset(ms),
       start: () => api.playPause(true), resume: () => { blocked = false; play(); paintLobby(); } });
   }
   function align(force = false) {

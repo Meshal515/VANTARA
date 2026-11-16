@@ -18,8 +18,16 @@ export const EMPTY_TTL_MS = 30 * 60_000;
 export const ROSTER_EVERY_MS = 1_000;
 /** فرق المدة الذي يُعدّ نفس النسخة. أكبر منه = «نسخة مختلفة» وتُقترح إزاحة. */
 export const SAME_VERSION_MS = 2_000;
-/** الحلقة التالية تبدأ وحدها حين يجهز الجميع، أو بعد هذه المهلة من جاهزية المضيف: لا أحد يوقف الغرفة. */
-export const AUTOSTART_MS = 20_000;
+/**
+ * الحلقة التالية لا تبدأ إلا بـ«ابدأ» من المضيف، أو وحدها حين يجهز كل الحاضرين فعلًا على
+ * الحلقة الجديدة (ومعه ضيف واحد على الأقل). لا مهلة تبدأ بدونهم: قرار المالك.
+ * البدء التلقائي بعدّ تنازلي مشترك، فلا يتفاجأ أحد.
+ */
+export const AUTOSTART_COUNTDOWN_MS = 3_000;
+/** حالات تعني «الحلقة محمّلة عندي وجاهزة». */
+const READY_STATES: readonly MemberState[] = ['ready', 'paused', 'playing'];
+/** حد قائمة المُخرَجين المحفوظة للغرفة. */
+const BANNED_MAX = 50;
 
 export type Mode = 'sync' | 'free';
 export type Control = 'host' | 'all';
@@ -36,7 +44,7 @@ export interface Timeline {
   media: MediaRef | null;
   /** بدأ التشغيل في هذه الحلقة؟ لا = غرفة الانتظار («جاري التجهيز… جاهز»). */
   started: boolean;
-  /** الحلقة التالية: تبدأ وحدها حين يجهز الحاضرون (أو بعد AUTOSTART_MS من جاهزية المضيف). */
+  /** الحلقة التالية: تبدأ وحدها فقط حين يجهز كل الحاضرين عليها، وإلا بـ«ابدأ» من المضيف. */
   autoStart: boolean;
   playing: boolean;
   /** موقع الحلقة بالمللي ثانية (أو رقم الصفحة في المانجا) عند لحظة الخادم at. */
@@ -55,6 +63,8 @@ export interface RoomSettings {
   createdAt: number;
   /** من يحق له الدخول: المدعوون بالاسم، أو '*' للكل. المضيف دائمًا. */
   allowed: string[] | '*';
+  /** من أخرجهم المضيف: لا يعودون إلا بدعوة جديدة منه. */
+  banned?: string[];
 }
 
 export interface Version {
@@ -92,6 +102,7 @@ export interface Persisted {
   timeline: Timeline;
   hostAwaySince: number | null;
   emptySince: number | null;
+  /** قديم: مهلة البدء التلقائي أُلغيت؛ يبقى ليُقرأ من غرف محفوظة. */
   hostReadyAt?: number | null;
 }
 
@@ -157,7 +168,6 @@ export class RoomCore {
   timeline: Timeline;
   hostAwaySince: number | null;
   emptySince: number | null;
-  hostReadyAt: number | null;
   readonly members = new Map<string, Member>();
   private lastRosterAt = 0;
   /** تغيّر شيء يستحق الحفظ (لا تقارير المواقع). */
@@ -168,11 +178,11 @@ export class RoomCore {
     this.timeline = saved.timeline;
     this.hostAwaySince = saved.hostAwaySince;
     this.emptySince = saved.emptySince;
-    this.hostReadyAt = saved.hostReadyAt ?? null;
     // غرف أُنشئت قبل الدعوات
     this.settings.allowed ??= '*';
     this.timeline.started ??= this.timeline.seq > 0;
     this.timeline.autoStart ??= false;
+    this.settings.banned ??= [];
   }
 
   static create(settings: RoomSettings, media: MediaRef | null, now: number): RoomCore {
@@ -185,7 +195,7 @@ export class RoomCore {
   }
 
   persisted(): Persisted {
-    return { settings: this.settings, timeline: this.timeline, hostAwaySince: this.hostAwaySince, emptySince: this.emptySince, hostReadyAt: this.hostReadyAt };
+    return { settings: this.settings, timeline: this.timeline, hostAwaySince: this.hostAwaySince, emptySince: this.emptySince };
   }
 
   private byUser(userId: string): Member | undefined {
@@ -199,8 +209,14 @@ export class RoomCore {
   }
 
   invited(userId: string): boolean {
-    const { allowed, hostUserId } = this.settings;
-    return userId === hostUserId || allowed === '*' || allowed.includes(userId);
+    const { allowed, hostUserId, banned } = this.settings;
+    if (userId === hostUserId) return true;
+    if (banned?.includes(userId)) return false;
+    return allowed === '*' || allowed.includes(userId);
+  }
+
+  banned(userId: string): boolean {
+    return userId !== this.settings.hostUserId && (this.settings.banned ?? []).includes(userId);
   }
 
   /** يعيد عضوًا بعد استيقاظ الكائن من السبات (الاتصال باقٍ، الذاكرة لا). */
@@ -211,6 +227,9 @@ export class RoomCore {
   join(member: Omit<Member, 'report' | 'joinedAt'>, now: number): Out[] {
     const out: Out[] = [];
     const previous = this.byUser(member.userId);
+    if (this.banned(member.userId)) {
+      return [{ to: [member.conn], msg: { t: 'kicked' } }, { close: member.conn, code: 4006, reason: 'kicked' }];
+    }
     if (!this.invited(member.userId)) {
       return [{ to: [member.conn], msg: { t: 'uninvited' } }, { close: member.conn, code: 4005, reason: 'uninvited' }];
     }
@@ -238,7 +257,8 @@ export class RoomCore {
     if (this.members.size === 0) this.emptySince = now;
     if (m.userId === this.settings.hostUserId) this.hostAwaySince = now;
     this.dirty = true;
-    return [{ to: 'all', msg: { t: 'left', userId: m.userId, name: m.name } }, this.rosterOut(now)];
+    // من كان يُنتظر طلع: إن صار الباقون كلهم جاهزين تبدأ الحلقة
+    return [{ to: 'all', msg: { t: 'left', userId: m.userId, name: m.name } }, ...this.maybeAutoStart(now), this.rosterOut(now)];
   }
 
   isHost(conn: string): boolean {
@@ -279,12 +299,24 @@ export class RoomCore {
       case 'invite': {
         if (!this.isHost(conn)) return this.denied(conn);
         const { allowed } = this.settings;
-        if (allowed === '*') return [];
         const ids = Array.isArray(msg['userIds']) ? (msg['userIds'] as unknown[]).filter((x): x is string => typeof x === 'string' && x.length <= 80) : [];
-        const merged = [...new Set([...allowed, ...ids])].filter((id) => id !== this.settings.hostUserId).slice(0, MAX_CAP - 1);
-        this.settings = { ...this.settings, allowed: msg['all'] === true ? '*' : merged };
+        // دعوة جديدة صريحة من المضيف تُلغي إخراجًا سابقًا لنفس الشخص
+        const banned = (this.settings.banned ?? []).filter((id) => msg['all'] !== true && !ids.includes(id));
+        if (allowed === '*') {
+          if (banned.length === (this.settings.banned ?? []).length) return [];
+          this.settings = { ...this.settings, banned };
+        } else {
+          const merged = [...new Set([...allowed, ...ids])].filter((id) => id !== this.settings.hostUserId).slice(0, MAX_CAP - 1);
+          this.settings = { ...this.settings, allowed: msg['all'] === true ? '*' : merged, banned: msg['all'] === true ? [] : banned };
+        }
         this.dirty = true;
         return [{ to: 'all', msg: { t: 'room', room: this.roomView() } }];
+      }
+      case 'kick': {
+        if (!this.isHost(conn)) return this.denied(conn);
+        const userId = typeof msg['userId'] === 'string' ? msg['userId'] : null;
+        if (!userId || userId === this.settings.hostUserId || userId.length > 80) return [];
+        return this.kick(userId, now);
       }
       case 'host': {
         if (!this.isHost(conn)) return this.denied(conn);
@@ -322,7 +354,6 @@ export class RoomCore {
       if (!media) return [];
       // الحلقة التالية في نفس الغرفة: الكل يرجع «جاري التجهيز»، وتبدأ وحدها حين يجهزون
       next = { ...t, media, started: false, autoStart: msg['autoStart'] !== false, playing: false, pos: Math.max(0, given ?? 0), at };
-      this.hostReadyAt = null;
       for (const m of this.members.values()) if (m.report) m.report = { ...m.report, state: 'preparing', mediaKey: null, version: null };
     } else return [];
     next.seq = t.seq + 1;
@@ -363,10 +394,6 @@ export class RoomCore {
     // تغيّر الحالة يُبث فورًا (تنبيه «اشتغل الفيديو عند دحمي»)، والمواقع وحدها مقيّدة بثانية
     if (after !== before) {
       const out: Out[] = [{ to: 'all', msg: { t: 'status', userId: member.userId, name: member.name, state: after, source: member.report.source } }];
-      if (member.userId === this.settings.hostUserId && (after === 'ready' || after === 'playing') && this.hostReadyAt == null) {
-        this.hostReadyAt = now;
-        this.dirty = true;
-      }
       out.push(...this.maybeAutoStart(now));
       out.push(this.rosterOut(now));
       return out;
@@ -375,17 +402,43 @@ export class RoomCore {
     return [this.rosterOut(now)];
   }
 
-  /** الحلقة التالية تبدأ وحدها: حين يجهز كل الحاضرين، أو بعد مهلة من جاهزية المضيف. */
+  /**
+   * الحلقة التالية تبدأ وحدها فقط حين يكون كل الحاضرين (المضيف وضيف على الأقل) جاهزين
+   * على الحلقة الجديدة نفسها. تقرير قديم وصل بعد «load» (الحلقة السابقة) لا يُحسب جاهزية،
+   * ومن تعذّر سيرفره أو ما زال يجهّز يوقف البدء التلقائي — المضيف وحده يقرر «ابدأ» حينها.
+   */
   private maybeAutoStart(now: number): Out[] {
     const t = this.timeline;
-    if (t.started || !t.autoStart || this.hostReadyAt == null) return [];
+    if (t.started || !t.autoStart || !t.media || this.settings.mode !== 'sync') return [];
     const present = [...this.members.values()];
-    const settled = (m: Member) => m.report != null && m.report.state !== 'preparing';
-    if (!present.every(settled) && now - this.hostReadyAt < AUTOSTART_MS) return [];
-    const at = now + LEAD_MS;
+    if (present.length < 2 || !present.some((m) => m.userId === this.settings.hostUserId)) return [];
+    const key = t.media.key;
+    const ready = (m: Member) => m.report != null && m.report.mediaKey === key && READY_STATES.includes(m.report.state);
+    if (!present.every(ready)) return [];
+    const at = now + AUTOSTART_COUNTDOWN_MS;
     this.timeline = { ...t, started: true, autoStart: false, playing: true, at, seq: t.seq + 1 };
     this.dirty = true;
     return [{ to: 'all', msg: { t: 'state', state: this.timeline, by: null } }];
+  }
+
+  /** المضيف يُخرج شخصًا: يُغلق اتصاله، ولا يعود إلا بدعوة جديدة. */
+  private kick(userId: string, now: number): Out[] {
+    const { allowed } = this.settings;
+    const banned = [...new Set([...(this.settings.banned ?? []), userId])].slice(-BANNED_MAX);
+    this.settings = { ...this.settings, banned, allowed: allowed === '*' ? '*' : allowed.filter((id) => id !== userId) };
+    this.dirty = true;
+    const out: Out[] = [];
+    let name: string | null = null;
+    for (const [conn, m] of [...this.members.entries()]) {
+      if (m.userId !== userId) continue;
+      name = m.name;
+      this.members.delete(conn);
+      out.push({ to: [conn], msg: { t: 'kicked' } }, { close: conn, code: 4006, reason: 'kicked' });
+    }
+    if (this.members.size === 0) this.emptySince = now;
+    if (name != null) out.push({ to: 'all', msg: { t: 'left', userId, name, kicked: true } });
+    out.push({ to: 'all', msg: { t: 'room', room: this.roomView() } }, ...this.maybeAutoStart(now), this.rosterOut(now));
+    return out;
   }
 
   private transferHost(userId: string, now: number): Out[] {
@@ -413,7 +466,6 @@ export class RoomCore {
     const times: number[] = [];
     if (this.members.size === 0 && this.emptySince != null) times.push(this.emptySince + EMPTY_TTL_MS);
     if (this.hostAwaySince != null && this.members.size > 0) times.push(this.hostAwaySince + HOST_GRACE_MS);
-    if (!this.timeline.started && this.timeline.autoStart && this.hostReadyAt != null) times.push(this.hostReadyAt + AUTOSTART_MS);
     return times.length ? Math.min(...times) : null;
   }
 

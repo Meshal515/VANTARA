@@ -17,25 +17,28 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
     if (closed || token !== revision || !latest?.visible) return;
     const roomHub = hub();
     const media = { ...(state?.media ?? {}), ...(roomHub?.session?.media ?? {}), ...(event.media ?? {}) };
+    const episode = event.episode ?? state?.episode ?? media.episode;
+    // عنوان حلقة الدعوة لا يبقى مكتوبًا بعد أن ينقل المضيف الغرفة لحلقة أخرى
+    const sameEpisode = Number(media.episode) === Number(episode);
     const initial = { banner: media.banner ?? media.cover ?? state?.poster ?? null, logo: media.logo ?? null,
-      title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: media.episodeTitle ?? null };
-    const key = `${media.seriesRef}|${state?.episode ?? media.episode}|${initial.banner}|${initial.logo}`;
+      title: media.title ?? state?.title ?? 'VANTARA', episodeTitle: sameEpisode ? media.episodeTitle ?? null : null };
+    const key = `${media.seriesRef}|${episode}|${initial.banner}|${initial.logo}`;
     if (key !== artKey) {
       artKey = key; art = initial;
-      void resolveArt(media).then(value => {
-        if (!closed && artKey === key) { art = { ...initial, ...value, banner: value.banner ?? initial.banner, title: value.title || initial.title }; paint(state, media); }
+      void resolveArt({ ...media, episode }).then(value => {
+        if (!closed && artKey === key) { art = { ...initial, ...value, banner: value.banner ?? initial.banner, title: value.title || initial.title }; paint(state, media, episode); }
       });
     }
-    paint(state, media);
+    paint(state, media, episode);
   }
-  function paint(state, media) {
+  function paint(state, media, episode = state?.episode ?? media.episode) {
     if (closed || !latest?.visible) return;
     const roomHub = hub(), event = latest;
     const person = id => roomHub?.person?.(id) ?? { userId: id, displayName: 'صديق' };
     const roster = (event.roster ?? []).map(r => ({ ...r, avatarKey: r.avatarKey || person(r.userId).avatarKey || null }));
     renderLobby(host, { ...event, roster, art, offset: event.videoOffsetMs ?? event.offset ?? 0,
       pending: pendingInvitees(event.invited, roster, event.me, person),
-      kindText: mediaKind(media), episodeText: episodeLine(media, state?.episode ?? media.episode),
+      kindText: mediaKind(media), episodeText: episodeLine(media, episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
       accent: media.kind === 'anime' ? '#3b82f6' : '#c1121f',
     }, { avatar: (p, size) => {
