@@ -12,4 +12,14 @@ class CoverReferersTest {
         assertEquals(listOf(CoverReferers.SOURCE_HEADERS, "https://mangalek.com/", CoverReferers.NO_REFERER),
             CoverReferers.attempts("https://mangalek.com/wp-content/x.jpg", hasSource = true))
     }
+    // الغلاف يظهر خلال ثوانٍ: لا تكرار لما لا يصلحه تغيير Referer
+    @Test fun onlyRefererRejectionsOrNonImagesTryTheNextReferer() {
+        assertEquals(true, CoverReferers.worthNextAttempt(403, gotNonImage = false))
+        assertEquals(true, CoverReferers.worthNextAttempt(401, gotNonImage = false))
+        assertEquals(true, CoverReferers.worthNextAttempt(200, gotNonImage = true))
+        assertEquals(false, CoverReferers.worthNextAttempt(null, gotNonImage = false))
+        assertEquals(false, CoverReferers.worthNextAttempt(404, gotNonImage = false))
+        assertEquals(false, CoverReferers.worthNextAttempt(503, gotNonImage = false))
+        assertEquals(true, CoverReferers.BUDGET_MS <= 6_000L)
+    }
 }
