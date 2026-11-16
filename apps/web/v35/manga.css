@@ -2000,8 +2000,21 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
   border-radius: 0;
   box-shadow: none;
 }
-/* الغلاف بنسبته كاملًا: لا قص ولا تمدد */
-.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover > img { width: 100%; height: 100%; object-fit: contain; }
+/* الغلاف بنسبته كاملًا: لا قص ولا تمدد. وإن لم تطابق نسبته مكانه (سقف 150vw للفن الطويل جدًا، أو غلاف محسوم
+ * وصل بنسبة غير نسبة ما ظهر أولًا) لا يبقى فراغ أسود حوله (بلاغ المالك: Goodbye Eri يمينًا ويسارًا، Solo
+ * Leveling من فوق): الفن نفسه مموّهًا يملأ المكان خلفه، والغلاف كاملًا فوقه. */
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover > img { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: contain; }
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover::before {
+  content: '';
+  position: absolute;
+  inset: -40px;
+  background-image: var(--art-bg, none);
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) saturate(1.15) brightness(0.8);
+  transform: translateZ(0);
+}
+.v35 #detail[data-look='webtoon'] .mw-stage .mw-cover::after { z-index: 2; }
 .v35 #detail[data-look='webtoon'] .mw-stage .mw-cover::after {
   content: '';
   position: absolute;
