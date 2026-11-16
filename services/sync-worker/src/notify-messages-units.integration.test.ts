@@ -36,7 +36,8 @@ async function notes(env: E, as: string, kind: string) {
   const rows = ((await res.json()) as { changes: Record<string, Array<Record<string, unknown>>> }).changes.notifications ?? [];
   return rows.filter((n) => n['kind'] === kind && n['user_id'] === as);
 }
-const body = (row: Record<string, unknown> | undefined) => JSON.parse(String(row?.['body'] ?? 'null'));
+const body = (row: Record<string, unknown> | undefined) => JSON.parse(String(row?.['meta'] ?? 'null'));
+const text = (row: Record<string, unknown> | undefined) => String(row?.['body'] ?? '');
 async function observe(env: E, as: string, numbers: number[]) {
   const works = [{
     work: 'ext:solo leveling', section: 'manga', kind: 'chapter', title: 'Solo Leveling', cover: 'https://img.test/sl.jpg',
@@ -55,7 +56,9 @@ describe('majlis message notifications', () => {
     expect(await notes(env, B, 'MESSAGE')).toHaveLength(0);
     const [toOwner] = await notes(env, OWNER, 'MESSAGE');
     expect(toOwner).toMatchObject({ actor_id: B, read: 0, seen: 0 });
-    expect(body(toOwner)).toEqual({ p: 'رد علي', n: 2 });
+    expect(body(toOwner)).toEqual({ n: 2 });
+    // body جملة مقروءة: النسخ القديمة تعرضه كما هو
+    expect(text(toOwner)).toBe('رد علي');
     expect(await notes(env, C, 'MESSAGE')).toHaveLength(1);
 
     // بعد القراءة يبدأ العدّ من جديد
@@ -63,7 +66,8 @@ describe('majlis message notifications', () => {
     await op(env, B, 'majlis.send', { kind: 'text', body: 'ثالثة' });
     const [again] = await notes(env, OWNER, 'MESSAGE');
     expect(again).toMatchObject({ read: 0 });
-    expect(body(again)).toEqual({ p: 'ثالثة', n: 1 });
+    expect(body(again)).toEqual({ n: 1 });
+    expect(text(again)).toBe('ثالثة');
   });
 
   it('a message deleted for everyone leaves no preview in anyone\'s notification', async () => {
@@ -72,6 +76,7 @@ describe('majlis message notifications', () => {
     await op(env, B, 'majlis.delete', { target: `msg:${id}`, scope: 'everyone' });
     const [row] = await notes(env, OWNER, 'MESSAGE');
     expect(String(row?.['body'])).not.toContain('سر');
+    expect(String(row?.['meta'])).not.toContain('سر');
     expect(body(row)).toMatchObject({ x: 1 });
   });
 });
@@ -87,11 +92,14 @@ describe('new chapters of a favorite', () => {
     const [first] = await notes(env, C, 'NEW_UNIT');
     expect(first).toMatchObject({ series_ref: 'ext:solo leveling', link: 'vantara://series/ext%3Asolo%20leveling', read: 0 });
     expect(body(first)).toMatchObject({ t: 'Solo Leveling', k: 'chapter', a: 101, b: 102, c: 'https://img.test/sl.jpg' });
+    expect(text(first)).toBe('نزلت الفصول 101–102 من Solo Leveling');
     expect(await notes(env, B, 'NEW_UNIT')).toHaveLength(0);
     expect(await notes(env, OWNER, 'NEW_UNIT')).toHaveLength(0);
 
     await observe(env, OWNER, [103]);
-    expect(body((await notes(env, C, 'NEW_UNIT'))[0])).toMatchObject({ a: 101, b: 103 });
+    const grown = (await notes(env, C, 'NEW_UNIT'))[0];
+    expect(body(grown)).toMatchObject({ a: 101, b: 103 });
+    expect(text(grown)).toBe('نزلت الفصول 101–103 من Solo Leveling');
 
     // بعد القراءة: إشعار بالوحدة الجديدة وحدها
     await op(env, C, 'notification.read', { id: first!['id'] });
@@ -99,6 +107,7 @@ describe('new chapters of a favorite', () => {
     const [fresh] = await notes(env, C, 'NEW_UNIT');
     expect(fresh).toMatchObject({ read: 0 });
     expect(body(fresh)).toMatchObject({ a: 104, b: 104 });
+    expect(text(fresh)).toBe('نزل الفصل 104 من Solo Leveling');
   });
 
   it('a work removed from favorites stops notifying', async () => {

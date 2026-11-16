@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detailAnyType, kindOf, normalize } from './cinema-meta.js';
+import { detailAnyType, kindOf, normalize, resolveWork } from './cinema-meta.js';
 import { mergeWork } from './cinema-identity.js';
 
 // ردود Cinemeta الحية (15 نوفمبر 2026) مختصرة: كل نوع خاطئ يرد بعمل «صالح» الشكل
@@ -14,6 +14,13 @@ const ARCANE = { id: 'tt11126994', imdb_id: 'tt11126994', type: 'series', name: 
 const FIGHT_CLUB = { id: 'tt0137523', imdb_id: 'tt0137523', type: 'movie', name: 'Fight Club', slug: 'movie/fight-club-0137523' };
 // /meta/series/tt0137523 يرد بعمل آخر تمامًا
 const FIGHT_CLUB_AS_SERIES = { id: 'tt0137523', imdb_id: 'tt0137523', type: 'series', name: 'NICK 대하 드라마 파워레인저 와일드포스', slug: 'series/nick-0137523', videos: [{ id: 'tt0137523:1:1', season: 1, episode: 1 }] };
+
+// ردود 16 نوفمبر 2026 الحية (بلاغ المالك: Cyberpunk «فيلم 1938 كوميديا»، Fight Club «مسلسل 2002»):
+// رد النوع الخاطئ عمل آخر تمامًا بالرقم نفسه، وslugه بنوعه هو
+const I_SEE_ICE = { id: 'tt12590266', imdb_id: 'tt12590266', type: 'movie', name: 'I See Ice', slug: 'movie/i-see-ice-12590266', year: '1938', runtime: '84 min', genres: ['Comedy'], imdbRating: '8.3' };
+const EDGERUNNERS_LIVE = { id: 'tt12590266', imdb_id: 'tt12590266', type: 'series', name: 'Cyberpunk: Edgerunners', slug: 'series/cyberpunk-edgerunners-12590266', releaseInfo: '2022–',
+  videos: Array.from({ length: 10 }, (_, i) => ({ id: `tt12590266:1:${i + 1}`, season: 1, episode: i + 1 })) };
+const NICK = { ...FIGHT_CLUB_AS_SERIES, releaseInfo: '2002–' };
 
 const fakeFetch = (table, { fail = [] } = {}) => async (url) => {
   const key = /\/meta\/(movie|series)\/(tt\d+)\.json/.exec(url)?.slice(1).join('/');
@@ -58,5 +65,35 @@ describe('cinema work type (Cyberpunk filed as a movie)', () => {
     expect(merged?.type).toBe('series');
     // نسخة بلا slug لا تُفرض على بطاقة نوعها مختلف
     expect(mergeWork({ id: 'tt1', type: 'series' }, { id: 'tt1', type: 'movie', typeCertain: false })).toBeNull();
+  });
+});
+
+describe('the wrong-type answer is another work with the same number (16 Nov live answers)', () => {
+  const table = { 'movie/tt12590266': I_SEE_ICE, 'series/tt12590266': EDGERUNNERS_LIVE, 'movie/tt0137523': FIGHT_CLUB, 'series/tt0137523': NICK };
+
+  it('Cyberpunk is the series, not «I See Ice» 1938 — even when its card says movie', async () => {
+    for (const opts of [{}, { hint: 'movie' }, { title: 'Cyberpunk: Edgerunners', hint: 'movie' }]) {
+      const out = await resolveWork('tt12590266', { ...opts, fetchImpl: fakeFetch(table) });
+      expect(out).toMatchObject({ certain: true, work: { type: 'series', title: 'Cyberpunk: Edgerunners', year: 2022 } });
+    }
+    const merged = mergeWork({ id: 'tt12590266', type: 'movie', title: 'Cyberpunk: Edgerunners' }, (await resolveWork('tt12590266', { hint: 'movie', fetchImpl: fakeFetch(table) })).work);
+    expect(merged).toMatchObject({ type: 'series', year: 2022 });
+    expect(merged.genres).not.toContain('Comedy');
+  });
+
+  it('Fight Club is the 1999 movie, not «NICK» 2002 — even when a card or preview asks for a series', async () => {
+    for (const opts of [{}, { hint: 'series' }, { title: 'Fight Club', hint: 'series' }]) {
+      const out = await resolveWork('tt0137523', { ...opts, fetchImpl: fakeFetch(table) });
+      expect(out.work).toMatchObject({ type: 'movie', title: 'Fight Club' });
+    }
+    // slug «series/» لعمل آخر لم يعد يكفي لجعل الرد «مسلسلًا مؤكدًا»
+    expect(normalize(NICK).typeCertain).toBe(false);
+  });
+
+  it('the known name settles it when episode counts cannot (a one-episode series under its own name)', async () => {
+    const solo = { id: 'tt9', imdb_id: 'tt9', type: 'series', name: 'Short Story', slug: 'series/short-story-9', videos: [{ id: 'tt9:1:1' }] };
+    const other = { id: 'tt9', imdb_id: 'tt9', type: 'movie', name: 'Unrelated Film', slug: 'movie/unrelated-film-9' };
+    const out = await resolveWork('tt9', { title: 'Short Story', fetchImpl: fakeFetch({ 'series/tt9': solo, 'movie/tt9': other }) });
+    expect(out).toMatchObject({ certain: true, work: { type: 'series', title: 'Short Story' } });
   });
 });

@@ -91,7 +91,9 @@ export function normalize(m) {
     id: String(m.imdb_id ?? m.id),
     type,
     // مسلسل بشهادة slug أو حلقاته: يُصحّح بطاقة محفوظة أو ممرَّرة «فيلمًا» (الاتجاه الوحيد المثبت)
-    typeCertain: type === 'series' && (String(m.slug ?? '').startsWith('series/') || episodesOf(m, String(m.imdb_id ?? m.id)) >= 2),
+    // مسلسل بحلقتين فأكثر للمعرّف نفسه. slug وحده ليس دليلًا: رد «النوع الخاطئ» قد يكون عملًا آخر
+    // بالرقم نفسه وslug مسلسل (Fight Club ← «NICK …» مسلسل 2002)
+    typeCertain: type === 'series' && episodesOf(m, String(m.imdb_id ?? m.id)) >= 2,
     title: m.name,
     poster: sharpArt(m.poster) || null,
     background: m.background ? m.background.replace(/\._V1_[^/]*?\.(jpe?g|png|webp)$/i, '._V1_.$1') : null,
@@ -134,25 +136,59 @@ export async function detail(type, id, { fetchImpl } = {}) {
   return normalize(data.meta);
 }
 
+const plainName = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '');
+/** الاسم نفسه (أو أحدهما يحوي الآخر، كـ«Cyberpunk: Edgerunners» و«Edgerunners»). */
+function sameWorkName(a, b) {
+  const x = plainName(a);
+  const y = plainName(b);
+  if (!x || !y) return false;
+  return x === y || (Math.min(x.length, y.length) >= 5 && (x.includes(y) || y.includes(x)));
+}
+
 /**
- * نوع مجهول (عمل من الحساب أو مرجع بلا موسم): الطلبان معًا ثم الحكم. ردود Cinemeta للنوع الخاطئ «صالحة» الشكل:
- *   - `/meta/movie/<مسلسل>`: المسلسل نفسه موسومًا فيلمًا (slug series/…)، أو بذرة بلا حلقات (Game of Thrones)،
- *     أو عمل آخر بنفس الرقم (Arcane ← «De nacht van Aalbers»).
- *   - `/meta/series/<فيلم>`: عمل آخر بحلقة واحدة (Fight Club ← «NICK …»).
- * الحكم: slug مسلسل، أو رد «مسلسل» بحلقتين فأكثر للمعرّف نفسه ⇒ مسلسل؛ وإلا فيلم.
- * `{ work, certain }`: certain=false إن فشل أحد الطلبين، فلا يُحفظ النوع من نصف جواب.
+ * هوية العمل من رقم IMDb، بالنوعين معًا دائمًا. Cinemeta يرد على النوع الخاطئ بعمل **آخر** يحمل
+ * الرقم نفسه (والصور والتقييم من metahub بالرقم، فيبدو صحيحًا):
+ *   - `/meta/series/tt0137523` (Fight Club) ← «NICK …» مسلسل 2002 بحلقة واحدة وslug مسلسل.
+ *   - `/meta/movie/tt12590266` (Cyberpunk: Edgerunners) ← «I See Ice» فيلم كوميدي 1938.
+ *   - `/meta/movie/<مسلسل>` أحيانًا المسلسل نفسه موسومًا فيلمًا (slug series/) أو بذرة بلا حلقات.
+ * الحكم بالترتيب:
+ *   1. الاسم المعروف (من البطاقة/السجل) يطابق أحد الردين وحده ⇒ هو، مؤكد.
+ *   2. رد «مسلسل» بحلقتين فأكثر للرقم نفسه ⇒ مسلسل.
+ *   3. رد «فيلم» بـslug فيلم ⇒ فيلم. وslug مسلسل في رد «فيلم» ⇒ المسلسل نفسه.
+ * `{ work, certain }`: certain=false إن فشل طلب أو بقي الحكم ظنيًا، فلا يُحفظ النوع.
+ * `hint` نوع البطاقة: لا يحكم، يرجّح فقط حين يتعادل كل شيء.
  */
-export async function detailAnyType(id, { fetchImpl } = {}) {
+export async function resolveWork(id, { title = null, hint = null, fetchImpl } = {}) {
   const ask = (type) => getJson(`${CINEMETA}/meta/${type}/${id}.json`, fetchImpl).then((d) => ({ meta: d?.meta ?? null }), () => ({ failed: true }));
   const [movie, series] = await Promise.all([ask('movie'), ask('series')]);
   const ours = (m) => (m && String(m.imdb_id ?? m.id) === String(id) ? m : null);
-  const movieMeta = ours(movie.meta);
-  const seriesMeta = ours(series.meta);
-  const isSeries = String(movieMeta?.slug ?? '').startsWith('series/') || episodesOf(seriesMeta, id) >= 2;
-  const chosen = isSeries ? (episodesOf(seriesMeta, id) ? seriesMeta : movieMeta) : movieMeta ?? seriesMeta;
-  const work = normalize(chosen ? { ...chosen, type: isSeries ? 'series' : chosen.type } : null);
-  return { work, certain: !movie.failed && !series.failed && Boolean(work) };
+  const mv = ours(movie.meta);
+  const sr = ours(series.meta);
+  const eps = episodesOf(sr, id);
+  const both = !movie.failed && !series.failed;
+  const pick = (meta, isSeries, certain) => {
+    const work = normalize(meta ? { ...meta, type: isSeries ? 'series' : 'movie' } : null);
+    if (work) work.typeCertain = Boolean(certain);
+    return { work, certain: Boolean(work && certain) };
+  };
+  if (title) {
+    const m = sameWorkName(mv?.name, title);
+    const s = sameWorkName(sr?.name, title);
+    if (m !== s) {
+      // فيلم مطابق بالاسم لكنه المسلسل نفسه موسومًا (slug series/) ⇒ مسلسل بحلقاته إن وُجدت
+      if (m && String(mv.slug ?? '').startsWith('series/')) return pick(eps ? sr : mv, true, true);
+      return pick(m ? mv : sr, s, true);
+    }
+  }
+  if (eps >= 2) return pick(sr, true, both || !series.failed);
+  if (mv && String(mv.slug ?? '').startsWith('series/')) return pick(eps ? sr : mv, true, both);
+  if (mv) return pick(mv, false, both && eps < 2 && (!hint || hint === 'movie' || !sr));
+  if (sr) return pick(sr, true, false);
+  return { work: null, certain: false };
 }
+
+/** توافق مع المستدعين القدامى: الحكم نفسه بلا اسم. */
+export const detailAnyType = (id, opts = {}) => resolveWork(id, opts);
 
 /** أسماء الأعمال تبقى كما هي (الإنجليزية)؛ القصة وحدها تُعرَّب. */
 export const displayTitle = (m) => m?.title || '';

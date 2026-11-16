@@ -7,7 +7,7 @@ const series = {
   seasons: [1, 2, 3].map((n) => ({ n, episodes: [1, 2].map((e) => ({ n: e, title: `S${n}E${e}`, released: 1 })) })),
 };
 vi.mock('./motion.js', () => ({ pop() {}, progressFill() {}, reduced: () => true, revealIn() {}, stripIn() {} }));
-vi.mock('../lib/cinema-meta.js', async (original) => ({ ...await original(), detail: async () => series, search: async () => [], castPhotos: async () => new Map(), catalog: async () => [] }));
+vi.mock('../lib/cinema-meta.js', async (original) => ({ ...await original(), detail: async () => series, resolveWork: async () => ({ work: series, certain: true }), search: async () => [], castPhotos: async () => new Map(), catalog: async () => [] }));
 vi.mock('../lib/anime-engine.js', async (original) => ({ ...await original(), available: () => false, sources: async () => [], onNeedsHuman() {}, on: () => () => {} }));
 const { createCinema } = await import('./cinema.js');
 

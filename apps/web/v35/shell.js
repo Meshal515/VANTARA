@@ -3282,11 +3282,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
         else fail();
       } else {
         const [, imdb] = id.split(':');
-        void import('../lib/cinema-meta.js').then(async ({ detail }) => {
-          for (const type of ['series', 'movie']) {
-            const d = await detail(type, imdb).catch(() => null);
-            if (d) return done([type === 'series' ? 'مسلسل' : 'فيلم', d.year, (d.genres ?? []).slice(0, 3).map(genreAr).join(' · ')], d.description);
-          }
+        // النوعان معًا والاسم يحكم: «مسلسل أولًا» كان يعطي Fight Club «مسلسلًا 2002» (عمل آخر بالرقم نفسه)
+        void import('../lib/cinema-meta.js').then(async ({ resolveWork }) => {
+          const { work: d } = await resolveWork(imdb, { title: work?.title ?? null }).catch(() => ({ work: null }));
+          if (d) return done([d.type === 'series' ? 'مسلسل' : 'فيلم', d.year, (d.genres ?? []).slice(0, 3).map(genreAr).join(' · ')], d.description);
           fail();
         }).catch(fail);
       }
