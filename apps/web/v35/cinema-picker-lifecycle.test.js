@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const engine = vi.hoisted(() => ({ prepare: vi.fn(), routes: vi.fn(), open: vi.fn(), close: vi.fn(), pick: vi.fn(), best: vi.fn(), addons: vi.fn(), search: vi.fn(), listeners: new Map() }));
 const title = { id: 'tt0137523', type: 'movie', title: 'Fight Club', _sourceCopy: { sourceId: 'aniasia2tv', url: '/fight-club', title: 'Fight Club' } };
 vi.mock('./motion.js', () => ({ pop() {}, progressFill() {}, reduced: () => true, revealIn() {}, stripIn() {} }));
-vi.mock('../lib/cinema-meta.js', async original => ({ ...await original(), detail: async (_type, id) => ({ id, type: 'movie', title: 'Fight Club' }), search: async () => [], castPhotos: async () => new Map() }));
+vi.mock('../lib/cinema-meta.js', async original => ({ ...await original(), detail: async (_type, id) => ({ id, type: 'movie', title: 'Fight Club' }), resolveWork: async (id) => ({ work: { id, type: 'movie', title: 'Fight Club' }, certain: true }), search: async () => [], castPhotos: async () => new Map() }));
 vi.mock('../lib/anime-engine.js', async original => ({
   ...await original(), available: () => true, sources: async () => [], onNeedsHuman() {},
   on: (event, callback) => { const listeners = engine.listeners.get(event) ?? new Set(); listeners.add(callback); engine.listeners.set(event, listeners); return () => listeners.delete(callback); },
