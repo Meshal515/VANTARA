@@ -26,6 +26,9 @@ class PreparedEpisode(
     private val monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
+    /** رقم الحلقة عددًا صحيحًا موجبًا (لاختيار ملفها من حزمة تورنت)، أو null لفيلم/حلقة كسرية. */
+    fun wholeEpisode(): Int? = number.takeIf { it > 0f && it % 1f == 0f }?.toInt()
+
     private val preparationStartedAt = monotonicClock()
     /** اسم الحلقة كما وجدها أول مصدر: كل المصادر الأخرى تُطابق عليه (EpisodeAlign) فلا تختلط حلقتان في ورقة واحدة. */
     val episodeAnchor = java.util.concurrent.atomic.AtomicReference<String?>(null)

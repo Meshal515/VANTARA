@@ -1,4 +1,5 @@
 /** تقييم المانجا من AniList فقط عند مطابقة عنوان العمل نفسه بثقة. */
+import { anilistFetch } from './anilist.js';
 import { normalizeTitle } from './catalog.js';
 import { adultGenre } from './adult-filter.js';
 
@@ -21,7 +22,7 @@ function mangaMetadata(m) {
 }
 
 /** True genre/tag catalogue independent of installed manga extensions; never disguise source absence as no manga. */
-export async function fetchMangaGenre(genre, { page = 1, fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
+export async function fetchMangaGenre(genre, { page = 1, fetchImpl = anilistFetch, timeoutMs = 12_000 } = {}) {
   if (typeof genre !== 'string' || !genre.trim()) return fetchMangaPopular({page,fetchImpl,timeoutMs});
   const byGenre = MANGA_GENRES.has(genre);
   const value = byGenre ? genre : (MANGA_TAGS[genre] ?? genre);
@@ -53,7 +54,7 @@ export async function fetchMangaGenre(genre, { page = 1, fetchImpl = globalThis.
 }
 
 /** Global readership, cached by the caller as a stable ranking snapshot. */
-export async function fetchMangaPopular({ page = 1, fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
+export async function fetchMangaPopular({ page = 1, fetchImpl = anilistFetch, timeoutMs = 12_000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -125,7 +126,7 @@ export function matchMangaArt(title, candidates) {
  * استعلام واحد لثمانية عناوين بدل طلب لكل بطاقة، مع مهلة واضحة: التقييم والفن الرسمي معًا، فلا طلب ثانٍ للفن.
  * @returns {Promise<Map<string, { rating: object|null, art: object|null }>>}
  */
-export async function fetchMangaMatches(titles, { fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
+export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, timeoutMs = 12_000 } = {}) {
   const names = [...new Set(titles.filter(Boolean))].slice(0, 20);
   const output = new Map(names.map((title) => [title, { rating: null, art: null }]));
   if (!names.length) return output;

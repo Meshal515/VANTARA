@@ -21,9 +21,11 @@ object HlsPlaylist {
 
     data class Key(val method: String, val uri: String?, val iv: String?, val keyFormat: String?)
 
-    data class Segment(val uri: String, val duration: Double, val key: Key?, val byteRange: String?, val map: String?, val mapByteRange: String?)
+    /** [sequence]: رقم المقطع في القائمة الأصلية (MEDIA-SEQUENCE + ترتيبه)، وهو IV مفتاح AES-128 الضمني. */
+    data class Segment(val uri: String, val duration: Double, val key: Key?, val byteRange: String?, val map: String?, val mapByteRange: String?,
+                       val sequence: Long = 0, val discontinuity: Boolean = false)
 
-    data class Media(val segments: List<Segment>, val targetDuration: Int, val version: Int, val endList: Boolean, val drm: Boolean) {
+    data class Media(val segments: List<Segment>, val targetDuration: Int, val version: Int, val endList: Boolean, val drm: Boolean, val mediaSequence: Long = 0) {
         val duration: Double get() = segments.sumOf { it.duration }
     }
 
@@ -110,9 +112,13 @@ object HlsPlaylist {
         var version = 3
         var end = false
         var drm = false
+        var firstSequence = 0L
+        var discontinuity = false
         for (raw in text.lineSequence()) {
             val line = raw.trim()
             when {
+                line.startsWith("#EXT-X-MEDIA-SEQUENCE:") -> firstSequence = line.substringAfter(':').trim().toLongOrNull()?.coerceAtLeast(0) ?: 0
+                line.startsWith("#EXT-X-DISCONTINUITY") && !line.startsWith("#EXT-X-DISCONTINUITY-SEQUENCE") -> discontinuity = true
                 line.startsWith("#EXTINF:") -> duration = line.removePrefix("#EXTINF:").substringBefore(',').trim().toDoubleOrNull() ?: 0.0
                 line.startsWith("#EXT-X-TARGETDURATION:") -> target = line.substringAfter(':').trim().toIntOrNull() ?: 0
                 line.startsWith("#EXT-X-VERSION:") -> version = line.substringAfter(':').trim().toIntOrNull() ?: 3
@@ -131,13 +137,14 @@ object HlsPlaylist {
                     key = if (method == "NONE" || method.isEmpty()) null else Key(method, a["URI"]?.let { resolve(base, it) }, a["IV"], format)
                 }
                 line.isNotEmpty() && !line.startsWith("#") -> {
-                    segments += Segment(resolve(base, line), duration, key, range, map, mapRange)
+                    segments += Segment(resolve(base, line), duration, key, range, map, mapRange, firstSequence + segments.size, discontinuity)
                     duration = 0.0
                     range = null
+                    discontinuity = false
                 }
             }
         }
-        return Media(segments, target, version, end, drm)
+        return Media(segments, target, version, end, drm, firstSequence)
     }
 
     /**
@@ -152,13 +159,16 @@ object HlsPlaylist {
         var lastKey: Key? = null
         var lastMap: String? = null
         for ((i, s) in media.segments.withIndex()) {
-            if (s.key != lastKey) {
+            if (s.discontinuity) out.append("#EXT-X-DISCONTINUITY\n")
+            // المفتاح بلا IV: IV الضمني رقم المقطع في الأصل، والقائمة المحلية تبدأ من 0؛ فيُكتب صريحًا لكل مقطع (HL1)
+            val implicitIv = s.key != null && s.key.iv == null && s.key.method == "AES-128"
+            if (s.key != lastKey || implicitIv) {
                 val k = s.key
                 if (k == null) out.append("#EXT-X-KEY:METHOD=NONE\n")
                 else {
                     out.append("#EXT-X-KEY:METHOD=").append(k.method)
                     keyName(k)?.let { out.append(",URI=\"").append(it).append('"') }
-                    k.iv?.let { out.append(",IV=").append(it) }
+                    (k.iv ?: if (implicitIv) "0x%032X".format(s.sequence) else null)?.let { out.append(",IV=").append(it) }
                     out.append('\n')
                 }
                 lastKey = k

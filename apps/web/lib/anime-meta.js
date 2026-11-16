@@ -1,4 +1,5 @@
 import { isRemovedAny } from './removed-works.js';
+import { anilistFetch } from './anilist.js';
 /**
  * بيانات الأنمي الوصفية — من AniList (GraphQL عام، مجاني، يسمح بالطلب من المتصفح).
  *
@@ -212,12 +213,14 @@ export function parseDetail(data) {
   };
 }
 
-async function request(query, variables, { signal, fetchImpl = globalThis.fetch, timeoutMs = 12_000 } = {}) {
+async function request(query, variables, { signal, fetchImpl = null, timeoutMs = 12_000, priority = 'background' } = {}) {
+  // كل طلب AniList يمر من البوابة المشتركة (lib/anilist.js): الحد واحد للتطبيق كله
+  const send = fetchImpl ?? ((url, init) => anilistFetch(url, init, { priority }));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
   try {
-    const res = await fetchImpl(ENDPOINT, {
+    const res = await send(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ query, variables }),
@@ -240,11 +243,12 @@ export async function fetchAnimeHome(opts = {}) {
 }
 
 export async function fetchAnimeDetail(id, opts = {}) {
-  return parseDetail(await request(DETAIL_QUERY, { id: Number(id) }, opts));
+  // فتح عمل: ضغطة المستخدم تتقدم طلبات الخلفية
+  return parseDetail(await request(DETAIL_QUERY, { id: Number(id) }, { priority: 'user', ...opts }));
 }
 
 export async function searchAnime({ search, genre, page = 1 } = {}, opts = {}) {
-  const data = await request(SEARCH_QUERY, { search: search || undefined, genre: genre || undefined, page }, opts);
+  const data = await request(SEARCH_QUERY, { search: search || undefined, genre: genre || undefined, page }, { priority: 'user', ...opts });
   return { items: list(data?.Page), hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
 }
 

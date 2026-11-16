@@ -6,7 +6,11 @@
 
 export const LOCAL_PREFIX = 'local:';
 
-export function localRows(items) {
+/**
+ * [isFiller]: قاعدة «مصدر تكملة إنجليزي» نفسها في صفحة العمل (works.js). الصف يحمل لغة مصدره الأصلي، فالقارئ يعرض زر
+ * الترجمة ويترجم الفصل المنزّل كما لو فُتح من المصدر (MG5). كان الصف بلا لغة فلا ترجمة أبدًا.
+ */
+export function localRows(items, { isFiller } = {}) {
   // الأحدث أولًا كفصول المصادر: صفحة العمل و«ابدأ القراءة» (startChapter) تفترضان هذا الترتيب، وترتيب
   // التنزيل (1، 2، 3، 5، 6، 4، 7) كان يبدأ القراءة من آخر فصل
   const ordered = [...items].sort((a, b) => (Number(b.unit.number) || 0) - (Number(a.unit.number) || 0));
@@ -15,6 +19,7 @@ export function localRows(items) {
     chapter: { ...(item.request?.chapter ?? {}), url: item.request?.chapter?.url ?? item.unit.key },
     number: item.unit.number,
     label: item.unit.title ?? null,
+    lang: item.request?.lang ?? (typeof isFiller === 'function' ? (isFiller(item.request?.sourceId) ? 'en' : 'ar') : undefined),
     local: true,
   }));
 }

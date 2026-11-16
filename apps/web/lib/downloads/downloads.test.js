@@ -149,6 +149,18 @@ describe('smart selection', () => {
     expect(sameRoute({ sourceId: 'addon|torrentio', server: 'Torrentio', code: 'TRR7', quality: 1080, fingerprint: 'btih:bbbb:0' }, chosen)).toBe(true);
   });
 
+  it('DL20: a season pack chosen on episode 1 is still that server for episode 2 (same infoHash, another file)', () => {
+    const hash = 'c'.repeat(40);
+    const chosen = { sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: `btih:${hash}:0`, mode: 'manual' };
+    // الحلقة الثانية من الحزمة نفسها: رقم ملف آخر، والسيرفر هو نفسه
+    expect(sameRoute({ sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: `btih:${hash}:1` }, chosen)).toBe(true);
+    expect(sameRoute({ sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: `btih:${hash}:` }, chosen)).toBe(true);
+    // تورنت آخر ليس هو مهما تشابه
+    expect(sameRoute({ sourceId: 'addon|torrentio', server: 'Torrentio', fingerprint: `btih:${'d'.repeat(40)}:1` }, chosen)).toBe(false);
+    // السيرفرات المباشرة كما هي: بصمة كاملة
+    expect(sameRoute({ sourceId: 'a', fingerprint: 'route:x:1' }, { sourceId: 'a', fingerprint: 'route:x:2' })).toBe(false);
+  });
+
   it('smart ranks a torrent swarm by its seeders and size, not by the order the addon listed it', () => {
     const t = (id, label) => ({ id, sourceId: 'addon|torrentio', sourceName: 'Torrentio', server: 'Torrentio', type: 'torrent', state: 'READY', quality: 1080, label });
     const ranked = rankRoutes([
@@ -430,6 +442,17 @@ describe('video route resolution', () => {
 });
 
 describe('on-device chapters', () => {
+  it('MG5: an English chapter opened from the device keeps its language, so the reader can translate it', async () => {
+    const { localRows } = await import('./local-reader.js');
+    const items = [
+      { id: 'dl_en', unit: { key: 'n:5', number: 5 }, request: { sourceId: 'mangadex@en', chapter: { url: '/c/5' } } },
+      { id: 'dl_ar', unit: { key: 'n:4', number: 4 }, request: { sourceId: 'teamx', chapter: { url: '/c/4' } } },
+    ];
+    const rows = localRows(items, { isFiller: (id) => String(id).includes('@') });
+    expect(rows.find((r) => r.number === 5).lang).toBe('en');
+    expect(rows.find((r) => r.number === 4).lang).toBe('ar');
+  });
+
   it('are listed newest first like source chapters, whatever the download order', async () => {
     const { localRows } = await import('./local-reader.js');
     const { startChapter } = await import('../../v35/reading.js');
