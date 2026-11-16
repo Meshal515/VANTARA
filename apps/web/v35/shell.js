@@ -1,5 +1,6 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { describeNotification, notificationData } from '../lib/notifications.js';
+import { anilistFetch } from '../lib/anilist.js';
 import { collectFollowTime } from '../lib/follow-time.js';
 /**
  * واجهة VANTARA — الرئيسية، صفحة العمل، المكتبة، الاستكشاف، الدرج.
@@ -3743,7 +3744,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const title = typeof w.title === 'string' ? w.title : w.title?.english || w.title?.romaji || w.title?.native || '';
       const job = (async () => {
         if (!alId && !title) return [];
-        const res = await fetch('https://graphql.anilist.co', {
+        const res = await anilistFetch('https://graphql.anilist.co', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({
@@ -4274,7 +4275,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         const ANILIST_GENRES = ['Action', 'Adventure', 'Comedy', 'Drama', 'Ecchi', 'Fantasy', 'Horror', 'Mahou Shoujo', 'Mecha', 'Music', 'Mystery', 'Psychological', 'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller'];
         const TAGS = { Isekai: 'Isekai', 'Martial Arts': 'Martial Arts', Historical: 'Historical', 'School Life': 'School' };
         const byGenre = ANILIST_GENRES.includes(en);
-        const res = await fetch('https://graphql.anilist.co', {
+        const res = await anilistFetch('https://graphql.anilist.co', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({

@@ -6,6 +6,7 @@
  * metahub بمعرّف IMDb (نفس مصدر شعارات Stremio). كله مجاني ويسمح بالطلب من المتصفح.
  * لا شعار؟ الاسم الطبيعي يظهر بدلًا منه — لا تخمين.
  */
+import { anilistFetch } from '../anilist.js';
 
 const CACHE_PREFIX = 'vantara.tgart.';
 const TTL_MS = 3 * 24 * 60 * 60_000;
@@ -191,7 +192,8 @@ async function aniZip(anilistId, fetchImpl, now, depth, budget) {
 
 /** اسم العمل وسنته ونوعه، وأجزاؤه الأعلى (العمل الأم ثم السابق) من AniList. */
 async function anilistInfo(anilistId, fetchImpl) {
-  const r = await fetchImpl('https://graphql.anilist.co', {
+  // الطلب الحقيقي يمر من البوابة المشتركة (الاختبارات تمرّر fetchImpl خاصًا)
+  const r = await (fetchImpl === globalThis.fetch ? anilistFetch : fetchImpl)('https://graphql.anilist.co', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({

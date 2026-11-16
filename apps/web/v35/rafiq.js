@@ -10,6 +10,7 @@
  * ليعرف رفيق ما شاهدت.
  */
 
+import { anilistFetch } from '../lib/anilist.js';
 import { glyph } from './icons.js';
 
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', NOT_YET_RELEASED: 'لم يبدأ', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
@@ -48,7 +49,7 @@ export function localSignals(watch) {
 }
 
 /** طلبات AniList كما صاغها الخادم (نص الطلب نفسه مفتاح)، أربعة معًا. */
-export async function fetchCatalog(requests, fetchImpl = globalThis.fetch) {
+export async function fetchCatalog(requests, fetchImpl = anilistFetch) {
   const out = [];
   const queue = [...requests].slice(0, 30);
   const worker = async () => {
