@@ -84,6 +84,20 @@ describe('the runner', () => {
     expect(notes.at(-1)).toEqual(['stop']);
   });
 
+  // JS1 (تدقيق §17): إيقاف الخدمة بين عملين ثم بدؤها للتالي والتطبيق في الخلفية يُسقط التطبيق على Android 12+.
+  // والعملان يترجمان الفصل نفسه (keyOf واحد): كان الثاني يدور بلا نهاية على «عدد الصفحات» فيجمّد خيط JS (أحمر قبل).
+  it('two queued works keep the foreground service between them: only the last finish stops it', async () => {
+    const { deps, notes } = fakeDeps({ pagesPer: 1 });
+    const runner = createJobRunner(deps);
+    runner.add(createJob({ ref: 'ext:a', title: 'A', sourceId: 'weeb', rows: [row(1)], keyOf }));
+    runner.add(createJob({ ref: 'ext:b', title: 'B', sourceId: 'weeb', rows: [row(1)], keyOf }));
+    await until(() => runner.jobs().every((j) => j.status === 'done'));
+    const finished = notes.filter(([k]) => k === 'finished').map(([, a]) => a.keepRunning);
+    expect(finished).toEqual([true, false]);
+    expect(notes.filter(([k]) => k === 'stop')).toHaveLength(1);
+    expect(notes.at(-1)).toEqual(['stop']);
+  });
+
   it('marks preparation as job work so native route never borrows reader priority', async () => {
     const { deps } = fakeDeps({ pagesPer: 1 });
     const seen = [];

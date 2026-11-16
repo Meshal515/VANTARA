@@ -181,6 +181,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   mounted.get(host)?.dispose();
   const state = { events: [], next: null, bridgeNext: null, bridgeKnown: null, loading: false, refreshing: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token, active = () => token === state.token;
+  const FIRST_RETRY_MS = 15_000;
+  let firstRetryAt = 0;
   host.replaceChildren();
   host.classList.add('up-feed');
   const list = el('div', 'up-list'), more = el('div', 'up-more');
@@ -211,6 +213,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     noteTimer = setTimeout(() => { if (status.textContent === text) status.textContent = ''; }, 4000);
   }
   function error() {
+    // المحاولة التلقائية التالية بعد مهلة من الفشل، لا في الاستطلاع التالي مباشرة (retryFirst)
+    if (!state.polled) firstRetryAt = Date.now() + FIRST_RETRY_MS;
     status.textContent = 'تعذّر جلب التحديثات. أعد المحاولة.';
     if (!state.events.length) list.replaceChildren(el('div', 'up-error', 'تعذّر جلب آخر التحديثات. اضغط تحديث لإعادة المحاولة.'));
   }
@@ -304,9 +308,24 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (inView) void load();
   }, { root: scrollRoot, rootMargin: '600px' });
   io?.observe(more);
+  /**
+   * أول تحميل فشل (طلب قُطع والتطبيق في الخلفية، أو شبكة عائدة للتو): كان الخطأ يبقى حتى «تحديث» باليد، لأن
+   * الاستطلاع الدوري لا يعمل قبل أول نجاح والمراقب لا يُطلق من جديد (بلاغ المالك بالصورة، 16 نوفمبر). الآن يُعاد
+   * وحده: عند الرجوع للتطبيق، وعند عودة الاتصال، وكل FIRST_RETRY_MS ما دامت الصفحة ظاهرة.
+   */
+  const retryFirst = (force = false) => {
+    if (!active() || state.polled || state.loading || state.refreshing || !visible() || document.hidden) return;
+    if (!force && Date.now() < firstRetryAt) return;
+    firstRetryAt = Date.now() + FIRST_RETRY_MS;
+    void load();
+  };
+  const onWake = () => { if (!document.hidden) retryFirst(true); };
+  document.addEventListener?.('visibilitychange', onWake);
+  view?.addEventListener?.('online', onWake);
   const timer = setInterval(async () => {
     if (!host.isConnected || !host.classList.contains('up-feed')) { api.dispose(); return; }
-    if (!state.polled || polling || state.loading || state.refreshing || !visible() || document.hidden) return;
+    if (!state.polled) { retryFirst(); return; }
+    if (polling || state.loading || state.refreshing || !visible() || document.hidden) return;
     polling = true;
     const revision=++headRevision;
     try {
@@ -329,7 +348,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     finally { polling = false; }
   }, 5000);
   const api = {
-    dispose() { state.token = {}; clearInterval(timer); clearTimeout(autoTimer); clearTimeout(noteTimer); io?.disconnect(); },
+    dispose() { state.token = {}; clearInterval(timer); clearTimeout(autoTimer); clearTimeout(noteTimer); io?.disconnect(); document.removeEventListener?.('visibilitychange', onWake); view?.removeEventListener?.('online', onWake); },
     loadMore: () => load({ asked: true }),
     async refresh() {
       if (!active() || state.loading || state.refreshing) return false;
