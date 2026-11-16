@@ -659,6 +659,8 @@ class PlayerActivity : Activity() {
             override fun openServers() = showServers()
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
+            // صورة الحلقة لغرفة المشاهدة معًا: نفس فن ورقة الحلقات، ويُجلب عند أول طلب
+            override fun episodeArt(n: Int): Pair<String?, String?>? { fetchEpisodeArt(); return episodeArt?.get(n) }
             // موسم آخر اختاره المضيف: الواجهة تفتح غرفة الموسم الجديد (الكل يختار سيرفره من جديد)
             // كان المشغّل يُغلق فورًا فتظهر صفحة الأنمي ثوانيَ ثم يعود للغرفة. الآن يبقى ظاهرًا بشاشة الغرفة، والواجهة
             // تفتح مشغّل الموسم الجديد فوقه، فيُغلق هذا حين يظهر الجديد (أو بعد مهلة إن تعذّر)
@@ -1883,6 +1885,7 @@ class PlayerActivity : Activity() {
             episodeArtLoading = false
             episodeArt = map ?: emptyMap()
             if (openSheet == SheetKind.EPISODES) sheet.refresh()
+            together?.episodeArtChanged()
         }
     }
 

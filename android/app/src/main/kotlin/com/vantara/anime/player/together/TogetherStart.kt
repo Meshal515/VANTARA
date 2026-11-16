@@ -39,6 +39,26 @@ object TogetherStart {
         Gate.SEND -> null
     }
 
+    /** فن بطاقة «البدء» وعنوان الحلقة في الغرفة لحلقة واحدة. */
+    data class EpisodeArt(val image: String?, val title: String?, val rating: String?, val duration: String?)
+
+    /**
+     * فن حلقة الغرفة الحالية (خلل المالك 16 نوفمبر: غيّر المضيف الحلقة فتغير كل شيء إلا الصورة المصغرة، بقيت للسابقة).
+     * ما جاء مع الدعوة (`launch`) يخص حلقة الدعوة وحدها. أي حلقة أخرى: صورتها وعنوانها من فن الحلقات في المشغّل
+     * (`known`، ani.zip)، والتقييم والمدة لا يُعرفان لها فلا يُعرضان (لا تخمين ولا بقايا الحلقة السابقة).
+     */
+    fun episodeArt(
+        episode: Int,
+        inviteEpisode: Int,
+        invite: EpisodeArt,
+        known: Pair<String?, String?>?,
+    ): EpisodeArt {
+        val image = known?.first?.takeIf { it.isNotBlank() }
+        val title = known?.second?.takeIf { it.isNotBlank() }
+        if (episode == inviteEpisode) return invite.copy(image = invite.image?.takeIf { it.isNotBlank() } ?: image, title = invite.title?.takeIf { it.isNotBlank() } ?: title)
+        return EpisodeArt(image = image, title = title, rating = null, duration = null)
+    }
+
     /** الأمر لم يُرسل (المقبس مغلق) رغم أن الحالة قالت متصل: سباق انقطاع. */
     const val SEND_FAILED = "ما وصل أمر البدء — الاتصال انقطع، جرّب بعد لحظة"
     /** الخادم رفض: لست المضيف عنده (انتقلت الاستضافة) أو لا تملك التحكم. */

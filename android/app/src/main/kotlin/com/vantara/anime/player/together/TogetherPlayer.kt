@@ -107,7 +107,27 @@ class TogetherPlayer(
         fun loadProgress(): Float = 0f
         /** المضيف نقل الغرفة لعمل آخر (موسم ثانٍ): يُغلق المشغّل وتفتح الواجهة غرفة الموسم الجديد للاختيار. */
         fun switchWork(key: String, label: String?) {}
+        /** صورة الحلقة n وعنوانها من فن حلقات المشغّل (ani.zip)، أو null إن لم يُعرف بعد. الجلب يبدأ عند أول طلب. */
+        fun episodeArt(n: Int): Pair<String?, String?>? = null
     }
+
+    /** فن حلقة الغرفة الحالية: حلقة الدعوة بفن الدعوة، وغيرها بفن حلقتها (لا بقايا السابقة). */
+    private fun currentArt() = TogetherStart.episodeArt(
+        roomEpisode(), initialEpisode,
+        TogetherStart.EpisodeArt(launch.episodeImage, launch.episodeTitle, launch.rating, launch.duration),
+        hooks.episodeArt(roomEpisode()),
+    )
+
+    private fun paintEpisodeTitle() {
+        val v = lobbyEpisodeTitle ?: return
+        val t = currentArt().title
+        val text = t?.let { "⁨$it⁩" } ?: ""
+        if (v.text.toString() != text) v.text = text
+        v.visibility = if (t == null) View.GONE else View.VISIBLE
+    }
+
+    /** وصل فن الحلقات (جلب ani.zip انتهى): تُعاد بطاقة «البدء» وعنوان الحلقة بفن الحلقة الحالية. */
+    fun episodeArtChanged() = main.post { lobbySig = ""; paintLobby() }
 
     private val main = Handler(Looper.getMainLooper())
     val client = TogetherClient(http, launch.baseUrl, launch.code, launch.token, { hooks.freshToken() }, this)
@@ -909,9 +929,8 @@ class TogetherPlayer(
                 hero.addView(context.label(it, 13.5f, 0x99FFFFFF.toInt(), bold = true).apply { setPadding(0, context.dp(8), 0, 0) })
             }
             hero.addView(context.label(episodeText(), 26f, Color.WHITE, bold = true).apply { setShadowLayer(context.dp(12).toFloat(), 0f, context.dp(2).toFloat(), 0x80000000.toInt()) }.also { lobbyEpisode = it })
-            launch.episodeTitle?.takeIf { it.isNotBlank() }?.let {
-                hero.addView(context.label("\u2068$it\u2069", 14f, 0xC7FFFFFF.toInt(), bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; visibility = if (roomEpisode() == initialEpisode) View.VISIBLE else View.GONE }.also { lobbyEpisodeTitle = it })
-            }
+            // \u0639\u0646\u0648\u0627\u0646 \u0627\u0644\u062d\u0644\u0642\u0629 \u064a\u062a\u0628\u0639 \u062d\u0644\u0642\u0629 \u0627\u0644\u063a\u0631\u0641\u0629 (\u0644\u0627 \u0639\u0646\u0648\u0627\u0646 \u062d\u0644\u0642\u0629 \u0627\u0644\u062f\u0639\u0648\u0629 \u0639\u0644\u0649 \u062d\u0644\u0642\u0629 \u0623\u062e\u0631\u0649)\u060c \u0648\u0645\u0643\u0627\u0646\u0647 \u0645\u0648\u062c\u0648\u062f \u062f\u0627\u0626\u0645\u064b\u0627 \u0644\u064a\u062a\u062d\u062f\u062b \u0639\u0646\u062f \u0627\u0644\u062a\u063a\u064a\u064a\u0631
+            hero.addView(context.label("", 14f, 0xC7FFFFFF.toInt(), bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }.also { lobbyEpisodeTitle = it; paintEpisodeTitle() })
             val steps = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, context.dp(8), 0, 0) }
             val bars = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = View.LAYOUT_DIRECTION_LTR }
             stepBars = (0 until STEPS.size).map { View(context).also { v -> bars.addView(v, LinearLayout.LayoutParams(context.dp(20), context.dp(3)).apply { marginEnd = context.dp(4) }) } }
@@ -1068,14 +1087,16 @@ class TogetherPlayer(
     private fun paintLobby() {
         // «الحلقة N» من الغرفة نفسها، وعنوان حلقة الدعوة لا يبقى على حلقة أخرى
         lobbyEpisode?.let { v -> val text = episodeText(); if (v.text.toString() != text) v.text = text }
-        lobbyEpisodeTitle?.visibility = if (roomEpisode() == initialEpisode) View.VISIBLE else View.GONE
+        paintEpisodeTitle()
         val bar = lobbyBar ?: return
         if (lobbyCount != null) return
         val root = lobby
         val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
             (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
         val sig = listOf(connected, ready, failedSource, awaitingPick, client.isHost, hooks.serverLabel(), portrait,
-            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
+            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first,
+            // صورة الحلقة جزء مما يُرى: تغيير الحلقة يعيد رسم بطاقة «البدء» (كانت تبقى بصورة السابقة)
+            roomEpisode(), currentArt()).joinToString("|")
         if (sig == lobbySig && bar.childCount > 0) return
         lobbySig = sig
         bar.removeAllViews()
@@ -1185,7 +1206,8 @@ class TogetherPlayer(
         card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF)
         card.clipToOutline = true
         card.contentDescription = "ابدأ للجميع"
-        launch.episodeImage?.let { url ->
+        val art = currentArt()
+        art.image?.let { url ->
             val thumb = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 if (!canStart) { alpha = 0.6f; colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix().apply { setSaturation(0.35f) }) }
@@ -1211,8 +1233,8 @@ class TogetherPlayer(
         card.addView(dot, FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER))
         // التقييم بمصدره والمدة: سطر صغير أسفل البطاقة نفسها (لا تحت عنوان الحلقة). لا يظهر ما لا نعرفه ولا يُخترع مصدر.
         val source = launch.ratingSource?.takeIf { it.isNotBlank() }
-        val ratingText = launch.rating?.takeIf { it.isNotBlank() }?.let { r -> "\u2066★ " + r + (if (source != null) " " + source else "") + "\u2069" }
-        val facts = listOfNotNull(ratingText, launch.duration?.takeIf { it.isNotBlank() })
+        val ratingText = art.rating?.takeIf { it.isNotBlank() }?.let { r -> "\u2066★ " + r + (if (source != null) " " + source else "") + "\u2069" }
+        val facts = listOfNotNull(ratingText, art.duration?.takeIf { it.isNotBlank() })
         if (facts.isNotEmpty()) {
             card.addView(View(context).apply { background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, intArrayOf(0x99000000.toInt(), 0x00000000)) },
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(56), Gravity.BOTTOM))
