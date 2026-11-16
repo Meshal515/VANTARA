@@ -227,11 +227,15 @@ export function createJobRunner(deps) {
 
   async function pagesOf(job, c) {
     const ch = job.chapters[c];
-    const cached = pageLists.get(ch.key);
-    if (cached) return cached;
-    const list = await engine.pages(ch.row.sourceId, ch.row.chapter);
-    if (!list?.length) throw new Error('empty');
-    pageLists.set(ch.key, list);
+    // القائمة المخزّنة يشترك فيها كل عمل يترجم الفصل نفسه، لكن عدد الصفحات يُسجَّل لفصل هذا العمل في الحالين.
+    // كان الكاش يرجع قبل تسجيله، فيبقى ch.pages = null ويطلب العامل «عدد الصفحات» إلى الأبد بلا انتظار حقيقي:
+    // حلقة microtask تجمّد خيط JavaScript (والـWebView كله) عند إضافة عمل ثانٍ لفصل في عمل سابق.
+    let list = pageLists.get(ch.key);
+    if (!list) {
+      list = await engine.pages(ch.row.sourceId, ch.row.chapter);
+      if (!list?.length) throw new Error('empty');
+      pageLists.set(ch.key, list);
+    }
     if (ch.pages !== list.length) {
       ch.pages = list.length;
       ch.done = ch.done.filter((i) => i < list.length);
@@ -350,7 +354,8 @@ export function createJobRunner(deps) {
           job.status = 'paused';
           job.reason = blocked;
           save();
-          void native.jobFinished({ title: `توقفت ترجمة ${job.title}`, text: BLOCK_TEXT[blocked] ?? 'افتح التطبيق لتكمل' });
+          // JS1: عمل آخر في الطابور = الخدمة الأمامية تبقى؛ إيقافها ثم بدؤها من الخلفية يُسقط التطبيق على Android 12+
+          void native.jobFinished({ title: `توقفت ترجمة ${job.title}`, text: BLOCK_TEXT[blocked] ?? 'افتح التطبيق لتكمل', keepRunning: Boolean(active()) });
           continue;
         }
         if (job.status !== 'running') continue;
@@ -368,7 +373,7 @@ export function createJobRunner(deps) {
           save();
           const p = progressOf(job);
           const complete = !p.failed && !p.unreachable;
-          void native.jobFinished({ title: complete ? `جاهزة للقراءة: ${job.title}` : `انتهت ترجمة ${job.title} بنقص`, text: finishedText(job) });
+          void native.jobFinished({ title: complete ? `جاهزة للقراءة: ${job.title}` : `انتهت ترجمة ${job.title} بنقص`, text: finishedText(job), keepRunning: Boolean(active()) });
           continue;
         }
         if (transient) await sleep(20_000);

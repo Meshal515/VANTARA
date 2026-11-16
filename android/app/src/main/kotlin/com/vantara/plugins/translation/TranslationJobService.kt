@@ -77,25 +77,32 @@ class TranslationJobService : Service() {
 
         @Volatile private var instance: TranslationJobService? = null
 
-        /** يبدأ الخدمة أو يحدّث إشعارها. */
-        fun update(context: Context, title: String, text: String, done: Int, total: Int) {
+        /**
+         * يبدأ الخدمة أو يحدّث إشعارها. يرجع false إن رفض النظام بدءها (JS1): Android 12+ يرمي
+         * ForegroundServiceStartNotAllowedException لبدء خدمة أمامية والتطبيق في الخلفية، وCapacitor يحوّل أي استثناء
+         * من دالة الإضافة إلى RuntimeException فينهار التطبيق. لا انهيار: الطابور في JS يكمل ما دامت العملية حيّة،
+         * ويُستأنف عند فتح التطبيق إن قُتلت.
+         */
+        fun update(context: Context, title: String, text: String, done: Int, total: Int): Boolean {
             val running = instance
             if (running != null) {
-                running.show(title, text, done, total)
-                return
+                return runCatching { running.show(title, text, done, total) }.isSuccess
             }
             val intent = Intent(context, TranslationJobService::class.java)
                 .putExtra(EXTRA_TITLE, title).putExtra(EXTRA_TEXT, text).putExtra(EXTRA_DONE, done).putExtra(EXTRA_TOTAL, total)
-            ContextCompat.startForegroundService(context, intent)
+            return runCatching { ContextCompat.startForegroundService(context, intent) }.isSuccess
         }
 
         fun stop(context: Context) {
             context.stopService(Intent(context, TranslationJobService::class.java))
         }
 
-        /** انتهى (أو توقف لسبب يحتاجك): يوقف الخدمة ويترك إشعارًا عاديًا يُمسح. */
-        fun finished(context: Context, title: String, text: String) {
-            stop(context)
+        /**
+         * انتهى عمل (أو توقف لسبب يحتاجك): إشعار عادي يُمسح. `keepRunning` = عمل آخر ما زال في الطابور، فالخدمة تبقى
+         * (JS1: إيقافها هنا ثم بدؤها للعمل التالي والتطبيق في الخلفية هو ما كان يُسقط التطبيق).
+         */
+        fun finished(context: Context, title: String, text: String, keepRunning: Boolean = false) {
+            if (!keepRunning) stop(context)
             channels(context)
             val n = NotificationCompat.Builder(context, CHANNEL_DONE)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
