@@ -20,7 +20,7 @@
  */
 
 import { readKv, writeKv } from './chapter-store.js';
-import { analyzePage, nativeBackend, nativeFileSrc, nativePathFromSrc, nativeTranslationAvailable, observeRefinements, releasePageReservation, renderPage, routePage } from './translation-native.js';
+import { analyzePage, nativeBackend, nativeFileSrc, nativePathFromSrc, nativeTranslationAvailable, observeRefinements, stagedPathFromSrc, releasePageReservation, renderPage, routePage } from './translation-native.js';
 import { createTextBatcher } from './translate-batch.js';
 import { canAcceptTranslationRepair } from './translation-repair-admission.js';
 import { recordPerf, stopwatch } from './translate-perf.js';
@@ -572,7 +572,7 @@ async function translatePageNow(deps, src, meta) {
   const clock = stopwatch();
   // القارئ يمرر convertFileSrc لا imagePath صريحًا. حفظ المسار المشتق هنا يصلح
   // تشخيص «اختبر التبييض» ويجعل سجل الصفحة قادرًا على إعادة تشغيل نماذج أندرويد.
-  const imagePath = deps.imagePath ?? filePathFromSrc(src);
+  const imagePath = deps.imagePath ?? filePathFromSrc(src) ?? await stagedPathFromSrc(src);
   const expectedCacheKey = pageCacheKey(meta);
   const candidate = deps.prepared;
   // prepared مملوك لنفس طلب الصفحة فقط: لا نعيد قراءة/تجزئة البايتات التي
@@ -1051,7 +1051,7 @@ function textBatcher(sync) {
 }
 
 export async function prepareTranslation(src, meta, options = {}) {
-  const path=filePathFromSrc(src);
+  const path=filePathFromSrc(src) ?? await stagedPathFromSrc(src);
   if (!path || !nativeTranslationAvailable()) return {src};
   const prep=stopwatch();
   const hash=await prep.time('prepare.hash', () => pageHashOf(src));

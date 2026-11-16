@@ -14,6 +14,7 @@ import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localWork, 
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
 import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
+import { isFiller } from './works.js';
 import { createStorageView } from './storage-view.js';
 import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, progressRatio } from '../lib/downloads/units.js';
 import { glyph } from './icons.js';
@@ -571,7 +572,7 @@ export function createDownloadsUI(deps) {
         coverImage: { ...(base?.coverImage ?? {}), large: art.cover, extraLarge: art.cover, medium: art.cover },
         bannerImage: art.banner ?? art.cover, wideBanner: art.banner ?? null };
       snapshot._work = { ...(snapshot._work ?? {}), key: snapshot._work?.key ?? ref.replace(/^ext:/, ''), title: w.title, thumbnailUrl: art.cover, editions: [] };
-      local = { ref, rows: localRows(items), engine: createLocalMangaEngine(ctx.store, items) };
+      local = { ref, rows: localRows(items, { isFiller }), engine: createLocalMangaEngine(ctx.store, items) };
     }
     view.localRef = ref;
     deps.openLocalWork?.({ ref, section: data.section, snapshot, local });

@@ -567,7 +567,7 @@ class AnimeEngine(context: Context) {
         }
         val list = com.vantara.addons.NativeAddonCandidates.parse(id, sourceId, name, raw, System.currentTimeMillis()) { stream ->
             val torrentEngine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
-            val uri = torrentEngine.register(com.vantara.addons.NativeAddonCandidates.torrentRequest(stream))
+            val uri = torrentEngine.register(com.vantara.addons.NativeAddonCandidates.torrentRequest(stream, prep.wholeEpisode()))
             if (prep.ownTorrentTicket(uri.toString())) uri.toString() else { torrentEngine.release(uri); null }
         }
         CoroutineScope(Dispatchers.IO + requireNotNull(prep.job)).launch {
@@ -758,7 +758,7 @@ class AnimeEngine(context: Context) {
             return done.computeIfAbsent(c.id) { java.util.Optional.ofNullable(register(c)) }.orElse(null)
         }
         private fun register(c: Candidate): Candidate? {
-            val request = com.vantara.anime.stream.MagnetLinks.request(c.url) ?: return null
+            val request = com.vantara.anime.stream.MagnetLinks.request(c.url, prep.wholeEpisode()) ?: return null
             val engine = com.vantara.addons.torrent.TorrentEngine.get(appContext)
             val uri = runCatching { engine.register(request) }.getOrNull() ?: return null
             if (!prep.ownTorrentTicket(uri.toString())) { engine.release(uri); return null }

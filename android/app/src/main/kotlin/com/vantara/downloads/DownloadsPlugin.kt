@@ -53,6 +53,11 @@ class DownloadsPlugin : Plugin() {
         }.also { runCatching { cm.registerDefaultNetworkCallback(it) } }
     }
 
+    override fun handleOnResume() {
+        super.handleOnResume()
+        DownloadService.resumeQueued(context)
+    }
+
     override fun handleOnDestroy() {
         DownloadService.listeners.remove(forward)
         networkCallback?.let { cb -> runCatching { (context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }
