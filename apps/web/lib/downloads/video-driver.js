@@ -59,10 +59,20 @@ export function routeIdentity(route) {
  *   - بصمة محفوظة: تطابق البصمة وحدها (تورنت آخر من الإضافة نفسها ليس هو، مهما تشابهت الجودة).
  *   - بلا بصمة (تنزيل قديم): اسم السيرفر والجودة داخل المصدر نفسه.
  */
+/**
+ * هوية حزمة التورنت (`btih:<infoHash>`) من بصمة ملف (`btih:<infoHash>:<fileIdx>`). سيرفر التورنت هو الحزمة:
+ * الحلقة التالية من حزمة الموسم نفسها ملف آخر في التورنت نفسه، والمحرك يختار ملفها (DL20).
+ */
+const torrentPack = (fingerprint) => (typeof fingerprint === 'string' && /^btih:[0-9a-f]{40}(?::|$)/i.test(fingerprint) ? fingerprint.slice(0, 45).toLowerCase() : null);
+
 export function sameRoute(route, source) {
   if (!route || !source?.sourceId || route.sourceId !== source.sourceId) return false;
   if (source.fingerprint) {
-    if (route.fingerprint) return route.fingerprint === source.fingerprint;
+    if (route.fingerprint) {
+      if (route.fingerprint === source.fingerprint) return true;
+      const pack = torrentPack(source.fingerprint);
+      return pack !== null && pack === torrentPack(route.fingerprint);
+    }
     return route.id === source.fingerprint;
   }
   if (source.server && route.server !== source.server) return false;

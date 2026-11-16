@@ -43,6 +43,37 @@ export function nativePathFromSrc(src) {
   try { return desktop()?.pathFromSrc?.(String(src ?? '')) ?? null; } catch { return null; }
 }
 
+/**
+ * صفحة لا مسار لها على الجهاز (فصل منزّل يُعرض بروابط blob: من IndexedDB): تُكتب ملفًا مؤقتًا في الإضافة فتُترجم
+ * على الجهاز كأي صفحة، لا عبر الخادم (MG5). null إن لم يدعمها الـAPK أو فشلت: يبقى المسار القديم.
+ */
+const staged = new Map();
+export async function stagedPathFromSrc(src) {
+  const value = String(src ?? '');
+  if (!value.startsWith('blob:')) return null;
+  const p = plugin();
+  if (!p || typeof p.stagePage !== 'function') return null;
+  if (staged.has(value)) return staged.get(value);
+  const pending = (async () => {
+    try {
+      const blob = await (await fetch(value)).blob();
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      const out = await p.stagePage({ data });
+      return typeof out?.path === 'string' && out.path ? out.path : null;
+    } catch { return null; }
+  })();
+  staged.set(value, pending);
+  if (staged.size > 400) staged.delete(staged.keys().next().value);
+  const path = await pending;
+  if (!path) staged.delete(value);
+  return path;
+}
+
 /** URL the reader can load for a rendered local file. */
 export function nativeFileSrc(path) {
   const convert = globalThis.Capacitor?.convertFileSrc ?? desktop()?.fileSrc;

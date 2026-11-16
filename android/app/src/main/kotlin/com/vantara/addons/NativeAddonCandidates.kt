@@ -24,7 +24,8 @@ object NativeAddonCandidates {
     }
     fun displayName(value: String) = value.trim().takeIf { it.length in 1..100 && !it.contains(Regex("https?://|manifest\\.json", RegexOption.IGNORE_CASE)) } ?: "إضافة"
 
-    fun torrentRequest(stream: JsonObject): com.vantara.addons.torrent.TorrentRequest {
+    /** [episode]: رقم الحلقة المطلوبة لاختيار ملفها من حزمة موسم حين تغيب fileIdx (TR1). */
+    fun torrentRequest(stream: JsonObject, episode: Int? = null): com.vantara.addons.torrent.TorrentRequest {
         val magnet = stream.text("magnet") ?: stream.text("url")?.takeIf { it.startsWith("magnet:") }
         val hash = stream.text("infoHash") ?: magnet?.let { value ->
             Regex("urn:btih:([a-fA-F0-9]{40})").find(java.net.URLDecoder.decode(value, "UTF-8"))?.groupValues?.get(1)
@@ -35,7 +36,8 @@ object NativeAddonCandidates {
             indexValue.intOrNull?.takeIf { it >= 0 } ?: error("Invalid torrent file index")
         }
         val sources = (stream["sources"] as? JsonArray)?.take(100)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull }.orEmpty()
-        return com.vantara.addons.torrent.TorrentRequest(hash, index, sources, magnet)
+        val filename = ((stream["behaviorHints"] as? JsonObject)?.text("filename"))?.takeIf { it.length in 1..512 && !it.contains('/') && !it.contains('\\') }
+        return com.vantara.addons.torrent.TorrentRequest(hash, index, sources, magnet, episode = episode?.takeIf { it > 0 }, filename = filename)
     }
 
     fun parse(session: String, sourceId: String, name: String, raw: JsonElement, now: Long,

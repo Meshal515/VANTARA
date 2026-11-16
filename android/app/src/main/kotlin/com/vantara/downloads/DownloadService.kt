@@ -115,11 +115,24 @@ class DownloadService : Service() {
         else if (holds.isNotEmpty()) runCatching { promote() }
     }
 
+    /**
+     * خمول: لا يُغلق فورًا (DS1). «نزّل الموسم» يسلّم حلقة بعد تجهيزها في الواجهة (عشرات الثواني)، فإن أُغلقت الخدمة
+     * بين حلقتين جاء التسليم التالي والتطبيق في الخلفية، فيرفض Android 12+ بدء خدمة أمامية ويسقط التطبيق. تبقى
+     * الخدمة دقيقتين بعد آخر عمل، ثم تُغلق إن بقيت خاملة.
+     */
     private fun idle() {
         if (!foreground) return
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        foreground = false
-        stopSelf()
+        main.removeCallbacks(lingerStop)
+        main.postDelayed(lingerStop, IDLE_LINGER_MS)
+    }
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val lingerStop = Runnable {
+        synchronized(this@DownloadService) {
+            if (!foreground || running.isNotEmpty() || pending.isNotEmpty() || holds.isNotEmpty()) return@Runnable
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            foreground = false
+            stopSelf()
+        }
     }
 
     private fun launch(job: DownloadJob) {
@@ -164,7 +177,8 @@ class DownloadService : Service() {
     /** تنزيل تورنت دائم بمحرك التطبيق نفسه، وإيقافه بإشارة الإلغاء نفسها. */
     private fun torrentDownload(job: DownloadJob, dest: java.io.File, handle: Running, onProgress: (DownloadJob) -> Unit): java.io.File {
         val hash = job.torrentHash ?: throw DownloadFailure("SOURCE", "تورنت بلا بصمة")
-        val request = com.vantara.addons.torrent.TorrentRequest(hash, job.torrentFile, emptyList(), job.torrentMagnet)
+        val request = com.vantara.addons.torrent.TorrentRequest(hash, job.torrentFile, emptyList(), job.torrentMagnet,
+            episode = job.episode.takeIf { it > 0f && it % 1f == 0f }?.toInt())
         val engine = com.vantara.addons.torrent.TorrentEngine.get(this)
         if (!com.vantara.addons.torrent.TorrentEngine.nativeAvailable()) throw DownloadFailure("UNSUPPORTED", "محرك التورنت غير متاح لمعمارية هذا الجهاز")
         var current = job
@@ -180,6 +194,8 @@ class DownloadService : Service() {
                 // المشغّل مفتوح عليه الآن: مؤقت لا رفض من المصدر، فيُعاد تلقائيًا بعد إغلاقه
                 "TORRENT_BUSY" -> DownloadFailure("NETWORK", "هذا الإصدار مفتوح في المشغّل الآن؛ يبدأ تنزيله بعد إغلاقه")
                 "NO_PEERS" -> DownloadFailure("NETWORK", "لا مشاركين في التورنت الآن")
+                "EPISODE_NOT_IN_TORRENT" -> DownloadFailure("SOURCE", "هذا التورنت لا يحتوي الحلقة المطلوبة")
+                "TORRENT_INCOMPLETE" -> DownloadFailure("VERIFY", "ملف الحلقة لم يكتمل؛ يُعاد تنزيله")
                 else -> DownloadFailure("NETWORK", e.message ?: "انقطع التورنت")
             }
         }
@@ -229,6 +245,7 @@ class DownloadService : Service() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(lingerStop)
         networkCallback?.let { cb -> runCatching { (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb) } }
         if (instance === this) instance = null
         running.values.forEach { it.reason = "pause"; it.cancelled = true; it.transfers.cancel() }
@@ -245,6 +262,7 @@ class DownloadService : Service() {
     companion object {
         private const val CHANNEL = "vantara.downloads.progress"
         private const val ONGOING_ID = 7401
+        private const val IDLE_LINGER_MS = 120_000L
         private const val SUBTITLE_BUDGET_MS = 30_000L
         @Volatile private var instance: DownloadService? = null
         private val running = ConcurrentHashMap<String, Running>()
@@ -295,7 +313,16 @@ class DownloadService : Service() {
             enqueue(job)
             val service = instance
             if (service != null) service.drainPending()
-            else ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java))
+            // التطبيق في الخلفية (Android 12+) يرفض بدء خدمة أمامية: كان الرفض يُسقط التطبيق (DS1). العنصر محفوظ
+            // «في الطابور» على القرص، ويُستأنف عند عودة التطبيق (resumeQueued) أو بأي بدء لاحق للخدمة (restoreQueue)
+            else runCatching { ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java)) }
+        }
+
+        /** عودة التطبيق للمقدمة: يكمل ما سُلِّم والخدمة متوقفة (رفض بدئها من الخلفية، أو قُتلت العملية). */
+        fun resumeQueued(context: Context) {
+            if (instance != null) return
+            val waiting = pending.isNotEmpty() || runCatching { store(context).all().any { it.state == "queued" || it.state == "downloading" || it.state == "verifying" || it.state == "reconnecting" } }.getOrDefault(false)
+            if (waiting) runCatching { ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java)) }
         }
 
         fun configure(parallel: Int?, wifi: Boolean?) {

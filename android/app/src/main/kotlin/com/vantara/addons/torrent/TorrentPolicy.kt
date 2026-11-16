@@ -8,7 +8,13 @@ import java.io.ByteArrayOutputStream
 import java.util.Locale
 
 /** The same torrent and exact file selected by the addon, never a title-only lookup. */
-class TorrentRequest(infoHash: String, val fileIdx: Int? = null, sources: List<String> = emptyList(), magnet: String? = null) {
+class TorrentRequest(
+    infoHash: String, val fileIdx: Int? = null, sources: List<String> = emptyList(), magnet: String? = null,
+    /** رقم الحلقة المطلوبة (عدد صحيح موجب) حين يغيب fileIdx: يختار ملفها من حزمة الموسم بدل الأكبر (TR1). */
+    val episode: Int? = null,
+    /** اسم الملف كما تعلنه الإضافة (behaviorHints.filename): أقوى من رقم الحلقة إن طابق ملفًا. */
+    val filename: String? = null,
+) {
     val infoHash = canonicalHash(infoHash)
     val trackers: List<String>
     init {
@@ -129,9 +135,36 @@ object TorrentPolicy {
     private fun playable(file: TorrentFile) = file.size > 0 && file.offset >= 0 && video.matches(file.path) &&
         !file.path.startsWith('/') && !file.path.contains('\\') && !file.path.contains('\u0000') &&
         file.path.split('/').none { it == ".." || it == "." } && !Regex("^[A-Za-z]:").containsMatchIn(file.path)
-    fun selectFile(files: List<TorrentFile>, requested: Int?): TorrentFile =
-        (if (requested == null) files.filter(::playable).maxByOrNull { it.size } else files.firstOrNull { it.index == requested && playable(it) })
-            ?: throw IllegalArgumentException("No playable file at requested torrent index")
+    /**
+     * الملف الذي يُشغَّل أو يُنزَّل من التورنت:
+     * 1) fileIdx الصريح من الإضافة إن كان فيديو صالحًا.
+     * 2) اسم الملف المعلن (behaviorHints.filename) إن طابق ملفًا.
+     * 3) رقم الحلقة من أسماء الملفات (S01E05، 1x05، E05، «- 05»، [05]، «الحلقة 5»).
+     * 4) ملف الفيديو الوحيد، أو الأكبر حين لا تُطلب حلقة بعينها (فيلم).
+     * حزمة فيها عدة حلقات وطُلبت حلقة ليست فيها = خطأ صريح، لا تشغيل حلقة أخرى (TR1). fileIdx يشير لغير فيديو
+     * يرجع لمطابقة الاسم والرقم بدل الفشل النهائي (TR2).
+     */
+    fun selectFile(files: List<TorrentFile>, requested: Int?, episode: Int? = null, filename: String? = null): TorrentFile {
+        if (requested != null) files.firstOrNull { it.index == requested && playable(it) }?.let { return it }
+        val videos = files.filter(::playable)
+        if (videos.isEmpty()) throw IllegalArgumentException("No playable file at requested torrent index")
+        val hinted = filename?.let(::baseName)?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
+        if (hinted != null) videos.firstOrNull { baseName(it.path).lowercase(Locale.ROOT) == hinted }?.let { return it }
+        val wanted = episode?.takeIf { it > 0 }
+        if (wanted != null) {
+            val matches = videos.filter { EpisodeNames.episode(it.path) == wanted }
+            if (matches.isNotEmpty()) return matches.maxBy { it.size }
+        }
+        if (videos.size == 1) return videos.single()
+        // fileIdx صريح لا يقود لفيديو: لا يُستبدل بملف آخر بلا دليل على أنه الحلقة نفسها
+        if (requested != null) throw IllegalArgumentException("No playable file at requested torrent index")
+        if (wanted != null) {
+            // حزمة بلا أرقام حلقات قابلة للقراءة: الأكبر كما كان. فيها أرقام ولا تحوي المطلوبة: لا حلقة خاطئة
+            if (videos.any { EpisodeNames.episode(it.path) != null }) throw IllegalArgumentException("EPISODE_NOT_IN_TORRENT")
+        }
+        return videos.maxBy { it.size }
+    }
+    private fun baseName(path: String) = path.substringAfterLast('/')
     fun readAt(file: TorrentFile, position: Long, pieceLength: Int, count: Int): PieceRead? {
         require(pieceLength > 0 && count >= 0 && position in 0..file.size)
         if (position == file.size || count == 0) return null
@@ -318,5 +351,31 @@ object TorrentHotswap {
             .filter { it.bytesPerSecond < maxOf(SLOW_BPS, typical / 4) && fastest >= maxOf(it.bytesPerSecond * 3, SLOW_BPS) }
             .sortedBy { it.bytesPerSecond }
             .map { it.ip }.distinct().take(MAX_VICTIMS).toList()
+    }
+}
+
+/** رقم الحلقة من اسم ملف في حزمة موسم. يتجاهل الدقة والترميز والسنة وبصمة CRC. null إن لم يُعرف بثقة. */
+object EpisodeNames {
+    private val noise = listOf(
+        Regex("\\[[0-9A-Fa-f]{8}\\]"),                       // [ABCD1234] CRC
+        Regex("(?i)\\b\\d{3,4}[pi]\\b"),                       // 1080p 720p
+        Regex("(?i)\\b(?:[xh]\\.?26[45]|hevc|avc|aac\\d?(?:\\.\\d)?|ddp?\\d\\.\\d|10bit|8bit|\\d+ch)\\b"),
+        Regex("(?i)\\b(?:19|20)\\d{2}\\b"),                      // السنة
+        Regex("(?i)\\bv\\d\\b"),
+    )
+    private val patterns = listOf(
+        Regex("(?i)\\bS\\d{1,2}[ ._-]*E(\\d{1,4})\\b"),
+        Regex("(?i)\\b\\d{1,2}x(\\d{1,3})\\b"),
+        Regex("(?i)\\b(?:EP?|Episode|Ep\\.)[ ._-]*(\\d{1,4})\\b"),
+        Regex("(?:الحلقة|حلقة)[ ._-]*(\\d{1,4})"),
+        Regex("\\s-\\s(\\d{1,4})(?:v\\d)?(?=[\\s._\\[(]|$)"),
+        Regex("[\\[(](\\d{1,4})(?:v\\d)?[\\])]"),
+        Regex("^(\\d{1,4})(?=[\\s._-])"),
+    )
+    fun episode(path: String): Int? {
+        var name = path.substringAfterLast('/').substringBeforeLast('.').replace('_', ' ').replace('.', ' ')
+        for (n in noise) name = name.replace(n, " ")
+        for (p in patterns) p.find(name)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+        return null
     }
 }

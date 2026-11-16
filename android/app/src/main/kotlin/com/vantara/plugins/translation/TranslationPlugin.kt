@@ -97,6 +97,31 @@ class TranslationPlugin : Plugin() {
         return PriorityGate.Page(chapter, index)
     }
 
+    /**
+     * صفحة بلا ملف (فصل منزّل في IndexedDB يُقرأ بروابط blob:): تُكتب ملفًا مؤقتًا باسم بصمتها فتمر بمسار الجهاز نفسه
+     * بدل خادم الترجمة (MG5). الحجم مسقوف، والمجلد يُقلَّم لأحدث [STAGE_KEEP] صفحة.
+     */
+    @PluginMethod
+    fun stagePage(call: PluginCall) {
+        val data = call.getString("data") ?: return call.reject("data required")
+        scope.launch {
+            try {
+                val bytes = android.util.Base64.decode(data, android.util.Base64.DEFAULT)
+                if (bytes.isEmpty() || bytes.size > STAGE_MAX_BYTES) return@launch call.reject("page size not allowed")
+                val name = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).take(16).joinToString("") { "%02x".format(it) }
+                val dir = File(context.cacheDir, "translation-stage").apply { mkdirs() }
+                val file = File(dir, "$name.img")
+                if (!file.isFile || file.length() != bytes.size.toLong()) {
+                    val tmp = File(dir, "$name.part")
+                    tmp.writeBytes(bytes)
+                    if (!tmp.renameTo(file)) { tmp.delete(); throw java.io.IOException("stage write failed") }
+                } else file.setLastModified(System.currentTimeMillis())
+                dir.listFiles()?.filter { it.name.endsWith(".img") }?.sortedByDescending { it.lastModified() }?.drop(STAGE_KEEP)?.forEach { it.delete() }
+                call.resolve(JSObject().put("path", file.absolutePath))
+            } catch (t: Throwable) { call.reject(t.message ?: "stage failed") }
+        }
+    }
+
     /** القارئ على هذه الصفحة الآن: ما أمامها يتقدّم في الدور. */
     @PluginMethod
     fun focusPage(call: PluginCall) {
@@ -469,3 +494,6 @@ class TranslationPlugin : Plugin() {
         call.resolve(JSObject().put("granted", granted))
     }
 }
+
+private const val STAGE_MAX_BYTES = 40 * 1024 * 1024
+private const val STAGE_KEEP = 240

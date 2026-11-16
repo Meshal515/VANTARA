@@ -45,6 +45,11 @@ class TorrentEngine internal constructor(
     private data class Ticket(val request: TorrentRequest, @Volatile var touched: Long = System.currentTimeMillis())
     private val tickets = ConcurrentHashMap<String, Ticket>()
     private val states = ConcurrentHashMap<String, State>()
+    /**
+     * تنزيل دائم واحد لكل تورنت في وقت واحد (TD2): حلقتان من حزمة موسم واحدة تتشاركان مقبض libtorrent نفسه
+     * (أولويات الملفات، مسار الحفظ، والتقدّم)، فكانت الثانية تُوقف ملف الأولى ثم «تكمل» الاثنتين ويُحفظ ملف الأولى ناقصًا.
+     */
+    private val permanentLocks = ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock>()
     private val managerHolder = lazy {
         check(nativeAvailable()) { "Native torrent library unavailable on device ABI" }
         SessionManager(false).apply {
@@ -206,6 +211,24 @@ class TorrentEngine internal constructor(
      */
     fun downloadPermanent(request: TorrentRequest, dest: File, cancelled: () -> Boolean, progress: (PermanentProgress) -> Unit): File {
         check(!shutdown.get()) { "Torrent engine is closed" }
+        val lock = permanentLocks.computeIfAbsent(request.infoHash) { java.util.concurrent.locks.ReentrantLock() }
+        // ينتظر دوره بلا حجز للإلغاء: الإيقاف يُحترم أثناء الانتظار
+        try {
+            while (!lock.tryLock(500, TimeUnit.MILLISECONDS)) {
+                if (cancelled() || Thread.currentThread().isInterrupted) throw InterruptedIOException("Torrent download cancelled")
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw InterruptedIOException("Torrent download interrupted")
+        }
+        try {
+            return downloadPermanentLocked(request, dest, cancelled, progress)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private fun downloadPermanentLocked(request: TorrentRequest, dest: File, cancelled: () -> Boolean, progress: (PermanentProgress) -> Unit): File {
         val hash = request.infoHash
         // حالة بث بلا قارئ (تسخين ورقة السيرفرات، أو مشاهدة انتهت وبقيت للعودة السريعة) لا تمنع التنزيل: تُخلى
         // ويُنزَّل إلى مجلد التحميلات. كانت أي حالة باقية ترفض بـTORRENT_BUSY ⇒ «المصدر رفض الطلب» بعد مجرد فتح
@@ -237,8 +260,11 @@ class TorrentEngine internal constructor(
             }
             val info = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { h.torrentFile()?.takeIf { it.isValid } }
             val files = info.files()
-            val index = request.fileIdx?.takeIf { it in 0 until files.numFiles() }
-                ?: (0 until files.numFiles()).maxByOrNull { files.fileSize(it) } ?: throw IOException("Torrent has no files")
+            val listed = (0 until files.numFiles()).filterNot { files.padFileAt(it) }.map { TorrentFile(it, files.filePath(it), files.fileSize(it), files.fileOffset(it)) }
+            // نفس قرار التشغيل (TR1): fileIdx، ثم اسم الملف، ثم رقم الحلقة؛ الأكبر فقط حين لا تُطلب حلقة
+            val index = try { TorrentPolicy.selectFile(listed, request.fileIdx, request.episode, request.filename).index } catch (e: IllegalArgumentException) {
+                throw IOException(if (e.message == "EPISODE_NOT_IN_TORRENT") "EPISODE_NOT_IN_TORRENT" else "Requested torrent file is not a playable video")
+            }
             h.prioritizeFiles(Array(files.numFiles()) { if (it == index) Priority.FOUR else Priority.IGNORE })
             val name = files.filePath(index)
             var lastDone = -1L
@@ -258,10 +284,15 @@ class TorrentEngine internal constructor(
                 else if (System.currentTimeMillis() - stalledSince > PERMANENT_STALL_MS) throw IOException(if (st.numPeers() == 0) "NO_PEERS" else "TORRENT_STALLED")
                 try { Thread.sleep(1000) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InterruptedIOException("Torrent download interrupted") }
             }
-            return File(dest, name)
+            val out = File(dest, name)
+            // «مكتمل» يعني ملف الحلقة نفسها بحجمه الكامل في مجلد هذا العنصر، لا مجرد ملف موجود
+            if (!out.isFile || out.length() != files.fileSize(index)) throw IOException("TORRENT_INCOMPLETE")
+            return out
         } finally {
             // الملف يبقى في مجلده؛ الجلسة لا تحتفظ بالتورنت بعد انتهاء العمل أو إيقافه (يُستأنف بإضافته من جديد وفحص قطعه)
             runCatching { manager.remove(h) }
+            // التنزيل التالي من الحزمة نفسها لا يلتقط هذا المقبض وهو يُغلق (مسار حفظه مجلد هذا العنصر)
+            runCatching { waitFor({ false }, 5_000, "Torrent handle still closing") { if (manager.find(Sha1Hash(hash))?.isValid == true) null else Unit } }
         }
     }
 
@@ -374,7 +405,9 @@ class TorrentEngine internal constructor(
         val files = (0 until storage.numFiles()).filterNot { storage.padFileAt(it) }.map {
             TorrentFile(it, storage.filePath(it), storage.fileSize(it), storage.fileOffset(it))
         }
-        val selected = try { TorrentPolicy.selectFile(files, request.fileIdx) } catch (_: IllegalArgumentException) { throw IOException("Requested torrent file is not a playable video") }
+        val selected = try { TorrentPolicy.selectFile(files, request.fileIdx, request.episode, request.filename) } catch (e: IllegalArgumentException) {
+            throw IOException(if (e.message == "EPISODE_NOT_IN_TORRENT") "EPISODE_NOT_IN_TORRENT" else "Requested torrent file is not a playable video")
+        }
         // Reject escaping paths anywhere in the pack, not just the chosen video.
         for (index in 0 until storage.numFiles()) {
             val target = File(state.folder, storage.filePath(index)).canonicalFile
