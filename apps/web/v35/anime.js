@@ -2536,7 +2536,10 @@ export function createAnime(deps) {
    */
   function playEpisode(m, n, { position = null, clip = null, hostPick = false } = {}) {
     // على الجهاز: الملف المحفوظ بالمشغّل نفسه، بلا ورقة سيرفرات ولا شبكة
-    if (state.local?.ref === `anime:${m.id}` && state.local.numbers.has(Number(n))) return void state.local.play(Number(n), { position });
+    if (state.local?.ref === `anime:${m.id}`) {
+      if (state.local.numbers.has(Number(n))) return void state.local.play(Number(n), { position });
+      return toast('لم يتم تحميل هذه الحلقة');
+    }
     if (isMovie(m)) n = 1;
     if (!engine.available()) {
       deps.openSheet((body) => {

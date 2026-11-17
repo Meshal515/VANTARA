@@ -890,11 +890,16 @@ class PlayerActivity : Activity() {
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
         val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
-        // المعاينة: مصدر مستقل بلا قياس شبكة (لا تُحسب حركتها على سرعة المشاهدة)، والتورنت بإطارات المشاهدة وحدها
-        // المعاينة: مصدر مستقل بلا قياس شبكة؛ التورنت بقارئ معاينة لا يحرّك نافذة المشاهدة
-        if (::seekPreview.isInitialized) seekPreview.bind({
-            CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false, preview = true), false, "${c.id}|preview").mediaSource
-        }, torrent = c.url.startsWith("vantara-torrent:"))
+        // HLS المحلي يبقى على Media3. الملف المباشر يُقرأ من القرص لاستخراج إطار عند الطلب.
+        if (::seekPreview.isInitialized) {
+            val file = android.net.Uri.parse(c.url).takeIf { android.os.Build.VERSION.SDK_INT >= 27 && it.scheme == "file" }?.path
+                ?.takeUnless { it.endsWith(".m3u8", ignoreCase = true) }
+            seekPreview.bind(
+                source = { CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false, preview = true), false, "${c.id}|preview").mediaSource },
+                torrent = c.url.startsWith("vantara-torrent:"),
+                localFile = file,
+            )
+        }
         externalAudioUrls = media.externalAudioUrls
         if (BuildConfig.DEBUG) {
             if (withoutExternalAudio) diag.error("engine recovery: optional external audio disabled for this retry")

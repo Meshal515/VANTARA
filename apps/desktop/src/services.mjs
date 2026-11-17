@@ -1281,13 +1281,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!s||s.session!==session||s.stopped||!s.ready||!s.playUrl)return {available:false};
     const duration=Number(s.progress.duration)||0;
     const ms=Math.max(0,Math.round(Number(positionMs)/10000)*10000);
-    if(!Number.isFinite(ms)||(duration&&ms>duration))return {available:false};
+    if(!Number.isFinite(ms))return {available:false};
+    const seekMs=duration>0 ? Math.min(ms,Math.max(0,duration-1000)) : ms;
     if(s.thumbs.has(ms))return {available:true,positionMs:ms,src:s.thumbs.get(ms)};
     if(s.torrentId&&s.win&&duration>0){
       try{
         const {bits}=await localBitfield(s.api,`/torrents/${s.torrentId}/haves`,{auth:s.auth,signal:s.controller.signal,timeout:2000});
-        const start=s.win.fileOffset+Math.floor(ms/duration*s.win.fileLength),len=s.win.pieceLength||1;
-        for(let p=Math.floor(start/len);p<=Math.floor((start+2*1024*1024)/len);p++)if(!hasPiece(bits,p))return {available:false,positionMs:ms,reason:'not-downloaded'};
+        const start=s.win.fileOffset+Math.floor(seekMs/duration*s.win.fileLength),len=s.win.pieceLength||1;
+        const end=Math.min(start+2*1024*1024,s.win.fileOffset+s.win.fileLength-1);
+        for(let p=Math.floor(start/len);p<=Math.floor(end/len);p++)if(!hasPiece(bits,p))return {available:false,positionMs:ms,reason:'not-downloaded'};
       }catch{return {available:false};}
     }
     const seq=s.thumbSeq=(s.thumbSeq??0)+1;
@@ -1296,7 +1298,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const job=(async()=>{
       const dir=await fs.mkdtemp(join(tmpdir(),'vantara-thumb-'));
       try{
-        const args=['--no-config','--terminal=no','--really-quiet','--no-audio','--no-sub','--vo=image','--vo-image-format=jpg','--vo-image-jpg-quality=72',`--vo-image-outdir=${dir}`,'--frames=1',`--start=${(ms/1000).toFixed(1)}`,'--hr-seek=no','--vf=scale=320:-2','--untimed',s.playUrl];
+        const args=['--no-config','--terminal=no','--really-quiet','--no-audio','--no-sub','--vo=image','--vo-image-format=jpg','--vo-image-jpeg-quality=72',`--vo-image-outdir=${dir}`,'--frames=1',`--start=${(seekMs/1000).toFixed(1)}`,'--hr-seek=no','--vf=scale=320:-2','--untimed',s.playUrl];
         await new Promise(resolveDone=>{
           const p=spawn(binaries.mpv,args,{env:cleanEnv(),stdio:'ignore',windowsHide:true,shell:false});
           const kill=setTimeout(()=>{try{p.kill();}catch{}},6000);
@@ -1305,7 +1307,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         const file=(await fs.readdir(dir)).find(n=>/\.jpe?g$/i.test(n));
         if(!file)return null;
         const src=`data:image/jpeg;base64,${(await fs.readFile(join(dir,file))).toString('base64')}`;
-        if(s.thumbs.size>240)s.thumbs.delete(s.thumbs.keys().next().value);
+        if(s.thumbs.size>=120)s.thumbs.delete(s.thumbs.keys().next().value);
         s.thumbs.set(ms,src);
         return src;
       }finally{await rm(dir,{recursive:true,force:true}).catch(()=>{});}

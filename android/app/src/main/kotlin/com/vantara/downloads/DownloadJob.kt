@@ -38,6 +38,7 @@ data class DownloadJob(
     val main: String? = null,
     val container: String? = null,
     val verified: Boolean = false,
+    val mainBytes: Long? = null,
     val error: String? = null,
     val message: String? = null,
     /** التورنت: البصمة ورقم الملف والرابط بمتتبّعاته — يكفي لإعادة الإضافة والاستئناف بعد إعادة التشغيل. */

@@ -274,6 +274,37 @@ export function localWork(items, ref) {
   };
 }
 
+/** سجل التنزيل هو مرجع الإتاحة، والتفاصيل المحفوظة تُغني العنصر المطابق فقط. */
+export function localCinemaSeasons(items, saved = []) {
+  const seasons = new Map();
+  for (const { unit } of items) {
+    const match = /^s(\d+)e(\d+)$/.exec(unit.key);
+    if (!match) continue;
+    const season = Number(match[1]), episode = Number(match[2]);
+    if (!seasons.has(season)) {
+      const meta = saved.find((s) => Number(s.n) === season);
+      seasons.set(season, { ...meta, n: season, episodes: [] });
+    }
+    const entry = seasons.get(season);
+    const meta = saved.find((s) => Number(s.n) === season)?.episodes?.find((e) => Number(e.n) === episode);
+    entry.episodes.push({ ...meta, n: episode, name: meta?.name ?? unit.title ?? null });
+  }
+  return [...seasons.values()].sort((a, b) => a.n - b.n)
+    .map((s) => ({ ...s, episodes: s.episodes.sort((a, b) => a.n - b.n) }));
+}
+
+export function localCinemaResume(seasons, selected, watch) {
+  const season = seasons.find((s) => s.n === selected && s.episodes.length) ?? seasons.find((s) => s.episodes.length);
+  if (!season) return null;
+  const exact = Number(watch?.season) === season.n ? Number(watch.episode) : null;
+  const record = exact == null ? null : watch.episodes?.[`${season.n}:${exact}`];
+  if (record && !record.done && season.episodes.some((e) => e.n === exact)) {
+    return { season: season.n, episode: exact, position: record.position ?? 0, resume: true, record };
+  }
+  const next = exact == null ? null : season.episodes.find((e) => e.n > exact);
+  return { season: season.n, episode: (next ?? season.episodes[0]).n, position: 0, resume: Boolean(next), record: null };
+}
+
 /** ملخص «جاري التحميل»: النشطة والمنتظرة وإجمالي السرعة. */
 export function queueSummary(items) {
   let active = 0;

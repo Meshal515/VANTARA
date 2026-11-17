@@ -33,22 +33,28 @@ class DownloadRunner(
     fun run(start: DownloadJob, listener: Listener): DownloadJob {
         var job = save(start.copy(state = "downloading", error = null, message = null), listener)
         val dir = store.dir(job.id)
-        job = when (job.kind) {
+        val savedMain = job.main?.let { File(dir, it) }
+        // FILE وTORRENT يكتبان الاسم النهائي عند اكتمال النقل. بعد إغلاق التطبيق أثناء الترجمات
+        // نتحقق من الملف نفسه بدل بدء النقل ثانية، أو مقارنته بحجم الحزمة شاملًا ملفات الترجمة.
+        val expectedMainBytes = job.mainBytes ?: job.total
+        val hasCompleteFile = job.kind != "HLS" && savedMain?.isFile == true &&
+            expectedMainBytes > 0 && savedMain.length() == expectedMainBytes
+        job = if (hasCompleteFile) job else when (job.kind) {
             "HLS" -> hls(job, dir, listener)
             "TORRENT" -> torrentFile(job, dir, listener)
             else -> file(job, dir, listener)
         }
         // الملف كامل: «يتحقق» من الآن، لا «يحمّل 100%» طوال جلب الترجمات والصوت الخارجي
-        job = save(job.copy(state = "verifying"), listener)
-        job = sidecars(job, dir, listener)
         val main = job.main?.let { File(dir, it) }
+        job = save(job.copy(state = "verifying", mainBytes = main?.length()), listener)
         if (main == null || !main.isFile || main.length() <= 0) throw DownloadFailure("VERIFY", "الملف الرئيسي غير موجود بعد التنزيل")
-        if (job.kind == "FILE") {
+        if (job.kind != "HLS") {
             val head = main.inputStream().use { s -> ByteArray(512).let { b -> val n = s.read(b); b.copyOf(maxOf(n, 0)) } }
             val sniffed = Signatures.sniff(head)
             if (sniffed == "PAGE" || sniffed == "HLS" || sniffed == "UNKNOWN") throw DownloadFailure("VERIFY", "المحفوظ ليس ملف فيديو ($sniffed)")
-            if (job.total > 0 && main.length() != job.total) throw DownloadFailure("VERIFY", "حجم الملف ${main.length()} لا يطابق ${job.total}")
+            if (job.mainBytes != (if (hasCompleteFile) expectedMainBytes else job.total)) throw DownloadFailure("VERIFY", "حجم الملف لا يطابق النقل المكتمل")
         }
+        job = sidecars(job, dir, listener)
         val size = store.sizeOnDisk(job.id)
         return save(job.copy(state = "ready", verified = true, bytes = size, total = size, finishedAt = System.currentTimeMillis()), listener)
     }
@@ -75,6 +81,10 @@ class DownloadRunner(
         job = job.copy(etag = etag ?: job.etag, lastModified = modified ?: job.lastModified, bytes = size, total = size)
         val head = part.inputStream().use { s -> ByteArray(512).let { b -> val n = s.read(b); b.copyOf(maxOf(n, 0)) } }
         val container = Signatures.sniff(head)
+        if (container in setOf("PAGE", "HLS", "UNKNOWN")) {
+            part.delete()
+            throw DownloadFailure("VERIFY", "المستلم ليس ملف فيديو ($container)")
+        }
         val name = "video.${Signatures.extension(container)}"
         val dest = File(dir, name)
         if (!part.renameTo(dest)) {
@@ -194,16 +204,16 @@ class DownloadRunner(
             return if (e in setOf("srt", "vtt", "ass", "ssa", "ttml", "m4a", "aac", "mp3", "opus", "ogg", "mka", "m3u8")) e else fallback
         }
         val subs = job.subtitles.mapIndexed { i, s ->
-            if (s.file != null && File(dir, s.file).isFile) return@mapIndexed s
+            if (s.file != null && File(dir, s.file).length() > 0) return@mapIndexed s
             val name = "sub-$i.${ext(s.url, "vtt")}"
-            runCatching { transfers.whole(s.url, job.headers, File(dir, name)) }.fold({ s.copy(file = name) }, { s })
+            runCatching { transfers.whole(s.url, job.headers, File(dir, name)) }.fold({ s.copy(file = name) }, { if (it is Transfers.Cancelled) throw it else s.copy(file = null) })
         }
         val audio = job.audio.mapIndexed { i, a ->
-            if (a.file != null && File(dir, a.file).isFile) return@mapIndexed a
+            if (a.file != null && File(dir, a.file).length() > 0) return@mapIndexed a
             val e = ext(a.url, "m4a")
             if (e == "m3u8") return@mapIndexed a // صوت HLS خارجي: يبقى في القائمة الرئيسية إن كان منها، ولا يُخترع ملف
             val name = "audio-$i.$e"
-            runCatching { transfers.whole(a.url, job.headers, File(dir, name)) }.fold({ a.copy(file = name) }, { a })
+            runCatching { transfers.whole(a.url, job.headers, File(dir, name)) }.fold({ a.copy(file = name) }, { if (it is Transfers.Cancelled) throw it else a.copy(file = null) })
         }
         job = job.copy(subtitles = subs, audio = audio)
         // ترجمات الإضافات (OpenSubtitles وغيرها): نص UTF-8 بجانب الفيديو، فلا ينكسر ترميز العربية بلا إنترنت

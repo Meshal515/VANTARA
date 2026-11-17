@@ -31,6 +31,11 @@ async function runEmbeddedVideoSmoke({window,videoHost,playerOverlay,native,fixt
     report.stage='renderer-ready';await until(()=>window.webContents.executeJavaScript('window.VantaraVideoSmokeReady===true'));
     report.stage='start-playback';await services.startPlayback({session:'embedded-proof',candidate:{url:'https://owned.example.com/owned.mp4'},title:'فيديو VANTARA المؤلف',pause:true});
     report.stage='first-frame';await until(()=>events.some(e=>e.type==='playback/ready'&&e.embedded));
+    report.stage='seek-preview';
+    const preview=await services.previewFrame({session:'embedded-proof',positionMs:0});
+    assert.equal(preview.available,true,'MPV must extract a seek preview from the fixture');
+    assert.ok(Buffer.from(preview.src.split(',')[1],'base64').subarray(0,3).equals(Buffer.from([0xff,0xd8,0xff])));
+    report.seekPreview=true;
     report.stage='native-child';const parent=nativeWindowId(window.getNativeWindowHandle());
     let proof=await until(async()=>{const s=await videoHost.inspect();return s.children.some(c=>c.child&&c.parent===s.host&&/mpv/i.test(c.class))&&s.width>200&&s.height>100?s:false;});
     assert.equal(proof.parent,parent);report.realEmbeddedChild=true;report.initial=proof;

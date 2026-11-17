@@ -40,6 +40,7 @@ export function createDownloadManager(deps) {
   const network = deps.network ?? { metered: () => false, online: () => true };
   const settings = { parallel: clampParallel(deps.settings?.parallel), wifiOnly: Boolean(deps.settings?.wifiOnly) };
   const items = new Map();
+  const pendingAdds = new Set();
   const running = new Map(); // id -> { controller, meter, savedAt, promise }
   const retryTimers = new Map();
   const listeners = new Set();
@@ -295,9 +296,21 @@ export function createDownloadManager(deps) {
           } else skipped.push({ spec, reason: existing.state === STATES.ready ? 'على الجهاز' : 'في الطابور', item: existing });
           continue;
         }
-        items.set(item.id, item);
-        await persist(item);
-        added.push(item);
+        if (pendingAdds.has(item.id)) {
+          skipped.push({ spec, reason: 'في الطابور' });
+          continue;
+        }
+        pendingAdds.add(item.id);
+        try {
+          // لا نسلّم مهمة للمحرك قبل حفظ مرجعها. وإلا يبقى الفيديو على القرص ويختفي من «على الجهاز».
+          await store.putItem(item);
+          items.set(item.id, item);
+          added.push(item);
+        } catch {
+          skipped.push({ spec, reason: 'تعذّر حفظ سجل التنزيل على الجهاز' });
+        } finally {
+          pendingAdds.delete(item.id);
+        }
       }
       if (added.length) emit({ type: 'list' });
       pump();

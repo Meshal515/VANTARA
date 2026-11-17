@@ -103,6 +103,31 @@ class DownloadRunnerTest {
         assertEquals("ready", store.read("dl_test1")?.state)
     }
 
+    @Test fun `restart during verification uses the committed media without requesting it again`() {
+        val store = store()
+        val original = job("/video.mkv")
+        File(store.dir(original.id).apply { mkdirs() }, "video.mkv").writeBytes(video)
+        val saved = original.copy(state = "verifying", main = "video.mkv", mainBytes = video.size.toLong(), total = video.size.toLong())
+        store.write(saved)
+        expired = true
+        val done = DownloadRunner(store, transfers()).run(requireNotNull(store.read(original.id))) {}
+        assertEquals("ready", done.state)
+        assertTrue(done.verified)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun `HLS byte range rejects a 200 response that contains the entire resource`() {
+        ignoreRange = true
+        val dest = File(tmp.root, "segment")
+        try {
+            transfers().whole(server.url("/video.mkv").toString(), emptyMap(), dest, 4L..11L)
+            fail("expected the mismatched response to fail validation")
+        } catch (e: DownloadFailure) {
+            assertEquals("VERIFY", e.code)
+        }
+        assertFalse(dest.exists())
+    }
+
     @Test fun `resumes an interrupted download from the last valid byte without re-downloading`() {
         val store = store()
         val part = File(store.dir("dl_test1").apply { mkdirs() }, "video.part")

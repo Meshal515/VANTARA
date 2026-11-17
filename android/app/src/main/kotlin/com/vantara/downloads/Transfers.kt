@@ -64,6 +64,14 @@ class Transfers(private val client: (url: String, headers: Map<String, String>) 
         return if (len > 0) len + offset else -1
     }
 
+    private fun rangeOf(response: Response): LongRange? {
+        val match = Regex("""bytes (\d+)-(\d+)/(?:\d+|\*)""").matchEntire(response.header("Content-Range").orEmpty())
+            ?: return null
+        val start = match.groupValues[1].toLongOrNull() ?: return null
+        val end = match.groupValues[2].toLongOrNull() ?: return null
+        return (start..end).takeUnless { it.isEmpty() }
+    }
+
     data class Head(val container: String, val total: Long, val ranges: Boolean, val etag: String?, val lastModified: String?, val contentType: String?)
 
     /** فحص قبل الحفظ: أول 16 بايت تكشف الحاوية، وContent-Range يكشف الحجم ودعم الاستئناف. */
@@ -96,6 +104,8 @@ class Transfers(private val client: (url: String, headers: Map<String, String>) 
                 offset = 0
                 part.delete()
             }
+            if (r.code == 206 && rangeOf(r)?.first != offset)
+                throw DownloadFailure("VERIFY", "بداية الجزء المستلم لا تطابق موضع الاستئناف")
             val total = totalOf(r, offset)
             ensureSpace(part, if (total > 0) total - offset else 64L * 1024 * 1024)
             val body = r.body ?: throw DownloadFailure("NETWORK", "رد بلا جسم")
@@ -136,6 +146,10 @@ class Transfers(private val client: (url: String, headers: Map<String, String>) 
         val tmp = File(dest.parentFile, dest.name + ".tmp")
         dest.parentFile?.mkdirs()
         execute(request(url, headers, range = range?.let { "bytes=${it.first}-${it.last}" }), headers).use { r ->
+            if (range != null && (r.code != 206 || rangeOf(r) != range))
+                throw DownloadFailure("VERIFY", "المصدر لم يرجع نطاق المقطع المطلوب")
+            if (range == null && r.code != 200)
+                throw DownloadFailure("VERIFY", "المصدر لم يرجع الملف المساعد كاملًا")
             val body = r.body ?: throw DownloadFailure("NETWORK", "رد بلا جسم")
             var n = 0L
             try {
@@ -155,7 +169,7 @@ class Transfers(private val client: (url: String, headers: Map<String, String>) 
                 if (e is Cancelled) throw e
                 throw storageFailure(e)
             }
-            val expected = r.body?.contentLength() ?: -1
+            val expected = range?.let { it.last - it.first + 1 } ?: body.contentLength()
             if (n <= 0 || (expected > 0 && n != expected)) { tmp.delete(); throw DownloadFailure("NETWORK", "مقطع ناقص") }
             if (!tmp.renameTo(dest)) { dest.delete(); if (!tmp.renameTo(dest)) throw DownloadFailure("STORAGE", "تعذّرت كتابة المقطع") }
             return n

@@ -2,11 +2,11 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadManager } from './manager.js';
 import { createMangaDriver, sniffImageType } from './manga-driver.js';
-import { countText, createItem, defaultUnitKey, localWork, mangaUnitNumber, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel, ERROR_LABEL } from './model.js';
+import { countText, createItem, defaultUnitKey, localCinemaResume, localCinemaSeasons, localWork, mangaUnitNumber, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel, ERROR_LABEL } from './model.js';
 import { rankRoutes, unsupportedReason } from './smart.js';
 import { memoryStore, openStore } from './store.js';
 import { createRateMeter, etaSeconds, formatBytes, formatEta, formatSpeed, progressRatio } from './units.js';
-import { resolveRoutes, sameRoute } from './video-driver.js';
+import { batchVideoSource, resolveRoutes, sameRoute } from './video-driver.js';
 
 /** JPEG كامل البنية (SOI … EOI): فحص السلامة يرفض المبتور، فالعيّنة تنتهي بـFFD9 كالملف الحقيقي. */
 const JPEG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 76 }, (_, i) => (i * 7) & 0x7f), 0xff, 0xd9]).buffer;
@@ -525,6 +525,26 @@ describe('video driver: the server the user chose is the one downloaded', () => 
   };
   const nativeReady = () => fakeDevice(() => ({ state: 'ready', bytes: 7, path: '/v.mkv' }));
 
+  it('resolves separate episode hashes in a manually selected source and keeps the anchor exact', async () => {
+    const a = torrent('ep-9', `btih:${'a'.repeat(40)}:0`, 'release 1');
+    const b = torrent('ep-10', `btih:${'b'.repeat(40)}:0`, 'release 2');
+    const other = { ...b, id: 'other', sourceId: 'addon|different', quality: 2160 };
+    const engine = engineWith([]);
+    engine.prepare.mockImplementation(async ({ session, episode }) => ({
+      session, done: true, routes: episode === 9 ? [a] : [b, other],
+    }));
+    const device = nativeReady();
+    const { createVideoDriver } = await import('./video-driver.js');
+    const driver = createVideoDriver({ engine: () => engine, native: () => device, platform: () => ({ torrent: true }) });
+    for (const episode of [9, 10]) {
+      const unitKey = `s2e${episode}`;
+      const source = batchVideoSource(a, { unitKey, anchorKey: 's2e9', sourceName: 'Torrentio' });
+      await driver.run({ id: `dl_${episode}`, request: { episode }, source, unit: { key: unitKey, number: episode }, work: { title: 'fixture' } }, ctlOf());
+    }
+    expect(device.start.mock.calls.map(([x]) => [x.candidate, x.episode])).toEqual([['cand-ep-9', 9], ['cand-ep-10', 10]]);
+    expect(sameRoute({ ...a, fingerprint: `btih:${'a'.repeat(40)}:1` }, { sourceId: a.sourceId, fingerprint: a.fingerprint, locked: true })).toBe(false);
+  });
+
   it('manual: the 200 MB release the user picked, not the 1.1 GB best of the same addon', async () => {
     const { createVideoDriver } = await import('./video-driver.js');
     const routes = [
@@ -660,4 +680,36 @@ describe('manga: the chapter the sheet starts on, and a source that returns no p
     expect(defaultUnitKey([{ key: 'a', number: null }])).toBe('a');
   });
 
+});
+
+describe('cinema on device', () => {
+  it('uses the downloaded second season and ignores first-season watch history', () => {
+    const items = [{ unit: { key: 's2e3', title: 'Third' } }, { unit: { key: 's2e9' } }];
+    const saved = [{ n: 1, episodes: [{ n: 1 }] }, { n: 2, episodes: [{ n: 3, name: 'Metadata' }, { n: 4 }] }];
+    const seasons = localCinemaSeasons(items, saved);
+    expect(seasons.map((s) => [s.n, s.episodes.map((e) => e.n)])).toEqual([[2, [3, 9]]]);
+    expect(seasons[0].episodes[0].name).toBe('Metadata');
+    expect(localCinemaResume(seasons, 1, { season: 1, episode: 1, episodes: { '1:1': { position: 9000 } } })).toMatchObject({ season: 2, episode: 3, position: 0 });
+    expect(localCinemaResume(seasons, 2, { season: 2, episode: 9, episodes: { '2:9': { position: 21000 } } })).toMatchObject({ season: 2, episode: 9, position: 21000 });
+  });
+});
+
+it('records a failed artwork request and recovers it after the backoff without touching downloaded media', async () => {
+  const { saveWorkArt, artUrl, dropWorkArt } = await import('./art.js');
+  const store = memoryStore();
+  const work = { ref: 'cinema:offline-art-test', cover: 'https://images.test/poster.png' };
+  const key = `${work.ref}|cover`;
+  const input = { fetchImpl: vi.fn(async () => ({ ok: false, status: 503 })) };
+  expect(await saveWorkArt(store, work, input)).toBe(0);
+  const failed = await store.getArt(key);
+  expect(failed).toMatchObject({ attempts: 1, error: 'HTTP 503' });
+  expect(await artUrl(store, work.ref, 'cover')).toBeNull();
+  await saveWorkArt(store, work, input);
+  expect(input.fetchImpl).toHaveBeenCalledTimes(1);
+  await store.putArt(key, { ...failed, retryAt: 0 });
+  input.fetchImpl.mockResolvedValue({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+  expect(await saveWorkArt(store, work, input)).toBe(1);
+  expect(await artUrl(store, work.ref, 'cover')).toMatch(/^blob:/);
+  await dropWorkArt(store, work.ref);
+  expect(await artUrl(store, work.ref, 'cover')).toBeNull();
 });

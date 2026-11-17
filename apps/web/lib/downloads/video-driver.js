@@ -54,6 +54,14 @@ export function routeIdentity(route) {
   return route?.fingerprint ?? route?.id ?? null;
 }
 
+/** السيرفر الدقيق يخص الحلقة التي عُرضت سيرفراتها. بقية الدفعة تختار داخل المصدر نفسه. */
+export function batchVideoSource(route, { unitKey, anchorKey, sourceName }) {
+  const source = { mode: 'manual', sourceId: route.sourceId, sourceName, quality: route.quality ?? null };
+  if (String(unitKey) !== String(anchorKey)) return source;
+  return { ...source, server: route.server, routeCode: route.code ?? null,
+    fingerprint: routeIdentity(route), label: route.label ?? null };
+}
+
 /**
  * السيرفر نفسه الذي اختاره المستخدم أو قُفل عليه التنزيل.
  *   - بصمة محفوظة: تطابق البصمة وحدها (تورنت آخر من الإضافة نفسها ليس هو، مهما تشابهت الجودة).
@@ -71,7 +79,13 @@ export function sameRoute(route, source) {
     if (route.fingerprint) {
       if (route.fingerprint === source.fingerprint) return true;
       const pack = torrentPack(source.fingerprint);
-      return pack !== null && pack === torrentPack(route.fingerprint);
+      if (pack === null || pack !== torrentPack(route.fingerprint)) return false;
+      // الاستئناف قد يُعيد بصمة الحزمة قبل اختيار الملف. لا تقبل فهرسًا صريحًا مختلفًا.
+      if (source.locked) {
+        const from = source.fingerprint.slice(46), to = route.fingerprint.slice(46);
+        return !from || !to || from === to;
+      }
+      return true;
     }
     return route.id === source.fingerprint;
   }
@@ -334,7 +348,8 @@ export function createVideoDriver(deps) {
           await native.start({
             parallel: conf.parallel,
             wifiOnly: conf.wifiOnly,
-            ...(subs?.subtitleIdentity ? { subtitleIdentity: subs.subtitleIdentity, addonSubtitleProviders: subs.addonSubtitleProviders ?? [], episode: current.request.episode ?? 1 } : {}),
+            episode: current.request.episode ?? 1,
+            ...(subs?.subtitleIdentity ? { subtitleIdentity: subs.subtitleIdentity, addonSubtitleProviders: subs.addonSubtitleProviders ?? [] } : {}),
             id: current.id,
             session,
             candidate,

@@ -7,6 +7,8 @@
 
 const SIZES = { cover: 360, banner: 1080, logo: 600 };
 const urls = new Map();
+const pending = new WeakMap();
+const RETRY_MS = [15_000, 120_000, 1_800_000];
 
 async function shrink(blob, maxWidth) {
   try {
@@ -31,8 +33,8 @@ async function shrink(blob, maxWidth) {
 }
 
 async function imageBlob(src, fetchImpl) {
-  const res = await fetchImpl(src);
-  if (!res.ok) return null;
+  const res = await fetchImpl(src, { signal: globalThis.AbortSignal?.timeout?.(12_000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
   return blob?.size && /^image\//.test(blob.type) ? blob : null;
 }
@@ -42,30 +44,43 @@ async function imageBlob(src, fetchImpl) {
  * `local(src)`: نسخة محلية بمحرّك المصدر (غلاف المانجا: الموقع يحتاج Referer/كوكي ولا يرسل CORS، فطلب
  * الواجهة المباشر يفشل دائمًا — لذلك غابت أغلفة المانجا وحدها عن «على الجهاز»). يرجع عدد الصور المحفوظة.
  */
-export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, local = null } = {}) {
+export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, local = null, extras = {} } = {}) {
   if (!store?.putArt || !work?.ref) return 0;
-  let saved = 0;
-  for (const kind of ['cover', 'banner', 'logo']) {
-    const src = work[kind];
-    if (!src || typeof src !== 'string') continue;
-    const key = `${work.ref}|${kind}`;
-    try {
-      if (await store.getArt(key)) continue;
-      let blob = await imageBlob(src, fetchImpl).catch(() => null);
-      if (!blob && local) {
-        const copy = await Promise.resolve(local(src, kind)).catch(() => null);
-        if (copy) blob = await imageBlob(copy, fetchImpl).catch(() => null);
-      }
-      if (!blob) continue;
-      blob = await shrink(blob, SIZES[kind]);
-      if (!blob?.size || !/^image\//.test(blob.type)) continue;
-      await store.putArt(key, { type: blob.type, data: await blob.arrayBuffer(), at: Date.now() });
-      saved++;
-    } catch {
-      /* صورة واحدة فشلت لا تمنع البقية */
+  let inflight = pending.get(store);
+  if (!inflight) pending.set(store, inflight = new Map());
+  if (inflight.has(work.ref)) return inflight.get(work.ref);
+  const saving = (async () => {
+    let saved = 0;
+    for (const [kind, src] of [...Object.keys(SIZES).map((kind) => [kind, work[kind]]), ...Object.entries(extras)]) {
+      if (!src || typeof src !== 'string') continue;
+      const key = `${work.ref}|${kind}`;
+      try {
+        const existing = await store.getArt(key);
+        if (existing?.data) continue;
+        if (existing?.src === src && existing.retryAt > Date.now()) continue;
+        try {
+          let fetchError;
+          let blob = await imageBlob(src, fetchImpl).catch((error) => { fetchError = error; return null; });
+          if (!blob && local) {
+            const copy = await local(src, kind);
+            if (copy) blob = await imageBlob(copy, fetchImpl);
+          }
+          if (!blob) throw fetchError ?? new Error('لم يصل ملف صورة صالح');
+          blob = await shrink(blob, SIZES[kind] ?? 480);
+          if (!blob?.size || !/^image\//.test(blob.type)) throw new Error('ملف الصورة غير صالح');
+          await store.putArt(key, { type: blob.type, data: await blob.arrayBuffer(), at: Date.now() });
+          saved++;
+        } catch (error) {
+          const attempts = (existing?.src === src ? existing.attempts ?? 0 : 0) + 1;
+          await store.putArt(key, { src, attempts, retryAt: Date.now() + RETRY_MS[Math.min(attempts - 1, RETRY_MS.length - 1)],
+            error: error?.message ?? 'تعذّر حفظ الصورة' });
+        }
+      } catch { /* عطل في مخزن الصور: ملف الوسائط مستقل عنه */ }
     }
-  }
-  return saved;
+    return saved;
+  })();
+  inflight.set(work.ref, saving);
+  try { return await saving; } finally { inflight.delete(work.ref); }
 }
 
 /** رابط محلي لصورة محفوظة (يُعاد استعماله)، أو null. */
@@ -81,10 +96,10 @@ export async function artUrl(store, ref, kind) {
 
 /** حُذف العمل كله: صوره وروابطها. */
 export async function dropWorkArt(store, ref) {
-  for (const kind of Object.keys(SIZES)) {
-    const key = `${ref}|${kind}`;
-    const url = urls.get(key);
-    if (url) URL.revokeObjectURL(url);
+  await pending.get(store)?.get(ref);
+  for (const [key, url] of urls) {
+    if (!key.startsWith(`${ref}|`)) continue;
+    URL.revokeObjectURL(url);
     urls.delete(key);
   }
   await store?.deleteArt?.(`${ref}|`).catch?.(() => {});

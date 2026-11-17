@@ -207,7 +207,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       previewTimer = timers.setTimeout(() => cmd('thumb', bucket), 120);
     }
   }
-  const hidePreview = () => { preview.classList.remove('is-on'); timers.clearTimeout(previewTimer); };
+  const hidePreview = () => { preview.classList.remove('is-on'); timers.clearTimeout(previewTimer); previewWant = null; };
   bar.addEventListener('pointermove', (e) => {
     if (dragging) { dragMs = msAt(e.clientX); paintTime(); }
     if (!state.duration) return;

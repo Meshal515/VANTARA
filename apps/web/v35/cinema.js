@@ -1,3 +1,4 @@
+import { localCinemaResume } from '../lib/downloads/model.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 /**
  * VANTARA CINEMA — أفلام ومسلسلات عالمية مترجمة.
@@ -375,6 +376,7 @@ export function createCinema(deps) {
       const resume = Boolean(e && !e.done && e.position > 5000);
       return { season: null, episode: 1, position: resume ? e.position : 0, resume, record: e ?? null };
     }
+    if (state.local?.ref === refOf(m.id)) return localCinemaResume(m.seasons ?? [], state.season, w);
     const first = m.seasons?.find((s) => s.n !== 0);
     if (!w?.episode) return { season: first?.n ?? 1, episode: first?.episodes[0]?.n ?? 1, position: 0, resume: false, record: null };
     const e = w.episodes?.[`${w.season}:${w.episode}`];
@@ -1579,7 +1581,7 @@ export function createCinema(deps) {
     // محذوف من التطبيق: لا يُفتح (ولا من رابط أو سجل قديم)، بلا ذكر لسبب
     if (removed(m)) { toast('هذا العمل غير متاح'); return; }
     // نوع مؤكد سابقًا (resolveWork) يغلب نوع البطاقة: بطاقة «أكمل المشاهدة» حُفظت أحيانًا بنوع رد خاطئ
-    if (types[m.id] && types[m.id] !== m.type) m = { ...m, type: types[m.id] };
+    if (!local && types[m.id] && types[m.id] !== m.type) m = { ...m, type: types[m.id] };
     const token = ++state.token;
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة ومواسم/حلقات المحمّل وحده، والتشغيل من الملف
     state.local = local;
@@ -1746,7 +1748,7 @@ export function createCinema(deps) {
       const found = h.pinned ? await h.first : await engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identityFor(season, 1)));
       return { copies: found.copies ?? [], pinned: Boolean(h.pinned) };
     };
-    const firstSeason = movie ? undefined : point?.season ?? seasons[0]?.n;
+    const firstSeason = movie ? undefined : state.season ?? point?.season ?? seasons[0]?.n;
     dl.open({
       section: 'cinema',
       kind: movie ? 'movie' : 'episode',
@@ -1755,7 +1757,7 @@ export function createCinema(deps) {
       units,
       seasons: movie ? undefined : seasons.map((s) => ({ n: s.n, label: `الموسم ${s.n}` })),
       season: firstSeason,
-      current: movie ? 'movie' : `s${point?.season ?? firstSeason}e${point?.episode ?? 1}`,
+      current: movie ? 'movie' : `s${firstSeason}e${point && point.season === firstSeason ? point.episode : 1}`,
       sources: async () => (await copiesFor(firstSeason)).copies.map((c) => ({ id: c.sourceId, name: c.sourceId.startsWith('addon|') ? addonName(c.sourceId) : SOURCE_NAMES[c.sourceId] ?? c.sourceName ?? c.sourceId })),
       build: async (list, choice) => {
         const bySeason = new Map();
@@ -2074,7 +2076,7 @@ export function createCinema(deps) {
       hostOf: (h) => h?.closest('.cn-detail'), spanOf: () => (unified ? art.offsetHeight || 300 : Math.max(1, art.offsetHeight - bar.offsetHeight)),
       active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id,
     });
-    if (!partial) {
+    if (!partial && state.local?.ref !== refOf(m.id)) {
       startWarm(m);
       void paintSources(m, m.type === 'series' ? state.season : null);
       void arabize(m, m.type === 'series' ? state.season : null);

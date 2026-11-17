@@ -201,6 +201,7 @@ class DownloadsPlugin : Plugin() {
             fresh = fresh.copy(kind = "TORRENT", url = request.magnetUri(), headers = emptyMap(), torrentHash = request.infoHash,
                 torrentFile = request.fileIdx, torrentMagnet = request.magnetUri())
         }
+        if (DownloadService.isRunning(id) || DownloadService.isQueued(id)) return call.resolve(JSObject().put("started", false).put("running", true))
         val previous = runCatching { store.read(id) }.getOrNull()
         val next = when {
             previous == null -> fresh
@@ -214,7 +215,6 @@ class DownloadsPlugin : Plugin() {
                 audio = previous.audio.ifEmpty { fresh.audio }, state = "queued", error = null, message = null)
         }
         DownloadService.configure(call.getInt("parallel"), call.getBoolean("wifiOnly"))
-        if (DownloadService.isRunning(id) || DownloadService.isQueued(id)) return call.resolve(JSObject().put("started", false).put("running", true))
         DownloadService.start(context, next)
         call.resolve(JSObject().put("started", true).put("resumedFrom", next.bytes))
     }
