@@ -154,7 +154,8 @@ export function swapPageImage(img, result, on, onBroken = null) {
   img.onload = translated
     ? () => {
         img.onload = null;
-        if (smallerThanOriginal(img)) broken();
+        // مؤقتة بقصد (refining): الكاملة قادمة، فقصرها ليس عطبًا (RT2: كان يحذفها ويعيدها بلا نهاية)
+        if (!result.refining && smallerThanOriginal(img)) broken();
       }
     : null;
   if (img.src !== target) img.src = target;
@@ -182,6 +183,8 @@ export function createReaderTranslation(deps) {
   let currentSegs = [];
   let currentSeg = null;
   const stall = createStallClock();
+  /** صفحات أُعيدت ترجمتها لعطب في هذه الجلسة (RT2). */
+  const rebuilt = new Map();
 
   // الـPWA بلا ترجمة مانجا: لا زرّ ولا ترجمة تلقائية مهما قال تخزين المتصفح
   const enabled = () => readTranslateSettings().enabled && supports('translation');
@@ -207,6 +210,10 @@ export function createReaderTranslation(deps) {
     if (result && img) {
       swapPageImage(img, result, isOn(), () => {
         seg.tl?.results.delete(index);
+        // إعادة ترجمة صفحة «معطوبة» مرة واحدة في الجلسة على الأكثر: لا حلقة بلا نهاية مهما كان سبب العطب (RT2)
+        const redo = rebuilt.get(`${seg.row.sourceId}|${index}|${result.hash}`) ?? 0;
+        if (redo >= 1) return;
+        rebuilt.set(`${seg.row.sourceId}|${index}|${result.hash}`, redo + 1);
         void forgetPage(result.hash, result.cacheKey, result.sourceHash).then(() => enqueuePage(seg, index));
       });
     }

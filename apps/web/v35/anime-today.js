@@ -1,3 +1,4 @@
+import { tagWork } from '../lib/removed-works.js';
 /**
  * رئيسية الأنمي — التصميم المعتمد (2026-11): البنر من جدول اليوم، ثم «تابع المشاهدة»، ثم جدول البث.
  *
@@ -344,7 +345,7 @@ export function createAnimeToday(h) {
   function continueCard(w) {
     const e = w.episodes?.[w.episode] ?? {};
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : e.done ? 1 : 0;
-    const c = el('div', 'ah-cw');
+    const c = tagWork(el('div', 'ah-cw'), `anime:${w.id}`);
     c.tabIndex = 0;
     c.setAttribute('role', 'button');
     c.setAttribute('aria-label', `تابع ${w.title} — ${unitLabel(w, w.episode)}`);

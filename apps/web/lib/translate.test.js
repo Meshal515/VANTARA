@@ -180,6 +180,7 @@ describe('partial publication safety', () => {
       translated:0,
       engine:'gpt-6-luna:t4',
       incomplete:true,
+      refining:false,
       at:123,
       tries:0,
     });
@@ -195,6 +196,14 @@ describe('partial publication safety', () => {
     expect(value.image).toBe('good.webp');
     expect(value.translated).toBe(1);
     expect(value.incomplete).toBe(false);
+  });
+});
+
+describe('RT2: a page analysed downscaled is published as refining, not broken', () => {
+  it('marks a complete render with a pending full-size refinement, and only that', () => {
+    expect(publicationValue({ image:'p.webp', translated:2, incomplete:false, refinementPath:'/r/p.webp' }).refining).toBe(true);
+    expect(publicationValue({ image:'p.webp', translated:2, incomplete:false, refinementPath:null }).refining).toBe(false);
+    expect(publicationValue({ image:'p.webp', translated:2, incomplete:true, refinementPath:'/r/p.webp' }).refining).toBe(false);
   });
 });
 
