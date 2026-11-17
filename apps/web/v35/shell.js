@@ -71,7 +71,7 @@ import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/ma
 import { artRatio, createArtStore } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
-import { isRemovedAny, removeWorkEverywhere, restoreRemovedWork, setRemovedSource } from '../lib/removed-works.js';
+import { installRemovedGate, isRemovedAny, removeWorkEverywhere, removedChanged, restoreRemovedWork, setRemovedSource, tagWork } from '../lib/removed-works.js';
 import { heroSlideIn, stripIn } from './motion.js';
 import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
@@ -439,6 +439,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   setHiddenUser(me);
   // «حذف العمل» من التطبيق كله: بصمات الأعمال المحذوفة (بلا أسماء) من المزامنة، تُخفي العمل في كل مكان
   setRemovedSource(() => sync.rows('removed_work_tokens', () => true));
+  // قاعدة الحذف الواحدة: أي بطاقة لعمل محذوف تُشال من أي شاشة (إلا الأرشيف)، الآن وفي كل رسم لاحق
+  installRemovedGate(root);
   /** مالك التطبيق (الشارة من الخادم): وحده يحذف الأعمال ويرى أرشيفها. */
   const iAmOwner = () => Boolean(me()) && sync.rows('accounts', (a) => a.user_id === me())[0]?.badge === 'owner';
 
@@ -1008,6 +1010,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // محذوف من التطبيق: لا بطاقة في أي قائمة (المكتبة والسجل لا يمران من فلتر البحث)
     if (isRemovedAny([String(work?.id ?? ''), work?._work?.key, ...(work?._work?.keys ?? [])].filter(Boolean))) { a.hidden = true; a.style.display = 'none'; return a; }
     a.dataset.workId = String(work.id);
+    tagWork(a, String(work.id), work?._work?.key, work?._work?.keys ?? []);
     a._work = work;
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
@@ -6118,6 +6121,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   function openHiddenArchive() {
     openSheet((body) => {
+      body.dataset.archive = '';
       const paint = () => {
         body.replaceChildren(el('h3', null, 'أرشيف الأعمال المحذوفة'));
         // المحذوف من التطبيق كله (المالك): يصل من الخادم لحسابه وحده، والإعادة تُرجعه للجميع
@@ -7401,6 +7405,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   };
   document.addEventListener('keydown', onKey);
   const unsubscribe = sync.onChange?.((tables) => {
+    // DL2: وصول حذف (أو إعادة) من جهاز آخر يُطبَّق على كل الشاشات الظاهرة فورًا
+    if (tables?.includes?.('removed_work_tokens') || tables?.has?.('removed_work_tokens')) removedChanged();
     if (tables.includes('work_views') || tables.includes('progress')) {
       if (currentPage() === 'home' && tables.includes('work_views')) {
         if (!state.heroItems.length) refreshFriendsHero();

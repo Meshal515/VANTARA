@@ -24,7 +24,7 @@ import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, displayTitle, resolveWork, search as searchMeta } from '../lib/cinema-meta.js';
-import { isRemovedAny } from '../lib/removed-works.js';
+import { isRemovedAny, tagWork } from '../lib/removed-works.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
 import { REJECT_AR, STATE, STATE_AR, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
@@ -573,7 +573,7 @@ export function createCinema(deps) {
 
   /** ملصق: الصورة نظيفة بلا شارات فوقها، والمعلومة تحتها. */
   function posterCard(m) {
-    const c = el('button', 'cn-poster');
+    const c = tagWork(el('button', 'cn-poster'), refOf(m.id));
     c.type = 'button';
     c.setAttribute('aria-label', displayTitle(m));
     const art = el('span', 'cn-poster-art');
@@ -591,6 +591,7 @@ export function createCinema(deps) {
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
     const c = asButton(el('div', 'cn-wide'), displayTitle(w));
     c.dataset.ref = refOf(w.id);
+    tagWork(c, refOf(w.id));
     const art = el('span', 'cn-wide-art');
     // البطاقة عريضة: الخلفية العريضة دائمًا، لا الملصق الطولي مضغوطًا (ملاحظة المالك). الأعمال الآتية من الحساب
     // بلا خلفية محفوظة تأخذ خلفية IMDb الرسمية بمعرّفها، والملصق آخر بديل

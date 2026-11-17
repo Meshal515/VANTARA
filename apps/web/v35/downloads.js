@@ -20,6 +20,7 @@ import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, p
 import { glyph } from './icons.js';
 import { parseRelease } from '../addons/release-info.js';
 import { isTorrentRoute } from '../lib/route-family.js';
+import { tagWork } from '../lib/removed-works.js';
 
 const SECTION_LABEL = { all: 'الكل', anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
 const SORTS = ['recent', 'size', 'name'];
@@ -468,7 +469,7 @@ export function createDownloadsUI(deps) {
   }
 
   function workCard(w) {
-    const a = el('article', 'work-card dl-card');
+    const a = tagWork(el('article', 'work-card dl-card'), w.ref, w.work?.ref, w.work?.id);
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
     a.setAttribute('aria-label', `${w.work.title} — ${countText(w.kind, w.count)} على الجهاز`);

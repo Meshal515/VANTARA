@@ -10,6 +10,7 @@ import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
 import { loadAliases } from '../lib/manga-alias-store.js';
 import { adultTitle, isBlockedKey } from '../lib/adult-filter.js';
+import { tagWork } from '../lib/removed-works.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -240,6 +241,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     b._group = g;
     b.dataset.eventId = g.id;
     b.dataset.workKey = groupKey(g);
+    tagWork(b, g.work, groupKey(g));
   }
   function row(g) {
     const b = el('button', 'up-card'); b.type = 'button';

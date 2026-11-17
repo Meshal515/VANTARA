@@ -16,6 +16,7 @@ import { createRoom, joinRoom, roomInfo } from '../lib/together/room.js';
 import { clockLabel, memberPosition } from '../lib/together/sync.js';
 import { isNative, desktopPlugin } from '../pwa/platform.js';
 import { mediaKind, resolveArt } from '../lib/together/art.js';
+import { tagWork } from '../lib/removed-works.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -314,7 +315,7 @@ export function createTogether(deps) {
   function card(row) {
     const media = (() => { try { return JSON.parse(row.media_json); } catch { return null; } })();
     const reading = media?.kind === 'manga';
-    const wrap = el('div', `tg-card tg-card--${media?.kind ?? 'anime'}`);
+    const wrap = tagWork(el('div', `tg-card tg-card--${media?.kind ?? 'anime'}`), media?.seriesRef, media?.key?.split('#')[0]);
     // الرأس: نوع الغرفة وحالتها الحية (مباشر / يتجهّزون / انتهت)
     const top = el('div', 'tg-card-top');
     const icon = el('span', 'tg-card-icon');

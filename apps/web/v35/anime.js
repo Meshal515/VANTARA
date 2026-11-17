@@ -1,4 +1,4 @@
-import { isRemovedAny } from '../lib/removed-works.js';
+import { isRemovedAny, tagWork } from '../lib/removed-works.js';
 import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resumeEpisode, stillUpgrade } from './anime-episodes.js';
 import { createEpisodeControls } from './anime-episode-controls.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
@@ -278,7 +278,7 @@ export function createAnime(deps) {
   const hideIfRemoved = (c, m) => { if (removedAnime(m)) { c.hidden = true; c.style.display = 'none'; } return c; };
   function posterCard(m, { rank, rankInline, onOpen } = {}) {
     if (removedAnime(m)) return hideIfRemoved(el('button', 'an-card'), m);
-    const c = el('button', `an-card${rank ? ' an-card--ranked' : ''}`);
+    const c = tagWork(el('button', `an-card${rank ? ' an-card--ranked' : ''}`), `anime:${m.id}`);
     c.type = 'button';
     c.setAttribute('aria-label', rank ? `${rank}. ${m.title}` : m.title);
     tint(c, m.color);
