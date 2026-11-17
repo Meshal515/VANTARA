@@ -225,9 +225,31 @@ it('التوقف أثناء المشاهدة: بعد 450ms فقط، والشعا
   expect(stage.hidden).toBe(true);expect(view.root.querySelector('.pp-retry').hidden).toBe(false);
 });
 
+it('لا ينتقل ويندوز للحلقة التالية عند EOF مبكر ولو تغيّرت المدة إلى موضع الانقطاع',()=>{
+ const {view,send}=fixture();
+ const card=view.root.querySelector('.pp-next');
+ view.update({ready:true,episode:3,total:12,position:228000,duration:1440000,ended:false});
+ view.update({duration:228000,ended:true});
+ expect(card.hidden).toBe(true);
+ vi.advanceTimersByTime(20000);
+ expect(send).not.toHaveBeenCalledWith({name:'episode',value:4});
+});
+
+it('يلغي الانتقال التلقائي عند تعطل المصدر أثناء العدّاد',()=>{
+ const {view,send}=fixture();
+ const card=view.root.querySelector('.pp-next');
+ view.update({ready:true,episode:3,total:12,position:1439500,duration:1440000,ended:false});
+ view.update({ended:true});
+ expect(card.hidden).toBe(false);
+ view.update({status:{error:true,text:'انقطع المصدر'}});
+ vi.advanceTimersByTime(20000);
+ expect(card.hidden).toBe(true);
+ expect(send).not.toHaveBeenCalledWith({name:'episode',value:4});
+});
+
 it('auto-next like the APK: countdown card at the end, plays the next episode, cancel and settings work',()=>{
  const {view,send}=fixture();
- view.update({ready:true,paused:false,episode:3,total:12,ended:false});
+ view.update({ready:true,paused:false,episode:3,total:12,position:1439500,duration:1440000,ended:false});
  view.update({ended:true});
  const card=view.root.querySelector('.pp-next');
  expect(card.hidden).toBe(false);

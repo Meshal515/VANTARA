@@ -645,14 +645,14 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   nextRow.append(nextNow, nextCancel);
   nextCard.append(nextKicker, nextTitle, nextCount, nextRow);
   root.append(nextCard);
-  let nextTimer = 0;
+  let nextTimer = 0, knownDuration = 0, nextEligible = false;
   const stopNext = () => { timers.clearInterval?.(nextTimer); nextTimer = 0; nextCard.hidden = true; };
   const playNext = (n) => { stopNext(); cmd('episode', n); };
   nextNow.onclick = (e) => { e.stopPropagation(); playNext(Number(state.episode) + 1); };
   nextCancel.onclick = (e) => { e.stopPropagation(); stopNext(); };
   function startNext() {
     showControls(true);
-    const seconds = autoNextSeconds(), n = Number(state.episode) + 1;
+    const seconds = Math.min(10, autoNextSeconds()), n = Number(state.episode) + 1;
     // الغرفة يتحكم بها المضيف، والفيلم والحلقة الأخيرة بلا تالية
     if (seconds <= 0 || state.together || state.movie || !(Number(state.total) >= n) || state.canChangeEpisode === false) return;
     let left = seconds;
@@ -775,7 +775,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     titleEl.textContent = state.title ?? '';
     subEl.textContent = state.subtitle ?? '';
     playBtn.innerHTML = state.paused || !state.ready ? ICON.play : ICON.pause;
-    playBtn.setAttribute('aria-label', state.paused ? 'تشغيل' : 'إيقاف مؤقت');
+    playBtn.setAttribute('aria-label', state.paused || !state.ready ? 'تشغيل' : 'إيقاف مؤقت');
     spinner.hidden = !(state.buffering || !state.ready) || !!state.status?.error;
     root.classList.toggle('pp--loading', !state.ready);
     status.textContent = state.status?.text ?? '';
@@ -812,9 +812,24 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
     paintChip();
+    if (state.loadEpoch !== previous.loadEpoch) hidePreview();
     if (preview.classList.contains('is-on') && state.thumb !== previous.thumb && state.thumb?.ms === previewWant && state.thumb?.src) { previewImg.src = state.thumb.src; preview.classList.add('has-img'); }
-    if (state.ended && !previous.ended) startNext();
-    else if (!state.ended && previous.ended) stopNext();
+    if (state.loadEpoch !== previous.loadEpoch || state.episode !== previous.episode) {
+      knownDuration = 0;
+      nextEligible = false;
+      stopNext();
+    }
+    if (state.ready && !state.ended && !state.status?.error && Number.isFinite(state.duration)) {
+      knownDuration = Math.max(knownDuration, state.duration);
+    }
+    // قد يبلغ mpv عن EOF بعد انقطاع المصدر. قارنه بمدة رُصدت قبل النهاية.
+    const remaining = knownDuration - state.position;
+    const confirmedEnd = state.ready && state.ended && !state.buffering && !state.status?.error
+      && knownDuration > 0 && remaining >= -1000 && remaining <= 2000
+      && Math.abs(state.duration - knownDuration) <= 2000;
+    if (confirmedEnd && !nextEligible) startNext();
+    else if (!confirmedEnd && nextEligible) stopNext();
+    nextEligible = confirmedEnd;
     if (openKind === 'room' && roomBody) {
       // الموضع والفرق يتغيران مع كل تقرير: يُحدَّثان في مكانهما، ولا يُعاد بناء اللوحة (والزر تحت الفأرة) إلا إن تغيّر ما فيها
       const shape = (s) => JSON.stringify([s.room && { ...s.room, members: s.room.members.map(({ posMs, driftMs, ...m }) => ({ ...m, drift: driftMs != null })) }, s.videoOffsetMs]);

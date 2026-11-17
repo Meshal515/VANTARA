@@ -648,6 +648,27 @@ describe('video driver: the server the user chose is the one downloaded', () => 
 });
 
 describe('work art on the device', () => {
+  it('يحفظ غلافًا وصور حلقات جديدة تصل بينما يجري حفظ صور العمل نفسه', async () => {
+    const { saveWorkArt } = await import('./art.js');
+    const store = memoryStore();
+    const work = { ref: 'cinema:series:test-art', banner: 'https://images.test/banner.jpg' };
+    let release;
+    const pendingBanner = new Promise((resolve) => { release = resolve; });
+    const image = () => ({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+    const fetchImpl = vi.fn(async (url) => url === work.banner ? pendingBanner : image());
+
+    const first = saveWorkArt(store, work, { fetchImpl });
+    const second = saveWorkArt(store, { ...work, cover: 'https://images.test/cover.jpg' }, {
+      fetchImpl, extras: { 'still-s2e3': 'https://images.test/s2e3.jpg' },
+    });
+    release(image());
+    await Promise.all([first, second]);
+
+    expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
+    expect(await store.getArt(`${work.ref}|still-s2e3`)).toMatchObject({ type: 'image/jpeg' });
+    expect(fetchImpl.mock.calls.filter(([url]) => url === work.banner)).toHaveLength(1);
+  });
+
   it('a manga cover the WebView cannot fetch (no CORS, needs Referer) is saved through the source engine', async () => {
     const { saveWorkArt, artUrl } = await import('./art.js');
     const store = memoryStore();

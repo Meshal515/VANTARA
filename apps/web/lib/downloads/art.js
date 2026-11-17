@@ -48,8 +48,10 @@ export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, l
   if (!store?.putArt || !work?.ref) return 0;
   let inflight = pending.get(store);
   if (!inflight) pending.set(store, inflight = new Map());
-  if (inflight.has(work.ref)) return inflight.get(work.ref);
+  const previous = inflight.get(work.ref);
   const saving = (async () => {
+    // دفعة لاحقة لنفس العمل قد تحمل صور حلقات أخرى أو غلافًا وصل حديثًا.
+    if (previous) await previous;
     let saved = 0;
     for (const [kind, src] of [...Object.keys(SIZES).map((kind) => [kind, work[kind]]), ...Object.entries(extras)]) {
       if (!src || typeof src !== 'string') continue;
@@ -80,7 +82,11 @@ export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, l
     return saved;
   })();
   inflight.set(work.ref, saving);
-  try { return await saving; } finally { inflight.delete(work.ref); }
+  try {
+    return await saving;
+  } finally {
+    if (inflight.get(work.ref) === saving) inflight.delete(work.ref);
+  }
 }
 
 /** رابط محلي لصورة محفوظة (يُعاد استعماله)، أو null. */
