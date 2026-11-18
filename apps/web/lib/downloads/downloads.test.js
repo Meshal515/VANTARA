@@ -715,6 +715,35 @@ describe('cinema on device', () => {
   });
 });
 
+
+it('retries a missing saved cover automatically and cancels pending retries when the work is removed', async () => {
+  const { saveWorkArt, dropWorkArt } = await import('./art.js');
+  const store = memoryStore();
+  const work = { ref: 'anime:auto-retry-art', cover: 'https://images.test/cover.jpg' };
+  let callback;
+  let delay;
+  const timers = {
+    setTimeout(fn, ms) { callback = fn; delay = ms; return 1; },
+    clearTimeout: vi.fn(),
+  };
+  const fetchImpl = vi.fn(async () => ({ ok: false, status: 503 }));
+  expect(await saveWorkArt(store, work, { fetchImpl, timers })).toBe(0);
+  expect(delay).toBeGreaterThan(0);
+  expect(delay).toBeLessThanOrEqual(15_000);
+  const failed = await store.getArt(`${work.ref}|cover`);
+  fetchImpl.mockResolvedValue({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+  const now = vi.spyOn(Date, 'now').mockReturnValue(failed.retryAt + 1);
+  try {
+    await callback();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
+    await dropWorkArt(store, work.ref);
+    expect(timers.clearTimeout).toHaveBeenCalled();
+  } finally {
+    now.mockRestore();
+  }
+});
+
 it('records a failed artwork request and recovers it after the backoff without touching downloaded media', async () => {
   const { saveWorkArt, artUrl, dropWorkArt } = await import('./art.js');
   const store = memoryStore();
