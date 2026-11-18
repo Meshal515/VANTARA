@@ -11,7 +11,7 @@ const pending = new WeakMap();
 const retryTimers = new WeakMap();
 const RETRY_MS = [15_000, 120_000, 1_800_000];
 
-/** مؤقت مستقل لكل صورة: يحترم زمن التراجع المحفوظ ولا يكرر عملًا أو يغيّر ملف الفيديو. */
+/** مؤقت مستقل لكل صورة: محاولة أثناء تشغيل الواجهة، وتُستعاد من retryAt عند زيارة العمل بعد إعادة فتح التطبيق. */
 function scheduleArtRetry(store, work, kind, src, options, retryAt) {
   let tasks = retryTimers.get(store);
   if (!tasks) retryTimers.set(store, tasks = new Map());
