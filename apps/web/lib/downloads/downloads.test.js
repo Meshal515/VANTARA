@@ -648,6 +648,27 @@ describe('video driver: the server the user chose is the one downloaded', () => 
 });
 
 describe('work art on the device', () => {
+  it('يحفظ غلافًا وصور حلقات جديدة تصل بينما يجري حفظ صور العمل نفسه', async () => {
+    const { saveWorkArt } = await import('./art.js');
+    const store = memoryStore();
+    const work = { ref: 'cinema:series:test-art', banner: 'https://images.test/banner.jpg' };
+    let release;
+    const pendingBanner = new Promise((resolve) => { release = resolve; });
+    const image = () => ({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+    const fetchImpl = vi.fn(async (url) => url === work.banner ? pendingBanner : image());
+
+    const first = saveWorkArt(store, work, { fetchImpl });
+    const second = saveWorkArt(store, { ...work, cover: 'https://images.test/cover.jpg' }, {
+      fetchImpl, extras: { 'still-s2e3': 'https://images.test/s2e3.jpg' },
+    });
+    release(image());
+    await Promise.all([first, second]);
+
+    expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
+    expect(await store.getArt(`${work.ref}|still-s2e3`)).toMatchObject({ type: 'image/jpeg' });
+    expect(fetchImpl.mock.calls.filter(([url]) => url === work.banner)).toHaveLength(1);
+  });
+
   it('a manga cover the WebView cannot fetch (no CORS, needs Referer) is saved through the source engine', async () => {
     const { saveWorkArt, artUrl } = await import('./art.js');
     const store = memoryStore();
@@ -692,6 +713,39 @@ describe('cinema on device', () => {
     expect(localCinemaResume(seasons, 1, { season: 1, episode: 1, episodes: { '1:1': { position: 9000 } } })).toMatchObject({ season: 2, episode: 3, position: 0 });
     expect(localCinemaResume(seasons, 2, { season: 2, episode: 9, episodes: { '2:9': { position: 21000 } } })).toMatchObject({ season: 2, episode: 9, position: 21000 });
   });
+});
+
+
+it('retries a missing saved cover automatically and cancels pending retries when the work is removed', async () => {
+  const { saveWorkArt, dropWorkArt } = await import('./art.js');
+  const store = memoryStore();
+  const work = { ref: 'anime:auto-retry-art', cover: 'https://images.test/cover.jpg' };
+  let callback;
+  let delay;
+  const timers = {
+    setTimeout(fn, ms) { callback = fn; delay = ms; return 1; },
+    clearTimeout: vi.fn(),
+  };
+  const fetchImpl = vi.fn(async () => ({ ok: false, status: 503 }));
+  expect(await saveWorkArt(store, work, { fetchImpl, timers })).toBe(0);
+  expect(delay).toBeGreaterThan(0);
+  expect(delay).toBeLessThanOrEqual(15_000);
+  const failed = await store.getArt(`${work.ref}|cover`);
+  fetchImpl.mockResolvedValue({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+  const now = vi.spyOn(Date, 'now').mockReturnValue(failed.retryAt + 1);
+  try {
+    await callback();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
+    await dropWorkArt(store, work.ref);
+    const removed = { ref: 'anime:remove-pending-art', cover: 'https://images.test/unavailable.jpg' };
+    fetchImpl.mockRejectedValue(new Error('offline'));
+    await saveWorkArt(store, removed, { fetchImpl, timers });
+    await dropWorkArt(store, removed.ref);
+    expect(timers.clearTimeout).toHaveBeenCalled();
+  } finally {
+    now.mockRestore();
+  }
 });
 
 it('records a failed artwork request and recovers it after the backoff without touching downloaded media', async () => {

@@ -68,6 +68,7 @@ class DownloadsPlugin : Plugin() {
         .put("id", job.id).put("state", job.state).put("bytes", job.bytes).put("total", job.total)
         .put("segmentsDone", job.segmentsDone).put("segmentsTotal", job.segmentsTotal)
         .put("code", job.error).put("message", job.message).put("verified", job.verified).put("peers", job.peers)
+        .put("packageComplete", job.resourcesComplete).put("resourcesRetryAt", job.resourcesRetryAt)
         .apply {
             if (job.state == "ready") {
                 val dir = DownloadService.store(context).dir(job.id)
@@ -75,6 +76,7 @@ class DownloadsPlugin : Plugin() {
                 put("location", "Android/data/${context.packageName}/files/VANTARA/Downloads")
                 put("media", JSObject()
                     .put("container", job.container)
+                    .put("packageComplete", job.resourcesComplete)
                     .put("subtitles", JSArray(job.subtitles.map { JSObject().put("lang", it.lang).put("label", it.label).put("saved", it.file != null) }))
                     .put("audio", JSArray(job.audio.map { JSObject().put("lang", it.lang).put("label", it.label).put("saved", it.file != null) })))
             }

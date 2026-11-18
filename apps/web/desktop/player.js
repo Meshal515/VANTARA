@@ -26,7 +26,20 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const httpsArt=url=>typeof url==='string'&&/^https:\/\//i.test(url)?url:null;
   const node=(tag,text,attrs={})=>{const el=doc.createElement(tag);if(text!=null)el.textContent=text;for(const [key,value]of Object.entries(attrs))el.setAttribute(key,String(value));return el;};
   const tell=(text,error=false)=>{if(status){status.textContent=safeMessage(text);status.dataset.error=String(error);}link?.push(true);};
-  const command=async(name,value)=>{if(!session)return;if(!ready){if(!failed)tell('انتظر بدء الفيديو…');return;}const id=session,rev=revision,subtitleChoice=['subtitle-select','subtitle-off','subtitle-load'].includes(name),choice=subtitleChoice?++subtitleCommandRevision:0;try{if(engine.playerCommand)await engine.playerCommand({session:id,command:name,value});else await bridge.playbackCommand({session:id,command:name,value});}catch(error){if(session===id&&revision===rev&&(!subtitleChoice||choice===subtitleCommandRevision))tell(error.message,true);}};
+  let retryRevision = null;
+  async function retry() {
+    const id = session, rev = revision;
+    if (!id || !engine.retryPlayback || retryRevision === rev) return;
+    retryRevision = rev;
+    try {
+      await engine.retryPlayback({session:id});
+    } catch (error) {
+      if (session === id && revision === rev) tell(error.message, true);
+    } finally {
+      if (retryRevision === rev) retryRevision = null;
+    }
+  }
+  const command=async(name,value)=>{if(!session)return;if(!ready){if(failed&&name==='pause')return retry();if(!failed)tell('انتظر بدء الفيديو…');return;}const id=session,rev=revision,subtitleChoice=['subtitle-select','subtitle-off','subtitle-load'].includes(name),choice=subtitleChoice?++subtitleCommandRevision:0;try{if(engine.playerCommand)await engine.playerCommand({session:id,command:name,value});else await bridge.playbackCommand({session:id,command:name,value});}catch(error){if(session===id&&revision===rev&&(!subtitleChoice||choice===subtitleCommandRevision))tell(error.message,true);}};
   const viewport=(hidden=false)=>{
     if(!video||!session)return;
     const rect=video.getBoundingClientRect?.();if(!rect)return;
@@ -96,10 +109,22 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       thumb:thumbInfo,ended,canRecommend:info.canRecommend===true,friends:Array.isArray(info.friends)?info.friends:[],skip:skipLabel,skipStatus:playerInfo?.section==='cinema'?null:skipStatusText(skipResult,skipPending,sec=>{const s=Math.max(0,Math.floor(sec));return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}),skipPending,net:netInfo,bufferedMs:Number.isFinite(netInfo?.aheadMs)?position+netInfo.aheadMs:null,people:overlayPeople(),room:overlayRoom(),synced:!!info.synced,subtitleDelay:subDelay,subtitleSize:subSize,subtitlePosition:subPos,subtitleBackground:subBg,together:!!info.together,videoOffsetMs:Number(info.videoOffsetMs)||0,...(overlayServers?{routes:overlayRoutes??[],routesDone:overlayRoutesDone}:{})};
   };
   const switchTo=async(id,find)=>{const rev=revision,choice=++sourceRevision;try{const selected=await find();if(session===id&&revision===rev&&sourceRevision===choice&&selected?.candidate)await engine.switchSource({session:id,candidate:selected.candidate,position});}catch(error){if(session===id&&revision===rev&&sourceRevision===choice)tell(error.message,true);}};
+  async function requestThumb(id, value) {
+    if (!ready || !Number.isFinite(value) || typeof bridge.previewFrame !== 'function') return;
+    const positionMs = Math.round(value / 10000) * 10000;
+    if (thumbInfo?.ms === positionMs) return;
+    const rev = revision;
+    try {
+      const frame = await bridge.previewFrame({session:id,positionMs});
+      if (session !== id || revision !== rev || !frame?.available || !frame.src) return;
+      thumbInfo = {ms:frame.positionMs,src:frame.src};
+      link?.push(true);
+    } catch { /* المعاينة لا توقف الفيديو */ }
+  }
   const overlayCommand=message=>{
     const id=session,value=message.value;if(!id)return;
     switch(message.name){
-      case 'retry':void engine.retryPlayback?.({session:id}).catch(error=>tell(error.message,true));break;
+      case 'retry':void retry();break;
       case 'pause':void command('pause',!!value);break;
       case 'seek':if(Number.isFinite(value))void command('seek',Math.max(0,value));break;
       case 'seek-by':if(Number.isFinite(value))void command('seek',Math.max(0,Math.min(duration||position+value,position+value)));break;
@@ -113,7 +138,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       case 'subtitle-load':if(typeof value==='string'&&/^https:\/\/\S+$/i.test(value)&&value.length<=2048)void command('subtitle-load',{url:value,lang:'ar',label:'ترجمة إضافية',select:true});break;
       case 'recommend':void Promise.resolve().then(()=>engine.queueRecommendation?.({session:id,toId:typeof value==='string'&&value?value:null})).catch(error=>tell(error.message,true));break;
       // صورة شريط التقدم: تُطلب من المحرك (إطار مصغّر لكل 10 ث) وتصل الطبقة مع الحالة التالية
-      case 'thumb':if(Number.isFinite(value)&&typeof bridge.previewFrame==='function'){const want=Math.round(value/10000)*10000;if(thumbInfo?.ms===want)break;void bridge.previewFrame({session:id,positionMs:want}).then(r=>{if(session===id&&r?.available&&r.src){thumbInfo={ms:r.positionMs,src:r.src};link?.push(true);}}).catch(()=>{});}break;
+      case 'thumb':void requestThumb(id,value);break;
       case 'skip-refetch':skipKey=null;skipResult=null;refreshSkip();break;
       case 'fit':if(value==='fit'||value==='fill'){fitValue=value;void command('video-fit',value);link?.push(true);}break;
       case 'volume':if(Number.isFinite(value)){volumeValue=Math.max(0,Math.min(100,Math.round(value)));void command('volume',volumeValue);link?.push(true);}break;
@@ -182,7 +207,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
       link?.push(true);
     }catch{}}
   function open(event){
-    if(panel&&session===event.session){revision++;ended=false;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;loadProgress=0;loadEpoch++;netInfo=freshNet(netInfo);tell('');void sources();return;}
+    if(panel&&session===event.session){revision++;ended=false;thumbInfo=null;skipController?.abort();skipKey=null;skipResult=null;duration=0;ready=false;failed=false;loadProgress=0;loadEpoch++;netInfo=freshNet(netInfo);tell('');void sources();return;}
     dismiss();previousFocus=doc.activeElement;session=event.session;loadProgress=0;loadEpoch++;position=0;duration=0;paused=false;ready=false;failed=false;buffering=false;ended=false;thumbInfo=null;netInfo=freshNet(null);skipLabel=null;subtitleTrackList=[];audioTrackList=[];speedValue=1;fitValue='fit';subDelay=0;subSize=40;subPos=100;subBg='shadow';titleText=event.title??'VANTARA';
     ensureStyles();
     panel=node('section',null,{class:'desktop-player pwa-player pp--shown v35','aria-label':'مشغل VANTARA'});
