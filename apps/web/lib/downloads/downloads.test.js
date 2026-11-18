@@ -738,6 +738,10 @@ it('retries a missing saved cover automatically and cancels pending retries when
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
     await dropWorkArt(store, work.ref);
+    const removed = { ref: 'anime:remove-pending-art', cover: 'https://images.test/unavailable.jpg' };
+    fetchImpl.mockRejectedValue(new Error('offline'));
+    await saveWorkArt(store, removed, { fetchImpl, timers });
+    await dropWorkArt(store, removed.ref);
     expect(timers.clearTimeout).toHaveBeenCalled();
   } finally {
     now.mockRestore();
