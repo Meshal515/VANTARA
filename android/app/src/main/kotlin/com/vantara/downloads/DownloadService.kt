@@ -69,10 +69,11 @@ class DownloadService : Service() {
      * المتوقف والفاشل والمكتمل لا يُمس: قرار المستخدم أو سبب ظاهر.
      */
     private fun restoreQueue() {
+        val now = System.currentTimeMillis()
         val saved = runCatching { store(this).all() }.getOrDefault(emptyList())
-            .filter { it.state == "queued" || it.state == "downloading" || it.state == "verifying" || it.state == "reconnecting" }
+            .filter { needsResume(it, now) }
             .sortedBy { it.createdAt }
-        for (job in saved) enqueue(job.copy(state = "queued"))
+        for (job in saved) enqueue(if (job.state == "ready") job else job.copy(state = "queued"))
     }
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -145,7 +146,9 @@ class DownloadService : Service() {
         running[job.id] = handle
         handle.job = scope.launch {
             try {
-                runner.run(job) { emit(it) }
+                if (job.state == "ready" && job.verified && !job.resourcesComplete)
+                    runner.retrySidecars(job) { emit(it) }
+                else runner.run(job) { emit(it) }
             } catch (e: Transfers.Cancelled) {
                 val reason = handle.reason
                 if (reason == "cancel") {
@@ -158,7 +161,10 @@ class DownloadService : Service() {
                     emit(paused)
                 }
             } catch (e: DownloadFailure) {
-                val saved = (store.read(job.id) ?: job).copy(state = if (e.code == "EXPIRED") "expired" else "failed", error = e.code, message = e.message)
+                val old = store.read(job.id) ?: job
+                val saved = if (job.state == "ready" && job.verified)
+                    old.copy(state = "ready", resourcesComplete = false, resourcesRetryAt = System.currentTimeMillis() + 30 * 60_000L, message = "تعذّر استئناف الموارد الخارجية")
+                else old.copy(state = if (e.code == "EXPIRED") "expired" else "failed", error = e.code, message = e.message)
                 store.write(saved)
                 emit(saved)
             } catch (t: Throwable) {
@@ -301,6 +307,11 @@ class DownloadService : Service() {
                 plainMedia = job.sourceId.startsWith(com.vantara.anime.AnimeEngine.RUNTIME_SOURCE_PREFIX)) else base
         }
 
+        /** تُعاد الموارد الخارجية عند استئناف التطبيق، ولا يدخل الفيديو المكتمل تنزيلًا ثانيًا. */
+        private fun needsResume(job: DownloadJob, now: Long): Boolean =
+            job.state in setOf("queued", "downloading", "verifying", "reconnecting") ||
+                (job.state == "ready" && job.verified && !job.resourcesComplete && job.resourcesRetryAt <= now)
+
         private fun enqueue(job: DownloadJob) {
             if (running.containsKey(job.id) || pending.any { it.id == job.id }) return
             pending.add(job)
@@ -320,8 +331,15 @@ class DownloadService : Service() {
 
         /** عودة التطبيق للمقدمة: يكمل ما سُلِّم والخدمة متوقفة (رفض بدئها من الخلفية، أو قُتلت العملية). */
         fun resumeQueued(context: Context) {
-            if (instance != null) return
-            val waiting = pending.isNotEmpty() || runCatching { store(context).all().any { it.state == "queued" || it.state == "downloading" || it.state == "verifying" || it.state == "reconnecting" } }.getOrDefault(false)
+            val now = System.currentTimeMillis()
+            val service = instance
+            if (service != null) {
+                for (job in runCatching { store(context).all().filter { needsResume(it, now) } }.getOrDefault(emptyList()))
+                    enqueue(job)
+                service.drainPending()
+                return
+            }
+            val waiting = pending.isNotEmpty() || runCatching { store(context).all().any { needsResume(it, now) } }.getOrDefault(false)
             if (waiting) runCatching { ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java)) }
         }
 
