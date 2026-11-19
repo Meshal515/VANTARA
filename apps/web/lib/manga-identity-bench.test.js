@@ -16,20 +16,23 @@ import { measure, simulate } from './fixtures/manga-identity-sim.js';
 const { works } = JSON.parse(readFileSync(new URL('./fixtures/manga-identity-bench.json', import.meta.url), 'utf8'));
 
 const run = (scenario) => {
-  const { entries, aliases } = simulate(works, scenario);
+  const { entries, aliases, officialIds } = simulate(works, scenario);
   const t0 = performance.now();
-  const index = canonicalIndex({ aliases });
+  const index = canonicalIndex({ aliases, officialIds });
   for (const e of entries) index.add(e);
   const cards = index.list();
   return { entries: entries.length, ms: performance.now() - t0, ...measure(cards, works) };
 };
 
 // الحدود = القياس عند تثبيت المقياس (2026-11-08). تحسين يرفعها؛ تراجع يكسر الاختبار.
+// duplicates (ID5): البطاقات الزائدة للعمل الواحد سقف لا يُتجاوز للأعلى (كان المقياس «ينجح» وفيه 939 مكررة). و«ids»:
+// المعرّف الرسمي المؤكد دليلًا (ID1) فوق «full»، بحارسيه: صفر دمج خاطئ.
 const FLOOR = {
-  titles: { oneCardWorks: 1024, homonymPairs: 63 },
-  mangadex: { oneCardWorks: 1114, homonymPairs: 65 },
-  details: { oneCardWorks: 1769, homonymPairs: 63 },
-  full: { oneCardWorks: 1821, homonymPairs: 65 },
+  titles: { oneCardWorks: 1024, homonymPairs: 63, duplicates: 939 },
+  mangadex: { oneCardWorks: 1114, homonymPairs: 65, duplicates: 876 },
+  details: { oneCardWorks: 1769, homonymPairs: 63, duplicates: 144 },
+  full: { oneCardWorks: 1821, homonymPairs: 65, duplicates: 100 },
+  ids: { oneCardWorks: 1822, homonymPairs: 65, duplicates: 99 },
 };
 
 describe('manga identity benchmark (real AniList + MangaDex titles)', () => {
@@ -47,6 +50,7 @@ describe('manga identity benchmark (real AniList + MangaDex titles)', () => {
       expect(evidenceWrong).toEqual([]);
       expect(m.homonymPairs).toBeLessThanOrEqual(FLOOR[scenario].homonymPairs);
       expect(m.oneCardWorks).toBeGreaterThanOrEqual(FLOOR[scenario].oneCardWorks);
+      expect(m.duplicates).toBeLessThanOrEqual(FLOOR[scenario].duplicates);
       // آلاف النسخ على الخيط الرئيسي: لا كلفة تربيعية
       expect(m.ms).toBeLessThan(3000);
     });

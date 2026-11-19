@@ -123,17 +123,33 @@ export function matchMangaArt(title, candidates) {
 }
 
 /**
+ * هوية العمل الرسمية (ID1، ID2): معرّف AniList وأسماؤه، فقط حين تكون المطابقة مؤكدة. الحارس: عمل واحد بالضبط يحمل هذا
+ * الاسم بين النتائج (غموض ⇒ لا دليل)، ولا رواية (رواية وأصلها لا يُدمجان: الاسم نفسه والعمل غيره).
+ * @returns {{ id: number, names: string[] }|null}
+ */
+export function matchMangaIdentity(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return null;
+  const named = (candidates ?? []).filter((m) =>
+    [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key));
+  if (named.length !== 1 || !Number.isFinite(named[0].id) || named[0].format === 'NOVEL') return null;
+  const m = named[0];
+  const names = [...new Set([m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].filter((n) => typeof n === 'string' && n.trim()))];
+  return { id: m.id, names };
+}
+
+/**
  * استعلام واحد لثمانية عناوين بدل طلب لكل بطاقة، مع مهلة واضحة: التقييم والفن الرسمي معًا، فلا طلب ثانٍ للفن.
  * @returns {Promise<Map<string, { rating: object|null, art: object|null }>>}
  */
 export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, timeoutMs = 12_000 } = {}) {
   const names = [...new Set(titles.filter(Boolean))].slice(0, 20);
-  const output = new Map(names.map((title) => [title, { rating: null, art: null }]));
+  const output = new Map(names.map((title) => [title, { rating: null, art: null, identity: null }]));
   if (!names.length) return output;
   const variables = Object.fromEntries(names.map((name, i) => [`q${i}`, name]));
   const args = names.map((_, i) => `$q${i}: String!`).join(', ');
   // بلا isAdult:false: عمل للكبار يجب أن يُعرف فيُحجب، لا أن يختفي من البحث فيبقى في القائمة
-  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id title { romaji english native } synonyms averageScore isAdult genres coverImage { extraLarge large color } bannerImage } }`).join(' ');
+  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id format title { romaji english native } synonyms averageScore isAdult genres coverImage { extraLarge large color } bannerImage } }`).join(' ');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -146,7 +162,7 @@ export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, time
     if (!body?.data) throw new Error('anilist_no_data');
     names.forEach((title, i) => {
       const media = body.data[`p${i}`]?.media;
-      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media) });
+      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media), identity: matchMangaIdentity(title, media) });
     });
     return output;
   } finally {

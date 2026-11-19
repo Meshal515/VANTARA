@@ -94,6 +94,66 @@ export function learnAliases(key, names) {
   rebuild();
 }
 
+// ───────── فك الدمج (ID4): «ليسا عملًا واحدًا» حدث مسجَّل لا حذف ─────────
+// الدمج كان إضافة فقط وللأبد: دمج خاطئ (ID3) يعرض علامات العمل الآخر بلا طريق رجوع. الفصل يُسجَّل زوجًا بوقته، فلا
+// يدمجهما الفهرس بعده (canonicalIndex separate)، ولا يقرأ refsOf علامات أحدهما مع الآخر. لا صف يُحذف: كل مرجع يرجع
+// يعرض ما يملكه كما كان. إعادة الدمج (unsplitRefs) تزيل الحدث نفسه.
+const SPLITS_KEY = 'vantara.manga.splits.v1';
+let splits = read(SPLITS_KEY);
+const splitKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+const bare = (ref) => String(ref ?? '').replace(/^ext:/, '');
+
+/** يفصل مرجعين (`ext:<مفتاح>` أو المفتاح نفسه) كانا عملًا واحدًا. */
+export function splitRefs(a, b, at = Date.now()) {
+  const k = splitKey(bare(a), bare(b));
+  if (!bare(a) || !bare(b) || bare(a) === bare(b) || splits[k]) return false;
+  splits[k] = { at };
+  reverse = null;
+  write(SPLITS_KEY, splits);
+  return true;
+}
+export function unsplitRefs(a, b) {
+  const k = splitKey(bare(a), bare(b));
+  if (!splits[k]) return false;
+  delete splits[k];
+  reverse = null;
+  write(SPLITS_KEY, splits);
+  return true;
+}
+export const isSplit = (a, b) => Boolean(splits[splitKey(bare(a), bare(b))]);
+/** أزواج المفاتيح المفصولة («a|b» مرتبة) لحارس الفهرس. */
+export function splitSet() {
+  return new Set(Object.keys(splits));
+}
+
+// ───────── المعرّف الرسمي (ID1): عنوان البطاقة ← معرّف AniList المؤكد ─────────
+// بطاقتان بمعرّف واحد عمل واحد (canonicalIndex، الخطوة 5)، بحارس «مصدر يعرضهما عملين» في الدمج نفسه.
+const OFFICIAL_KEY = 'vantara.manga.officialIds.v1';
+const MAX_OFFICIAL = 6000;
+let official = read(OFFICIAL_KEY);
+let officialMap = null;
+
+/** [[مفتاح العنوان المطبَّع، معرّف AniList]] من مطابقة مؤكدة؛ يُحفظ مرة للدفعة. */
+export function noteOfficialIds(pairs) {
+  let changed = false;
+  for (const [key, id] of pairs ?? []) {
+    if (!key || !Number.isSafeInteger(id) || id <= 0 || official[key] === id) continue;
+    delete official[key];
+    official[key] = id;
+    changed = true;
+  }
+  if (!changed) return false;
+  const keys = Object.keys(official);
+  for (const k of keys.slice(0, Math.max(0, keys.length - MAX_OFFICIAL))) delete official[k];
+  officialMap = null;
+  write(OFFICIAL_KEY, official);
+  return true;
+}
+
+export function officialIdMap() {
+  return officialMap ??= new Map(Object.entries(official));
+}
+
 // ───────── المراجع: عمل كان بطاقة باسمه ثم صار جزءًا من عمل قانوني ─────────
 // تقدّم القراءة والمكتبة محفوظة بمرجع الاسم القديم؛ لا تُنقل ولا تُحذف، بل تُقرأ
 // مع العمل القانوني (`refsOf`).
@@ -110,7 +170,7 @@ export function noteRefAlias(aliasRef, canonicalRef) {
 export function noteRefAliases(pairs) {
   let changed = false;
   for (const [aliasRef, canonicalRef] of pairs) {
-    if (!aliasRef || !canonicalRef || aliasRef === canonicalRef) continue;
+    if (!aliasRef || !canonicalRef || aliasRef === canonicalRef || isSplit(aliasRef, canonicalRef)) continue;
     const list = refAliases[canonicalRef] ?? [];
     if (list.includes(aliasRef)) continue;
     // These references own saved progress/library rows; dropping an old name
@@ -150,7 +210,9 @@ export function refsOf(ref) {
   const back = reverseIndex();
   for (let i = 0; i < refs.length; i++) {
     for (const next of [...(refAliases[refs[i]] ?? []), ...(back.get(refs[i]) ?? [])]) {
-      if (!seen.has(next)) { seen.add(next); refs.push(next); }
+      // رابط فُكّ (ID4): لا تُقرأ علامات هذا المرجع مع ذاك، والصفوف نفسها باقية لكل مرجع
+      if (seen.has(next) || isSplit(refs[i], next) || isSplit(ref, next)) continue;
+      seen.add(next); refs.push(next);
     }
   }
   return refs;
@@ -169,6 +231,9 @@ export function canonicalRefOf(ref) {
 
 /** للاختبار فقط. */
 export function _reset() {
+  splits = read(SPLITS_KEY);
+  official = read(OFFICIAL_KEY);
+  officialMap = null;
   shipped = {};
   learned = read(KEY);
   twins = read(TWINS_KEY);

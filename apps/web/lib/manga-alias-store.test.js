@@ -57,3 +57,20 @@ describe('SY2: a full device storage is said, not swallowed', () => {
     expect(refsOf('ext:new name')).toEqual(['ext:new name', 'ext:old name']);
   });
 });
+
+describe('ID4: a merge can be undone, and undoing deletes nothing', () => {
+  it('after a split each reference reads only its own marks; re-merging the same evidence is refused; unsplit restores', async () => {
+    const { splitRefs, unsplitRefs, isSplit } = await import('./manga-alias-store.js');
+    noteRefAlias('ext:ragnarok arise', 'ext:solo leveling');
+    expect(refsOf('ext:solo leveling')).toEqual(['ext:solo leveling', 'ext:ragnarok arise']);
+    expect(splitRefs('ext:ragnarok arise', 'ext:solo leveling')).toBe(true);
+    expect(isSplit('ext:solo leveling', 'ext:ragnarok arise')).toBe(true);
+    expect(refsOf('ext:solo leveling')).toEqual(['ext:solo leveling']);
+    expect(refsOf('ext:ragnarok arise')).toEqual(['ext:ragnarok arise']);
+    // الفهرس يعيد الدليل نفسه: لا يُسجَّل الدمج من جديد
+    noteRefAlias('ext:ragnarok arise', 'ext:solo leveling');
+    expect(refsOf('ext:solo leveling')).toEqual(['ext:solo leveling']);
+    unsplitRefs('ext:ragnarok arise', 'ext:solo leveling');
+    expect(refsOf('ext:solo leveling')).toEqual(['ext:solo leveling', 'ext:ragnarok arise']);
+  });
+});

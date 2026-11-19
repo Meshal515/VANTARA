@@ -39,7 +39,7 @@ import { readerEngine } from '../lib/reader-engine.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
 import { chapterKeyOf, chapterKeysAcross, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
-import { countMainChapters, titlesMatch } from '../lib/catalog.js';
+import { countMainChapters, normalizeTitle, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
 import { benchmarkEngines, benchmarkPage, diagnoseCleaning, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
@@ -84,7 +84,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { canonicalRefOf, noteRefAliases, refsOf } from '../lib/manga-alias-store.js';
+import { canonicalRefOf, learnAliases, noteOfficialIds, noteRefAliases, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -967,6 +967,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const matches = await fetchMangaMatches(batch.map((b) => b.title));
       batch.forEach(({ title, resolve, resolveArt }) => { resolve(matches.get(title)?.rating ?? null); resolveArt(matches.get(title)?.art ?? null); });
+      // الهوية الرسمية المؤكدة تُتعلَّم (ID1، ID2): المعرّف دليل دمج، وأسماء AniList البديلة أسماء للعمل نفسه. تُستعمل في بناء
+      // الفهرس التالي لا في البطاقات الظاهرة الآن (لا يتبدل شيء تحت عينك). الحارسان في matchMangaIdentity وفي الدمج نفسه
+      const learnedIds = [];
+      for (const { title } of batch) {
+        const identity = matches.get(title)?.identity;
+        if (!identity) continue;
+        const key = normalizeTitle(title);
+        learnedIds.push([key, identity.id]);
+        learnAliases(key, identity.names);
+      }
+      if (learnedIds.length) noteOfficialIds(learnedIds);
     } catch {
       batch.forEach(({ title, resolve, resolveArt }) => { ratingPromises.delete(title); artPromises.delete(title); resolve(null); resolveArt(null); });
     } finally {
@@ -2836,6 +2847,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       body.append(row('spark', 'القارئ الذكي', w._chapters?.length ?? 0, null));
       for (const x of sources) body.append(row('layers', x.label, x.count, x.sourceId));
+      // فك دمج خاطئ (ID4): نسخة دخلت البطاقة باسم آخر تُفصل عنها. لا شيء يُحذف: علاماتها ومواضعها باقية بمرجعها
+      const cardKey = w._work?.key;
+      const merged = (w._editions ?? []).map((e) => ({ e, own: normalizeTitle(e.manga?.title) })).filter(({ own }) => cardKey && own && own !== cardKey);
+      for (const { e, own } of [...new Map(merged.map((m) => [m.own, m])).values()]) {
+        body.append(sheetItem('alert', `«${e.manga.title}» (${displayName(e.label, e.sourceId)}) ليس نفس العمل`, () => {
+          closeSheet();
+          if (!splitRefs(`ext:${own}`, `ext:${cardKey}`)) return;
+          resetSources();
+          toast(`فُصل «${e.manga.title}» عن هذا العمل. علاماته وتقدّمه باقية معه`);
+          void openWork(workFromRef(`ext:${cardKey}`, titleOf(w), w._work?.thumbnailUrl));
+        }));
+      }
       for (const f of failed) {
         const b = el('div', 'sheet-item');
         b.innerHTML = glyph('alert');

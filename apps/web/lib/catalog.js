@@ -340,7 +340,9 @@ export function originalTitle(raw) {
 	const text = String(raw ?? '').normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '');
 	const chars = text.match(ORIGINAL_SCRIPT) ?? [];
 	if (chars.length < 4 || chars.length < text.length * 0.8) return null;
-	return chars.join('');
+	// الأرقام جزء من المفتاح (ID3): كانت تُرمى فيصير «나 혼자만 레벨업» و«나 혼자만 레벨업 2» مفتاحًا واحدًا فيُدمج
+	// الجزء الثاني بالأول. الأحرف الأصلية والأرقام بترتيبها؛ «第2部» و«시즌2» أحرفهما أصلية أصلًا
+	return (text.match(new RegExp(`${ORIGINAL_SCRIPT.source}|\\d`, 'gu')) ?? []).join('');
 }
 
 /**
@@ -440,7 +442,7 @@ function preparedAliases(aliases) {
 	return hit;
 }
 
-export function canonicalIndex({ aliases = new Map() } = {}) {
+export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set() } = {}) {
 	const entries = [];
 	const rejected = [];
 	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
@@ -508,6 +510,16 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			if (family) {
 				rejected.push(`«${a}» ≠ «${b}» (${why}): ${family} يعرضهما عملين`);
 				return false;
+			}
+			// فصلهما المستخدم (ID4): لا دليل يعيد دمجهما
+			if (separate.size) {
+				const keysOf = (r) => [r, ...[...families.get(r).values()].flatMap((set) => [...set])];
+				const ka = keysOf(ra);
+				const kb = keysOf(rb);
+				if (ka.some((x) => kb.some((y) => separate.has(x < y ? `${x}|${y}` : `${y}|${x}`)))) {
+					rejected.push(`«${a}» ≠ «${b}» (${why}): فصلهما المستخدم`);
+					return false;
+				}
 			}
 			parent.set(rb, ra);
 			for (const [f, keys] of families.get(rb)) {
@@ -605,6 +617,19 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 				if (spinOff(list[0], list[i])) { rejected.push(`«${list[0]}» ≠ «${list[i]}» (عنوان أصلي «${o}»): اسم جزء آخر`); continue; }
 				union(list[0], list[i], `عنوان أصلي «${o}»`);
 			}
+		}
+
+		// 5) المعرّف الرسمي المؤكد (ID1): بطاقتان طابق اسماهما عمل AniList نفسه مطابقة غير غامضة (manga-meta
+		// matchMangaIdentity) عمل واحد. حارس «مصدر يعرضهما عملين» داخل union نفسه: يرفض ويُسجَّل في rejected
+		const byOfficial = new Map();
+		for (const k of entryKeys) {
+			const id = officialIds.get(k);
+			if (!Number.isSafeInteger(id)) continue;
+			if (!byOfficial.has(id)) byOfficial.set(id, []);
+			byOfficial.get(id).push(k);
+		}
+		for (const [id, list] of [...byOfficial].sort(([a], [b]) => a - b)) {
+			for (let i = 1; i < list.length; i++) union(list[0], list[i], `معرّف رسمي ${id}`);
 		}
 
 		// البطاقات: مكوّن لكل جذر، بمفتاح ثابت
