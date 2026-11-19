@@ -7,6 +7,7 @@
  */
 
 import { chapterNumberOf } from '../lib/catalog.js';
+import { refsOf as defaultRefsOf } from '../lib/manga-alias-store.js';
 
 export const AUTO_READ_RATIO = 0.9;
 export const HISTORY_READ_RATIO = 0.2;
@@ -53,28 +54,71 @@ export function sameChapterKey(stored, key) {
   return stored === key || (stored != null && legacyChapterKeys(key).includes(stored));
 }
 
-function markOf(sync, userId, key) {
-  // المزامنة الحقيقية: بحث بالمفتاح (والطبقة المتفائلة فوقه) لا مسح كل العلامات —
-  // قائمة ألف فصل كانت تمسح ألف علامة لكل فصل فيها، فتتجمّد الصفحة
-  if (typeof sync.row === 'function') {
-    const row = sync.row('chapter_marks', `${userId}/${key}`);
-    return row ? Boolean(row.read) : undefined;
+/**
+ * مفاتيح الفصل نفسه في كل مراجع العمل، المرجع الحالي أولًا (المرحلة 1 من خطة المانجا، RD6).
+ *
+ * العمل الواحد قد يحمل أكثر من مرجع: `ext:<مفتاح قديم>` كُتبت به العلامات قبل الدمج، و`ext:<مفتاح جديد>`
+ * تحمله البطاقة بعده (`refsOf` في manga-alias-store.js). القراءة تتبع كل المراجع، والكتابة تبقى بمرجع
+ * البطاقة: لا صف يُنقل ولا يُحذف. **انتقالي:** الهوية الداخلية الثابتة (الحل ب في MANGA_REMEDIATION_PLAN.md)
+ * تحلّ محل سجل الدمج المحلي هذا.
+ */
+export function chapterKeysAcross(seriesRef, key, refsOf = defaultRefsOf) {
+  const own = String(key ?? '');
+  const prefix = `${shortRef(String(seriesRef ?? ''))}#`;
+  if (!own.startsWith(prefix)) return [own];
+  const suffix = own.slice(prefix.length);
+  const keys = [own];
+  for (const ref of refsOf(String(seriesRef))) {
+    const other = `${shortRef(String(ref))}#${suffix}`.slice(0, MAX_KEY);
+    if (!keys.includes(other)) keys.push(other);
   }
-  if (pending.has(key)) return pending.get(key);
-  const [mark] = sync.rows('chapter_marks', (r) => r.user_id === userId && r.chapter_key === key);
-  return mark ? Boolean(mark.read) : undefined;
+  return keys;
 }
 
-export function isChapterRead(sync, seriesRef, key) {
-  const userId = sync.user?.userId;
-  const own = markOf(sync, userId, key);
-  if (own !== undefined) return own;
-  // علامة بالمفتاح القديم (ذيل Float) ولا علامة بالجديد: تبقى كما علّمها صاحبها (#323 U-28)
-  for (const old of legacyChapterKeys(key)) {
-    const mark = markOf(sync, userId, old);
-    if (mark !== undefined) return mark;
+function markRowOf(sync, userId, key) {
+  // المزامنة الحقيقية: بحث بالمفتاح (والطبقة المتفائلة فوقه) لا مسح كل العلامات —
+  // قائمة ألف فصل كانت تمسح ألف علامة لكل فصل فيها، فتتجمّد الصفحة
+  if (typeof sync.row === 'function') return sync.row('chapter_marks', `${userId}/${key}`) ?? null;
+  return sync.rows('chapter_marks', (r) => r.user_id === userId && r.chapter_key === key)[0] ?? null;
+}
+
+/** علامة مفتاح واحد بمفتاحه القديم (ذيل Float، #323 U-28) إن غاب الجديد: `{ read, at }` أو null. */
+function markAt(sync, userId, key) {
+  for (const k of [key, ...legacyChapterKeys(key)]) {
+    const row = markRowOf(sync, userId, k);
+    if (row) return { read: Boolean(row.read), at: Number(row.updated_at) || 0 };
   }
-  return false;
+  return null;
+}
+
+/**
+ * هل الفصل مقروء؟ العلامة المعلّقة (لم يرد الخادم) تفوز، ثم **أحدث** علامة في أي مرجع للعمل، والتعادل
+ * للمرجع الحالي. عمل بمرجع واحد يبقى كما كان.
+ */
+export function isChapterRead(sync, seriesRef, key, { refsOf = defaultRefsOf } = {}) {
+  const userId = sync.user?.userId;
+  const keys = chapterKeysAcross(seriesRef, key, refsOf);
+  if (typeof sync.row !== 'function') for (const k of keys) if (pending.has(k)) return pending.get(k);
+  let best = null;
+  for (const k of keys) {
+    const m = markAt(sync, userId, k);
+    if (m && (!best || m.at > best.at)) best = m;
+  }
+  return best ? best.read : false;
+}
+
+/** موضع القراءة من الخادم للفصل في كل مراجع العمل: الأبعد يفوز، كقاعدة دمج الخادم (`MAX`). */
+export function progressFor(sync, seriesRef, key, { refsOf = defaultRefsOf } = {}) {
+  const userId = sync.user?.userId;
+  const keys = chapterKeysAcross(seriesRef, key, refsOf);
+  const rows = sync.rows('progress', (r) => r.user_id === userId && keys.some((k) => sameChapterKey(r.chapter_key, k)));
+  return rows.sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0] ?? null;
+}
+
+/** الموضع المحفوظ على الجهاز: بمفتاح المرجع الحالي أولًا، ثم مراجع العمل الأخرى. */
+export function positionFor(positions, seriesRef, key, { refsOf = defaultRefsOf } = {}) {
+  for (const k of chapterKeysAcross(seriesRef, key, refsOf)) if (positions?.[k]) return positions[k];
+  return null;
 }
 
 /**
@@ -97,14 +141,18 @@ export function markChapters(sync, seriesRef, rows, read) {
   return keys.length;
 }
 
-/** يلغي تعليم كل فصول العمل. */
-export function clearChapterMarks(sync, seriesRef) {
+/** يلغي تعليم كل فصول العمل، في كل مراجعه (SY3): نية المستخدم العمل كله لا البطاقة الحالية. */
+export function clearChapterMarks(sync, seriesRef, { refsOf = defaultRefsOf } = {}) {
   const userId = sync.user?.userId;
-  const marked = sync.rows('chapter_marks', (r) => r.user_id === userId && r.series_ref === seriesRef && r.read);
-  if (!marked.length) return 0;
-  for (const r of marked) pending.set(r.chapter_key, false);
-  sync.enqueue('chapter.markMany', { seriesRef, read: false, all: true });
-  return marked.length;
+  let total = 0;
+  for (const ref of refsOf(String(seriesRef))) {
+    const marked = sync.rows('chapter_marks', (r) => r.user_id === userId && r.series_ref === ref && r.read);
+    if (!marked.length) continue;
+    for (const r of marked) pending.set(r.chapter_key, false);
+    sync.enqueue('chapter.markMany', { seriesRef: ref, read: false, all: true });
+    total += marked.length;
+  }
+  return total;
 }
 
 export function markChapter(sync, seriesRef, row, read) {

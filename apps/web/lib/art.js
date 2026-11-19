@@ -28,7 +28,7 @@ export const isOfficialArt = (url) => /\/\/s\d+\.anilist\.co\/|\/\/img\.anili\.s
 /**
  * @param {{ storage?: Storage|null, probe?: (url: string, ms?: number) => Promise<{url:string,width:number,height:number}|null> }} [o]
  */
-export function createArtStore({ storage = globalThis.localStorage ?? null, probe = probeImage } = {}) {
+export function createArtStore({ storage = globalThis.localStorage ?? null, probe = probeImage, refsOf = (id) => [id] } = {}) {
   let all = null;
   let legacy = undefined;
   const read = () => {
@@ -66,8 +66,15 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     const hit = read()[id];
     if (hit) return hit;
     const old = legacyOf(id);
-    if (old) { all[id] = old; persist(); }
-    return old;
+    if (old) { all[id] = old; persist(); return old; }
+    // المرحلة 1 من خطة المانجا (CV4): العمل نفسه بمرجع آخر (قبل الدمج أو بعده) حُسم غلافه: يُنسخ القرار
+    // كما هو إلى المرجع الحالي فلا يُحسم غلاف ثانٍ بعد العرض، والأصل يبقى. انتقالي حتى الهوية الداخلية الثابتة.
+    for (const ref of refsOf(id)) {
+      if (ref === id) continue;
+      const other = all[ref] ?? legacyOf(ref);
+      if (other) { all[id] = other; persist(); return other; }
+    }
+    return null;
   }
 
   /**
@@ -155,7 +162,15 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     /** يُنادى حين يُحسم فن عمل: الشاشات الظاهرة التي تنتظره ترسمه (مرة، بلا تبديل لما ظهر). */
     onDecided(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     /** غلاف فشل تحميله (رابط مات): يُنسى قراره فيُحسم من جديد في الفتحة التالية. */
-    forget(id) { read(); if (id in all) { delete all[id]; persist(); } },
+    forget(id) {
+      read();
+      const dead = all[id]?.cover ?? null;
+      let changed = false;
+      if (id in all) { delete all[id]; changed = true; }
+      // والقرار نفسه في مراجع العمل الأخرى (المرحلة 1): لا يُنسخ رابط ميت من جديد إلى البطاقة
+      if (dead) for (const ref of refsOf(id)) if (ref !== id && all[ref]?.cover === dead) { delete all[ref]; changed = true; }
+      if (changed) persist();
+    },
   };
 }
 

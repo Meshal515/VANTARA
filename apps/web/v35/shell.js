@@ -38,7 +38,7 @@ import { warmChapter } from './reader.js';
 import { readerEngine } from '../lib/reader-engine.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
+import { chapterKeyOf, chapterKeysAcross, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
 import { countMainChapters, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
@@ -529,9 +529,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sourceId: '',
       chapter: { chapterNumber: Number(row.chapter_number), name: row.chapter_label ?? '' },
     });
-    // بحث بالمفتاح: السجل يُرسم كثيرًا، ومسح كل العلامات لكل صف كان يثقله
-    if (sync.row('chapter_marks', `${me()}/${chapterKey}`)?.read) return true;
-    return Number(sync.row('progress', `${me()}/${chapterKey}`)?.ratio) >= 0.2;
+    // بحث بالمفتاح: السجل يُرسم كثيرًا، ومسح كل العلامات لكل صف كان يثقله. وبكل مراجع العمل (المرحلة 1، RD6)
+    const keys = chapterKeysAcross(String(row.series_ref), chapterKey);
+    if (isChapterRead(sync, String(row.series_ref), chapterKey)) return true;
+    return keys.some((k) => Number(sync.row('progress', `${me()}/${k}`)?.ratio) >= 0.2);
   }
   const viewRows = (userId = me()) =>
     sync
@@ -618,7 +619,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * فتجده صفحة العمل محسومًا بأبعاده (يظهر بنسبته من أول إطار، والغلاف نفسه في الخارج والداخل). كانت ثلاث
    * قواعد (البطاقات: أول رابط يتحمّل، وصفحة العمل: بالقياس، والفهرس: بشكل الرابط) وأربع ذاكرات.
    */
-  const art = createArtStore();
+  // المرحلة 1 (CV4): قرار غلاف العمل يُقرأ من كل مراجعه (refsOf)، فلا يتبدل الغلاف حين يتغيّر مفتاح البطاقة
+  const art = createArtStore({ refsOf });
   // حُذف مصدر: أغلفته المحسومة تُنسى فتُحسم من غيره (قاعدة المالك: الغلاف ثابت إلا بحذف مصدره)
   // قائمة فارغة لا تُصدَّق (لم تكتمل بعد، أو المحرك غير متاح): لا يُنسى شيء
   void engine.sources().then((list) => { if (Array.isArray(list) && list.length) art.forgetSources(new Set(list.map((x) => x.id))); }).catch(() => {});
@@ -4135,7 +4137,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function chapterRatio(userId, ref, number) {
     if (number == null) return null;
     const key = chapterKeyOf(ref, { chapter: { chapterNumber: number, name: '' }, sourceId: '' });
-    const row = sync.rows('progress', (r) => r.user_id === userId && sameChapterKey(r.chapter_key, key)).sort((x, y) => (Number(y.ratio) || 0) - (Number(x.ratio) || 0))[0];
+    const keys = chapterKeysAcross(ref, key);
+    const row = sync.rows('progress', (r) => r.user_id === userId && keys.some((k) => sameChapterKey(r.chapter_key, k))).sort((x, y) => (Number(y.ratio) || 0) - (Number(x.ratio) || 0))[0];
     return row ? Math.max(0, Math.min(1, Number(row.ratio) || 0)) : null;
   }
   /**
