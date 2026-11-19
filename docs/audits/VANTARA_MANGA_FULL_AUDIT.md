@@ -244,6 +244,27 @@
 - و`reader.js` القديم ما زالت دواله (`createPageLoader`، `createProgressSaver`) مستوردة في `app.js` (`:1055,1176,1251`) و`reader-translate.js` و`translate.js`.
 - **الحكم:** ليس كودًا ميتًا. يحتاج قرارًا: يُوحَّد على النظام الجديد أو يُعزل صراحة.
 
+### الجولة 2 (19 نوفمبر): خادم المانجا
+
+**المقروء سطرًا سطرًا:** `services/sync-worker/src/updates.ts` كاملًا (411)، و`collectors.ts` (المانجا: `observe` و`teamx` و`mangaDex` و`mangaSites` و`collectTimelines`)، و`notifyFavoriteUnits` و`publishDue` و`currentRev` ومسار `/v1/pulse` في `index.ts`، وفهارس `update_events` و`social_at` في الهجرات.
+
+**ما هو سليم:** خط الأساس الأول لا يصنع مئات الأحداث، والحدث يُعرَّف بالعمل والوحدة لا بالمصدر، ودمج المصادر في SQL يقرأ الصف الحالي لا اللقطة (سباق جهازين)، والإشعار بعد ثبوت الأحداث. **والنبض كل 4 ثوانٍ مفهرس** (`*_social_at` و`sync_state` بصف واحد)، فلا يستنزف حد القراءة.
+
+| # | النظام | الخطورة | الحالة | الخلل |
+| --- | --- | --- | --- | --- |
+| **NT1** | 1، الخادم | **عالٍ** | مؤكد بالكود | إشعار «فصل جديد» للمفضلة يطابق مرجع العمل حرفيًا؛ العمل نفسه باسم آخر عند المصدر الذي اكتشف الفصل = لا إشعار |
+| **UP1** | الخادم | متوسط-عالٍ | مؤكد بالكود | أول مشاهدة لعمل تجعل خط الأساس أعلى رقم وصل **بلا فحص القفزة**؛ رقم خاطئ كبير (RD7) يُخفي كل الفصول الحقيقية بعده من «آخر التحديثات» إن لم يحمل المصدر تواريخ |
+| **CFW2** | الخادم | عالٍ (قرار) | مؤكد بالكود | الخادم على Cloudflare يزور مواقع المانجا كل دقيقة (Team X وواجهة MangaDex و`MANGA_SITES`) ليبني «آخر التحديثات» |
+| **CL2** | 1، الخادم | متوسط | مؤكد بالكود | جامع MangaDex يسمي العمل بعنوانه الإنجليزي أو الروماجي، والمصدر في الجهاز قد يسميه غير ذلك: حدثان لعمل واحد (جذر A1) |
+| **A11** | معماري | متوسط | مؤكد | الخادم يستورد `normalizeTitle` من كود الواجهة (`apps/web/lib/catalog.js`)؛ أي تعديل على تطبيع العناوين يغيّر مفاتيح أحداث الخادم ويقطعها عن القديمة |
+| **CL3** | الخادم | منخفض | مؤكد (= CF2 في #349) | ترويسة `User-Agent` لجامع MangaDex تحمل رابط مستودع المالك في GitHub |
+
+- **NT1:** `index.ts` `notifyFavoriteUnits`: `WHERE c.kind = 'favorite' AND c.member = 1 AND c.series_ref IN (…works…)`. والخادم لا يعرف `refAliases` (سجل الدمج على الجهاز وحده). مثال من صورة المالك: المفضلة `ext:until no demon remains` (من «الأكثر قراءة»)، والفصل الجديد من Asura بـ`ext:the tale of cultivation and demon extermination`. **تجربة للمالك:** عمل في مفضلتك يظهر في البحث ببطاقتين؛ هل وصلك إشعار آخر فصل منه؟
+- **UP1:** `updates.ts` `decide`: `if (!mark) return { …, mark: { season: top.season, number: top.number } }` بلا `JUMP`. ثم `isAbove` يرفض ما تحت الخط، و`fresh` لا يقبل غير المؤرخ تحته. و`handleUpdatesTwins` يقرأ نفس `max_number` فيتأثر كشف التوائم.
+- **CFW2:** `collectors.ts` `TEAMX = 'https://olympustaff.com'`، و`api.mangadex.org/chapter`، و`MANGA_SITES` (`manga-sites.ts`)، و`wrangler.toml` `crons = ["* * * * *"]`. يضاف إلى CFW1 في قرار المالك عن Cloudflare. ومواقع قد تحجب عناوين Cloudflare فتسقط بصمت إلا في `collector_state.last_error`.
+- **عمليات المانجا في `index.ts` (قُرئت):** `chapter.complete` (عدّاد قراءات بـ`applied_ops` فلا يُحتسب مرتين)، و`library.add`، و`view.add` (`MAX(viewed_at)`)، و`work.remove` (المالك وحده، حتى 40 مفتاحًا = DL6). سليمة التصميم. **وتأكيد A7:** `workStatements` يحفظ في `works.cover_url` أول غلاف يرسله أي جهاز (`COALESCE`)، و`handleUpdatesList` يعرضه في «آخر التحديثات» بدل قرار الغلاف على الجهاز، فقد يختلف غلاف الحدث عن غلاف البطاقة.
+- **حجم الكتابات:** كل دقيقة على الأقل كتابتا حجز ومؤشر لكل جامع مختار، ومعها الأحداث. **لم أقس** الاستهلاك اليومي الفعلي؛ يحتاج مقاييس D1 من لوحة Cloudflare (`rows written`/يوم) مقابل حد 100 ألف.
+
 ---
 
 ## رابعًا — مشاكل المعمارية
