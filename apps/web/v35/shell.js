@@ -2691,7 +2691,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const chapterNumberText = (r) => (Number.isFinite(r?.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
   /** اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») لا يُكرَّر: يُكتب «الفصل 48» بالعربي. */
-  const plainChapterName = (name) => !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
+  // اسم فصل بلا معنى زائد: رقم وحده، أو اسم العمل نفسه ثم الرقم («Raising villains the right way - 1»، بلاغ المالك):
+  // يُعرض «الفصل 1» بدل تكرار اسم العمل الطويل في الزر وفي صفوف الفصول
+  const titleWords = (t) => String(t ?? '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const plainChapterName = (name) => {
+    if (!name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name)) return true;
+    const rest = titleWords(name);
+    const w = state.current;
+    const titles = [w?.title?.english, w?.title?.romaji, w?.title?.native, w?._work?.title, ...(w?.synonyms ?? [])].map(titleWords).filter((t) => t.length > 2);
+    return titles.some((t) => rest.startsWith(t) && /^(?:(?:الفصل|فصل|chapter|ch|ep)\s*)?[\d.\s]*$/i.test(rest.slice(t.length).trim()));
+  };
 
   /**
    * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح ومصدره («الفصل 143 · Team X»).
@@ -2723,7 +2732,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       label.textContent = resume ? (started ? 'تابع الآن' : 'ابدأ الآن') : started ? 'تابع القراءة' : 'ابدأ القراءة';
       const name = next.chapter?.name || '';
       const from = next.chapter?.scanlator || (state.current?._sources ?? []).find((x) => x.sourceId === next.sourceId)?.label || '';
-      sub.textContent = [plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ');
+      // الزر قصير وواضح: «الفصل N · المصدر» دائمًا متى عُرف الرقم؛ اسم الفصل الكامل مكانه قائمة الفصول (بلاغ المالك)
+      const known = Number.isFinite(next.number) && next.number >= 0;
+      sub.textContent = [known || plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ');
     }
     if (resume) setResumeHead(next, started);
   }

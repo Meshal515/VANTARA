@@ -1697,6 +1697,12 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
   justify-content: center;
 }
 .v35 #detail[data-look='page'] .read-cta small {
+  /* سطر واحد قصير: اسم فصل طويل يُختصر بنقاط، و«ابدأ القراءة» تبقى واضحة كاملة */
+  min-width: 0;
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--fs-meta);
   font-weight: 500;
   opacity: 0.8;
@@ -1705,6 +1711,7 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
   content: '·';
   margin-inline-end: 8px;
 }
+.v35 #detail[data-look='page'] #readCtaLabel { flex: none; }
 .v35 #detail[data-look='page'] .read-cta small:empty {
   display: none;
 }
