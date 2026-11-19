@@ -285,7 +285,7 @@
 
 ### الجولة 3 (19 نوفمبر): مسارات المانجا في `shell.js`
 
-**المقروء:** `workFromRef` (417-479)، و`loadHome` (1402-1516)، و`latestFirstPage` و`globalPopular`، و`setReadCta` و`renderSources` (2700-2772)، و`resolveManga` ونهاية `mountV35` (7851-7979)، ومعها من قبل `openWork` و`show` و`renderChaptersLoading` و`mountLegacy` ومطابقة AniList والحذف ودمج المكتبة.
+**المقروء:** `workFromRef` (417-479)، و`loadHome` (1402-1516)، و`renderChapters` (2887-2986)، و`latestFirstPage` و`globalPopular`، و`setReadCta` و`renderSources` (2700-2772)، و`resolveManga` ونهاية `mountV35` (7851-7979)، ومعها من قبل `openWork` و`show` و`renderChaptersLoading` و`mountLegacy` ومطابقة AniList والحذف ودمج المكتبة.
 
 | # | الخطورة | الحالة | الخلل |
 | --- | --- | --- | --- |
@@ -295,6 +295,7 @@
 
 - **PF1:** `shell.js` `chapterRefreshTimer = setInterval(refreshChapters, 60_000)` و`visibilitychange`؛ `refreshChapters` يشترط الرئيسية ظاهرة وقسم المانجا ومرور 60 ثانية. `latestFirstPage` ← `browseLive({ kind: 'latestListing' }, …, { concurrency: 3 })` على كل المصادر. **الأثر المحتمل:** ساعة على الرئيسية ≈ 60 دورة × عدد المصادر من الطلبات، فيرتفع خطر 429 والقاطع (AW26، حتى 6 ساعات)، والبطارية والبيانات. **الإثبات:** عدّ طلبات المحرك في ساعة على الرئيسية (سجل `source-report`).
 - **A12:** كل قاعدة تعطي جوابًا مختلفًا للعنوانين نفسيهما. الحل يأتي مع الهوية الواحدة (الحل ب).
+- **RB1 (متوسط، مؤكد بالكود):** `shell.js:7430`: أي تغيير في `chapter_marks` يصل وصفحة العمل ظاهرة يستدعي `renderChapters` كاملة، و`renderChapters` (`:2887-2986`) ينهي بـ`panel.replaceChildren(...parts)`. تعليم فصل من جهاز آخر أو من «علّم فصول» يعيد بناء القائمة تحت الإصبع (نفس نوع TG2 وAD1 وCH1 وDW2 في #349، «أكثر نوع خلل تكرارًا»). ومع المرحلة 1 كل صف يمر على `chapterKeysAcross` و`refsOf`؛ الكلفة صغيرة لكنها تتكرر مع كل إعادة بناء.
 
 ---
 
