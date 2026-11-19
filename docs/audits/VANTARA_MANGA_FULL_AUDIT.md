@@ -285,13 +285,18 @@
 
 ### الجولة 3 (19 نوفمبر): مسارات المانجا في `shell.js`
 
-**المقروء:** `workFromRef` (417-479)، و`loadHome` (1402-1516)، و`renderChapters` (2887-2986)، و`latestFirstPage` و`globalPopular`، و`setReadCta` و`renderSources` (2700-2772)، و`resolveManga` ونهاية `mountV35` (7851-7979)، و`openAddonSource` (5287-5372)، ومعها من قبل `openWork` و`show` و`renderChaptersLoading` و`mountLegacy` ومطابقة AniList والحذف ودمج المكتبة.
+**المقروء:** `workFromRef` (417-479)، و`loadHome` (1402-1516)، و`renderChapters` (2887-2986)، و`latestFirstPage` و`globalPopular`، و`setReadCta` و`renderSources` (2700-2772)، و`resolveManga` ونهاية `mountV35` (7851-7979)، و`openAddonSource` (5287-5372)، و`openMangaDownload` (3698-3758)، و`runSearch` و`renderLibrary` (4436-4489، 4733-4773)، و`card` (1010-1060)، و`showPage` و`restoreScroll` (5574-5640)، و`adult-filter.js` `blockKey`، ومعها من قبل `openWork` و`show` و`renderChaptersLoading` و`mountLegacy` ومطابقة AniList والحذف ودمج المكتبة.
 
 | # | الخطورة | الحالة | الخلل |
 | --- | --- | --- | --- |
 | **PF1** | متوسط | مؤكد بالكود، الأثر فرضية | رئيسية المانجا الظاهرة تعيد طلب «آخر التحديثات» من كل المصادر كل 60 ثانية (`refreshChapters` ← `loadHome` ← `latestFirstPage`، كاشه 60 ثانية)، ومعها بناء الفهرس ورسم الرئيسية وكتابة `home.v4` |
 | **A12** | متوسط (معماري) | مؤكد | ثلاث قواعد هوية: `canonicalIndex` (القوائم)، و`titlesMatch` بتشابه 80% (`resolveManga` و`shell.js:7859`)، و`createWorkIndex` بالمطابقة الحرفية (النظام القديم) |
 | **SRC3** | متوسط | مؤكد بالكود (#349 «مسار مزدوج»، باقٍ) | فتح عمل مانجا من صفحة مصدر إضافة يبني العمل بنسخة ذلك المصدر وحده (`openAddonSource` ← `sourceWorkModel`، والهوية `null` للمانجا)، فلا يلتقي بنسخ المصادر الأخرى ولا ببطاقته في القوائم |
+| **DLX1** | متوسط | مؤكد بالكود | تنزيل الفصول: المصدر البديل لفصل فشل يُختار بمطابقة الرقم حرفيًا (`openMangaDownload` `alternatesOf`: `r.number === row.number`)؛ مع RD7 يُنزَّل **فصل آخر** بصمت مكان المطلوب. وهوية الفصل المنزّل فيها مرجع البطاقة، فبعد الدمج يظهر العمل مرتين في «على الجهاز» ويمكن تنزيل الفصل نفسه مرتين (جذر A1) |
+| **AF1** | متوسط | مؤكد بالكود | حجب «للكبار» يُحفظ للأبد بلا فك (`adult-filter.js` `blockKey`، 5000 مفتاح في `localStorage`)، وقراره مطابقة عنوان واحدة في أول 5 نتائج بحث AniList (`manga-meta.js` `matchMangaRating`). عمل عادي يشارك عنوانه حرفيًا مع عمل للكبار يختفي من الجهاز نهائيًا |
+| **AF2** | منخفض-متوسط | مؤكد بالكود | البطاقة المحجوبة تُزال بعد ظهورها (`card` ← `a.remove()`)، فتقفز الشبكة؛ يخالف قاعدة CLAUDE.md («ما يصل متأخرًا يُخفى بـ`visibility` لا بالإزالة») |
+| **NV1، NV2** | متوسط | #349، **باقيان** | الموضع يُستعاد عند «الرجوع» وحده (`showPage`: `!push && … restoreScroll`)، والاستعادة تتوقف بعد 400ms (`restoreScroll`: `[0, 120, 400]`) |
+| **PF2** | منخفض | مؤكد بالكود | «مكتبتي» تبني لكل تبويب من الستة قائمته كاملة لتعدّها (`renderLibrary` ← `libraryWorks(k)` ← `mergeWorkPages` ← فهرس كامل) مع كل رسم |
 | **SY4** | منخفض | مؤكد | `workFromRef` يقرأ `WORKS_KEY` من `localStorage` (مخزن أعمال آخر على الجهاز، يدخل في SY2) |
 
 - **PF1:** `shell.js` `chapterRefreshTimer = setInterval(refreshChapters, 60_000)` و`visibilitychange`؛ `refreshChapters` يشترط الرئيسية ظاهرة وقسم المانجا ومرور 60 ثانية. `latestFirstPage` ← `browseLive({ kind: 'latestListing' }, …, { concurrency: 3 })` على كل المصادر. **الأثر المحتمل:** ساعة على الرئيسية ≈ 60 دورة × عدد المصادر من الطلبات، فيرتفع خطر 429 والقاطع (AW26، حتى 6 ساعات)، والبطارية والبيانات. **الإثبات:** عدّ طلبات المحرك في ساعة على الرئيسية (سجل `source-report`).
