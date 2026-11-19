@@ -251,7 +251,8 @@
 | --- | --- |
 | **انحلت** | SRC1 (المطابقة الحرفية تكفي، `works.js` `discoverEditions`)، SRC2 (`resetSources` قبل الحارس، `shell.js:5251`)، RT2 (حلقة الويبتون)، MG5 (الفصل المنزّل يُترجم)، JS1، DL20، DL22 (تنبيه لكل عنصر)، DL27 (الجمع)، DL31 («3/4 صفحة»)، DL21 (ضمنًا بـDS1) |
 | **مخفف، يحتاج تحقق على الجهاز** | CFI3 (CFI1: لا حل صامت لصورة ولا تكرار لكل مضيف) |
-| **باقية: الملف لم يتغير** | EE1، EE2، BN1، UE1، UE10، DNS1، SR1، AW26، BT3، PL1، MG3، DL25، RT1 (القراءة معًا)، SM8، CV1، CV2، CV3، CH1، CH2، CH3، DL5، DL6 |
+| **باقية: الملف لم يتغير** | EE1، EE2، BN1، UE1، UE10، DNS1، SR1، AW26، BT3، PL1، MG3، DL25، RT1 (القراءة معًا)، SM8، CV1، CV2، CV3، CH1، CH2، CH3، DL6 |
+| **عولج جزئيًا (تصحيح 19 نوفمبر)** | DL5: Debug أضاف `tagWork` في `updates-view` و`profile` و`downloads` و`unified-view` و`together` و`anime-today`؛ الباقي `friends.js` و`majlis.js` و`rafiq.js` |
 | **باقية: الملف تغيّر والتغيير لا يمسها** | EE3 (= SE4)، RT3، TJ1، MG4، RD1، RD2، RD3، RD4، RD5، WT7، UE9 |
 | **تحتاج قراءة أعمق** | RS1 (زر «استعادة»: تغيّر مسار المدمجة سابقًا في `extension-engine.js` `installFormer`) |
 
