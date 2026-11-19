@@ -266,7 +266,8 @@ class TogetherRoomScreensDeviceTest {
         while (SystemClock.elapsedRealtime() < end) Thread.sleep(250)
         assertTrue("الغرفة متصلة", room() != null)
         // لوحة الغرفة كما يفتحها المضيف من الشريط العلوي، وتبقى ثابتة (لا تُبنى كل نصف ثانية)
-        instrumentation.runOnMainSync { room()!!.let { r -> r.javaClass.getDeclaredMethod("openPanel").apply { isAccessible = true }.invoke(r) } }
+        val panelOwner = room()!!
+        instrumentation.runOnMainSync { panelOwner.javaClass.getDeclaredMethod("openPanel").apply { isAccessible = true }.invoke(panelOwner) }
         shot("leave-01-panel", 1500)
         back()
         // زر الرجوع بلا ورقة مفتوحة: سؤال بدل خروج صامت
