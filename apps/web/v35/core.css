@@ -731,6 +731,14 @@ html,
   width: 60%;
   margin-top: 6px;
 }
+/* هيكل في السطر (شرائح المصادر ونطاقات الفصول قبل وصولها): يأخذ مقاس صنفه ومكانه في سطره. لا يرث
+ * absolute + inset:0 من .skeleton (صُممت لتغطي إطار الغلاف)، وإلا التصق بأقرب أب موضوع: كبسولة سوداء أعلى
+ * الصفحة، ولوح أسود بطولها في الكلاسيكي (VI1). */
+.v35 .skeleton-inline {
+  position: relative;
+  pointer-events: none;
+  animation: v35-pulse 1.6s ease-in-out infinite;
+}
 @keyframes v35-pulse {
   50% {
     opacity: 0.6;

@@ -2655,7 +2655,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const src = q('sourcesBlock');
     src.hidden = false;
     q('sourceRow').replaceChildren(...[96, 84, 92].map((wpx) => {
-      const chip = el('span', 'source-chip skeleton');
+      const chip = el('span', 'source-chip skeleton-inline');
       chip.style.width = `${wpx}px`;
       return chip;
     }));
@@ -2669,7 +2669,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const ranges = q('chapterRanges');
     if (ranges) {
       ranges.hidden = false;
-      ranges.replaceChildren(...[0, 1, 2, 3].map(() => el('span', 'mw-range-skel skeleton')));
+      ranges.replaceChildren(...[0, 1, 2, 3].map(() => el('span', 'mw-range-skel skeleton-inline')));
     }
     // الهيكل بعدد ما سيأتي: نطاق كامل (50) في الشبكة إن عُرف أن الفصول أكثر، وإلا عددها
     const grid = lookIs('resume');
@@ -2703,25 +2703,56 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const sub = q('readCtaSub');
     if (!btn) return;
     btn.disabled = !next;
-    // سطر الفصل يحجز مكانه دائمًا: الاسم لا يقفز للأعلى حين يصل
-    sub.textContent = '\u00a0';
+    // أثناء الجلب (next === undefined) سطر الفصل يحجز مكانه بهيكل ظاهر بعرضه، فيبقى الاسم والسطر متوسطين في الزر
+    // ولا يتحرك الاسم حين يصل الفصل. كانت مسافة غير مرئية فيبدو الاسم مرفوعًا عن الوسط (VI2). بلا فصل: السطر يُطوى
+    // (:empty في manga.css) فيتوسط الاسم وحده، وارتفاع الزر ثابت.
+    const pending = next === undefined;
+    sub.replaceChildren();
     const resume = lookIs('resume');
-    if (next === undefined) label.textContent = 'جارٍ جمع الفصول';
-    else if (next === null) {
+    if (pending) {
+      label.textContent = 'جارٍ جمع الفصول';
+      const bar = el('span', 'cta-skel');
+      bar.setAttribute('aria-hidden', 'true');
+      sub.append(bar);
+    } else if (next === null) {
       label.textContent = 'لا فصول متاحة';
-      if (q('sourceRow')?.querySelector('.skeleton')) q('sourcesBlock').hidden = true;
-      if (q('chapterRanges')?.querySelector('.skeleton')) q('chapterRanges').hidden = true;
+      if (q('sourceRow')?.querySelector('.skeleton-inline')) q('sourcesBlock').hidden = true;
+      if (q('chapterRanges')?.querySelector('.skeleton-inline')) q('chapterRanges').hidden = true;
     }
     else {
       label.textContent = resume ? (started ? 'تابع الآن' : 'ابدأ الآن') : started ? 'تابع القراءة' : 'ابدأ القراءة';
       const name = next.chapter?.name || '';
       const from = next.chapter?.scanlator || (state.current?._sources ?? []).find((x) => x.sourceId === next.sourceId)?.label || '';
-      sub.textContent = [plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ') || '\u00a0';
+      sub.textContent = [plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ');
     }
-    if (resume) {
-      q('resumeNum').textContent = next ? chapterNumberText(next) : '—';
-      q('resumeKick').textContent = next && !started ? 'ابدأ من أول فصل' : 'تابع من حيث وقفت';
-      q('resumeLabel').textContent = next && !started ? 'الفصل الأول' : 'الفصل التالي';
+    if (resume) setResumeHead(next, started);
+  }
+
+  /**
+   * رأس «من حيث وقفت»: لا يعلن استئنافًا ولا رقمًا قبل معرفة الفصول والتقدم (VI3). أثناء الجلب هيكل محايد
+   * (data-pending: النص شفاف بمقاسه فلا يتحرك شيء حين يصل)، ثم الحالة الصحيحة مرة واحدة.
+   */
+  function setResumeHead(next, started) {
+    const num = q('resumeNum');
+    const kick = q('resumeKick');
+    const what = q('resumeLabel');
+    const box = num?.closest('.mw-resume');
+    if (!num || !kick || !what || !box) return;
+    const pending = next === undefined;
+    box.toggleAttribute('data-pending', pending);
+    for (const n of [num, kick, what]) n.toggleAttribute('aria-hidden', pending);
+    if (pending) {
+      num.textContent = '00';
+      kick.textContent = 'ابدأ من أول فصل';
+      what.textContent = 'الفصل الأول';
+    } else if (next === null) {
+      num.textContent = '—';
+      kick.textContent = started ? 'تابع من حيث وقفت' : 'لم تبدأ بعد';
+      what.textContent = 'لا فصول متاحة';
+    } else {
+      num.textContent = chapterNumberText(next);
+      kick.textContent = started ? 'تابع من حيث وقفت' : 'ابدأ من أول فصل';
+      what.textContent = started ? 'الفصل التالي' : 'الفصل الأول';
     }
   }
 

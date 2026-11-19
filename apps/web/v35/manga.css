@@ -563,6 +563,20 @@
 .v35 #detail .mw-cta-text { min-width: 0; }
 .v35 #detail .mw-cta b { display: block; font-size: 15.5px; font-weight: 800; }
 .v35 #detail .mw-cta small { display: block; margin-top: 1px; font-size: 12px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* بلا فصل (لا فصول متاحة) يُطوى السطر فيتوسط الاسم؛ الزر بارتفاعه الثابت (VI2) */
+.v35 #detail .mw-cta small:empty { display: none; }
+/* سطر الفصل أثناء الجلب: هيكل بعرضه في مكانه، لا مسافة فارغة ترفع الاسم عن الوسط (VI2) */
+.v35 #detail .cta-skel {
+  display: inline-block;
+  width: 96px;
+  max-width: 100%;
+  height: 0.75em;
+  border-radius: 6px;
+  vertical-align: middle;
+  background: currentColor;
+  opacity: 0.3;
+  animation: v35-pulse 1.6s ease-in-out infinite;
+}
 .v35 #detail .mw-go { flex: none; width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); display: grid; place-items: center; }
 .v35 #detail .mw-go .icon { width: 16px; height: 16px; transform: translateX(1px); }
 
@@ -907,6 +921,13 @@
 .v35 #detail[data-look='resume'] .mw-big { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
 .v35 #detail[data-look='resume'] .mw-big b { font-size: 64px; font-weight: 800; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; color: var(--text-1); }
 .v35 #detail[data-look='resume'] .mw-big span { font-size: 15px; font-weight: 700; color: var(--text-2); }
+/* قبل الجلب: النص بمقاسه شفاف وفوقه هيكل يتنفس، فلا يُعلن استئنافًا لا يُعرف ولا يتحرك شيء حين يصل (VI3) */
+.v35 #detail[data-look='resume'] .mw-resume[data-pending] :is(#resumeKick, #resumeNum, #resumeLabel) {
+  color: transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text-1) 12%, transparent);
+  animation: v35-pulse 1.6s ease-in-out infinite;
+}
 .v35 #detail[data-look='resume'] .mw-progress { margin-top: 16px; }
 .v35 #detail[data-look='resume'] .mw-line { background: rgba(255, 255, 255, 0.16); }
 .v35 #detail[data-look='resume'] .mw-progress-row { font-size: 12px; }
@@ -994,8 +1015,7 @@ html[data-motion='off'] .v35 #detail .mw-ban-amb img { transition: none; }
 .v35 #detail .mw-skel-lines { display: flex; flex-direction: column; justify-content: space-around; height: calc(3 * 1.85em); }
 .v35 #detail .mw-skel-lines i { display: block; height: 13px; border-radius: 6px; background: var(--surface-2); }
 .v35 #detail .mw-skel-lines i:last-child { width: 62%; }
-.v35 #detail .mw-src .source-chip.skeleton { pointer-events: none; }
-.v35 #detail .mw-range-skel { flex: 0 0 82px; height: 32px; border-radius: 16px; }
+.v35 #detail .mw-range-skel { flex: 0 0 82px; height: 32px; border-radius: 16px; background: var(--surface-1); }
 .v35 #detail .mw-ch--skel .mw-ch-open { cursor: default; }
 .v35 #detail .mw-cell.skeleton { pointer-events: none; }
 .v35 #detail .mw-cover > img.img-fade { animation: mw-img-in 0.32s ease-out both; }
@@ -2117,6 +2137,22 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
 
 /* غلاف وصل بعد ظهور صفحة العمل بنسبة غير نسبة مكانه: يبقى المكان كما ظهر ويُعرض الغلاف كاملًا داخله (shell.js) */
 .v35 #detail #detailCover > img.mw-fit { object-fit: contain; }
+/* وما يبقى من الإطار حول الغلاف يملؤه الفن نفسه مموّهًا، لا خلفية الإطار الداكنة (شريط على حافة الغلاف، VI5).
+ * يشمل الكلاسيكي على الكمبيوتر لأنه يعرض الغلاف بنسبته (contain) دائمًا. «ويبتوني» له طبقته الخاصة أعلاه. */
+.v35 #detail:not([data-look='webtoon']) #detailCover:has(> img.mw-fit)::before,
+.v35 #detail[data-look='page'] #detailCover:has(> img)::before {
+  content: '';
+  position: absolute;
+  inset: -24px;
+  background-image: var(--art-bg, none);
+  background-size: cover;
+  background-position: center;
+  filter: blur(20px) saturate(1.15) brightness(0.8);
+  pointer-events: none;
+}
+/* الغلاف فوق تعبئته: .mw-cover يضعه absolute أصلًا، والكلاسيكي (.detail-cover) في السطر */
+.v35 #detail .mw-cover > img { z-index: 1; }
+.v35 #detail .detail-cover > img { position: relative; z-index: 1; }
 
 /* ═════ قبل وصول المعلومات (بلاغ المالك، 16 نوفمبر): لا صناديق سوداء ═════
  * الغلاف والبنر والاسم كانت تظهر مساحات داكنة مصمتة («سواد») في «ويبتوني» و«الملف» حتى تصل الصور والاسم.

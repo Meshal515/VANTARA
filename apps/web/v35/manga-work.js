@@ -177,8 +177,9 @@ export function detailMarkup(look, { glyph, iconButton }) {
   if (L === 'resume') {
     return (
       bar +
-      `<div class="mw-resume">${amb('mw-resume-bg')}<small id="resumeKick">تابع من حيث وقفت</small>` +
-      `<div class="mw-big"><b id="resumeNum">—</b><span id="resumeLabel">الفصل التالي</span></div>${progress()}${cta('تابع الآن')}</div>` +
+      // قبل الجلب لا يُعرف التقدم ولا الفصل التالي: هيكل محايد بمقاس النص (VI3)، تملؤه القشرة (setResumeHead)
+      `<div class="mw-resume" data-pending>${amb('mw-resume-bg')}<small id="resumeKick" aria-hidden="true">ابدأ من أول فصل</small>` +
+      `<div class="mw-big"><b id="resumeNum" aria-hidden="true">00</b><span id="resumeLabel" aria-hidden="true">الفصل الأول</span></div>${progress()}${cta()}</div>` +
       `<div class="mw-ident">${cover}<div class="mw-id">${title}${stats}</div></div>` +
       `<div class="mw-wrap">${quick3}<section class="mw-chapters">${chead}${sources}${ranges}${panel}</section>` +
       `${story(true)}${genres}${info}</div>`
