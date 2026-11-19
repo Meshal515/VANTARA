@@ -32,7 +32,7 @@ import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, createSavedWorks, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { readerEngine } from '../lib/reader-engine.js';
@@ -260,6 +260,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
   const sourceVerification = createSourceVerification();
+  // SY2: تخزين الجهاز ممتلئ فلم يُحفظ سجل الدمج أو قرار غلاف: يُقال مرة في الجلسة بدل أن يضيع بصمت
+  let storageFullSaid = false;
+  const onStorageFull = () => { if (storageFullSaid) return; storageFullSaid = true; setTimeout(() => toast('مساحة التخزين في التطبيق ممتلئة: بعض ما تعلّمه عن أعمالك لن يُحفظ بعد إعادة الفتح. امسح الكاش من الإعدادات', 6000), 0); };
+  globalThis.addEventListener?.('vantara:storage-full', onStorageFull);
 
   // Startup invariant: the shell must mount before any optional native bridge work.
   // Follow-time is telemetry/accounting; a missing, stale, or temporarily broken
@@ -400,22 +404,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // العمل من المكتبة بلا بحث جديد.
 
   const serverWork = (ref) => sync.rows('works', (x) => x.series_ref === ref)[0] ?? null;
+  // يُقرأ مرة ويبقى في الذاكرة (SY4)
+  const savedWorks = createSavedWorks({ key: WORKS_KEY });
   /**
    * يحفظ نسخ العمل في الجهاز، ويخبر الخادم بما لا يعرفه منها: عملٌ فتحتَه
    * يُفتح بعدها على كل جهاز بنفس نسخه، بلا بحث.
    */
   function rememberWork(w) {
-    const all = readJson(WORKS_KEY, {});
     // عمل فُتح من مصدر محدد: تُضاف نسخته إلى المحفوظ ولا تستبدل نسخ بقية المصادر
-    const editions = w._pinnedSource ? [...(all[w.id]?.editions ?? []).filter((e) => e.sourceId !== w._pinnedSource), ...(w._work.editions ?? [])] : w._work.editions ?? [];
-    all[w.id] = { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions };
-    writeJson(WORKS_KEY, all);
+    const editions = w._pinnedSource ? [...(savedWorks.get(w.id)?.editions ?? []).filter((e) => e.sourceId !== w._pinnedSource), ...(w._work.editions ?? [])] : w._work.editions ?? [];
+    savedWorks.put(w.id, { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions });
     const facts = { title: titleOf(w), coverUrl: w._work.thumbnailUrl ?? null, editions };
     if (!editions.length || !describesMore(serverWork(String(w.id)), facts)) return;
     sync.enqueue('work.describe', { seriesRef: String(w.id), ...facts, editions: compactEditions(editions) });
   }
   function workFromRef(ref, fallbackTitle, cover) {
-    const saved = readJson(WORKS_KEY, {})[ref];
+    const saved = savedWorks.get(ref);
     const row = serverWork(ref);
     const title = displayTitle(ref, row?.title, saved?.title, fallbackTitle);
     // الغلاف الموحّد (الخادم) أولًا، ثم ما عرفه هذا الجهاز: نفس الغلاف في كل الشاشات
@@ -8000,6 +8004,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ++pageMotionRequest;
       finishPageMotion();
       sourceVerification.close();
+      globalThis.removeEventListener?.('vantara:storage-full', onStorageFull);
       addonViewGeneration++;closeAddonSource();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}

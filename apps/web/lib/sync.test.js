@@ -855,7 +855,8 @@ describe('independent account persistence under localStorage quota', () => {
     await sync.pull();
     await vi.waitFor(() => expect(sync.rows('library')).toHaveLength(1));
     expect(sync.health().lastError?.code).not.toBe('mirror_audit_storage_full');
-    expect(limited.getItem('vantara.mirror')).not.toContain('historic');
+    // SY2: المرآة في IndexedDB، ونسخة localStorage المشتركة تُحذف لتحرير مساحتها للمواضع والأغلفة وسجل الدمج
+    expect(limited.getItem('vantara.mirror')).toBeNull();
     sync.dispose();
     const reopened = await loadSync({ storage: limited, fetchImpl: async () => { throw new Error('offline'); } });
     await reopened.pull();

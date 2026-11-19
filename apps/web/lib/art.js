@@ -42,7 +42,8 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     timer = setTimeout(() => {
       const keys = Object.keys(all);
       for (const k of keys.slice(0, Math.max(0, keys.length - MAX))) delete all[k];
-      try { storage?.setItem(KEY, JSON.stringify(all)); } catch { /* تسريع لا حقيقة: يُحسم من جديد */ }
+      // فشل الحفظ (تخزين ممتلئ) يُعلن (SY2): القرار يبقى للجلسة، لكن ضياعه يعني غلافًا آخر بعد إعادة الفتح
+      try { storage?.setItem(KEY, JSON.stringify(all)); } catch { try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key: KEY } })); } catch { /* */ } }
     }, 300);
   };
   const legacyOf = (id) => {

@@ -33,6 +33,33 @@ export const STATUS_BY_SMANGA = {
 };
 
 /** مرجع العمل في المزامنة: ثابت لنفس العنوان المطبَّع، وموسوم بمصدره. */
+/**
+ * الأعمال المحفوظة على الجهاز (نسخ كل عمل فُتح، ليُفتح من المكتبة بلا بحث). SY4: كان المخزن كله يُقرأ ويُحلَّل نصًا مع كل
+ * workFromRef (21 موضعًا، منها رسم المكتبة لمئات الأعمال)، ويكبر بلا حد في localStorage المشترك (SY2). هنا: يُقرأ مرة
+ * ويبقى في الذاكرة، والكتابة تحدّثه، وسقف بالأحدث استعمالًا.
+ */
+export const MAX_SAVED_WORKS = 3000;
+export function createSavedWorks({ key, storage = globalThis.localStorage, max = MAX_SAVED_WORKS } = {}) {
+  let all = null;
+  const load = () => {
+    if (all) return all;
+    try { all = JSON.parse(storage?.getItem(key) ?? '{}') ?? {}; } catch { all = {}; }
+    return all;
+  };
+  return {
+    get: (ref) => load()[ref] ?? null,
+    put(ref, value) {
+      const map = load();
+      delete map[ref]; // الأحدث آخرًا: السقف يُسقط الأقدم استعمالًا
+      map[ref] = value;
+      const keys = Object.keys(map);
+      for (const k of keys.slice(0, Math.max(0, keys.length - max))) delete map[k];
+      try { storage?.setItem(key, JSON.stringify(map)); return true; }
+      catch { try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key } })); } catch { /* */ } return false; }
+    },
+  };
+}
+
 export function seriesRefOf(work) {
   return `ext:${work.key}`;
 }

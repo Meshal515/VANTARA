@@ -413,11 +413,23 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     pinGrant = token && user?.userId ? saved.pinGrant ?? null : null;
     refreshOverlay();
   });
-  const persistMirror = () => writeLocalCache(MIRROR_KEY, mirror);
+  // SY2: المرآة (آلاف الصفوف، حتى 4MB) كانت تُكتب في localStorage المشترك، فامتلاؤه يُسقط بصمت ما هو أصغر وأهم: مواضع
+  // القراءة وقرارات الأغلفة وسجل الدمج (refAliases). مكانها IndexedDB (ونسخة أندرويد): حين تُحفظ هناك تُحذف نسخة
+  // localStorage لتحرير المساحة. بلا IndexedDB (وضع خاص، متصفح يمنعه) تبقى في localStorage كما كانت. الإقلاع ينتظر
+  // sync.ready (القراءة من IndexedDB) قبل رسم الواجهة، فلا وميض.
+  const releaseLocalMirror = () => {
+    if (!dataOwner || dataOwner !== localCacheOwner) return;
+    try { localStorage.removeItem(MIRROR_KEY); } catch { /* يبقى؛ النسخة المستقلة محفوظة */ }
+  };
+  const persistMirror = () => {
+    const snapshot = mirror;
+    void storeCopy('snapshot', { mirror: snapshot, cursor, auditedAt: lastAudit?.userId === user?.userId ? lastAudit.at : null })
+      .then((saved) => { if (saved) releaseLocalMirror(); else writeLocalCache(MIRROR_KEY, snapshot); }, () => writeLocalCache(MIRROR_KEY, snapshot));
+  };
   const commitMirror = async (snapshot, nextCursor, auditedAt = lastAudit?.userId === user?.userId ? lastAudit.at : null) => {
-    const localSaved = writeLocalCache(MIRROR_KEY, snapshot);
-    const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt });
-    return localSaved || independentSaved;
+    const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt }).catch(() => false);
+    if (independentSaved) { releaseLocalMirror(); return true; }
+    return writeLocalCache(MIRROR_KEY, snapshot);
   };
   const recovered = sessionReady.then(async () => {
     const recoveryOwner = user?.userId;

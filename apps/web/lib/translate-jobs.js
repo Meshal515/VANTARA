@@ -209,10 +209,19 @@ export function createJobRunner(deps) {
   const pageLists = new Map();
   const tries = new Map();
 
+  // TJ1: الطابور كله (بصفوف فصوله) كان يُكتب في localStorage بعد كل صفحة. الواجهة تُبلَّغ فورًا كما هي، والحفظ مرة
+  // كل ثانيتين على الأكثر ما دامت ترجمة تعمل، وفورًا حين لا يعمل شيء (اكتمل، توقف، أُلغي). إغلاق مفاجئ يُفقد ثانيتين
+  // من التقدم فقط، والصفحات المترجمة نفسها محفوظة ببصمتها فلا تُعاد ترجمتها.
+  const SAVE_EVERY_MS = 2_000;
+  let lastWrite = -Infinity;
+  let writeTimer = null;
+  const writeNow = () => { clearTimeout(writeTimer); writeTimer = null; lastWrite = now(); writeJobs(jobs, storage); };
   const save = () => {
-    writeJobs(jobs, storage);
+    if (!jobs.some((j) => j.status === 'running') || now() - lastWrite >= SAVE_EVERY_MS) writeNow();
+    else writeTimer ??= setTimeout(writeNow, Math.max(0, SAVE_EVERY_MS - (now() - lastWrite)));
     for (const fn of listeners) fn(jobs);
   };
+  globalThis.addEventListener?.('pagehide', () => { if (writeTimer) writeNow(); });
   const find = (id) => jobs.find((j) => j.id === id);
   const active = () => jobs.find((j) => j.status === 'running');
 

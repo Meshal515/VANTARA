@@ -19,11 +19,17 @@ const read = (key) => {
     return {};
   }
 };
+// SY2: فشل الحفظ (تخزين ممتلئ) لا يُبتلع: سجل الدمج يربط علاماتك ومواضعك بالعمل، وضياعه بصمت يُخفيها بعد إعادة الفتح.
+// يبقى في الذاكرة للجلسة، ويُعلن مرة (vantara:storage-full) فتقوله الواجهة.
+export let storageFailures = 0;
 const write = (key, value) => {
   try {
     globalThis.localStorage?.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    // تخزين ممتلئ: الذاكرة للجلسة تكفي
+    storageFailures++;
+    try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key } })); } catch { /* بيئة بلا أحداث */ }
+    return false;
   }
 };
 

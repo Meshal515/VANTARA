@@ -46,3 +46,14 @@ describe('one work, one reference class (both directions)', () => {
     expect(canonicalRefOf('ext:x')).toBe(canonicalRefOf('ext:y'));
   });
 });
+
+describe('SY2: a full device storage is said, not swallowed', () => {
+  it('a failed save of the merge record announces vantara:storage-full and keeps the alias for the session', () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; } });
+    const heard = [];
+    vi.stubGlobal('dispatchEvent', (e) => heard.push(e.type === 'vantara:storage-full' ? e.detail.key : e.type));
+    noteRefAlias('ext:old name', 'ext:new name');
+    expect(heard).toEqual(['vantara.manga.refAliases.v1']);
+    expect(refsOf('ext:new name')).toEqual(['ext:new name', 'ext:old name']);
+  });
+});

@@ -286,3 +286,20 @@ describe('chapterSpan', () => {
     expect(span).toEqual({ ar: 22, en: 72 });
   });
 });
+
+describe('SY4: saved works are read once, not parsed on every workFromRef', () => {
+  it('reads storage once for many lookups, keeps the newest, and caps the store', async () => {
+    const { createSavedWorks } = await import('./works.js');
+    let reads = 0;
+    const data = new Map([['k', JSON.stringify({ 'ext:a': { title: 'A' } })]]);
+    const storage = { getItem: (k) => { reads++; return data.get(k) ?? null; }, setItem: (k, v) => data.set(k, v) };
+    const store = createSavedWorks({ key: 'k', storage, max: 3 });
+    for (let i = 0; i < 500; i++) store.get('ext:a');
+    expect(reads).toBe(1);
+    expect(store.get('ext:a')).toEqual({ title: 'A' });
+    for (const ref of ['ext:b', 'ext:c', 'ext:d']) store.put(ref, { title: ref });
+    store.put('ext:b', { title: 'B again' });
+    expect(Object.keys(JSON.parse(data.get('k')))).toEqual(['ext:c', 'ext:d', 'ext:b']);
+    expect(reads).toBe(1);
+  });
+});
