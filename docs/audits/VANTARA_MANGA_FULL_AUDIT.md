@@ -285,12 +285,13 @@
 
 ### الجولة 3 (19 نوفمبر): مسارات المانجا في `shell.js`
 
-**المقروء:** `workFromRef` (417-479)، و`loadHome` (1402-1516)، و`renderChapters` (2887-2986)، و`latestFirstPage` و`globalPopular`، و`setReadCta` و`renderSources` (2700-2772)، و`resolveManga` ونهاية `mountV35` (7851-7979)، ومعها من قبل `openWork` و`show` و`renderChaptersLoading` و`mountLegacy` ومطابقة AniList والحذف ودمج المكتبة.
+**المقروء:** `workFromRef` (417-479)، و`loadHome` (1402-1516)، و`renderChapters` (2887-2986)، و`latestFirstPage` و`globalPopular`، و`setReadCta` و`renderSources` (2700-2772)، و`resolveManga` ونهاية `mountV35` (7851-7979)، و`openAddonSource` (5287-5372)، ومعها من قبل `openWork` و`show` و`renderChaptersLoading` و`mountLegacy` ومطابقة AniList والحذف ودمج المكتبة.
 
 | # | الخطورة | الحالة | الخلل |
 | --- | --- | --- | --- |
 | **PF1** | متوسط | مؤكد بالكود، الأثر فرضية | رئيسية المانجا الظاهرة تعيد طلب «آخر التحديثات» من كل المصادر كل 60 ثانية (`refreshChapters` ← `loadHome` ← `latestFirstPage`، كاشه 60 ثانية)، ومعها بناء الفهرس ورسم الرئيسية وكتابة `home.v4` |
 | **A12** | متوسط (معماري) | مؤكد | ثلاث قواعد هوية: `canonicalIndex` (القوائم)، و`titlesMatch` بتشابه 80% (`resolveManga` و`shell.js:7859`)، و`createWorkIndex` بالمطابقة الحرفية (النظام القديم) |
+| **SRC3** | متوسط | مؤكد بالكود (#349 «مسار مزدوج»، باقٍ) | فتح عمل مانجا من صفحة مصدر إضافة يبني العمل بنسخة ذلك المصدر وحده (`openAddonSource` ← `sourceWorkModel`، والهوية `null` للمانجا)، فلا يلتقي بنسخ المصادر الأخرى ولا ببطاقته في القوائم |
 | **SY4** | منخفض | مؤكد | `workFromRef` يقرأ `WORKS_KEY` من `localStorage` (مخزن أعمال آخر على الجهاز، يدخل في SY2) |
 
 - **PF1:** `shell.js` `chapterRefreshTimer = setInterval(refreshChapters, 60_000)` و`visibilitychange`؛ `refreshChapters` يشترط الرئيسية ظاهرة وقسم المانجا ومرور 60 ثانية. `latestFirstPage` ← `browseLive({ kind: 'latestListing' }, …, { concurrency: 3 })` على كل المصادر. **الأثر المحتمل:** ساعة على الرئيسية ≈ 60 دورة × عدد المصادر من الطلبات، فيرتفع خطر 429 والقاطع (AW26، حتى 6 ساعات)، والبطارية والبيانات. **الإثبات:** عدّ طلبات المحرك في ساعة على الرئيسية (سجل `source-report`).
