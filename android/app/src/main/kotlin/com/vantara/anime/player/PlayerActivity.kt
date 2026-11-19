@@ -648,6 +648,10 @@ class PlayerActivity : Activity() {
             override fun message(text: String) = this@PlayerActivity.message(text)
             override fun episode() = episodeInt()
             override fun sourceName() = current?.let { codeOf(it) ?: it.server }
+            // هوية السيرفر بصيغة الويب وويندوز («معرّف المصدر|رمز السيرفر» بحروف صغيرة): لاقتراح سيرفر المضيف
+            override fun serverKey() = current?.let { c -> prep?.routeOf(c.id)?.let { "${it.sourceId}|${it.code.lowercase()}" } ?: "${c.sourceId}|${c.server.lowercase()}" }
+            override fun readyServers() = prep?.routes().orEmpty().filter { it.state == RouteState.READY }.map { Triple("${it.sourceId}|${it.code.lowercase()}", it.id, it.code) }
+            override fun useServer(candidateId: String) { prep?.routes()?.firstOrNull { it.id == candidateId }?.let { switchTo(it) } }
             // حلقة أخرى في الغرفة: تُجهّز سيرفراتها ولا يبدأ شيء حتى يختار كل واحد سيرفره
             override fun switchToEpisode(n: Int) = switchEpisode(n, roomPick = true)
             override fun hasNextEpisode() = hasNext()
@@ -1066,7 +1070,7 @@ class PlayerActivity : Activity() {
     /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
     private fun maybePrepareNext() {
         if (!reportedStart || !hasNext() || warmedSessionId != null || player.playbackState != Player.STATE_READY) return
-        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position())) return
+        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position(), if (together != null) NextEpisodeWarmup.ROOM_WINDOW_MS else 4 * 60_000L)) return
         val source = current?.sourceId ?: return
         val next = episodeInt() + 1
         val id = "warm-${System.nanoTime()}"
@@ -1134,11 +1138,9 @@ class PlayerActivity : Activity() {
         loading(true)
         if (warmed == null && !roomPick) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
-        if (roomPick && together != null) {
-            loading(false)
-            together?.awaitPick()
-            return
-        }
+        // الغرفة نقلتنا لحلقة أخرى من العمل نفسه (قرار المالك، 19 نوفمبر): تكمل بسيرفرك المفضل وجودتك بلا «اختر سيرفر»
+        // ولا جاهزية دخول؛ جُهّزت مسبقًا قبل النهاية، وإن فشل التجهيز المسبق تُجهَّز الآن بالطريق العادي نفسه.
+        // (كان كل عضو يُعاد لاختيار السيرفر عند كل حلقة. تغيير الموسم مسار آخر: switchWork، ويبقى فيه الاختيار.)
         val p = prep ?: return
         val s = session ?: return
         val from = resume[n] ?: 0L

@@ -1,4 +1,4 @@
-import { renderLobby, pendingInvitees, sectionAccent } from '../lib/together/lobby.js';
+import { renderLobby, pendingInvitees, sectionAccent, hostServerSuggestion } from '../lib/together/lobby.js';
 import { aniZipArt, episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
 import { fetchSeasonChain } from '../lib/anime-meta.js';
 
@@ -12,6 +12,8 @@ const seasonChain = id => {
 
 export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility, resolveArtImpl = resolveArt }) {
   let latest = null, closed = false, revision = 0, artKey = null, art = null, lastState = null, lastMedia = null;
+  // سيرفرات المضيف التي رفضها العضو («لا»): لا يُعاد اقتراحها في هذه الغرفة
+  const declined = new Set();
   const doc = host.ownerDocument;
   const hub = () => engine.roomHub?.({ session });
   async function update(event) {
@@ -139,6 +141,7 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       kindText: mediaKind(media), episodeText: episodeLine(media, episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
       accent: sectionAccent(media.kind),
+      suggestion: event.selectingSource ? null : hostServerSuggestion({ roster, me: event.me, mine: state?.serverKey ?? null, available: state?.sources ?? [], declined }),
     };
     // الموضع والزمن وانحراف كل عضو تتغير مع كل تقرير ولا تُرى في الغرفة: لا تُعيد الرسم
     const VOLATILE = new Set(['pos', 'at', 'driftMs', 'driftP95', 'seenAt', 'lastSeen', 'rtt', 'now']);
@@ -149,6 +152,10 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       if (roomHub?.avatar) return roomHub.avatar(p, size);
       const fallback = doc.createElement('span'); fallback.textContent = [...(p.displayName ?? 'صديق')][0]; return fallback;
     }, start: event.start, resume: event.resume, changeServer: chooseServer, leave,
+    // «نعم»: سيرفر المضيف يصير سيرفرك (المشغّل يبدّل له من الموضع نفسه)؛ «لا»: تبقى على اختيارك ولا يُعاد السؤال
+    acceptSuggestion: () => { const pick = model.suggestion; if (!pick) return; declined.add(pick.key); painted = null;
+      void Promise.resolve(engine.switchSource?.({ session, candidate: pick.id })).catch(() => {}).finally(() => paint(lastState, lastMedia)); },
+    declineSuggestion: () => { if (model.suggestion) declined.add(model.suggestion.key); painted = null; paint(lastState, lastMedia); },
     episodes: event.host && Number(state?.total) > 1 && typeof engine.changeEpisode === 'function' ? () => openEpisodes(state, media) : null,
     setOffset: ms => event.setVideoOffset?.(Math.max(-120000, Math.min(120000, ms))) });
   }

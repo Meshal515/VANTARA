@@ -16,7 +16,7 @@ function writeOffset(key, ms) {
 }
 
 /** Bind the existing HTML video to the same millisecond room protocol as Android. */
-export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, source, onEpisode, onLobby, message }) {
+export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, source, server = () => null, onEpisode, onLobby, message }) {
   const controller = createDriftController();
   let prepared = false;
   let failed = false;
@@ -46,7 +46,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     const state = stateNow();
     if (!force && state === lastState && now - lastReport < 2000) return;
     lastState = state; lastReport = now;
-    room.report({ pos: position(), at: now, state, source: source(), mediaKey: mediaKey(),
+    room.report({ pos: position(), at: now, state, source: source(), server: server(), mediaKey: mediaKey(),
       version: { durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null },
       driftMs: synced() && prepared && room.timeline?.started ? Math.round(localPosition() - localTarget(room.timeline, now)) : null, driftP95: controller.stats().p95 });
   }
@@ -130,6 +130,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   const api = {
     // Welcome can arrive while the shell is preparing the invitation's source.
     ready() { if (destroyed) return; prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
+    /** إعادة رسم الغرفة (بعد ردّ العضو على اقتراح سيرفر المضيف). */
+    refreshLobby() { paintLobby(); },
     preparing() { if (destroyed) return; prepared = false; failed = false; report(true); paintLobby(); },
     failed() { if (destroyed) return; prepared = false; failed = true; report(true); paintLobby(); },
     /** الغرفة المتزامنة لم تبدأ بعد: التجهيز يتم بصمت ويقف عند البداية. */

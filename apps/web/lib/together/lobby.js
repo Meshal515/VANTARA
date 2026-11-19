@@ -67,6 +67,25 @@ export function guestsNotReady(roster = [], { me = null, roomKey = null } = {}) 
   return roster.filter((r) => !r.host && r.userId !== me && !(READY.has(r.state) && (roomKey == null || r.mediaKey == null || r.mediaKey === roomKey)));
 }
 
+/** هوية السيرفر الثابتة بين الأجهزة في الغرفة («معرّف المصدر|رمز السيرفر»)؛ أندرويد يكوّنها بالصيغة نفسها. */
+export const serverKey = (c) => (c?.sourceId && (c.code ?? c.server) ? `${c.sourceId}|${String(c.code ?? c.server).toLowerCase()}` : null);
+
+/**
+ * اقتراح سيرفر المضيف في اللوبي (قرار المالك، 19 نوفمبر): إن كان سيرفر المضيف متوفرًا عندك وأنت على غيره، يُعرض
+ * عليك بإشعار ثابت «نعم/لا» لا يختفي حتى ترد. «نعم» يجعله سيرفرك، و«لا» يبقيك على اختيارك. لا يُفرض على أحد.
+ * الهوية `server` ثابتة بين الأجهزة («معرّف المصدر|رمز السيرفر»)، لا الاسم المعروض.
+ * @param {{roster?: Array<{host?: boolean, userId: string, server?: string|null, source?: string|null}>, me?: string|null,
+ *   mine?: string|null, available?: Array<{id: string, key: string|null, label?: string}>, declined?: Iterable<string>}} o
+ * @returns {{key: string, id: string, label: string}|null}
+ */
+export function hostServerSuggestion({ roster = [], me = null, mine = null, available = [], declined = [] } = {}) {
+  const host = roster.find((r) => r.host);
+  if (!host || host.userId === me || !host.server || host.server === mine) return null;
+  if (new Set(declined).has(host.server)) return null;
+  const match = available.find((c) => c.key === host.server);
+  return match ? { key: host.server, id: match.id, label: host.source || match.label || host.server.split('|').pop() } : null;
+}
+
 /** رسالة رفض الغرفة لأمر: بانتظار ضيوف لم يجهزوا، أو التحكم للمضيف. */
 export function deniedText(d) {
   if (d?.reason === 'not_ready') {
@@ -328,7 +347,23 @@ export function renderLobby(host, m, a) {
   if (m.offset) row.append(btn('pl-link', 'صفّر', () => a.setOffset(0), 'إلغاء الديلاي'));
   more.append(row);
 
-  host.append(bg, top, hero, more, bar);
+  // اقتراح سيرفر المضيف: إشعار ثابت فوق الشريط حتى ترد بنعم أو لا (لا يختفي وحده)
+  const extra = [];
+  if (m.suggestion && a.acceptSuggestion && a.declineSuggestion) {
+    const note = el('div', 'pl-suggest');
+    note.setAttribute('role', 'alertdialog');
+    note.setAttribute('aria-label', 'سيرفر المضيف');
+    const text = el('p', 'pl-suggest-text');
+    const name = el('bdi', null, m.suggestion.label);
+    text.append('المضيف يشاهد على ', name, '، وهو متوفر عندك. تبي نفس السيرفر؟');
+    const yes = btn('pl-go is-primary', '<span>نعم</span>', a.acceptSuggestion, 'نعم، استخدم سيرفر المضيف');
+    const no = btn('pl-go', '<span>لا</span>', a.declineSuggestion, 'لا، أبقَ على سيرفري');
+    const acts = el('div', 'pl-suggest-acts');
+    acts.append(yes, no);
+    note.append(text, acts);
+    extra.push(note);
+  }
+  host.append(bg, top, hero, more, ...extra, bar);
 
   // العدّ التنازلي المشترك: رقم كبير فوق كل شيء حتى لحظة البدء
   if (m.countdownTo && m.now) {
