@@ -5,6 +5,7 @@ import { startDesktopDefaultAddons } from './default-addons.js';
 import { installFirstPartyTransport } from './first-party.js';
 import { startDesktopUpdateWatch } from './update-check.js';
 import { installDesktopPlayer } from './player.js';
+import { desktopChallenges } from './source-fetcher.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
 function element(document, tag, text, cls) {
@@ -38,6 +39,32 @@ export async function renderInstallPreview({ document = globalThis.document, reg
   return panel;
 }
 
+/**
+ * إضافة «التحقق» في ويندوز بشكل إضافة الـAPK (lib/source-verification.js): required/state، وpending، وbegin. الواجهة
+ * نفسها («تحتاج تحقق» وزر «تحقق») تعمل كما في الجوال، والصفحة الظاهرة من العملية الرئيسية (source-browser.cjs).
+ */
+export function createDesktopVerification(bridge, challenges = desktopChallenges) {
+  const listeners = { required: new Set(), state: new Set() };
+  const emit = (name, item) => { for (const fn of listeners[name] ?? []) { try { fn(item); } catch { /* */ } } };
+  challenges.subscribe((item) => emit('required', item));
+  return Object.freeze({
+    async addListener(name, fn) {
+      const set = listeners[name];
+      if (!set || typeof fn !== 'function') return { remove: async () => {} };
+      set.add(fn);
+      return { remove: async () => { set.delete(fn); } };
+    },
+    async pending() { return { pending: challenges.pending() }; },
+    async begin({ host } = {}) {
+      if (typeof bridge?.verifySource !== 'function') return { host, state: 'failed', reason: 'webview_unavailable' };
+      const result = await bridge.verifySource({ host }).catch(() => ({ host, state: 'failed', reason: 'launch_failed' }));
+      if (result?.state === 'verified') challenges.clear(host);
+      emit('state', result);
+      return result;
+    },
+  });
+}
+
 export function installDesktopBridges(g = globalThis) {
   if (!isDesktop(g)) return null;
   if (g.VantaraDesktopBridges) return g.VantaraDesktopBridges;
@@ -46,7 +73,10 @@ export function installDesktopBridges(g = globalThis) {
   const engine = createDesktopEngine({ bridge: g.VantaraDesktop, getRuntime });
   installDesktopPlayer({g,bridge:g.VantaraDesktop,engine});
   let modules;
-  const ExtensionEngine=new Proxy({}, {get(_,method){if(method==='then')return undefined;return async args=>{
+  // الجسر يعلن ما يملكه فقط: كان يرد «موجودة» على أي اسم، فظنت الواجهة أن ويندوز يدير مستودعات Mihon وإضافاتها
+  // (addRepo/installExtension) فتظهر للتثبيت ثم تفشل بـ«وظيفة المصدر غير متاحة». إضافات Mihon تعمل في الـAPK وحده.
+  const MANGA_METHODS=new Set(['sources','prepare','popular','latest','catalogue','search','genre','series','chapters','pages','image','cover','sites','addSite','removeSite','clearImageCache']);
+  const ExtensionEngine=new Proxy({}, {has(_,method){return MANGA_METHODS.has(method);},get(_,method){if(method==='then'||!MANGA_METHODS.has(method))return undefined;return async args=>{
     const runtime=getRuntime();await runtime.ready;await runtime.addons.ready;
     if(['image','cover'].includes(method)){
       const source=runtime.addons.sources.source(args.sourceId);
@@ -60,7 +90,7 @@ export function installDesktopBridges(g = globalThis) {
     if(typeof plugin[method]!=='function')throw new Error('وظيفة المصدر غير متاحة');
     return plugin[method](args);
   };}});
-  g.VantaraDesktopBridges = Object.freeze({ AnimeEngine:engine,ExtensionEngine,SourceRuntime:{getRuntime},AddonFabric:{runtime:async()=>({getRuntime})} });
+  g.VantaraDesktopBridges = Object.freeze({ AnimeEngine:engine,ExtensionEngine,Verification:createDesktopVerification(g.VantaraDesktop),SourceRuntime:{getRuntime},AddonFabric:{runtime:async()=>({getRuntime})} });
   if(g.document&&g.location?.protocol==='vantara:'){
     const defaults=startDesktopDefaultAddons({runtime:getRuntime(),onStatus:()=>g.document.dispatchEvent(new CustomEvent('vantara:addons-changed'))});
     g.VantaraDesktopDefaults=defaults;

@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   builtAt: argument('built', /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/),
   requestResource: call('request-resource'),
   requestFirstParty: call('request-first-party'),
+  verifySource: call('verify-source'),
   showApp:call('show-app'),
   showPlayer:call('show-player'),
   playerViewport:call('player-viewport'),

@@ -1828,6 +1828,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (!full._chapters?.length) {
         // مصدرٌ ردّ بلا فصول ليس مصدرًا صامتًا: نقول ما حدث فعلًا ولكل مصدر سببه
         const failed = full._failedSources ?? [];
+        // مصدر يطلب تحققًا بيد إنسان (صفحة تحقق بقيت بعد المتصفح المخفي): زر يفتح صفحة التحقق ثم يعيد الجلب،
+        // كما في الـAPK. «أعد المحاولة» وحدها لا تفيد: الموقع سيرد بالصفحة نفسها
+        const blocked = failed.some((f) => /تحقق|Cloudflare/i.test(String(f.reason ?? ''))) ? sourceVerification.list().map((x) => x.host) : [];
         emptyState(q('chapterPanel'), {
           icon: 'offline',
           error: true,
@@ -1835,7 +1838,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
           text: failed.length
             ? failed.map((f) => `${displayName(f.label, f.sourceId)}: ${f.reason ?? 'لم يرد في الوقت'}`).join(' · ')
             : 'ردّت المصادر، ولا فصول فيها لهذا العمل الآن.',
-          action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
+          action: blocked.length
+            ? { label: 'تحقق من المصدر', icon: 'refresh', run: async () => {
+              for (const host of blocked) {
+                const out = await sourceVerification.begin(host);
+                if (!out?.ok && out?.error) toast(out.error);
+              }
+              if (state.current?.id === work.id) void openWork(work);
+            } }
+            : { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
         });
         setReadCta(null);
       }

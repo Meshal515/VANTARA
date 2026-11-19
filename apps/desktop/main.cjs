@@ -170,6 +170,15 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     sourceUserAgent: sourceBrowser?.userAgent,
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand'], ['preview-frame', 'previewFrame']]) register(name, args => services[method](args));
+  // صفحة التحقق الظاهرة (طلب صريح من المستخدم بزر «تحقق»): مضيف عام فقط، ونجاحها يمرر طلباته بجلسة المتصفح
+  register('verify-source', async ({ host } = {}) => {
+    const name = String(host ?? '').toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(name) || name.length > 253) return { host: name, state: 'failed', reason: 'invalid_endpoint' };
+    if (!sourceBrowser) return { host: name, state: 'failed', reason: 'webview_unavailable' };
+    const result = await sourceBrowser.verify({ url: `https://${name}/`, parent: window });
+    if (result.state === 'verified') services.trustBrowserHost(name);
+    return result;
+  });
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
     await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
