@@ -152,3 +152,18 @@ it('keeps periodic drift correction at normal speed at the bounded local end', (
   expect(f.room.report).toHaveBeenLastCalledWith(expect.objectContaining({ driftMs: 0 }));
   f.bridge.destroy();
 });
+
+// TG10/TG11 (#349): التحويل لمتزامنة كان يعيد خط الغرفة القديم فيشتغل الفيديو والمضيف موقِف، أو يرجع الكل لحلقة قديمة
+it('switching to sync: the host re-announces its paused state and its own episode', () => {
+    vi.useFakeTimers(); const f = fixture(true, { started: true, playing: true, pos: 10000, seq: 3 });
+    const room = (info) => { f.room.info = info; for (const fn of f.events.get('room') ?? []) fn(info); };
+    room({ mode: 'free' }); f.bridge.ready();
+    f.video.paused = true; f.video.currentTime = 30; f.room.command.mockClear();
+    room({ mode: 'sync' });
+    expect(f.room.command).toHaveBeenCalledWith('pause', expect.objectContaining({ pos: 30000 }));
+    expect(f.video.play).not.toHaveBeenCalled();
+    room({ mode: 'free' }); f.room.timeline = { ...f.room.timeline, media: { key: 'anime:42#5', kind: 'anime' } }; f.room.command.mockClear();
+    room({ mode: 'sync' });
+    expect(f.room.command).toHaveBeenCalledWith('load', expect.objectContaining({ media: expect.objectContaining({ key: 'anime:42#1' }) }));
+    f.bridge.destroy();
+});

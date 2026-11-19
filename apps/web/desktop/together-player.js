@@ -100,6 +100,21 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
     }
     lobby(); report(true);
   }
+  // TG10/TG11: التحويل من منفصلة إلى متزامنة يعيد خط الغرفة القديم (حالته وحلقته). المضيف يعلن حلقته وحالته لحظة التحويل.
+  let lastMode = synced() ? 'sync' : 'free';
+  function onRoom() {
+    const mode = synced() ? 'sync' : 'free';
+    const switched = mode === 'sync' && lastMode !== 'sync';
+    lastMode = mode;
+    if (!synced()) { if (native.rate !== 1) { native.rate = 1; command('rate', 1); } lobby(); report(true); return; }
+    if (switched && room.isHost && prepared && live() && room.instant) {
+      if (room.timeline?.media?.key !== key()) room.command('load', { media: { key: key(), kind: room.timeline?.media?.kind ?? 'anime', label: `الحلقة ${episode()}` }, pos: 0 });
+      else hostCommand(native.paused ? 'pause' : 'play', native.position);
+      lobby(); report(true);
+      return;
+    }
+    align(true); lobby(); report(true);
+  }
   function hostCommand(op, localPos) {
     const at = room.clock.serverNow();
     room.command(op, { pos: localToRoom(localPos), at });
@@ -109,7 +124,7 @@ export function createDesktopTogetherPlayer({ together, bridge, session, episode
   // رفض الخادم (ليس المضيف عنده أو لا يملك التحكم) كان يمر بلا أثر: الزر «لا يستجيب» (15 نوفمبر)
   const offs = [room.on('denied', (d) => message(deniedText(d))), room.on('state', receive), room.on('welcome', () => receive({ state: room.timeline })), room.on('roster', lobby),
     room.on('connection', () => { if (room.status === 'closed') return detach(); if (live()) { align(true); report(true); } lobby(); }),
-    room.on('room', () => { if (synced()) align(true); else if (native.rate !== 1) { native.rate = 1; command('rate', 1); } lobby(); report(true); })];
+    room.on('room', onRoom)];
   if (together.hub.onChange) offs.push(together.hub.onChange(() => { if (together.hub.session !== together.session) detach(); }));
   const timer = setInterval(() => { align(); report(); lobby(); }, 500);
   const api = {

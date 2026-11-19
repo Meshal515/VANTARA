@@ -639,6 +639,26 @@ class PlayerActivity : Activity() {
         startTogether()
     }
 
+    /** الخروج من الغرفة لا يغلق المشغّل: الفيديو يكمل عندك من نفس اللحظة، بلا غرفة (قرار المالك، 19 نوفمبر). */
+    private fun leaveTogether() {
+        val t = together ?: return
+        if (openSheet == SheetKind.TOGETHER || openSheet == SheetKind.LEAVE) sheet.close()
+        together = null
+        t.leave()
+        message("طلعت من الغرفة · تكمل لحالك")
+        if (current == null) showServers()
+    }
+
+    /** زر الرجوع وأنت في غرفة: سؤال واحد بدل خروج صامت من الغرفة (TG16). */
+    private fun confirmExitRoom() {
+        open(SheetKind.LEAVE, "تطلع من الغرفة؟", "أصدقاؤك يكملون المشاهدة بدونك") { body ->
+            body.addView(pillButton("كمّل الفيديو بدون الغرفة", primary = true) { leaveTogether() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+            body.addView(pillButton("اطلع من المشغّل", primary = false) { sheet.close(); finish() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
     /** غرفة Together: الاتصال والأفاتارات في الشريط العلوي، والمزامنة تعمل مع المشغّل. */
     private fun startTogether() {
         val raw = launch.together ?: return
@@ -655,7 +675,7 @@ class PlayerActivity : Activity() {
             override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
             override fun overlayHost() = root
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
-            override fun leaveRoom() = finish()
+            override fun leaveRoom() = leaveTogether()
             override fun openServers() = showServers()
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
@@ -1192,7 +1212,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER, LEAVE }
 
     private var openSheet: SheetKind? = null
 
@@ -1381,7 +1401,7 @@ class PlayerActivity : Activity() {
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(20), dp(14), dp(20), 0)
         }
-        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { finish() })
+        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { if (together != null) confirmExitRoom() else finish() })
         titleView = label("", 16f, Color.WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; textDirection = View.TEXT_DIRECTION_ANY_RTL }
         episodeView = label("", 12.5f, Tone.TEXT_2).apply { setPadding(0, dp(4), 0, 0) }
         top.addView(LinearLayout(this).apply {
@@ -2682,6 +2702,7 @@ class PlayerActivity : Activity() {
             clip != null -> clip?.close()
             sheet.isOpen -> sheet.close()
             locked -> flashUnlock()
+            together != null -> confirmExitRoom()
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
     }
@@ -2692,7 +2713,8 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         main.removeCallbacks(presenceTick)
-        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها
+        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها، والغرفة لا تعيد تشغيله في الخلفية (TG15)
+        together?.onBackground()
         setPlayingQuietly(false)
         if (::seekPreview.isInitialized) seekPreview.hide()
         startup.active(false)
@@ -2703,6 +2725,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         usageForeground = true
+        together?.onForeground()
         startup.active(player.playWhenReady)
         watchStall()
         sampleUsage()

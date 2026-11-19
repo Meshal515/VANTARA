@@ -155,20 +155,32 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
   return { update, destroy() { closed = true; revision++; clearInterval(host._countdown); closeEpisodes(); host.remove(); } };
 }
 
-/** ورقة السيرفرات فوق الغرفة على الكمبيوتر: تُعلَّم حتى تُغلق الورقة (تختفي show عن خلفيتها). */
-export function markRoomServers(doc) {
+/**
+ * ورقة السيرفرات فوق الغرفة على الكمبيوتر: تُعلَّم حتى تُغلق الورقة (تختفي show عن خلفيتها).
+ * CW1: كانت العلامة تُزال بعد 8 ث إن لم تُفتح الورقة، والسينما تحسم نوع العمل (Cinemeta) قبل الورقة، فمع نت بطيء
+ * تُفتح الورقة **تحت** شاشة الغرفة (z-index 150 مقابل 10000) ولا تُرى. الآن تبقى العلامة ما دامت شاشة الغرفة قائمة
+ * (يزيلها `done` عند إغلاقها) أو حتى تُفتح الورقة وتُغلق، وبحد أمان دقيقتين.
+ */
+export function markRoomServers(doc, { limitMs = 120000 } = {}) {
   const html = doc.documentElement;
   html.classList.add('room-servers');
   const view = doc.defaultView;
-  let seen = false;
+  let seen = false, finished = false, timer = 0, limit = 0;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    html.classList.remove('room-servers');
+    (view?.clearInterval ?? clearInterval)(timer);
+    (view?.clearTimeout ?? clearTimeout)(limit);
+  };
   const check = () => {
     const open = Boolean(doc.querySelector('.sheet-backdrop.show'));
     if (open) seen = true;
-    if (seen && !open) { html.classList.remove('room-servers'); clearInterval(timer); }
+    if (seen && !open) done();
   };
-  const timer = (view?.setInterval ?? setInterval)(check, 150);
-  // لم تُفتح ورقة خلال 8 ث (فشل أو إلغاء): لا يبقى الوضع معلّقًا
-  (view?.setTimeout ?? setTimeout)(() => { if (!seen) { html.classList.remove('room-servers'); clearInterval(timer); } }, 8000);
+  timer = (view?.setInterval ?? setInterval)(check, 150);
+  limit = (view?.setTimeout ?? setTimeout)(() => { if (!seen) done(); }, limitMs);
+  return done;
 }
 
 /** Invitation entry: no MPV process, no automatic source pick, no duplicate room socket. */
@@ -176,14 +188,14 @@ export function openDesktopRoomEntry({ document: doc, together, media, chooseSer
   const root = doc.createElement('section'); root.className = 'desktop-player pwa-player v35 desktop-room-entry';
   root.dataset.tone = media.kind === 'cinema' ? 'cinema' : 'anime';
   const host = doc.createElement('div'); host.className = 'pp-lobby'; root.append(host); doc.body.append(root);
-  let disposed = false; const offs = [];
-  const destroy = () => { if (disposed) return; disposed = true; offs.forEach(off=>off()); view.destroy(); root.remove(); };
+  let disposed = false; const offs = []; let serversMark = null;
+  const destroy = () => { if (disposed) return; disposed = true; offs.forEach(off=>off()); serversMark?.(); view.destroy(); root.remove(); };
   const room = together.session.room;
   const facade = { roomHub:()=>together.hub,playerState:async()=>({ media, title:media.title, poster:media.cover,episode:media.episode }) };
   const view = createDesktopLobby({ host, engine:facade,session:together.session.code,
     // «اختر السيرفر»: الغرفة تبقى، والورقة لوحة جانبية فوقها (html.room-servers)؛ إغلاقها يرجعك للغرفة نفسها،
     // واختيار سيرفر يفتح المشغّل الذي يُغلق هذه الشاشة (player.js open).
-    visibility(){}, leave:()=>{together.hub.leave();destroy();},chooseServer:()=>{markRoomServers(doc);chooseServer();} });
+    visibility(){}, leave:()=>{together.hub.leave();destroy();},chooseServer:()=>{serversMark?.();serversMark=markRoomServers(doc);chooseServer();} });
   const paint = () => {
     if (disposed) return;
     void view.update({ visible:true, selectingSource:true, prepared:false, host:room.isHost, connection:room.status,
