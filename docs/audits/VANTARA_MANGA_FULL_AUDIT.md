@@ -334,6 +334,20 @@
   ```
   **متى لا يُرسل الطابور:** قبل `connectUpdates` (بلا حساب، أو وضع «على جهازي»)، وبلا اتصال، وحين يرفض الخادم (ومنه تجاوز حد D1 اليومي، المطبّق منذ 1 سبتمبر 2026). وكل قائمة «آخر التحديثات» من 16 مصدرًا ≈ مئات التقارير.
 
+### الجولة 5 (19 نوفمبر): Kotlin المتبقي، وتغييرات Debug على التحميلات والقارئ
+
+**المقروء سطرًا سطرًا:** `ChapterNumbers.kt`، `ImagePayloadPolicy.kt`، `ExtensionFailure.kt`، `ExtensionStateFile.kt`، وحدود `StoragePlugin.kt` (سقف كاش الصفحات 600MB والمترجمة 300MB)، وتغييرات Debug على `v35/downloads.js` و`v35/reader-core.js` (مهلة قائمة الصفحات 20 ثانية، `PAGES_TIMEOUT_MS`).
+**مسح موجّه لبقية الـ57** (`!!`، `runBlocking`/`GlobalScope`، `Thread.sleep`، العمل على الخيط الرئيسي): ثلاث `!!` محروسة بسياقها (`HttpSource.kt:257` يضبط المحرك `imageUrl` قبله، و`AppUpdatePlugin.kt:283`، و`VerificationActivity.kt:199`)، و`Thread.sleep` الوحيد في `MainThreadWatch.kt` على خيط عيّنات خاص في Debug وحده. نماذج واجهة Tachiyomi (`SManga` و`SChapter` و`Page` و`Filter` وأخواتها) عقود بيانات بلا منطق.
+
+| # | الخطورة | الحالة | الخلل |
+| --- | --- | --- | --- |
+| **ES1** | منخفض الاحتمال، عالٍ الأثر | **مؤكد بالكود** (#349 قال «احتمال») | تلف `user-repos.json` ونسخته `.bak` معًا ⇒ `ExtensionStateFile.read` يرمي `EXTENSION_STATE_UNRECOVERABLE`، و`ExtensionEnginePlugin.load()` يقرأ `userStore.state` داخل `scope.launch` بلا `runCatching` ⇒ استثناء coroutine بلا معالج يُسقط التطبيق عند كل إقلاع |
+| **IP1** | منخفض | مؤكد بالكود | `ImagePayloadPolicy.validate` يقبل HEIC (`heic`/`heix`/`mif1`)، و`sniffType` لا يعرفه فيُحفظ بامتداد `.jpg`، وWebView لا يفك HEIC: صفحة «مقبولة» لا تُعرض |
+| **EF1** | منخفض | مؤكد بالكود | تغيّر نطاق الموقع (404/403) يُصنَّف «عطل الموقع» فلا يُطلب الإصدار الأحدث للإضافة فورًا؛ ينتظر الفحص اليومي (يتصل بـSE1) |
+| **DLA1** | منخفض-متوسط | مؤكد بالكود | Debug أزال حارس `healedArt` من `downloads.js`: كل رسم لبطاقة عمل منزّل بلا فن محلي يعيد جلب الفن وكتابته ما دام متصلًا، فجلب فاشل يتكرر مع كل رسم |
+| **PF5** | متوسط | مؤكد بالكود، الأثر يحتاج مقاييس D1 | «آخر التحديثات» يطلب آخر 100 حدث كل 5 ثوانٍ ما دام ظاهرًا (`updates-view.js:327`، `setInterval(…, 5000)`)، وكل طلب فيه استعلام فرعي لكل صف (`BURST` في `handleUpdatesList`)، بدل «ما الجديد منذ آخر مؤشر» |
+| **ENT1 (تفصيل)** | — | مؤكد | سياسة `source-entitlement.js`: الحساب القديم يحتفظ بالمدمجة سابقًا، والجديد يبدأ بصفر، والاختيار لكل حزمة في `settings.data`. والحزمة نفسها تُنزَّل على كل جهاز. الوثيقة: `docs/repository-compat/BUNDLED_SOURCE_SEPARATION.md` |
+
 ---
 
 ## رابعًا — مشاكل المعمارية
