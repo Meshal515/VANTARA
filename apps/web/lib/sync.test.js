@@ -732,6 +732,21 @@ describe('server-authoritative mirror recovery after APK 177', () => {
     expect(storage.getItem('vantara.mirror.audit.v1')).toBeNull();
   });
 
+  it('a pull round with no new rows does not rewrite the mirror (SY1: was 3 full saves on the main thread every 60s)', async () => {
+    storage.setItem('vantara.cursor', '40');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: { 'u1/a': { user_id: 'u1', series_ref: 'a', rev: 40 } } }));
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({ reset: false, cursor: 40, more: false, changes: {} })) });
+    await sync.pull();
+    let writes = 0;
+    const set = storage.setItem;
+    storage.setItem = (key, value) => { if (key === 'vantara.mirror') writes++; return set(key, value); };
+    await sync.pull();
+    await sync.pull();
+    expect(writes).toBe(0);
+    // صف جديد يُحفظ كما كان، والمؤشر بعد الحفظ
+    sync.dispose();
+  });
+
   it('never advances a persisted cursor when writing the mirror fails', async () => {
     let outOfSpace = false;
     const limited = fakeStorage({ failOn: (key) => outOfSpace && key === 'vantara.mirror' });

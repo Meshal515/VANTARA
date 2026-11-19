@@ -1165,7 +1165,10 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         }
 
         const nextCursor = Number(payload.cursor ?? cursor) || cursor;
-        if (!await commitMirror(mirror, nextCursor)) throw new Error('mirror_storage_full');
+        // جولة بلا صفوف لا تُعيد حفظ المرآة كاملة (SY1: ثلاث كتابات كاملة على الخيط الرئيسي كل 60 ث وبعد كل إرسال).
+        // المؤشر يتقدم في الذاكرة فقط: لا شيء وصل ليضيع، وبعد إعادة الفتح يُسحب من المؤشر المحفوظ فيرجع الفراغ نفسه.
+        // القاعدة باقية: ما وصل يُحفظ قبل أن يتقدم المؤشر المحفوظ، وفشل الحفظ يوقف السحب (mirror_storage_full).
+        if (touched.length && !await commitMirror(mirror, nextCursor)) throw new Error('mirror_storage_full');
         if (generation !== sessionGeneration || dataOwner !== pullUserId || pullUserId !== (user?.userId ?? null)) break;
         if (payload.more && nextCursor === 0) {
           if (skippedInitialZero) throw new Error('mirror_delta_stalled_zero');

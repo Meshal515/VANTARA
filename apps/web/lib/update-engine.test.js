@@ -105,3 +105,47 @@ it('diagnoses capacity rejection and preserves the existing pending work', async
   expect(report({ work: 'ext:too big', title: 'Too big', section: 'manga', kind: 'chapter', units: Array.from({ length: 50_001 }, (_, number) => ({ number })) })).toBe(false);
   expect(updateReportStatus()).toMatchObject({ pendingWorks: 1, pendingUnits: 1, dropped: 50_001 });
 });
+
+it('UQ1: with no transport, each report writes only its own work (linear, not the whole queue every time)', async () => {
+  vi.resetModules();
+  const data = new Map();
+  let written = 0;
+  vi.stubGlobal('localStorage', { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => { written += String(v).length; data.set(k, String(v)); }, removeItem: (k) => data.delete(k) });
+  const { report, updateReportStatus } = await import('./update-engine.js');
+  const units = Array.from({ length: 40 }, (_, number) => ({ number }));
+  for (let i = 0; i < 600; i++) report({ work: `ext:work ${i}`, title: `Work ${i}`, section: 'manga', kind: 'chapter', source: { s: 'qa' }, units });
+  const stored = [...data.values()].reduce((n, v) => n + v.length, 0);
+  // v1 كتب الطابور كله مع كل تقرير: ~300 ضعف الحجم المحفوظ. الآن كل تقرير مدخله وحده، والفهرس حين يُضاف عمل
+  expect(written).toBeLessThan(stored * 4);
+  expect(updateReportStatus()).toMatchObject({ pendingWorks: 600, pendingUnits: 24_000 });
+  vi.unstubAllGlobals();
+});
+
+it('UQ1: reports saved by the old single-key queue survive the upgrade and are sent', async () => {
+  vi.useFakeTimers(); vi.resetModules();
+  const data = new Map([['vantara.update-reports.v1', JSON.stringify([{ work: 'ext:old', title: 'Old', section: 'manga', kind: 'chapter', source: { s: 'qa' }, units: [{ number: 7 }] }])]]);
+  vi.stubGlobal('localStorage', { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, String(v)), removeItem: (k) => data.delete(k) });
+  let engine = await import('./update-engine.js');
+  expect(data.get('vantara.update-reports.v1')).toBe('[]');
+  // إعادة فتح ثانية: من المدخل الجديد، بلا تكرار
+  vi.resetModules(); engine = await import('./update-engine.js');
+  let sent = [];
+  engine.connectUpdates(async (_p, { body }) => { sent = body.works; return { status: 200 }; });
+  await engine.flush();
+  expect(sent.map((w) => [w.work, w.units])).toEqual([['ext:old', [{ number: 7 }]]]);
+  vi.resetModules(); engine = await import('./update-engine.js');
+  expect(engine.updateReportStatus().pendingWorks).toBe(0);
+  vi.unstubAllGlobals(); vi.useRealTimers();
+});
+
+it('UQ2: the pending reports never hold more than 1MB of shared localStorage', async () => {
+  vi.resetModules();
+  const data = new Map();
+  vi.stubGlobal('localStorage', { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, String(v)), removeItem: (k) => data.delete(k) });
+  const { report, updateReportStatus } = await import('./update-engine.js');
+  const units = Array.from({ length: 40 }, (_, number) => ({ number, publishedAt: 1_700_000_000_000 + number, name: 'x'.repeat(40) }));
+  for (let i = 0; i < 1000; i++) report({ work: `ext:big ${i}`, title: `Big ${i}`, section: 'manga', kind: 'chapter', source: { s: 'qa' }, units });
+  expect([...data.values()].reduce((n, v) => n + v.length, 0)).toBeLessThan(1_100_000);
+  expect(updateReportStatus().dropped).toBeGreaterThan(0);
+  vi.unstubAllGlobals();
+});

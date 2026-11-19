@@ -40,7 +40,7 @@ async function __realLoadWork(`;
 
 const ep = (n, o) => ({ title: `Episode ${n} - Story ${n}`, thumbnail: `${o}/__art/still.svg`, url: null, site: 'x' });
 /** ردّ AniList ثابت لأي استعلام: عمل واحد بمعرّف الطلب، ولصفحات القوائم 12 عملًا. */
-function anilistFixture(body, o) {
+export function anilistFixture(body, o) {
   let vars = {};
   let query = '';
   try { const j = JSON.parse(body ?? '{}'); vars = j.variables ?? {}; query = j.query ?? ''; } catch { /* */ }
