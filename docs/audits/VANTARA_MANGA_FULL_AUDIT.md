@@ -297,7 +297,12 @@
 | **AF2** | منخفض-متوسط | مؤكد بالكود | البطاقة المحجوبة تُزال بعد ظهورها (`card` ← `a.remove()`)، فتقفز الشبكة؛ يخالف قاعدة CLAUDE.md («ما يصل متأخرًا يُخفى بـ`visibility` لا بالإزالة») |
 | **NV1، NV2** | متوسط | #349، **باقيان** | الموضع يُستعاد عند «الرجوع» وحده (`showPage`: `!push && … restoreScroll`)، والاستعادة تتوقف بعد 400ms (`restoreScroll`: `[0, 120, 400]`) |
 | **PF2** | منخفض | مؤكد بالكود | «مكتبتي» تبني لكل تبويب من الستة قائمته كاملة لتعدّها (`renderLibrary` ← `libraryWorks(k)` ← `mergeWorkPages` ← فهرس كامل) مع كل رسم |
+| **RB2** | متوسط | مؤكد بالكود | أي تغيير في `work_views` (يتغير مع قراءة الأصدقاء عبر `publishDue`) يعيد رسم الرئيسية كاملة وهي ظاهرة (`sync.onChange` في `shell.js:7413-7417` ← `renderHome`) |
+| **PF3** | منخفض-متوسط | مؤكد بالكود | فوق PF1: `sweepLatest` يمسح آخر فصول كل المصادر كل 10 دقائق على الأقل (`setInterval` كل دقيقتين بحد أدنى 10 دقائق، `shell.js:7608-7620`) |
 | **SY4** | منخفض | مؤكد | `workFromRef` يقرأ `WORKS_KEY` من `localStorage` (مخزن أعمال آخر على الجهاز، يدخل في SY2) |
+
+**تغطية `shell.js` بعد الجولة 3:** قُرئت دوال المانجا الرئيسية (فتح العمل والعرض، الفصول والمصادر وزر القراءة، الرئيسية وتحديثها، البطاقة والصورة، الحذف، مطابقة AniList، البحث، المكتبة، التنزيل، فتح المصادر، التنقل والتمرير، مستمع المزامنة، المسح الدوري). **لم تُقرأ سطرًا سطرًا:** `renderDetail` و`openTranslateAhead` و`renderHistoryList` و`paintStats` و`openWorkOptions` و`paintMarkBar` و`openChapterRange` و`previewWork` و`readTogetherCurrent` و`renderHome`/`renderAllHome` و`bindHero` و`loadHeroLogos` (~1200 سطر)، وأجزاء الإعدادات والحساب والـPIN (ليست مانجا). مسحها الموجّه: 3 مؤقتات دورية (كلها أعلاه)، و16 `catch` صامتًا، و6 مفاتيح `localStorage` (تدخل في SY2).
+
 
 - **PF1:** `shell.js` `chapterRefreshTimer = setInterval(refreshChapters, 60_000)` و`visibilitychange`؛ `refreshChapters` يشترط الرئيسية ظاهرة وقسم المانجا ومرور 60 ثانية. `latestFirstPage` ← `browseLive({ kind: 'latestListing' }, …, { concurrency: 3 })` على كل المصادر. **الأثر المحتمل:** ساعة على الرئيسية ≈ 60 دورة × عدد المصادر من الطلبات، فيرتفع خطر 429 والقاطع (AW26، حتى 6 ساعات)، والبطارية والبيانات. **الإثبات:** عدّ طلبات المحرك في ساعة على الرئيسية (سجل `source-report`).
 - **A12:** كل قاعدة تعطي جوابًا مختلفًا للعنوانين نفسيهما. الحل يأتي مع الهوية الواحدة (الحل ب).
