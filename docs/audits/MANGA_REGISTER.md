@@ -139,6 +139,80 @@
 
 ---
 
+## 3) القارئ والفصول والتقدم
+
+**المقروء سطرًا سطرًا:** من `v35/reader.js`: الإعداد (143-234)، و`pagesFor` و`savedPage` و`writePosition` و`openChapter` (465-600)، و`appendNext` و`trimSegments` (714-770)، و`loadSlot` و`pageFromOtherSource` و`switchSource` و`placeImage` (805-960)، و`tickActive` و`afterProgress` و`flushProgress` (1170-1257). ومعه `v35/reading.js` (المفاتيح والعلامات)، و`lib/catalog.js` (`parseChapterNumber` و`chapterNumberOf` و`mergeChapters`).
+**لم يُقرأ بعد:** باقي `reader.js` (التكبير والفريم والقوائم والمشاركة والوقفات، حوالي 900 سطر)، و`reader-core.js` و`reader-scroll.js` و`chapter-store.js` و`manga-work.js`.
+
+| # | الخطورة | كود | اختبار | جوال | الخلل |
+| --- | --- | --- | --- | --- | --- |
+| RD6 | **عالٍ** | ✅ | ✅ | ⏳ | علامات «قرأته» وموضع القراءة تختفي حين يتغيّر مفتاح بطاقة العمل (دمج جديد أو اسم بديل تعلّمه الجهاز) |
+| RD7 | **عالٍ** | ✅ | ✅ | ⏳ | رقم الفصل = أول عدد في اسمه: «Vol.1 Ch.2» = 1 و«Season 2 Chapter 15» = 2، فتُحذف فصول بصمت |
+| RD8 | متوسط | ✅ | — | — | صفحة فشلت تُؤخذ من مصدر آخر إن تساوى عدد الصفحات فقط؛ ترتيب مختلف (صفحة إعلان أو شكر) = صفحة خاطئة في وسط الفصل بلا علامة |
+| RD9 | متوسط | ✅ | — | — | الجهاز الآخر يفتح الفصل من **أبعد** صفحة بلغتها (`furthest`) لا من آخر موضع (`current`) |
+| RD5 | متوسط (#349، باقٍ) | ✅ | — | ⏳ | صور الفصول المعروضة لا تُفرَّغ؛ حتى 4 فصول سابقة + الحالي + التالي تبقى مفكوكة في الذاكرة |
+
+#### RD6: «قرأت هذا الفصل وصار غير مقروء»
+
+- **الموضع:** `reading.js` `chapterKeyOf` يبني المفتاح `ext:<مفتاح البطاقة>#n:<رقم>`، و`isChapterRead` يبحث بهذا المفتاح وحده. ونفس المفتاح يكتب التقدم (`reader.js:1251`) والموضع المحلي (`:520`) ويقرؤهما (`savedPage`، `:491-498`).
+- **الفرق عن المكتبة:** المكتبة والقوائم والتقييم تقرأ كل مراجع العمل (`refsOf`)، والعلامات والتقدم لا تقرؤها (`shell.js:2566,2895,3089,3668,4051,7673`، `reader.js:609,1763`).
+- **متى يتغيّر مفتاح البطاقة:** `canonicalIndex` يختار المفتاح «مالك أسماء محفوظة، وإلا الأكثر إشارة، وإلا الأطول». فتح صفحة العمل (`learnDetailAliases`)، أو وصول أسماء بديلة مشحونة أو من الخادم (`manga-twins`)، أو مصدر جديد، كلها قد تغيّر المفتاح.
+- **الإثبات** (`proofs/marks.mjs`، الكود الحقيقي):
+  ```
+  قبل الدمج: ext:demonic emperor → مقروء؟ true
+  بعد الدمج: بطاقات 1 ext:magic emperor → مقروء؟ false
+  ```
+- **مهم للخطة:** إصلاح التكرار (ID1) يدمج آلاف البطاقات ويغيّر مفاتيحها. **بدون إصلاح RD6 أولًا، الإصلاح نفسه يمسح علامات القراءة ومواضعها عند كل المستخدمين.** الترتيب الصحيح: RD6 ثم ID1.
+- **تجربة للمالك:** عمل قرأت منه فصولًا وله اسمان عند مصدرين. افتح صفحته من البطاقة الأخرى: هل الفصول المقروءة معلَّمة؟
+
+#### RD7: فصول تختفي من القائمة
+
+- **الموضع:** `catalog.js:158-162` (`parseChapterNumber`) يأخذ أول عدد في النص. يُستعمل حين لا يضبط المصدر `chapterNumber` (`-1`). ثم `mergeChapters` (`:767-791`) يبقي فصلًا واحدًا لكل رقم.
+- **الإثبات** (`proofs/chapters.mjs`):
+  ```
+  "Vol.3 Ch.25" → 3
+  "Season 2 Chapter 15" → 2
+  "الموسم 2 الفصل 7" → 2
+  أربعة فصول بلا رقم من المصدر → [ 'S2 Ch 1=2', 'S1 Ch 1=1' ]
+  ثلاثة فصول بمجلد → [ 'Vol.1 Ch.1=1' ]
+  ```
+- **النطاق:** المصادر العربية تكتب غالبًا «الفصل 25» (سليم)، وMangaDex يرسل الرقم. المعرّض للخلل: الإضافات الإنجليزية والمصادر التي تكتب المجلد أو الموسم قبل الفصل. Mihon نفسه يحذف المجلد قبل قراءة الرقم (ChapterRecognition).
+- **أثر ثانٍ:** نفس الرقم الخاطئ يدخل مفتاح العلامة (`n:3`)، فتتداخل علامات فصول مختلفة.
+
+#### RD8 وRD9
+
+- **RD8:** `reader.js:849-872`: الشرط الوحيد `pages.length === seg.pages.length`.
+- **RD9:** `savedPage` يقرأ `ratio` من الخادم، و`flushProgress` يرسل `ratio: readRatio(seg.furthest…)`. رجعت لصفحة 5 بعد أن بلغت 30؟ الجهاز الآخر يفتح على 29.
+
+---
+
+## 4) تحميلات المانجا والقراءة بلا إنترنت
+
+**المقروء سطرًا سطرًا:** `lib/downloads/manga-driver.js` (170-348)، و`lib/downloads/index.js` (`networkWatch` و`keepAliveWhileManga` و`downloads`)، وفي `manager.js` مسار الاكتمال (195-225) و`patch`/`emit`، و`DownloadsPlugin.keepAlive` و`DownloadService.hold/release` في Android.
+**ملاحظة:** #349 قرأ التحميلات 100% (القسمان 18 و20)، وDebug أصلح بنودها العالية (#350). هذا القسم يركز على ما يخص المانجا.
+
+**ما هو سليم:** كل صفحة تُفحص (توقيع ونهاية ملف وفك فعلي) قبل الحفظ، والتحقق النهائي يعيد قراءة كل صفحة، ولا خلط بين صفحات مصدرين في فصل واحد، والاستئناف يكمل ما نقص فقط، والموقع الذي يطلب التمهل ينزل التوازي إلى 1.
+
+| # | الخطورة | كود | اختبار | جوال | الخلل |
+| --- | --- | --- | --- | --- | --- |
+| DL21 | متوسط (#349، باقٍ) | ✅ | — | ⏳ | بين فصل وفصل تُترك الخدمة الأمامية، وإعادة إمساكها والتطبيق في الخلفية يرفضها Android 12+ بصمت |
+| DM1 | متوسط | محتمل | — | ⏳ («بطء والجوال مقفل») | التنزيل يجري في JavaScript الصفحة؛ والصفحة مخفية فمؤقتاتها تُبطَّأ (انتظار إعادة المحاولة وتنظيم الطابور) |
+| DM2 | منخفض | ✅ | — | — | التنزيل يمر بكاش صفحات القارئ (`engine.pageImage`)، فصورة «تحذير» محفوظة هناك (SE2) تُحفظ في الفصل المنزّل كأنها صفحة سليمة |
+| MG3، MG4، MG5 | (#349) | — | — | — | لم أعد فحصها في هذه الجولة |
+
+#### DL21: متى يتوقف التنزيل في الخلفية
+
+- **السلسلة:** `manager.js:202-212` يكتب الفصل `ready` ثم يُعلم المستمعين **قبل** `pump()`. `keepAliveWhileManga` (`index.js`) يعدّ النشط من `ACTIVE_STATES` (`queued` ليس منها)، فإن لم يبق فصل نشط يرسل `on: false`. `DownloadService.release` يترك المسكة، والخدمة قد تتوقف. ثم `pump()` يبدأ الفصل التالي فيُرسل `on: true`، و`hold` يحاول `startForegroundService` والتطبيق في الخلفية، فيرفضها Android 12+ ويبتلع `runCatching` الرفض.
+- **لماذا لم يظهر مع المالك (260 فصلًا بلا مشكلة):** التوازي الافتراضي 2، فغالبًا يبقى فصل نشط حين يكتمل الآخر، والفجوة لا تحدث. تحدث مع «توازي 1»، أو حين يكتمل الفصلان معًا، أو مع فصول صغيرة سريعة.
+- **تجربة للمالك:** اجعل التوازي 1، ونزّل 10 فصول، واقفل الجوال فورًا. بعد 5 دقائق: كم فصلًا نزل؟
+
+#### DM1: البطء والجوال مقفل
+
+- `manga-driver.js` يجري في WebView: `wait()` بين المحاولات (`setTimeout`)، و`scheduleDraw` وقياس السرعة في الواجهة. حين تكون الصفحة مخفية يُبطّئ Chromium مؤقتاتها (مرة في الثانية، ثم مرة في الدقيقة بعد 5 دقائق إخفاء للمؤقتات المتسلسلة). الشبكة نفسها لا تُبطَّأ.
+- **محتمل لا مؤكد:** يحتاج قياسًا على جهاز (زمن 20 فصلًا والشاشة تعمل مقابل والشاشة مقفلة).
+
+---
+
 ## سكربتات الإثبات
 
 تُشغَّل من أي مجلد بـ`node`، وتستورد `apps/web/lib` من المستودع بلا تعديل.
@@ -178,3 +252,47 @@ console.log(i.list().length, i.list().map((w) => w.title + ' [' + w.editions.len
 ```
 pnpm exec vitest run apps/web/lib/manga-identity-bench.test.js
 ```
+
+### `marks.mjs` (RD6)
+
+```js
+const W = '/home/user/VANTARA/apps/web/';
+const { canonicalIndex } = await import(W + 'lib/catalog.js');
+const { chapterKeyOf, isChapterRead } = await import(W + 'v35/reading.js');
+const ed = (s, t) => ({ sourceId: s, manga: { title: t, url: '/' + t } });
+let idx = canonicalIndex();
+idx.add(ed('teamx', 'Magic Emperor')); idx.add(ed('swat', 'Demonic Emperor'));
+const refBefore = `ext:${idx.list().find((w) => w.title === 'Demonic Emperor').key}`;
+const row = { sourceId: 'swat', number: 5, chapter: { chapterNumber: 5, url: '/c5' } };
+const marks = new Map([[`u1/${chapterKeyOf(refBefore, row)}`, { read: true }]]);
+const sync = { user: { userId: 'u1' }, row: (t, id) => marks.get(id) };
+console.log('قبل:', refBefore, isChapterRead(sync, refBefore, chapterKeyOf(refBefore, row)));
+idx = canonicalIndex({ aliases: new Map([['magic emperor', ['Demonic Emperor']]]) });
+idx.add(ed('teamx', 'Magic Emperor')); idx.add(ed('swat', 'Demonic Emperor'));
+const refAfter = `ext:${idx.list()[0].key}`;
+console.log('بعد:', idx.list().length, refAfter, isChapterRead(sync, refAfter, chapterKeyOf(refAfter, row)));
+```
+
+### `chapters.mjs` (RD7)
+
+```js
+const { parseChapterNumber, mergeChapters } = await import('/home/user/VANTARA/apps/web/lib/catalog.js');
+for (const n of ['Vol.3 Ch.25', 'Season 2 Chapter 15', 'الموسم 2 الفصل 7', 'Chapter 330']) console.log(n, '→', parseChapterNumber(n));
+const chapters = ['S1 Ch 1', 'S1 Ch 2', 'S2 Ch 1', 'S2 Ch 2'].map((name, i) => ({ name, url: '/c' + i, chapterNumber: -1 }));
+console.log(mergeChapters([{ sourceId: 'a', chapters }]).map((r) => r.chapter.name + '=' + r.number));
+const vols = ['Vol.1 Ch.1', 'Vol.1 Ch.2', 'Vol.1 Ch.3'].map((name, i) => ({ name, url: '/v' + i, chapterNumber: -1 }));
+console.log(mergeChapters([{ sourceId: 'a', chapters: vols }]).map((r) => r.chapter.name + '=' + r.number));
+```
+
+---
+
+## ما بقي من الجرد
+
+| القسم | الحالة |
+| --- | --- |
+| الأغلفة (`manga-art.js`، `art.js`، `manga-cover.js`) | لم يُفحص في هذه الجولة |
+| ترجمة المانجا (`translate*.js`، `reader-translate.js`، `Pipeline.kt`) | #349 قرأ 52%؛ لم يُعد فحصها |
+| المجلس و«يقرأون الآن» والقراءة معًا | لم يُفحص في هذه الجولة |
+| باقي محرك المصادر: `UserExtensions.kt`، `CloudflareInterceptor.kt`، `FileExtensionLoader.kt`، `SourceCompatRepairs.kt`، `pwa/sources/*` | لم يُفحص |
+| باقي القارئ (~900 سطر)، `reader-core.js`، `chapter-store.js`، `manga-work.js` | لم يُفحص |
+| بنود #349 الخاصة بالمانجا | commits Debug تذكر إصلاح DL20 وJS1 وMG5 وRT2 فقط. الباقي لم يُعد التحقق منه بندًا بندًا |
