@@ -243,3 +243,22 @@ test('an extension the JVM verifier refuses is reported plainly and not recorded
   await u.engine.call('addRepo', { url: ROOT });
   await assert.rejects(u.engine.call('installExtension', { repo: ROOT, pkg: PKG }), (e) => e.code === 'ENGINE_INSTALL');
 });
+
+test('a source failure is an error with its reason, never a silent empty list (VerifyError named plainly)', async () => {
+  const t = setup();
+  await t.engine.call('addRepo', { url: ROOT });
+  await t.engine.call('installExtension', { repo: ROOT, pkg: PKG });
+  const base = t.fake.runtime.request;
+  t.fake.runtime.request = async (p, o) => {
+    if (p === '/api/graphql' && typeof o?.body === 'string' && JSON.parse(o.body).query.includes('fetchSourceManga'))
+      return new Response(JSON.stringify({ data: { fetchSourceManga: null }, errors: [{ message: 'Exception while fetching data (/fetchSourceManga) : java.lang.VerifyError: Bad type on operand stack' }] }));
+    return base(p, o);
+  };
+  await assert.rejects(t.engine.call('popular', { sourceId: `${PKG}#${SRC}`, page: 1 }), (e) => e.code === 'ENGINE_VERIFY' && /لا يعمل في محرك ويندوز/.test(e.message));
+  t.fake.runtime.request = async (p, o) => {
+    if (p === '/api/graphql' && typeof o?.body === 'string' && JSON.parse(o.body).query.includes('fetchSourceManga'))
+      return new Response(JSON.stringify({ data: { fetchSourceManga: null }, errors: [{ message: 'HTTP error 503' }] }));
+    return base(p, o);
+  };
+  await assert.rejects(t.engine.call('popular', { sourceId: `${PKG}#${SRC}`, page: 1 }), (e) => e.code === 'SOURCE_ERROR' && /503/.test(e.message));
+});

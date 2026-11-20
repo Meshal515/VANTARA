@@ -20,6 +20,10 @@ const MANGA_FIELDS = 'id url title thumbnailUrl author artist description genre 
 const CHAPTER_FIELDS = 'id url name uploadDate chapterNumber scanlator sourceOrder';
 
 const arabic = (message, code) => Object.assign(new Error(message), code ? { code } : {});
+/** خطأ مصدر بالعربية: كود الإضافة الذي لا يعمل في المحرك يُسمّى كذلك، وغيره بسببه. */
+const sourceFailure = (message) => (/VerifyError|IncompatibleClassChangeError|NoSuchMethodError|NoClassDefFoundError|AbstractMethodError/.test(String(message))
+  ? arabic('هذا المصدر لا يعمل في محرك ويندوز بعد (كود إضافته لا يتوافق معه)؛ يعمل في تطبيق الجوال', 'ENGINE_VERIFY')
+  : arabic(cleanError(message) || 'تعذّر الطلب من المصدر', 'SOURCE_ERROR'));
 const gqlString = (value) => JSON.stringify(String(value ?? ''));
 const cleanError = (message) => String(message ?? '').replace(/(?:https?:\/\/)\S+/gi, '[رابط]').replace(/^(?:[\w.]+(?:Exception|Error):\s*)+/, '').slice(0, 220);
 
@@ -104,7 +108,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     const response = await runtime.request('/api/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) });
     const body = await response.json().catch(() => null);
     if (!body) throw arabic(`المحرك ردّ بخطأ ${response.status}`, 'ENGINE_HTTP');
-    if (body.errors?.length && !body.data) throw arabic(cleanError(body.errors[0]?.message) || 'تعذّر الطلب من المصدر', 'SOURCE_ERROR');
+    if (body.errors?.length && !body.data) throw sourceFailure(body.errors[0]?.message);
     return { data: body.data, errors: body.errors ?? [] };
   }
   async function engineExtensions() {
@@ -179,8 +183,10 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
   // ---------- التصفح ----------
   async function fetchPage(source, type, page, query = '') {
     const q = type === 'SEARCH' ? `, query:${gqlString(query)}` : '';
-    const { data } = await gql(`mutation { fetchSourceManga(input:{source:${gqlString(source)}, type:${type}, page:${Number(page) || 1}${q}}) { hasNextPage mangas { ${MANGA_FIELDS} } } }`);
+    const { data, errors } = await gql(`mutation { fetchSourceManga(input:{source:${gqlString(source)}, type:${type}, page:${Number(page) || 1}${q}}) { hasNextPage mangas { ${MANGA_FIELDS} } } }`);
     const out = data?.fetchSourceManga;
+    // فشل المصدر لا يُعرض قائمة فارغة صامتة (ويندوز حقيقي: Team X «فارغ» في 93ms كان VerifyError مخفيًا)
+    if (!out && errors.length) throw sourceFailure(errors[0]?.message);
     const mangas = (out?.mangas ?? []).map((m) => { mangaIds.set(`${source}\n${m.url}`, m.id); return toManga(m); });
     return { mangas, hasNextPage: Boolean(out?.hasNextPage), page: Number(page) || 1 };
   }
@@ -231,7 +237,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
       const { data, errors } = await gql(`mutation { fetchMangaAndChapters(input:{id:${mangaId}, fetchManga:true, fetchChapters:true}) { manga { ${MANGA_FIELDS} } chapters { ${CHAPTER_FIELDS} } } }`);
       const out = data?.fetchMangaAndChapters;
       // فشل المصدر بلا فصول محفوظة = خطأ واضح؛ وإن كانت محفوظة من قبل تُعرض (كالـAPK: الوصف المكسور لا يمنع القراءة)
-      if (!out || (errors.length && !out.chapters?.length)) throw arabic(cleanError(errors[0]?.message) || 'تعذّر جلب العمل من المصدر', 'SOURCE_ERROR');
+      if (!out || (errors.length && !out.chapters?.length)) throw (errors.length ? sourceFailure(errors[0]?.message) : arabic('تعذّر جلب العمل من المصدر', 'SOURCE_ERROR'));
       const manga = { ...toManga(out.manga), url: args.manga.url };
       if (!manga.title) manga.title = args.manga.title ?? '';
       const chapters = chaptersFrom(source, out.chapters);
@@ -244,7 +250,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     return locked(`${source}\n${mangaId}`, async () => {
       // fetchChapters قديمة في Suwayomi (lib 1.6): النداء الجامع بلا تفاصيل
       const { data, errors } = await gql(`mutation { fetchMangaAndChapters(input:{id:${mangaId}, fetchManga:false, fetchChapters:true}) { chapters { ${CHAPTER_FIELDS} } } }`);
-      if (!data?.fetchMangaAndChapters || errors.length) throw arabic(cleanError(errors[0]?.message) || 'تعذّر جلب الفصول', 'SOURCE_ERROR');
+      if (!data?.fetchMangaAndChapters || errors.length) throw (errors.length ? sourceFailure(errors[0]?.message) : arabic('تعذّر جلب الفصول', 'SOURCE_ERROR'));
       const list = chaptersFrom(source, data.fetchMangaAndChapters.chapters);
       return { chapters: list, count: list.length };
     });
@@ -264,7 +270,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     const { id: source } = await sourceOf(args?.sourceId);
     const chapterId = await chapterIdOf(source, args?.chapter);
     const { data, errors } = await gql(`mutation { fetchChapterPages(input:{chapterId:${chapterId}}) { pages } }`);
-    if (!data?.fetchChapterPages) throw arabic(cleanError(errors[0]?.message) || 'تعذّر جلب صفحات الفصل', 'SOURCE_ERROR');
+    if (!data?.fetchChapterPages) throw (errors.length ? sourceFailure(errors[0]?.message) : arabic('تعذّر جلب صفحات الفصل', 'SOURCE_ERROR'));
     const list = data.fetchChapterPages.pages.map((p, index) => {
       const m = /^\/api\/v1\/manga\/(\d+)\/chapter\/(\d+)\/page\/(\d+)/.exec(p);
       const imageUrl = m ? `${MEDIA}/manga/${m[1]}/chapter/${m[2]}/page/${m[3]}` : null;
