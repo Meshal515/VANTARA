@@ -2,62 +2,54 @@
  * موضع التوقف داخل الحلقة أو الفيلم بين أجهزتك (ANX1).
  *
  * كان الموضع على الجهاز وحده: شاهدت «ذا أوديسي» ساعتين على جهاز، فيعرف الجهاز الآخر الحلقة من الحساب ويبدأها من
- * أولها، بينما الأول يقول «متبقي ساعة وعشرون دقيقة». الآن الجهاز يقيس الموضع ويحفظه محليًا كما كان، ويرفع الرقم وحده
- * (بالثواني) إلى الحساب في جدول التقدم الموجود (`progress`): لا جدول جديد ولا تحديث للخادم.
- *   - مفتاح الصف: `anime:<id>#ep:<n>` أو `cinema:<id>#s:<season>#e:<n>`، فلا يختلط بفصول المانجا.
- *   - `page` = الثواني، و`ratio` = الموضع ÷ المدة؛ الخادم لا يُرجع الرقم للخلف (MAX).
- *   - يتبع كل رفع إقرار فوري (`progress.confirm`): صف الحلقة لا ينتظر «مالك تقدم المانجا» في صندوقه.
- *   - الجهاز الآخر يأخذ موضع الحساب فقط إن كان أحدث من موضعه المحلي (لا يُبدّل ما شاهدته هنا للتو).
- * الحساب طبقة إضافية: بلا حساب أو بلا خادم يعمل الاستئناف محليًا كما كان تمامًا.
+ * أولها، بينما الأول يقول «متبقي ساعة وعشرون دقيقة». الآن:
+ *   - الجهاز يقيس الموضع ويحفظه محليًا كما كان (الأساس، يعمل بلا حساب ولا خادم).
+ *   - ويرفع الرقم وحده إلى جدول مستقل `playback_positions` (لا جدول تقدم المانجا): لا يختلط بإحصائيات المانجا ولا
+ *     بصندوق «مالك التقدم».
+ *   - **الأحدث بوقت القياس يفوز، لا الأكبر:** من أعاد الحلقة من بدايتها يجد البداية على أجهزته الأخرى.
+ *   - لا يُرفع شيء قبل 30 ثانية مشاهدة فعلية في الجلسة: فتح المشغّل وإغلاقه لا يمحو موضعك على جهاز آخر.
+ *   - الجهاز الآخر يأخذ موضع الحساب فقط إن كان قياسه أحدث من آخر قياس هنا.
+ *   - لا يُرسل حتى يعلن الخادم دعمه (`sync.supports('position.set')`): خادم أقدم كان سيعزل العملية فتضيع.
  */
 
+/** مشاهدة فعلية في الجلسة قبل أول رفع: فتح المشغّل وإغلاقه لا يمس موضعك على أجهزتك الأخرى. */
+export const MIN_SESSION_MS = 30_000;
 /** أقل فاصل بين رفعين لنفس الحلقة أثناء المشاهدة. الإغلاق يرفع فورًا. */
 export const POSITION_EVERY_MS = 20_000;
-/** موضع أقل من هذا لا يستحق «تابع من حيث وقفت». */
-export const MIN_RESUME_MS = 5_000;
+export const FEATURE = 'position.set';
 
 export const animePositionKey = (id, n) => `anime:${id}#ep:${n}`;
 export const cinemaPositionKey = (id, season, n) => `cinema:${id}#s:${season ?? 0}#e:${n}`;
 
-/** يرفع مواضع التشغيل إلى الحساب بفاصل، مرة لكل تغيّر حقيقي. */
+/**
+ * يرفع مواضع التشغيل إلى الحساب. `played(key, ms)` يُنادى بزمن التشغيل الفعلي المتقدم (لا قفزات) لعدّ الجلسة،
+ * و`record` بموضع كل حدث تشغيل.
+ */
 export function createPositionSync(sync, { now = Date.now } = {}) {
   const sent = new Map();
+  const session = new Map();
+  const ready = () => Boolean(sync?.user?.userId) && typeof sync.enqueue === 'function' && sync.supports?.(FEATURE) === true;
   return {
+    /** تشغيل فعلي تقدّم بهذا القدر (ms) في الحلقة؛ القفزات (أكثر من 15 ث) والرجوع لا تُعد. */
+    played(key, ms) {
+      if (ms > 0 && ms <= 15_000) session.set(key, (session.get(key) ?? 0) + ms);
+    },
     /** @returns {boolean} هل رُفع الآن. */
     record(seriesRef, key, positionMs, durationMs, { final = false } = {}) {
-      if (!sync?.user?.userId || typeof sync.enqueue !== 'function') return false;
-      if (!(Number(durationMs) > 0) || !(Number(positionMs) >= MIN_RESUME_MS)) return false;
+      if (!ready() || !(Number(durationMs) > 0) || !(Number(positionMs) >= 0)) return false;
+      if ((session.get(key) ?? 0) < MIN_SESSION_MS) return false;
       const at = now();
-      const page = Math.floor(Number(positionMs) / 1000);
+      const second = Math.floor(Number(positionMs) / 1000);
       const prev = sent.get(key);
-      if (prev && prev.page === page) return false;
+      if (prev && prev.second === second) return false;
       if (!final && prev && at - prev.at < POSITION_EVERY_MS) return false;
-      sent.set(key, { at, page });
-      const ratio = Math.min(1, Math.max(0, Number(positionMs) / Number(durationMs)));
-      sync.enqueue('progress.set', { chapterKey: key, seriesRef, page, ratio });
-      sync.enqueue('progress.confirm', { chapterKey: key, page });
+      sent.set(key, { at, second });
+      sync.enqueue('position.set', { mediaKey: key, seriesRef, positionMs: Math.round(Number(positionMs)), durationMs: Math.round(Number(durationMs)), at });
       return true;
     },
+    /** المشغّل أُغلق: الجلسة التالية تبدأ عدّها من الصفر. */
+    end(key) { session.delete(key); sent.delete(key); },
   };
-}
-
-/**
- * مواضع الحساب لعمل: `Map<مفتاح الحلقة المحلي, { position, duration, at }>`.
- * `localKey` يحوّل مفتاح الصف إلى مفتاح سجل الجهاز (`n` للأنمي، `season:n` للسينما) أو null.
- */
-export function accountPositions(sync, seriesRef, localKey) {
-  const me = sync?.user?.userId;
-  const out = new Map();
-  if (!me || typeof sync.rows !== 'function') return out;
-  for (const row of sync.rows('progress', (r) => r.user_id === me && r.series_ref === seriesRef)) {
-    const key = localKey(String(row.chapter_key ?? ''));
-    const seconds = Number(row.page);
-    if (key == null || !(seconds > 0)) continue;
-    const ratio = Number(row.ratio);
-    const position = seconds * 1000;
-    out.set(key, { position, duration: ratio > 0 ? Math.round(position / ratio) : 0, at: Number(row.updated_at) || 0 });
-  }
-  return out;
 }
 
 export const animeLocalKey = (id) => {
@@ -70,7 +62,7 @@ export const cinemaLocalKey = (id) => {
 };
 
 /**
- * سجل مشاهدة الجهاز لعمل، وفوقه مواضع الحساب الأحدث منه. لا يمس ما في التخزين: نسخة للعرض والاستئناف فقط.
+ * سجل مشاهدة الجهاز لعمل، وفوقه مواضع الحساب التي قِيست **بعد** آخر قياس هنا. لا يمس التخزين: نسخة للعرض والاستئناف.
  * حلقة مكتملة هنا تبقى مكتملة؛ وأحدث حلقة في الحساب تصير «آخر حلقة» إن كانت أحدث من آخر مشاهدة هنا.
  */
 export function withAccountPositions(watch, remote, { lastOf = (key) => ({ episode: Number(key) }) } = {}) {
@@ -82,9 +74,8 @@ export function withAccountPositions(watch, remote, { lastOf = (key) => ({ episo
   for (const [key, r] of remote) {
     const mine = episodes[key];
     if (mine?.done) continue;
-    const mineAt = Number(mine?.at) || 0;
-    if (mine && mineAt >= r.at) continue;
-    episodes[key] = { ...mine, position: r.position, duration: r.duration || Number(mine?.duration) || 0, at: r.at, done: Boolean(mine?.done) };
+    if (mine && (Number(mine.at) || 0) >= r.at) continue;
+    episodes[key] = { ...mine, position: r.position, duration: r.duration || Number(mine?.duration) || 0, at: r.at, done: false };
     if (r.at > latest) { latest = r.at; last = key; }
   }
   if (last == null) return { ...base, episodes };
@@ -93,14 +84,14 @@ export function withAccountPositions(watch, remote, { lastOf = (key) => ({ episo
 
 /**
  * سجل الجهاز لكل أعمال القسم، وفوقه مواضع الحساب الأحدث. عمل لم يُشغَّل على هذا الجهاز أبدًا يأخذ سجلًا من الحساب
- * (هذه حالة «ذا أوديسي» على الجهاز الثاني). `section` = 'anime' أو 'cinema'.
+ * بعلامة `_remoteOnly` (حالة «ذا أوديسي» على الجهاز الثاني). `section` = 'anime' أو 'cinema'.
  */
 export function overlayAllPositions(all, sync, section) {
   const me = sync?.user?.userId;
   if (!me || typeof sync?.rows !== 'function') return all;
   const prefix = `${section}:`;
   const groups = new Map();
-  for (const row of sync.rows('progress', (r) => r.user_id === me && String(r.series_ref ?? '').startsWith(prefix))) {
+  for (const row of sync.rows('playback_positions', (r) => r.user_id === me && String(r.series_ref ?? '').startsWith(prefix))) {
     const id = String(row.series_ref).slice(prefix.length);
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(row);
@@ -111,20 +102,16 @@ export function overlayAllPositions(all, sync, section) {
     const localKey = section === 'anime' ? animeLocalKey(id) : cinemaLocalKey(id);
     const remote = new Map();
     for (const row of rows) {
-      const key = localKey(String(row.chapter_key ?? ''));
-      const seconds = Number(row.page);
-      if (key == null || !(seconds > 0)) continue;
-      const ratio = Number(row.ratio);
-      const position = seconds * 1000;
-      remote.set(key, { position, duration: ratio > 0 ? Math.round(position / ratio) : 0, at: Number(row.updated_at) || 0 });
+      const key = localKey(String(row.media_key ?? ''));
+      const position = Number(row.position_ms);
+      if (key == null || !(position >= 0)) continue;
+      remote.set(key, { position, duration: Number(row.duration_ms) || 0, at: Number(row.watched_at) || 0 });
     }
     if (!remote.size) continue;
     const lastOf = section === 'anime'
       ? (key) => ({ episode: Number(key) })
-      : (key) => { const [s, n] = key.split(':').map(Number); return { season: s || null, episode: n }; };
+      : (key) => { const [s, n] = key.split(':').map(Number); return { season: s, episode: n }; };
     const key = Object.keys(all ?? {}).find((k) => String(k) === id) ?? id;
-    // عمل بلا سجل هنا: `_remoteOnly` (بلا عنوان ولا غلاف بعد)، فلا يُرسم بطاقة من هذا السجل وحده؛ «تابع المشاهدة»
-    // يأخذ بطاقته من الحساب (work_views) ومعها هذا الموضع
     const fresh = { id: section === 'anime' && /^\d+$/.test(id) ? Number(id) : id, episodes: {}, _remoteOnly: true };
     out[key] = withAccountPositions(all?.[key] ?? fresh, remote, { lastOf });
   }

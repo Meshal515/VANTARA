@@ -127,6 +127,7 @@ export function createAnime(deps) {
   // سجل الجهاز، وفوقه موضع التوقف الأحدث من أجهزتك الأخرى (ANX1). الكتابة دائمًا في سجل الجهاز نفسه.
   const localWatch = () => overlayAllPositions(readWatch(currentUser()), deps.sync, 'anime');
   const positions = createPositionSync(deps.sync);
+  const positionClock = new Map();
   const saveWatch = (all) => writeJson(watchKey(currentUser()), all);
   const signedIn = () => Boolean(account && deps.sync?.user?.userId);
   // Shelf order is refreshed on entry or a user action, never by background sync.
@@ -2412,6 +2413,13 @@ export function createAnime(deps) {
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
     // An old native player must never credit playback to the account now signed in.
     if (cur.userId !== currentUser()) return;
+    // ANX1: زمن التشغيل الفعلي لهذه الحلقة في الجلسة (قفزة لا تُعد)؛ الرفع لا يبدأ قبل 30 ث منه
+    {
+      const key = animePositionKey(cur.m.id, Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n);
+      const last = positionClock.get(key);
+      if (Number.isFinite(p.position) && last != null) positions.played(key, p.position - last);
+      if (Number.isFinite(p.position)) positionClock.set(key, p.position);
+    }
     if (!nativeFollowTime() && Number.isFinite(p.position)) {
       const now = Date.now();
       const d = watchClock.pos === null ? 0 : p.position - watchClock.pos;
@@ -2433,6 +2441,7 @@ export function createAnime(deps) {
       recordWatch(cur.m, n, p.position, p.duration, cur.userId);
       // الرقم وحده إلى حسابك: الجهاز الآخر يكمل من الدقيقة نفسها (ANX1)
       positions.record(`anime:${cur.m.id}`, animePositionKey(cur.m.id, n), p.position, p.duration, { final: Boolean(p.final) });
+      if (p.final) { positions.end(animePositionKey(cur.m.id, n)); positionClock.clear(); }
       account?.recordView(cur.m, n);
       // 90% = شوهدت، في حسابك (مرة واحدة)
       const watchedRatio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);

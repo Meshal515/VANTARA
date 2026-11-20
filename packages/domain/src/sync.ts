@@ -139,6 +139,8 @@ export function nextDeltaCursor(
 export type OpKind =
   | 'progress.set'
   | 'progress.confirm'
+  /** موضع التوقف داخل حلقة/فيلم (ANX1): جدول `playback_positions`، الأحدث بوقت القياس يفوز. */
+  | 'position.set'
   | 'chapter.complete'
   | 'episode.complete'
   | 'chapter.mark'

@@ -91,6 +91,15 @@ const MAX_QUARANTINE = 100;
 const MAX_PULL_ROUNDS = 20;
 
 /** الجداول التي تصل في الفروقات، ومفتاح كل صف. */
+const FEATURES_KEY = 'vantara.sync.features';
+let serverFeatures = new Set((() => { try { const v = JSON.parse(globalThis.localStorage?.getItem(FEATURES_KEY) ?? '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; } })());
+function noteFeatures(list) {
+  const next = new Set(list.filter((x) => typeof x === 'string').slice(0, 64));
+  if (next.size === serverFeatures.size && [...next].every((x) => serverFeatures.has(x))) return;
+  serverFeatures = next;
+  try { globalThis.localStorage?.setItem(FEATURES_KEY, JSON.stringify([...next])); } catch { /* يُعاد من السحب التالي */ }
+}
+
 const KEYS = {
   accounts: (row) => row.user_id,
   profiles: (row) => row.user_id,
@@ -99,6 +108,8 @@ const KEYS = {
   chapter_reads: (row) => `${row.user_id}/${row.chapter_key}`,
   // عين الفصل: علامة المالك وحده، آخر كتابة تفوز
   chapter_marks: (row) => `${row.user_id}/${row.chapter_key}`,
+  // موضع التوقف داخل الحلقة/الفيلم (ANX1): جدول مستقل عن تقدم المانجا، الأحدث بوقت القياس يفوز
+  playback_positions: (row) => `${row.user_id}/${row.media_key}`,
   usage_daily: (row) => `${row.user_id}/${row.day}`,
   collections: (row) => `${row.user_id}/${row.kind}/${row.series_ref}`,
   // «المكتمل»: صف لكل عمل أكملته
@@ -1152,6 +1163,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
           break;
         }
 
+        // ما يدعمه الخادم من عمليات جديدة (position.set…): لا تُرسل عملية لخادم أقدم فيعزلها وتضيع
+        if (Array.isArray(payload.features)) noteFeatures(payload.features);
         const touched = [];
         // شاهد قبر وصل: كل صف في المرآة يخص ذلك الـUUID يُمسح هنا أيضًا، فلا
         // يبقى على هذا الجهاز ما مُسح من الخادم (الخادم يمسح ولا يرسل «حُذف»)
@@ -1866,6 +1879,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     translation,
     stream,
     pendingProgress,
+    /** هل يدعم الخادم هذه العملية؟ (أعلنها في /v1/sync). قبل أول سحب: لا. */
+    supports: (feature) => serverFeatures.has(feature),
     latestSnapshots: () => request('/v1/source-latest'),
     privacyCapability: () => request('/v1/privacy/capabilities'),
     claimLatest: (sourceId) => request('/v1/source-latest/claim', { method: 'POST', body: { sourceId } }),

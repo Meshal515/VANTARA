@@ -956,3 +956,20 @@ it('never labels a new account delta snapshot with the previous account full-aud
   expect(JSON.parse(storage.getItem('vantara.mirror.audit.v1')).userId).toBe('u1');
   vi.unstubAllGlobals();
 });
+
+// ANX1: عملية جديدة لا تُرسل لخادم أقدم (كان سيعزلها فتضيع)؛ الخادم يعلن ما يدعمه في /v1/sync
+describe('server features', () => {
+  it('learns supported ops from the sync response, keeps them, and stores playback positions apart from manga progress', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      cursor: 5, more: false, features: ['position.set'],
+      changes: { playback_positions: [{ user_id: 'u1', media_key: 'anime:21#ep:3', series_ref: 'anime:21', position_ms: 600_000, duration_ms: 1_440_000, watched_at: 10, rev: 5 }] },
+    }));
+    const sync = await loadSync({ storage, fetchImpl });
+    expect(sync.supports('position.set')).toBe(false);
+    await sync.pull();
+    expect(sync.supports('position.set')).toBe(true);
+    expect(sync.rows('playback_positions').map((r) => r.media_key)).toEqual(['anime:21#ep:3']);
+    expect(sync.rows('progress')).toEqual([]);
+    expect(JSON.parse(storage.getItem('vantara.sync.features'))).toEqual(['position.set']);
+  });
+});
