@@ -1,3 +1,4 @@
+import { readFileSync as readSourceForRollback } from 'node:fs';
 import { beforeEach } from 'vitest';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -826,4 +827,16 @@ it('audit §13 RS1: «استعادة» on a formerly bundled source restores it 
   expect(open).not.toHaveBeenCalled();
   expect(install).toHaveBeenCalled();
   view.close();
+});
+
+// قرار المالك (20 نوفمبر): رجوع للإصدار السابق، وسطر يقول ما فعله التحديث التلقائي
+it('safe self-update: rollback only when a previous version is kept, and the last automatic check is explained', () => {
+  const ui = readSourceForRollback(new URL('./addons-v7.js', import.meta.url), 'utf8');
+  const engine = readSourceForRollback(new URL('../lib/extension-engine.js', import.meta.url), 'utf8');
+    expect(engine).toContain("rollback: typeof plugin.rollbackExtension === 'function' ? (pkg) => plugin.rollbackExtension({ pkg }) : null");
+    expect(engine).toContain("updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null");
+    const part = ui.slice(ui.indexOf('async function renderUpdateState'), ui.indexOf('function canOpenRemote'));
+    expect(part).toContain('if(!st.previous)return;');
+    expect(part).toContain('ارجع للإصدار السابق');
+    expect(part).toMatch(/SKIP_REJECTED:`الإصدار \$\{st\.lastVersion\} لم يعمل في الفحص، فبقي الحالي`/);
 });

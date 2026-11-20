@@ -90,15 +90,28 @@ export async function writeWork(id, value) {
   if (Math.random() < 0.02) void prune();
 }
 
-async function prune() {
+// CST1: كان التقليم يقرأ كل الأعمال بفصولها في الذاكرة دفعة واحدة (getAll) ليعرف الأقدم. الآن: العدد أولًا (رخيص)، ولا
+// شيء إن لم يتجاوز السقف؛ وإلا مؤشر يمر سجلًا سجلًا ويحفظ المفتاح ووقته فقط.
+export async function prune() {
   const d = await db();
   if (!d) return;
-  const all = await run('readonly', (s) => s.getAll());
-  const keys = await run('readonly', (s) => s.getAllKeys());
-  if (!all || !keys || keys.length <= MAX_WORKS) return;
-  const order = keys.map((k, i) => [k, all[i]?.at ?? 0]).sort((a, b) => a[1] - b[1]);
+  const count = await run('readonly', (s) => s.count());
+  if (!(count > MAX_WORKS)) return;
+  const order = [];
+  await run('readonly', (s) => {
+    const cursor = s.openCursor();
+    cursor.onsuccess = () => {
+      const c = cursor.result;
+      if (!c) return;
+      order.push([c.key, c.value?.at ?? 0]);
+      c.continue();
+    };
+    return null;
+  });
+  if (order.length <= MAX_WORKS) return;
+  order.sort((a, b) => a[1] - b[1]);
   await run('readwrite', (s) => {
-    for (const [k] of order.slice(0, keys.length - MAX_WORKS)) s.delete(k);
+    for (const [k] of order.slice(0, order.length - MAX_WORKS)) s.delete(k);
   });
 }
 

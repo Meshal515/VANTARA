@@ -234,12 +234,22 @@
     padding-right: 0;
     width: auto;
   }
+  /* يبدأ مع الغلاف (top: 72px) تحت الشريط العلوي، لا تحت أيقوناته: كان «201 فصلًا» ملاصقًا للشريط (VD3).
+   * بلا خط العمود الرأسي: على الجوال يفصل الاسم عن الغلاف بجانبه، وهنا الغلاف في عمود بعيد فيبقى خطًا معلقًا
+   * بجانب «فصلًا» (طلب المالك، 19 نوفمبر) */
   .v35 #detail[data-look='page'] .detail-meta {
-    margin-top: 12px;
+    border-inline-start: 0;
+    padding-inline-start: 0;
+    margin-top: 72px;
     padding: 0 0 22px;
     border-bottom: 1px solid var(--line);
     gap: 10px;
     height: auto;
+  }
+  /* «فصلًا» بحجم يُقرأ بجانب الرقم الكبير (كان 12px تحت رقم 40px) */
+  .v35 #detail[data-look='page'] .detail-folio span {
+    font-size: 18px;
+    color: var(--text-2);
   }
   .v35 #detail[data-look='page'] .detail-meta h1 {
     font-size: 44px;
@@ -299,7 +309,9 @@
 }
 @media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
   .v35 #detail[data-look='webtoon']:not([data-unified]) {
-    --wt-h: clamp(460px, calc(100svh - 270px), 880px);
+    /* الألواح بارتفاع يُبقي الاسم وزر القراءة كاملًا في الشاشة الأولى (قانون الكمبيوتر 2): كان الزر مقصوصًا أسفل
+     * الطية بـ100svh - 270px (VD1). 340px = الهامش العلوي + الاسم والمعلومات تحت الألواح + الزر وهامشه */
+    --wt-h: clamp(400px, calc(100svh - 340px), 880px);
     --wt-gap: 14px;
     padding: 0 0 72px;
   }
@@ -1013,4 +1025,38 @@
     max-height: max(420px, calc(100svh - 230px));
   }
   .v35 .cn-detail[data-style='series']:not([data-unified]) .cn-detail-art > .cn-img { object-fit: cover; object-position: center top; }
+}
+
+/* ═══ «الملف» على الكمبيوتر بلا صورة عريضة (VD2) ═══
+ * أغلب المانجا بلا بنر عريض في AniList، فكان الغلاف نفسه يُكبَّر بنرًا بعرض الصفحة ويُقص (قانون الكمبيوتر 3).
+ * بلا صورة عريضة: لا بنر من الغلاف، بل شريط ضوء هادئ من لون الفن أقصر، والغلاف الحاد كاملًا في سطر الهوية.
+ * والأرقام وزر القراءة يمتدان بجانب الغلاف حتى حافة العمود، لا عمودًا ضيقًا يترك يسار الصفحة فارغًا (القانون 4).
+ * الجوال والتابلت باللمس لا يتغيرون. */
+@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-ban:not(.mw-ban--art) {
+    height: calc(220px + var(--safe-top));
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-ban--cover > img {
+    visibility: hidden;
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-ban--cover .mw-ban-amb {
+    display: block;
+    inset: -40px;
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-ban--cover .mw-ban-amb img {
+    filter: blur(4px) saturate(1.3) brightness(0.45); /* الصورة مصغّرة ×10 (manga.css): تساوي 40px */
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-ban--cover .mw-ban-amb img.ready {
+    opacity: 1;
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-ban:not(.mw-ban--art) + .mw-idrow {
+    margin-top: -96px;
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) :is(.mw-nums, .mw-row) {
+    max-width: none;
+    margin-inline-start: calc(180px + 20px + var(--mw-side));
+  }
+  .v35 #detail[data-look='profile']:not([data-unified]) .mw-wrap > .mw-row {
+    margin-inline-start: calc(180px + 20px);
+  }
 }

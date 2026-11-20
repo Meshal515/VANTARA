@@ -31,6 +31,8 @@ data class Member(
     val avatarKey: String? = null,
     /** الحلقة التي أبلغ عنها (لجاهزية «البدء»: تقرير حلقة سابقة لا يُحسب). */
     val mediaKey: String? = null,
+    /** هوية سيرفره الثابتة بين الأجهزة («معرّف المصدر|رمز السيرفر»): لاقتراح سيرفر المضيف على الأعضاء. */
+    val server: String? = null,
 )
 
 /**
@@ -243,9 +245,9 @@ class TogetherClient(
         if (mediaKey != null) put("media", JSONObject().put("key", mediaKey).put("kind", mediaKind(mediaKey)).put("label", mediaLabel ?: mediaKey))
     }).also { sent -> if (sent) watch.expectReply(SystemClock.elapsedRealtime()) }
 
-    fun report(pos: Double, state: String, source: String?, mediaKey: String?, durationMs: Long?, driftMs: Long?, driftP95: Long?) = send(
+    fun report(pos: Double, state: String, source: String?, mediaKey: String?, durationMs: Long?, driftMs: Long?, driftP95: Long?, server: String? = null) = send(
         JSONObject().put("t", "report").put("pos", pos).put("at", clock.serverNow()).put("state", state)
-            .put("source", source ?: JSONObject.NULL).put("mediaKey", mediaKey ?: JSONObject.NULL)
+            .put("source", source ?: JSONObject.NULL).put("server", server ?: JSONObject.NULL).put("mediaKey", mediaKey ?: JSONObject.NULL)
             .put("version", JSONObject().put("durationMs", durationMs ?: JSONObject.NULL))
             .put("driftMs", driftMs ?: JSONObject.NULL).put("driftP95", driftP95 ?: JSONObject.NULL),
     )
@@ -257,6 +259,9 @@ class TogetherClient(
 
     /** المضيف ينقل الاستضافة. */
     fun giveHost(userId: String) = send(JSONObject().put("t", "host").put("userId", userId))
+
+    /** «اطلع من الغرفة» صريحًا: «bye» قبل الإغلاق، فإن كنت المضيف تنتقل الاستضافة لأقدم حاضر فورًا (قرار المالك). */
+    fun bye() { send(JSONObject().put("t", "bye")) }
 
     fun close() {
         closed = true
@@ -305,6 +310,7 @@ class TogetherClient(
                     sameVersion = if (o.isNull("sameVersion") || !o.has("sameVersion")) null else o.optBoolean("sameVersion"),
                     avatarKey = o.optString("avatarKey").takeIf { !o.isNull("avatarKey") && it.isNotEmpty() },
                     mediaKey = o.optString("mediaKey").takeIf { !o.isNull("mediaKey") && it.isNotEmpty() },
+                    server = o.optString("server").takeIf { !o.isNull("server") && it.isNotEmpty() },
                 )
             }
         }

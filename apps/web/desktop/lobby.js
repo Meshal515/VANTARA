@@ -1,4 +1,4 @@
-import { renderLobby, pendingInvitees, sectionAccent } from '../lib/together/lobby.js';
+import { renderLobby, pendingInvitees, sectionAccent, hostServerSuggestion } from '../lib/together/lobby.js';
 import { aniZipArt, episodeLine, mediaKind, resolveArt } from '../lib/together/art.js';
 import { fetchSeasonChain } from '../lib/anime-meta.js';
 
@@ -12,6 +12,8 @@ const seasonChain = id => {
 
 export function createDesktopLobby({ host, engine, session, chooseServer, leave, visibility, resolveArtImpl = resolveArt }) {
   let latest = null, closed = false, revision = 0, artKey = null, art = null, lastState = null, lastMedia = null;
+  // سيرفرات المضيف التي رفضها العضو («لا»): لا يُعاد اقتراحها في هذه الغرفة
+  const declined = new Set();
   const doc = host.ownerDocument;
   const hub = () => engine.roomHub?.({ session });
   async function update(event) {
@@ -139,6 +141,7 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       kindText: mediaKind(media), episodeText: episodeLine(media, episode),
       server: state?.server ? { code: state.server.sourceName ?? state.server.code, quality: state.server.quality ? `${state.server.quality}p` : null } : null,
       accent: sectionAccent(media.kind),
+      suggestion: event.selectingSource ? null : hostServerSuggestion({ roster, me: event.me, mine: state?.serverKey ?? null, available: state?.sources ?? [], declined }),
     };
     // الموضع والزمن وانحراف كل عضو تتغير مع كل تقرير ولا تُرى في الغرفة: لا تُعيد الرسم
     const VOLATILE = new Set(['pos', 'at', 'driftMs', 'driftP95', 'seenAt', 'lastSeen', 'rtt', 'now']);
@@ -149,26 +152,42 @@ export function createDesktopLobby({ host, engine, session, chooseServer, leave,
       if (roomHub?.avatar) return roomHub.avatar(p, size);
       const fallback = doc.createElement('span'); fallback.textContent = [...(p.displayName ?? 'صديق')][0]; return fallback;
     }, start: event.start, resume: event.resume, changeServer: chooseServer, leave,
+    // «نعم»: سيرفر المضيف يصير سيرفرك (المشغّل يبدّل له من الموضع نفسه)؛ «لا»: تبقى على اختيارك ولا يُعاد السؤال
+    acceptSuggestion: () => { const pick = model.suggestion; if (!pick) return; declined.add(pick.key); painted = null;
+      void Promise.resolve(engine.switchSource?.({ session, candidate: pick.id })).catch(() => {}).finally(() => paint(lastState, lastMedia)); },
+    declineSuggestion: () => { if (model.suggestion) declined.add(model.suggestion.key); painted = null; paint(lastState, lastMedia); },
     episodes: event.host && Number(state?.total) > 1 && typeof engine.changeEpisode === 'function' ? () => openEpisodes(state, media) : null,
     setOffset: ms => event.setVideoOffset?.(Math.max(-120000, Math.min(120000, ms))) });
   }
   return { update, destroy() { closed = true; revision++; clearInterval(host._countdown); closeEpisodes(); host.remove(); } };
 }
 
-/** ورقة السيرفرات فوق الغرفة على الكمبيوتر: تُعلَّم حتى تُغلق الورقة (تختفي show عن خلفيتها). */
-export function markRoomServers(doc) {
+/**
+ * ورقة السيرفرات فوق الغرفة على الكمبيوتر: تُعلَّم حتى تُغلق الورقة (تختفي show عن خلفيتها).
+ * CW1: كانت العلامة تُزال بعد 8 ث إن لم تُفتح الورقة، والسينما تحسم نوع العمل (Cinemeta) قبل الورقة، فمع نت بطيء
+ * تُفتح الورقة **تحت** شاشة الغرفة (z-index 150 مقابل 10000) ولا تُرى. الآن تبقى العلامة ما دامت شاشة الغرفة قائمة
+ * (يزيلها `done` عند إغلاقها) أو حتى تُفتح الورقة وتُغلق، وبحد أمان دقيقتين.
+ */
+export function markRoomServers(doc, { limitMs = 120000 } = {}) {
   const html = doc.documentElement;
   html.classList.add('room-servers');
   const view = doc.defaultView;
-  let seen = false;
+  let seen = false, finished = false, timer = 0, limit = 0;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    html.classList.remove('room-servers');
+    (view?.clearInterval ?? clearInterval)(timer);
+    (view?.clearTimeout ?? clearTimeout)(limit);
+  };
   const check = () => {
     const open = Boolean(doc.querySelector('.sheet-backdrop.show'));
     if (open) seen = true;
-    if (seen && !open) { html.classList.remove('room-servers'); clearInterval(timer); }
+    if (seen && !open) done();
   };
-  const timer = (view?.setInterval ?? setInterval)(check, 150);
-  // لم تُفتح ورقة خلال 8 ث (فشل أو إلغاء): لا يبقى الوضع معلّقًا
-  (view?.setTimeout ?? setTimeout)(() => { if (!seen) { html.classList.remove('room-servers'); clearInterval(timer); } }, 8000);
+  timer = (view?.setInterval ?? setInterval)(check, 150);
+  limit = (view?.setTimeout ?? setTimeout)(() => { if (!seen) done(); }, limitMs);
+  return done;
 }
 
 /** Invitation entry: no MPV process, no automatic source pick, no duplicate room socket. */
@@ -176,14 +195,14 @@ export function openDesktopRoomEntry({ document: doc, together, media, chooseSer
   const root = doc.createElement('section'); root.className = 'desktop-player pwa-player v35 desktop-room-entry';
   root.dataset.tone = media.kind === 'cinema' ? 'cinema' : 'anime';
   const host = doc.createElement('div'); host.className = 'pp-lobby'; root.append(host); doc.body.append(root);
-  let disposed = false; const offs = [];
-  const destroy = () => { if (disposed) return; disposed = true; offs.forEach(off=>off()); view.destroy(); root.remove(); };
+  let disposed = false; const offs = []; let serversMark = null;
+  const destroy = () => { if (disposed) return; disposed = true; offs.forEach(off=>off()); serversMark?.(); view.destroy(); root.remove(); };
   const room = together.session.room;
   const facade = { roomHub:()=>together.hub,playerState:async()=>({ media, title:media.title, poster:media.cover,episode:media.episode }) };
   const view = createDesktopLobby({ host, engine:facade,session:together.session.code,
     // «اختر السيرفر»: الغرفة تبقى، والورقة لوحة جانبية فوقها (html.room-servers)؛ إغلاقها يرجعك للغرفة نفسها،
     // واختيار سيرفر يفتح المشغّل الذي يُغلق هذه الشاشة (player.js open).
-    visibility(){}, leave:()=>{together.hub.leave();destroy();},chooseServer:()=>{markRoomServers(doc);chooseServer();} });
+    visibility(){}, leave:()=>{together.hub.leave();destroy();},chooseServer:()=>{serversMark?.();serversMark=markRoomServers(doc);chooseServer();} });
   const paint = () => {
     if (disposed) return;
     void view.update({ visible:true, selectingSource:true, prepared:false, host:room.isHost, connection:room.status,

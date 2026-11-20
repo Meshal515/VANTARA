@@ -27,6 +27,9 @@ async function request(url: string, fetchImpl: Fetcher, init: RequestInit = {}):
 }
 
 /** Latest Team-X cards point to dated chapter lists; no inferred “published now”. */
+/** CL3: هوية عميل عامة لجامع الخادم (MangaDex يطلب هوية تعرّف التطبيق)، بلا رابط مستودع ولا بيانات شخصية. */
+export const COLLECTOR_AGENT = 'VANTARA/1.0 (release timeline collector)';
+
 export function teamxCards(html: string) {
   const start = html.indexOf('class="last-chapter"');
   const area = start < 0 ? html : html.slice(start);
@@ -149,7 +152,7 @@ async function mangaDex(env: Env, now: number, fetchImpl: Fetcher) {
   // بلا محتوى للكبار: MangaDex يضمّ erotica افتراضيًا ما لم تُحدَّد الفئات
   const query = 'limit=50&translatedLanguage%5B%5D=ar&includes%5B%5D=manga&order%5BpublishAt%5D=desc&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive';
   const body = await (await request(`https://api.mangadex.org/chapter?${query}`, fetchImpl, {
-    headers: { 'User-Agent': 'VANTARA/1.0 (release timeline collector; https://github.com/Meshal515/VANTARA)' },
+    headers: { 'User-Agent': COLLECTOR_AGENT },
   })).json() as { data?: Array<{ attributes?: { chapter?: string; publishAt?: string }; relationships?: Array<{ id: string; type: string; attributes?: { title?: Record<string, string> } }> }> };
   if (!Array.isArray(body.data)) throw new Error('invalid MangaDex feed');
   const works = new Map<string, Observation>();
@@ -172,7 +175,7 @@ async function mangaDex(env: Env, now: number, fetchImpl: Fetcher) {
     try {
       const q = ids.map((id) => `ids%5B%5D=${id}`).join('&');
       const covers = await (await request(`https://api.mangadex.org/manga?limit=100&includes%5B%5D=cover_art&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&${q}`, fetchImpl, {
-        headers: { 'User-Agent': 'VANTARA/1.0 (release timeline collector; https://github.com/Meshal515/VANTARA)' },
+        headers: { 'User-Agent': COLLECTOR_AGENT },
       })).json() as { data?: Array<{ id: string; attributes?: { tags?: Array<{ attributes?: { name?: { en?: string } } }> }; relationships?: Array<{ type: string; attributes?: { fileName?: string } }> }> };
       const art = new Map((covers.data ?? []).map((m) => [m.id, m.relationships?.find((r) => r.type === 'cover_art')?.attributes?.fileName]));
       // وسوم العمل نفسه: Boys' Love وGirls' Love وأمثالها لا تدخل الخط الزمني

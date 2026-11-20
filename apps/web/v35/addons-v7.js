@@ -869,6 +869,7 @@ export function renderV7Addons({
         }));
         acts.append(btn("فتح في VANTARA","v7-btn primary",()=>openNative(a)));
         if(!a.builtin)acts.append(btn("حذف","v7-btn danger",()=>askDelete(a,"native")));
+        if(!a.builtin&&typeof a._store?.api?.rollback==="function")void renderUpdateState(a,dialog,acts);
       }
       if(a._store?.api?.enable && a.installed)acts.append(btn(a.enabled===false?"تفعيل":"تعطيل","v7-btn",async()=>{
         if(busy)return;busy=true;
@@ -877,6 +878,24 @@ export function renderV7Addons({
       }));
       acts.append(btn("رجوع","v7-btn",()=>closeModal()));dialog.append(acts);
     }
+  }
+  /**
+   * التحديث الذاتي الآمن: سطر يقول ما حدث في آخر فحص تلقائي، وزر «ارجع للإصدار السابق» إن كان على الجهاز إصدار
+   * سليم قبله. الرجوع يُثبَّت فلا يعيده التحديث التلقائي، ويُحدَّث لاحقًا فقط إلى إصدار أحدث منه.
+   */
+  async function renderUpdateState(a,dialog,acts){
+    const api=a._store.api;
+    let st=null;
+    try{st=await api.updateState?.(a.pkg);}catch{return;}
+    if(!st||!dialog.isConnected)return;
+    const said={APPLY:`حُدّثت تلقائيًا إلى ${st.lastVersion}`,SKIP_REJECTED:`الإصدار ${st.lastVersion} لم يعمل في الفحص، فبقي الحالي`,SKIP_UNVERIFIED:`الإصدار ${st.lastVersion} ينتظر: الموقع لم يرد أثناء الفحص`,SKIP_HELD:`باقٍ على الإصدار الذي اخترته`}[st.lastAction];
+    if(said){const line=el("p","v7-update-result",said);line.setAttribute("role","status");dialog.insertBefore(line,acts);}
+    if(!st.previous)return;
+    acts.insertBefore(btn(`ارجع للإصدار السابق (${String(st.previous).slice(0,24)})`,"v7-btn",async()=>{
+      if(busy)return;busy=true;
+      try{const r=await api.rollback(a.pkg);notify(`رجعنا إلى ${r?.version??st.previous}`);closeModal(true);sourcesChanged();await refresh();}
+      catch(err){notify(fmtErr(err));}finally{busy=false;}
+    }),acts.lastElementChild);
   }
   function canOpenRemote(a){
     return a.enabled!==false && !(a.configuration?.required && !a.configuration?.configured) && supportedCapabilities(a,registry.runtimeName||"pwa")
@@ -1046,7 +1065,8 @@ export function renderV7Addons({
           matched=true;sourcesChanged();await refresh();closeModal(true);break;
         }catch(e){lastError=fmtErr(e);}
       }
-      if(!matched)note.textContent=lastError||"صيغة المستودع غير متوافقة مع المحركات الحالية.";
+      // بلا محرك Mihon في هذا الجهاز (ويندوز): السبب صريحًا، لا خطأ محرك آخر جرّب المستودع
+      if(!matched)note.textContent=stores.some(s=>s.id==="manga")?(lastError||"صيغة المستودع غير متوافقة مع المحركات الحالية."):"إضافات Mihon للمانجا تعمل في تطبيق الجوال فقط حاليًا. مصادر المانجا هنا هي المصادر المدمجة في VANTARA.";
     }catch(e){note.textContent=fmtErr(e);}
     finally{busy=false;yes.disabled=false;}
   }

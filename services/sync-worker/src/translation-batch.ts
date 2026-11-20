@@ -140,7 +140,8 @@ export async function handleTranslateTextBatch(request: Request, env: Translatio
         };
         const refused=output.some(o=>(o.content ?? []).some(c=>c.type==='refusal'));
         const perOutput=matches.length===1 && object(matches[0]!.translation) ? JSON.stringify(matches[0]!.translation) : '';
-        const perPage=response({...payload,usage:perUsage,output:refused ? payload.output : [{type:'message',content:[{type:'output_text',text:perOutput}]}]});
+        // BT3: رفض في الدفعة يخص الصفحة التي بلا ترجمة وحدها؛ كان يُعلَّم على الست كلها ولو وصلت ترجمة البقية
+        const perPage=response({...payload,usage:perUsage,output:refused && !perOutput ? payload.output : [{type:'message',content:[{type:'output_text',text:perOutput}]}]});
         entry.resolve(timedResponse(perPage,providerNetworkMs,dispatchedAt-entry.queuedAt));
       });
     } catch(error) {

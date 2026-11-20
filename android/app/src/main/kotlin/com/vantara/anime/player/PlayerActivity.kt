@@ -465,6 +465,7 @@ class PlayerActivity : Activity() {
         }
     }
     private val seekBudget = PlaybackSeekBudget()
+    private val seekRecovery = SeekRecovery()
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
     private val stallWatchdog = Runnable {
@@ -639,6 +640,26 @@ class PlayerActivity : Activity() {
         startTogether()
     }
 
+    /** الخروج من الغرفة لا يغلق المشغّل: الفيديو يكمل عندك من نفس اللحظة، بلا غرفة (قرار المالك، 19 نوفمبر). */
+    private fun leaveTogether() {
+        val t = together ?: return
+        if (openSheet == SheetKind.TOGETHER || openSheet == SheetKind.LEAVE) sheet.close()
+        together = null
+        t.leave()
+        message("طلعت من الغرفة · تكمل لحالك")
+        if (current == null) showServers()
+    }
+
+    /** زر الرجوع وأنت في غرفة: سؤال واحد بدل خروج صامت من الغرفة (TG16). */
+    private fun confirmExitRoom() {
+        open(SheetKind.LEAVE, "تطلع من الغرفة؟", "أصدقاؤك يكملون المشاهدة بدونك") { body ->
+            body.addView(pillButton("كمّل الفيديو بدون الغرفة", primary = true) { leaveTogether() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+            body.addView(pillButton("اطلع من المشغّل", primary = false) { sheet.close(); finish() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
     /** غرفة Together: الاتصال والأفاتارات في الشريط العلوي، والمزامنة تعمل مع المشغّل. */
     private fun startTogether() {
         val raw = launch.together ?: return
@@ -648,6 +669,10 @@ class PlayerActivity : Activity() {
             override fun message(text: String) = this@PlayerActivity.message(text)
             override fun episode() = episodeInt()
             override fun sourceName() = current?.let { codeOf(it) ?: it.server }
+            // هوية السيرفر بصيغة الويب وويندوز («معرّف المصدر|رمز السيرفر» بحروف صغيرة): لاقتراح سيرفر المضيف
+            override fun serverKey() = current?.let { c -> prep?.routeOf(c.id)?.let { "${it.sourceId}|${it.code.lowercase()}" } ?: "${c.sourceId}|${c.server.lowercase()}" }
+            override fun readyServers() = prep?.routes().orEmpty().filter { it.state == RouteState.READY }.map { Triple("${it.sourceId}|${it.code.lowercase()}", it.id, it.code) }
+            override fun useServer(candidateId: String) { prep?.routes()?.firstOrNull { it.id == candidateId }?.let { switchTo(it) } }
             // حلقة أخرى في الغرفة: تُجهّز سيرفراتها ولا يبدأ شيء حتى يختار كل واحد سيرفره
             override fun switchToEpisode(n: Int) = switchEpisode(n, roomPick = true)
             override fun hasNextEpisode() = hasNext()
@@ -655,7 +680,7 @@ class PlayerActivity : Activity() {
             override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
             override fun overlayHost() = root
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
-            override fun leaveRoom() = finish()
+            override fun leaveRoom() = leaveTogether()
             override fun openServers() = showServers()
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
@@ -766,6 +791,7 @@ class PlayerActivity : Activity() {
             main.removeCallbacksAndMessages(embeddedCues)
             if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                seekRecovery.seeked(SystemClock.elapsedRealtime())
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
                 watchStall()
             }
@@ -964,6 +990,17 @@ class PlayerActivity : Activity() {
 
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
+        // TS1: عطل بعد تشغيل ناجح وبعد قفزة قريبة = الموضع الجديد لم يجهز بعد، لا سيرفر ميت. يُعاد فتح المصدر نفسه عند
+        // الموضع (مرتين على الأكثر)، ولا يُعلَّم فاشلًا ولا يُبدَّل بمصدر يبدأ من الصفر عند الدقيقة 20
+        val retry = current?.takeIf { seekRecovery.shouldRetry(it.id, reportedStart, SystemClock.elapsedRealtime()) }
+        if (retry != null) {
+            main.removeCallbacks(stallWatchdog)
+            main.removeCallbacks(startupWatchdog)
+            if (BuildConfig.DEBUG) diag.error("seek recovery: reopen same candidate at the new position after $reason")
+            message("نجهّز هذا الموضع…")
+            start(retry, position())
+            return
+        }
         clearSkipTimings()
         startup.cancel()
         usageStarted = false
@@ -1021,7 +1058,7 @@ class PlayerActivity : Activity() {
     private fun switchTo(route: Route) {
         val p = prep ?: return
         val s = session ?: return
-        val c = p.rank(p.candidatesOf(route.id)).firstOrNull()?.let { s.take(it.id) }
+        val c = p.rank(p.candidatesOf(route.id)).firstOrNull()?.let { s.take(it.id, manual = true) }
         if (c == null) {
             message("هذا السيرفر لم يعد متاحًا")
             return
@@ -1066,7 +1103,7 @@ class PlayerActivity : Activity() {
     /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
     private fun maybePrepareNext() {
         if (!reportedStart || !hasNext() || warmedSessionId != null || player.playbackState != Player.STATE_READY) return
-        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position())) return
+        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position(), if (together != null) NextEpisodeWarmup.ROOM_WINDOW_MS else 4 * 60_000L)) return
         val source = current?.sourceId ?: return
         val next = episodeInt() + 1
         val id = "warm-${System.nanoTime()}"
@@ -1134,11 +1171,9 @@ class PlayerActivity : Activity() {
         loading(true)
         if (warmed == null && !roomPick) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
-        if (roomPick && together != null) {
-            loading(false)
-            together?.awaitPick()
-            return
-        }
+        // الغرفة نقلتنا لحلقة أخرى من العمل نفسه (قرار المالك، 19 نوفمبر): تكمل بسيرفرك المفضل وجودتك بلا «اختر سيرفر»
+        // ولا جاهزية دخول؛ جُهّزت مسبقًا قبل النهاية، وإن فشل التجهيز المسبق تُجهَّز الآن بالطريق العادي نفسه.
+        // (كان كل عضو يُعاد لاختيار السيرفر عند كل حلقة. تغيير الموسم مسار آخر: switchWork، ويبقى فيه الاختيار.)
         val p = prep ?: return
         val s = session ?: return
         val from = resume[n] ?: 0L
@@ -1192,7 +1227,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER, LEAVE }
 
     private var openSheet: SheetKind? = null
 
@@ -1381,7 +1416,7 @@ class PlayerActivity : Activity() {
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(20), dp(14), dp(20), 0)
         }
-        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { finish() })
+        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { if (together != null) confirmExitRoom() else finish() })
         titleView = label("", 16f, Color.WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; textDirection = View.TEXT_DIRECTION_ANY_RTL }
         episodeView = label("", 12.5f, Tone.TEXT_2).apply { setPadding(0, dp(4), 0, 0) }
         top.addView(LinearLayout(this).apply {
@@ -2682,6 +2717,7 @@ class PlayerActivity : Activity() {
             clip != null -> clip?.close()
             sheet.isOpen -> sheet.close()
             locked -> flashUnlock()
+            together != null -> confirmExitRoom()
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
     }
@@ -2692,7 +2728,8 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         main.removeCallbacks(presenceTick)
-        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها
+        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها، والغرفة لا تعيد تشغيله في الخلفية (TG15)
+        together?.onBackground()
         setPlayingQuietly(false)
         if (::seekPreview.isInitialized) seekPreview.hide()
         startup.active(false)
@@ -2703,6 +2740,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         usageForeground = true
+        together?.onForeground()
         startup.active(player.playWhenReady)
         watchStall()
         sampleUsage()

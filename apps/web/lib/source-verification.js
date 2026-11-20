@@ -1,3 +1,4 @@
+import { desktopPlugin } from '../pwa/platform.js';
 /** Explicit verification UI. Background events never launch native Activities. */
 const validHost = value => typeof value === 'string' && value.length <= 253 && /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(value) && value.includes('.') && !/^\d+(?:\.\d+){3}$/.test(value) && !/\.(?:local|internal|localhost|invalid|lan)$/i.test(value);
 // Native reason codes stay available for diagnostics; only these local messages
@@ -26,7 +27,9 @@ export function verificationMessage(result={}) {
   return Object.hasOwn(messages,result.reason)?messages[result.reason]:'لم يكتمل التحقق. تقدر تحاول مرة ثانية.';
 }
 export function nativeVerificationPlugin() {
-  return globalThis.Capacitor?.getPlatform?.() === 'android' ? globalThis.Capacitor?.Plugins?.Verification ?? null : null;
+  // ويندوز: الإضافة نفسها بشكلها من جسر سطح المكتب (desktop/boot.js) وصفحة تحقق ظاهرة من العملية الرئيسية
+  if (globalThis.Capacitor?.getPlatform?.() === 'android') return globalThis.Capacitor?.Plugins?.Verification ?? null;
+  return desktopPlugin('Verification');
 }
 export function createSourceVerification({plugin=nativeVerificationPlugin(),runtimePlugin=globalThis.Capacitor?.Plugins?.VantaraRuntime,document=globalThis.document}={}) {
   let closed=false;

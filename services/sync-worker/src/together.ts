@@ -137,7 +137,8 @@ export class TogetherRoom {
     let msg: unknown;
     try { msg = JSON.parse(message); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
-    await this.apply(this.core.handle(a.conn, msg as Record<string, unknown>, Date.now()));
+    const m = msg as Record<string, unknown>;
+    await this.apply(this.core.handle(a.conn, m, Date.now()), softMessage(m));
   }
 
   async webSocketClose(ws: DOWebSocket): Promise<void> {
@@ -172,7 +173,18 @@ export class TogetherRoom {
     try { this.sockets.get(conn)?.send(data); } catch { /* اتصال ميت: إغلاقه يصل وحده */ }
   }
 
-  private async apply(out: Out[]): Promise<void> {
+  // WT7: تمرير المضيف في «القراءة معًا» يرسل موضعه مرات في الثانية، وكل أمر كان يكتب الغرفة كلها في التخزين (3 ث
+  // تمرير = 39 كتابة). الآن ما يتكرر بكثرة (موضع، تقرير، نبض) يُكتب مرة كل SOFT_PERSIST_MS على الأكثر مع كتابة أخيرة
+  // مؤجلة لا تضيع، وما سواه (دخول، خروج، مضيف، حلقة) يُكتب فورًا كما كان.
+  private readonly throttle = new PersistThrottle(() => this.flush());
+
+  private async flush(): Promise<void> {
+    if (!this.core?.dirty) return;
+    this.core.dirty = false;
+    await this.persist();
+  }
+
+  private async apply(out: Out[], soft = false): Promise<void> {
     if (!this.core) return;
     for (const o of out) {
       if ('close' in o) {
@@ -185,10 +197,7 @@ export class TogetherRoom {
       const targets = o.to === 'all' ? [...this.sockets.keys()] : o.to;
       for (const conn of targets) if (conn !== o.except) this.send(conn, data);
     }
-    if (this.core.dirty) {
-      this.core.dirty = false;
-      await this.persist();
-    }
+    if (this.core.dirty) await this.throttle.request(soft);
   }
 
   private async persist(): Promise<void> {
@@ -197,6 +206,42 @@ export class TogetherRoom {
     const next = this.core.nextDeadline();
     if (next != null) await this.state.storage.setAlarm(next);
     else await this.state.storage.deleteAlarm();
+  }
+}
+
+/** رسائل تتكرر بكثرة ولا يضر تأخير حفظها ثانيتين: موضع القراءة/المشاهدة، وتقارير الأعضاء، والنبض. */
+export function softMessage(msg: Record<string, unknown>): boolean {
+  return msg['t'] === 'report' || msg['t'] === 'ping' || (msg['t'] === 'cmd' && msg['op'] === 'seek');
+}
+
+export const SOFT_PERSIST_MS = 2000;
+
+/**
+ * كتابة الغرفة: العاجل فورًا، والمتكرر مرة كل SOFT_PERSIST_MS مع كتابة أخيرة مؤجلة (لا يضيع آخر موضع).
+ * أي كتابة عاجلة تلغي المؤجلة لأنها تحمل الحالة كلها.
+ */
+export class PersistThrottle {
+  private last = -Infinity;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  constructor(
+    private readonly write: () => Promise<void>,
+    private readonly now: () => number = Date.now,
+    private readonly gap = SOFT_PERSIST_MS,
+  ) {}
+
+  async request(soft: boolean): Promise<void> {
+    const at = this.now();
+    if (soft && at - this.last < this.gap) {
+      this.timer ??= setTimeout(() => { this.timer = null; void this.run(); }, Math.max(0, this.gap - (at - this.last)));
+      return;
+    }
+    await this.run();
+  }
+
+  private async run(): Promise<void> {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    this.last = this.now();
+    await this.write();
   }
 }
 

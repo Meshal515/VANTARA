@@ -133,3 +133,15 @@ it('isolates one failed page transaction and releases its paid reservation',asyn
   expect(spend?.reserved).toBe(0);expect(spend?.usd).toBeCloseTo(.00006,12);
   expect((await env.DB.prepare('SELECT COUNT(*) AS n FROM translation_pages').first<{n:number}>())?.n).toBe(1);
 });
+
+// BT3: رفض النموذج لصفحة واحدة لا يرفض صفحات الدفعة التي وصلت ترجمتها
+it('one refused page in a batch does not refuse the pages that were translated', async () => {
+  const { env } = setup();
+  const fetcher: typeof fetch = async () => Response.json({ status:'completed', usage:{input_tokens:60,output_tokens:60}, output:[
+    { type:'message', content:[{ type:'output_text', text: JSON.stringify({ pages:[translatedPage(0), translatedPage(2)] }) }] },
+    { type:'message', content:[{ type:'refusal', refusal:'cannot translate page 1' }] },
+  ] });
+  const response = await handleTranslateTextBatch(req([page(0), page(1), page(2)]), env, user, Date.UTC(2026,9,5), { fetch: fetcher });
+  const body = await response.json() as { pages: Array<{ status: number }> };
+  expect(body.pages.map((p) => p.status === 200)).toEqual([true, false, true]);
+});

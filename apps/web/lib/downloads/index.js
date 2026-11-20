@@ -121,10 +121,9 @@ export function keepAliveWhileManga(manager, native = nativeDownloads()) {
       }
       return;
     }
-    const head = active[0];
-    const label = active.length === 1
-      ? `${head.work?.title ?? ''} — ${unitLabel(head)}${head.pagesTotal ? ` · ${head.pages ?? 0}/${head.pagesTotal}` : ''}`
-      : `${active.length} فصول مانجا تُنزَّل`;
+    // DN2: سطر لكل فصل (حتى 4) بتقدّمه بالصفحات؛ الإشعار الأصلي يقسمها أسطرًا (DownloadNotice)
+    const line = (i) => `${i.work?.title ?? ''} — ${unitLabel(i)}${i.pagesTotal ? ` · ${i.pages ?? 0}/${i.pagesTotal}` : ''}`;
+    const label = active.slice(0, 4).map(line).join('\n');
     const now = Date.now();
     if (!on || (label !== lastLabel && now - lastAt > 2000)) {
       on = true;

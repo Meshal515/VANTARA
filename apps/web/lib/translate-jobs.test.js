@@ -84,6 +84,19 @@ describe('the runner', () => {
     expect(notes.at(-1)).toEqual(['stop']);
   });
 
+  it('TJ1: the whole queue is not rewritten after every page; the final state is saved at once', async () => {
+    const { deps, storage } = fakeDeps({ pagesPer: 10 });
+    let writes = 0;
+    const set = storage.setItem.bind(storage);
+    storage.setItem = (k, v) => { if (k === 'vantara.translate.jobs.v1' || /jobs/.test(k)) writes++; return set(k, v); };
+    const runner = createJobRunner(deps);
+    const job = runner.add(createJob({ ref: 'ext:y', title: 'Y', sourceId: 'weeb', rows: [row(1), row(2), row(3)], keyOf, mode: 'fast' }));
+    await until(() => runner.jobs()[0]?.status === 'done');
+    // 30 صفحة: كانت 30 كتابة كاملة على الأقل
+    expect(writes).toBeLessThan(10);
+    expect(readJobs(storage)[0]).toMatchObject({ id: job.id, status: 'done' });
+  });
+
   // JS1 (تدقيق §17): إيقاف الخدمة بين عملين ثم بدؤها للتالي والتطبيق في الخلفية يُسقط التطبيق على Android 12+.
   // والعملان يترجمان الفصل نفسه (keyOf واحد): كان الثاني يدور بلا نهاية على «عدد الصفحات» فيجمّد خيط JS (أحمر قبل).
   it('two queued works keep the foreground service between them: only the last finish stops it', async () => {

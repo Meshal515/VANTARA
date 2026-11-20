@@ -9,11 +9,28 @@
  *
  * القاطع مشترك بين كل الإضافات ولغاتها ومصادر المانجا على الجهاز نفسه، فعشر لغات لموقع واحد
  * تتشارك التوقف نفسه بدل أن تضاعف الطلبات على موقع طلب التوقف.
+ *
+ * نوع الخطأ يحدد نطاقه (AW26): 429 و502/503/504 و520-530 (الموقع مشغول أو ساقط) تخص المضيف كله. أما 500 وأخواته
+ * فغالبًا صفحة عمل معطوبة: كانت ثلاثة أعمال معطوبة متتالية توقف الإضافة لكل الأعمال حتى 6 ساعات. الآن تُعدّ على
+ * الصفحة نفسها (المضيف + المسار) فيتوقف ذلك العمل وحده، ولا يُعدّ المضيف ساقطًا إلا إن فشلت HOST_SPREAD صفحات
+ * مختلفة متتالية بلا رد سليم بينها.
  */
 
 import { siteStatusMessage } from './plugin-failure.js';
 
-export const BREAKER = Object.freeze({ THRESHOLD: 3, BASE_MS: 30_000, MAX_MS: 6 * 60 * 60 * 1000, MAX_HOSTS: 2000 });
+export const BREAKER = Object.freeze({ THRESHOLD: 3, BASE_MS: 30_000, MAX_MS: 6 * 60 * 60 * 1000, MAX_HOSTS: 2000, HOST_SPREAD: 6 });
+/** حالات تعني أن الموقع نفسه مشغول أو ساقط (لا صفحة بعينها). */
+export const hostWide = (code) => code === 429 || code === 502 || code === 503 || code === 504 || (code >= 520 && code <= 530);
+
+/** مفتاح الصفحة داخل المضيف (المسار والاستعلام)، أو '' إن لم يصلح الرابط. */
+export function pathOf(url) {
+  try {
+    const u = new URL(String(url));
+    return `${u.pathname}${u.search}`.slice(0, 512);
+  } catch {
+    return '';
+  }
+}
 export const HOST_COOLING = 'HOST_COOLING';
 
 /** الموقع طلب التوقف مؤقتًا. الرسالة تقول بصراحة إن الخلل من الموقع. */
@@ -77,26 +94,16 @@ export function createHostBreaker({ now = () => Date.now() } = {}) {
     return left > 0 ? left : null;
   }
 
-  /** يرمي HostCoolingError إن كان المضيف متوقفًا. */
-  function assertAllowed(host) {
+  const pageKey = (h, path) => `${h} ${path}`;
+
+  /** يرمي HostCoolingError إن كان المضيف متوقفًا، أو الصفحة نفسها إن أُعطي مسارها. */
+  function assertAllowed(host, path = '') {
     const h = String(host ?? '').toLowerCase();
-    const left = h ? waitMs(h) : null;
+    const left = h ? waitMs(h) ?? (path ? waitMs(pageKey(h, path)) : null) : null;
     if (left != null) throw new HostCoolingError(h, left);
   }
 
-  /** نتيجة رد HTTP فعلي من المضيف. `retryAfter` بالمللي ثانية أو null. */
-  function record(host, status, retryAfter = null) {
-    const h = String(host ?? '').toLowerCase();
-    const code = Number(status);
-    if (!h || !Number.isInteger(code) || code < 100 || code > 599) return;
-    if (code !== 429 && code < 500) {
-      const s = hosts.get(h);
-      if (s) { s.failures = 0; s.opens = 0; }
-      return;
-    }
-    const s = stateOf(h);
-    s.failures += 1;
-    const asked = (code === 429 || code === 503) && Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
+  const open = (s, asked) => {
     if (asked != null) {
       s.openUntil = now() + Math.min(asked, BREAKER.MAX_MS);
     } else if (s.failures >= BREAKER.THRESHOLD) {
@@ -104,6 +111,39 @@ export function createHostBreaker({ now = () => Date.now() } = {}) {
       s.opens += 1;
       s.failures = BREAKER.THRESHOLD - 1;
     }
+  };
+
+  /** نتيجة رد HTTP فعلي من المضيف. `retryAfter` بالمللي ثانية أو null. `path` صفحة الطلب (AW26). */
+  function record(host, status, retryAfter = null, path = '') {
+    const h = String(host ?? '').toLowerCase();
+    const code = Number(status);
+    if (!h || !Number.isInteger(code) || code < 100 || code > 599) return;
+    if (code !== 429 && code < 500) {
+      const s = hosts.get(h);
+      if (s) { s.failures = 0; s.opens = 0; s.spread = null; }
+      const p = path && hosts.get(pageKey(h, path));
+      if (p) { p.failures = 0; p.opens = 0; }
+      return;
+    }
+    // صفحة معطوبة (500 وأخواته): تُعدّ عليها هي، والمضيف لا يُعدّ ساقطًا إلا بانتشار الفشل على صفحات مختلفة
+    if (path && !hostWide(code)) {
+      const p = stateOf(pageKey(h, path));
+      p.failures += 1;
+      open(p, null);
+      const s = stateOf(h);
+      s.spread ??= new Set();
+      s.spread.add(path);
+      if (s.spread.size >= BREAKER.HOST_SPREAD) {
+        s.failures = BREAKER.THRESHOLD;
+        open(s, null);
+        s.spread = null;
+      }
+      return;
+    }
+    const s = stateOf(h);
+    s.failures += 1;
+    const asked = (code === 429 || code === 503) && Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
+    open(s, asked);
   }
 
   return { waitMs, assertAllowed, record, reset: () => hosts.clear(), size: () => hosts.size };
@@ -132,7 +172,8 @@ export function guardFetcher(fetcher, breaker = sharedHostBreaker()) {
   if (!fetcher || typeof fetcher.text !== 'function') return fetcher;
   const text = async (url, opts) => {
     const host = hostOf(url);
-    breaker.assertAllowed(host);
+    const path = pathOf(url);
+    breaker.assertAllowed(host, path);
     let out;
     try {
       out = await fetcher.text(url, opts);
@@ -140,11 +181,11 @@ export function guardFetcher(fetcher, breaker = sharedHostBreaker()) {
       // رد الموقع نفسه فقط (صفحة تحقق أو حالة HTTP). أخطاء الجالب (حده، جلسته، مهلته) والشبكة
       // والإلغاء ليست ردًا من الموقع فلا تُحسب عليه
       if (Number.isInteger(error?.status) && error.status >= 400 && ['http', 'challenge'].includes(error?.code))
-        breaker.record(host, error.status, retryAfterMs(error.retryAfter));
+        breaker.record(host, error.status, retryAfterMs(error.retryAfter), path);
       throw error;
     }
     if (Number.isInteger(out?.status) && out.status > 0)
-      breaker.record(host, out.status, retryAfterMs(headerOf(out.headers, 'retry-after')));
+      breaker.record(host, out.status, retryAfterMs(headerOf(out.headers, 'retry-after')), path);
     return out;
   };
   const page = async (url, opts = {}) => {
@@ -172,13 +213,14 @@ export function guardTransport(transport, breaker = sharedHostBreaker()) {
   if (!transport || typeof transport.text !== 'function' || transport.guarded) return transport;
   const wrap = (method) => async (url, options) => {
     const host = hostOf(url);
-    breaker.assertAllowed(host);
+    const path = pathOf(url);
+    breaker.assertAllowed(host, path);
     try {
       const out = await transport[method](url, options);
-      breaker.record(host, 200);
+      breaker.record(host, 200, null, path);
       return out;
     } catch (error) {
-      if (Number.isInteger(error?.status)) breaker.record(host, error.status, retryAfterMs(error.retryAfter));
+      if (Number.isInteger(error?.status)) breaker.record(host, error.status, retryAfterMs(error.retryAfter), path);
       throw error;
     }
   };

@@ -200,6 +200,93 @@ class TogetherRoomScreensDeviceTest {
         server.shutdown()
     }
 
+    /**
+     * الخروج من الغرفة (قرار المالك، 19 نوفمبر): لوحة الغرفة للمضيف، وسؤال زر الرجوع، ثم «كمّل بدون الغرفة»
+     * فيبقى المشغّل مفتوحًا والفيديو عندك. اللقطات leave-* تُقرأ من فحوص CI.
+     */
+    @Test fun captureRoomLeave() {
+        assumeTrue("room screenshots are opt-in", InstrumentationRegistry.getArguments().getString("roomShots") == "1")
+        val context = instrumentation.targetContext
+        val out = File(context.filesDir, "player-shots").apply { mkdirs() }
+        val video = File(context.filesDir, "room-leave.mp4")
+        instrumentation.context.assets.open("addon-torrent-proof.mp4").use { input -> video.outputStream().use { input.copyTo(it) } }
+        val server = MockWebServer()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val now = System.currentTimeMillis().toDouble()
+                webSocket.send(JSONObject()
+                    .put("t", "welcome").put("you", "host").put("proto", 2).put("now", now)
+                    .put("room", JSONObject().put("hostUserId", "host").put("mode", "sync").put("control", "host").put("invited", JSONArray().put("friend")))
+                    .put("state", JSONObject().put("media", JSONObject().put("key", "anime:20958#1").put("kind", "anime").put("label", "Attack on Titan Season 2 — الحلقة 1"))
+                        .put("started", true).put("playing", true).put("pos", 0).put("at", now).put("rate", 1).put("seq", 1))
+                    .put("roster", JSONArray()
+                        .put(JSONObject().put("userId", "host").put("name", "أنت").put("host", true).put("state", "playing").put("joinedAt", 1))
+                        .put(JSONObject().put("userId", "friend").put("name", "منصور").put("host", false).put("state", "playing").put("source", "MegaUp").put("pos", 0).put("at", now).put("joinedAt", 2)))
+                    .toString())
+            }
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val m = JSONObject(text)
+                if (m.optString("t") == "ping") webSocket.send(JSONObject().put("t", "pong").put("t0", m.opt("t0")).put("ts", System.currentTimeMillis()).toString())
+            }
+        }))
+        server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+        com.vantara.plugins.ensureEngineInjekt(context.applicationContext as android.app.Application)
+        val engine = AnimeEngine.get(context)
+        val now = System.currentTimeMillis()
+        val copies = listOf(SourceAnime(sourceId = "animekai", url = "fixture://attack-on-titan-s2", title = "Attack on Titan Season 2"))
+        val session = PlaybackSession(emptyList(), engine.health)
+        val prep = PreparedEpisode(id = "room-leave", copies = copies, number = 1f, prefs = Preferences(), session = session, health = engine.health)
+        prep.adopt("AnimeKai", listOf(Candidate(id = "l1", sourceId = "AnimeKai", sourceName = "AnimeKai", server = "MegaUp", host = "local.fixture",
+            url = Uri.fromFile(video).toString(), quality = 1080, label = "مترجم عربي", resolvedAt = now, expiresAt = now + 3_600_000)))
+        AnimeEngine::class.java.getDeclaredField("sessions").apply { isAccessible = true }.let {
+            @Suppress("UNCHECKED_CAST") (it.get(engine) as MutableMap<String, PlaybackSession>)["room-leave"] = session
+        }
+        AnimeEngine::class.java.getDeclaredField("prepared").apply { isAccessible = true }.let {
+            @Suppress("UNCHECKED_CAST") (it.get(engine) as MutableMap<String, PreparedEpisode>)["room-leave"] = prep
+        }
+        val together = JSONObject()
+            .put("baseUrl", server.url("/").toString().trimEnd('/')).put("code", "LEAVE2").put("token", "fixture").put("mode", "sync")
+            .put("mediaPrefix", "anime:20958").put("kindText", "أنمي").put("title", "Attack on Titan Season 2").put("pick", false)
+            .put("invitees", JSONArray().put(JSONObject().put("userId", "friend").put("displayName", "منصور")))
+        val launch = PlayerActivity.Launch(
+            session = "room-leave", title = "Attack on Titan Season 2", animeId = "20958", episode = 1f, total = 12,
+            copies = Json.encodeToString(ListSerializer(SourceAnime.serializer()), copies), together = together.toString(),
+        )
+        instrumentation.startActivitySync(PlayerActivity.intent(context, launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val activity = waitFor { resumed() as? PlayerActivity }
+        fun shot(name: String, settle: Long = 900) {
+            Thread.sleep(settle)
+            val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return
+            File(out, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        fun room(): Any? { var r: Any? = null; instrumentation.runOnMainSync {
+            r = PlayerActivity::class.java.getDeclaredField("together").apply { isAccessible = true }.get(activity) }; return r }
+        @Suppress("DEPRECATION") fun back() { instrumentation.runOnMainSync { activity.onBackPressed() }; Thread.sleep(600) }
+        val end = SystemClock.elapsedRealtime() + 8_000
+        while (SystemClock.elapsedRealtime() < end) Thread.sleep(250)
+        assertTrue("الغرفة متصلة", room() != null)
+        // لوحة الغرفة كما يفتحها المضيف من الشريط العلوي، وتبقى ثابتة (لا تُبنى كل نصف ثانية)
+        val panelOwner = room()!!
+        instrumentation.runOnMainSync { panelOwner.javaClass.getDeclaredMethod("openPanel").apply { isAccessible = true }.invoke(panelOwner) }
+        shot("leave-01-panel", 1500)
+        back()
+        // زر الرجوع بلا ورقة مفتوحة: سؤال بدل خروج صامت
+        back()
+        shot("leave-02-back-confirm", 900)
+        var pressed = false
+        instrumentation.runOnMainSync {
+            val found = ArrayList<android.view.View>()
+            activity.window.decorView.findViewsWithText(found, "كمّل الفيديو بدون الغرفة", android.view.View.FIND_VIEWS_WITH_TEXT)
+            found.firstOrNull { it.isClickable }?.let { pressed = it.performClick() }
+        }
+        assertTrue("زر «كمّل الفيديو بدون الغرفة» موجود", pressed)
+        shot("leave-03-solo", 1500)
+        assertTrue("المشغّل ما زال مفتوحًا بعد الخروج من الغرفة", !activity.isFinishing && !activity.isDestroyed)
+        assertTrue("لا غرفة بعد الخروج", room() == null)
+        instrumentation.runOnMainSync { activity.finish() }
+        server.shutdown()
+    }
+
     private fun resumed(): Activity? {
         var found: Activity? = null
         instrumentation.runOnMainSync { found = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).firstOrNull() }

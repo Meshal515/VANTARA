@@ -124,6 +124,16 @@ describe('Update Engine: خط الأساس', () => {
     expect((await list(e, 'section=manga')).events.map((x) => x.id)).toEqual(['ext:ok|c:5', 'ext:old|c:21']);
   });
 
+  it('UP1: an absurd number on first sight does not become the baseline nor an event', async () => {
+    const e = env();
+    // «Vol.2 Ch.5» قُرئ 2025 مثلًا: فوق 1..40 بفجوة شاذة
+    expect(await observe(e, [manga('ext:outlier', [...range(1, 40), 2025], 'x', { 40: NOW - H, 2025: NOW - H })], NOW)).toMatchObject({ created: 1 });
+    expect((await list(e, 'section=manga')).events.map((r) => r.number)).toEqual([40]);
+    // الفصل الحقيقي التالي يظهر حدثًا (كان يُرفض لأنه تحت 2025)
+    expect(await observe(e, [manga('ext:outlier', [41, ...range(1, 40)], 'x', { 41: NOW })], NOW + H)).toMatchObject({ created: 1 });
+    expect((await list(e, 'section=manga')).events.map((r) => r.number)).toContain(41);
+  });
+
   it('ignores absurd jumps (bad numbering) and older backfill under the watermark', async () => {
     const e = env();
     await observe(e, [manga('ext:d', [50], 'x')], NOW);

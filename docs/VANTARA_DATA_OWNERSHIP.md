@@ -45,6 +45,7 @@ VANTARA كان يخزّن نفس المعنى في مخزنين:
 | `library.membership` | UCHIYOMI | D1 | `library`, `works` (D1، مرآة) |
 | `reading.progress` | UCHIYOMI | D1 | `progress` (D1، صندوق صادر) |
 | `reading.ratings` | D1 | — | `ratings` |
+| `watch.position` | D1 | — | `playback_positions` (موضع التوقف في الحلقة/الفيلم؛ الأحدث بوقت القياس يفوز، مستقل عن تقدم المانجا) |
 | `stats.reading` | D1 | — | `chapter_reads`, `usage_daily` |
 | `social.profile` | D1 | — | `profiles` |
 | `social.presence` | D1 | — | `presence` |

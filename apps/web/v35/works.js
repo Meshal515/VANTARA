@@ -12,7 +12,7 @@
 import engine from '../lib/extension-engine.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
-import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, setTwinAliases, twinsAt } from '../lib/manga-alias-store.js';
+import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
 import { twinAliases } from '../lib/manga-twins.js';
 import { coverCandidates, pickCover } from '../lib/manga-cover.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
@@ -33,6 +33,33 @@ export const STATUS_BY_SMANGA = {
 };
 
 /** مرجع العمل في المزامنة: ثابت لنفس العنوان المطبَّع، وموسوم بمصدره. */
+/**
+ * الأعمال المحفوظة على الجهاز (نسخ كل عمل فُتح، ليُفتح من المكتبة بلا بحث). SY4: كان المخزن كله يُقرأ ويُحلَّل نصًا مع كل
+ * workFromRef (21 موضعًا، منها رسم المكتبة لمئات الأعمال)، ويكبر بلا حد في localStorage المشترك (SY2). هنا: يُقرأ مرة
+ * ويبقى في الذاكرة، والكتابة تحدّثه، وسقف بالأحدث استعمالًا.
+ */
+export const MAX_SAVED_WORKS = 3000;
+export function createSavedWorks({ key, storage = globalThis.localStorage, max = MAX_SAVED_WORKS } = {}) {
+  let all = null;
+  const load = () => {
+    if (all) return all;
+    try { all = JSON.parse(storage?.getItem(key) ?? '{}') ?? {}; } catch { all = {}; }
+    return all;
+  };
+  return {
+    get: (ref) => load()[ref] ?? null,
+    put(ref, value) {
+      const map = load();
+      delete map[ref]; // الأحدث آخرًا: السقف يُسقط الأقدم استعمالًا
+      map[ref] = value;
+      const keys = Object.keys(map);
+      for (const k of keys.slice(0, Math.max(0, keys.length - max))) delete map[k];
+      try { storage?.setItem(key, JSON.stringify(map)); return true; }
+      catch { try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key } })); } catch { /* */ } return false; }
+    },
+  };
+}
+
 export function seriesRefOf(work) {
   return `ext:${work.key}`;
 }
@@ -56,7 +83,7 @@ function loadTwins() {
 function workIndex() {
   void loadAliases();
   loadTwins();
-  const index = canonicalIndex({ aliases: aliasMap() });
+  const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
   const list = index.list;
   index.list = () => {
     const works = list();
@@ -75,7 +102,7 @@ function workIndex() {
 export function canonicalEventWorks(events) {
   void loadAliases();
   loadTwins();
-  const index = canonicalIndex({ aliases: aliasMap() });
+  const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
   const own = new Map();
   for (const e of events ?? []) {
     const work = String(e?.work ?? '');
@@ -750,6 +777,28 @@ export function mergeWorkPages(items) {
     for (const item of before) if (String(item.id).startsWith('ext:')) formerRefs.push([String(item.id), merged.id]);
     return { position: Math.min(...work.keys.map((key) => positionsByKey.get(key) ?? Infinity)), item: merged };
   });
+  // ID6: بطاقة AniList بلا نسخ («الأكثر قراءة»، التصنيفات) تنضم لبطاقة المصدر التي تحمل اسمها الرسمي (الإنجليزي أو
+  // الروماجي أو الأصلي، لا الأسماء البديلة العامة) أو معرّفها الرسمي المؤكد (ID1). بطاقة واحدة بالضبط وإلا لا دمج
+  // (غموض). كانت تُترك «unrelated» فيظهر «Until No Demon Remains» بطاقة بجانب نسخة Asura.
+  const nameOwners = new Map();
+  grouped.forEach((g, i) => {
+    const w = g.item._work;
+    for (const n of [w?.key, ...(w?.keys ?? []), ...(w?.aliases ?? []).map(normalizeTitle)]) {
+      if (!n) continue;
+      if (!nameOwners.has(n)) nameOwners.set(n, new Set());
+      nameOwners.get(n).add(i);
+    }
+  });
+  const official = officialIdMap();
+  for (const { item } of unrelated) {
+    if (!Number.isSafeInteger(item._metaId) || !String(item.id).startsWith('ext:')) continue;
+    const hits = new Set();
+    for (const n of [item.title?.english, item.title?.romaji, item.title?.native].map(normalizeTitle).filter(Boolean)) {
+      for (const i of nameOwners.get(n) ?? []) hits.add(i);
+    }
+    grouped.forEach((g, i) => { if ((g.item._work?.keys ?? []).some((k) => official.get(k) === item._metaId)) hits.add(i); });
+    if (hits.size === 1) formerRefs.push([String(item.id), grouped[[...hits][0]].item.id]);
+  }
   noteRefAliases(formerRefs);
   // بطاقة بلا نسخ (مرجع محفوظ من «الأكثر قراءة» أو جهاز آخر) لعمل له بطاقة بنسخ: بطاقة واحدة.
   // التجميع بفئة المرجع (`canonicalRefOf`)، والفائزة البطاقة التي تحمل نسخًا، في موضع أسبقهما.
@@ -1031,7 +1080,9 @@ const loading = new Map();
  * تصغر أبدًا: فصلٌ عرفناه لا يختفي لأن مصدره تأخّر اليوم.
  * @returns {Promise<object>} العمل بعد أن ردّ كل ما يمكن أن يردّ
  */
-export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false, pinnedSource = null } = {}) {
+export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false, pinnedSource = null, fresh = false } = {}) {
+  // WB1: فتح صريح من المستخدم يطلب قائمة الفصول طازجة (الويب وويندوز)، لا من كاش قد يعود لنصف ساعة
+  const listOpts = fresh ? [{ fresh: true }] : [];
   const id = String(v35work.id);
   // مصدر محدد: نسخته وحدها، ولا اكتشاف في بقية المصادر (المعرّف قد يكون مشتركًا بهوية AniList/MangaDex)
   if (pinnedSource) discover = false;
@@ -1072,7 +1123,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
       list.map(async (edition) => {
         try {
           if (edition === primary && !detail) {
-            const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+            const out = await withTimeout(engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
             detail = out.manga ?? detail;
             // التفاصيل كشفت كوميكس غربية: لا تعود للقوائم على هذا الجهاز
             if (isWesternManga(detail)) learnWestern(v35work._work?.key);
@@ -1081,7 +1132,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
             learnDetailAliases(v35work._work?.key, detail);
             edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {
-            edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS) };
+            edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS) };
           }
           failed.delete(edition.sourceId);
           if (Array.isArray(edition.chapters)) noteEditionChapters(mirrorFamily(edition.sourceId), edition.manga?.url, edition.chapters.length);
@@ -1102,7 +1153,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
       const rest = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId)).filter((e) => e !== primary).slice(0, 2);
       for (const edition of rest) {
         try {
-          const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+          const out = await withTimeout(engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
           if (!out?.manga) continue;
           if (isWesternManga(out.manga)) learnWestern(v35work._work?.key);
           if (adultManga(out.manga)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
@@ -1236,7 +1287,7 @@ export function matchingWork(items, saved) {
   if (exact) return exact;
   const variants = titleVariants(saved);
   if (!variants.length) return null;
-  const index = canonicalIndex({ aliases: aliasMap() });
+  const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
   const own = index.add({ sourceId: 'saved-work-reference', manga: { title: variants[0], altNames: variants.slice(1) } }).key;
   const candidates = items.map((item) => ({ item, keys: (item._work?.editions ?? []).map((edition) => index.add(edition)?.key).filter(Boolean) }));
   const matches = candidates.filter(({ keys }) => keys.some((key) => index.keyOf(key) === index.keyOf(own)));
@@ -1267,7 +1318,7 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false 
         const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS).catch(() => null);
         for (const manga of page?.mangas ?? []) candidates.set(manga.url || normalizeTitle(manga.title), manga);
       }
-      const index = canonicalIndex({ aliases: aliasMap() });
+      const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
       const base = (v35work._work?.editions ?? []).map((e) => index.add(e)?.key).filter(Boolean);
       if (!base.length) base.push(index.add({ sourceId: 'known-work', manga: { title: variants[0], altNames: variants.slice(1) } }).key);
       const hits = [...candidates.values()].map((manga) => ({ manga, key: index.add({ sourceId: source.id, manga })?.key }));

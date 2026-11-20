@@ -3,6 +3,7 @@ import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resume
 import { createEpisodeControls } from './anime-episode-controls.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { animePositionKey, createPositionSync, overlayAllPositions } from '../lib/watch-position.js';
 /**
  * VANTARA ANIME — الرئيسية، صفحة الأنمي، اكتشف، قائمتي.
  *
@@ -24,7 +25,7 @@ import { reportSource } from '../lib/source-report.js';
 import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, RELATION_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, meccaDay, relativeAr } from '../lib/anime-meta.js';
 import { animeTitle } from '../lib/anime-title.js';
-import { createAnimeDiscover } from './anime-discover.js';
+import { anilistFailureText, createAnimeDiscover } from './anime-discover.js';
 import { pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { isNative } from '../pwa/platform.js';
@@ -101,6 +102,7 @@ export function recordWatch(m, episode, position, duration, userId = null) {
   const all = readWatch(userId);
   const w = all[m.id] ?? { id: m.id, episodes: {} };
   Object.assign(w, { title: m.title, poster: m.poster ?? m.posterSmall, banner: m.banner, color: m.color, total: m.episodes ?? null, format: m.format ?? null });
+  delete w._remoteOnly; // شُغّل هنا فعلًا: سجل جهاز كامل
   const done = duration > 0 && position / duration >= 0.9;
   w.episodes[episode] = { position, duration, at: Date.now(), done: done || Boolean(w.episodes[episode]?.done) };
   w.episode = episode;
@@ -122,7 +124,10 @@ export function createAnime(deps) {
   // حسابك: القوائم وعين الحلقة وآخر المشاهدات تُزامَن مثل المانجا (وتظهر في ملفك)
   const account = deps.sync ? createAnimeAccount(deps.sync) : null;
   const currentUser = () => deps.sync?.user?.userId ?? null;
-  const localWatch = () => readWatch(currentUser());
+  // سجل الجهاز، وفوقه موضع التوقف الأحدث من أجهزتك الأخرى (ANX1). الكتابة دائمًا في سجل الجهاز نفسه.
+  const localWatch = () => overlayAllPositions(readWatch(currentUser()), deps.sync, 'anime');
+  const positions = createPositionSync(deps.sync);
+  const positionClock = new Map();
   const saveWatch = (all) => writeJson(watchKey(currentUser()), all);
   const signedIn = () => Boolean(account && deps.sync?.user?.userId);
   // Shelf order is refreshed on entry or a user action, never by background sync.
@@ -358,7 +363,8 @@ export function createAnime(deps) {
   // ───────────── الرئيسية ─────────────
 
   const watching = () => {
-    const entries = new Map(Object.values(localWatch()).filter((w) => w?.id && w.episode).map((w) => [String(w.id), w]));
+    const local = localWatch();
+    const entries = new Map(Object.values(local).filter((w) => w?.id && w.episode && !w._remoteOnly).map((w) => [String(w.id), w]));
     // The owner's server history survives reinstall and is visible on every device.
     // A local position is useful for resume, but never stands in for another user's data.
     if (signedIn()) for (const row of deps.sync.rows('work_views', (r) => r.user_id === currentUser() && !r.removed && r.series_ref?.startsWith('anime:'))) {
@@ -366,8 +372,9 @@ export function createAnime(deps) {
       const id = rawId.startsWith("addon-") ? rawId : Number(rawId);
       const episode = Number(row.chapter_number ?? /\d+(?:\.\d+)?/.exec(row.chapter_label ?? '')?.[0]);
       if ((!String(id).startsWith("addon-") && !Number.isFinite(id)) || !Number.isFinite(episode) || episode <= 0) continue;
-      const old = entries.get(String(id));
-      if (old && old.at >= row.viewed_at) continue;
+      // موضع من جهاز آخر (ANX1) لعمل لم يُشغَّل هنا: يُلحق ببطاقة الحساب
+      const old = entries.get(String(id)) ?? (local[String(id)]?._remoteOnly ? local[String(id)] : null);
+      if (old && !old._remoteOnly && old.at >= row.viewed_at) continue;
       entries.set(String(id), {
         id, episode, at: row.viewed_at, title: row.series_title ?? old?.title ?? `#${id}`,
         poster: row.cover_url ?? old?.poster ?? null, episodes: old?.episodes ?? {},
@@ -422,8 +429,8 @@ export function createAnime(deps) {
     q('animeHome').replaceChildren(box);
   }
 
-  function renderError(retry) {
-    const box = emptyBox('offline', 'تعذّر جلب الأنمي', 'تحقّق من الاتصال ثم أعد المحاولة.');
+  function renderError(retry, error = null) {
+    const box = emptyBox('offline', 'تعذّر جلب الأنمي', anilistFailureText(error, 'جلب الأنمي'));
     box.append(button('an-btn an-btn--primary', 'أعد المحاولة', retry));
     q('animeHome').replaceChildren(box);
   }
@@ -451,8 +458,8 @@ export function createAnime(deps) {
           const view = renderHome(fresh);
           if (first) revealIn(view);
         }
-      } catch {
-        if (!state.home) renderError(() => void loadHome({ force: true }));
+      } catch (error) {
+        if (!state.home) renderError(() => void loadHome({ force: true }), error);
       }
     };
     state.loading = run().finally(() => (state.loading = null));
@@ -2406,6 +2413,13 @@ export function createAnime(deps) {
     if (!cur || (p.animeId ? String(p.animeId) !== String(cur.m.id) : p.session !== cur.session)) return;
     // An old native player must never credit playback to the account now signed in.
     if (cur.userId !== currentUser()) return;
+    // ANX1: زمن التشغيل الفعلي لهذه الحلقة في الجلسة (قفزة لا تُعد)؛ الرفع لا يبدأ قبل 30 ث منه
+    {
+      const key = animePositionKey(cur.m.id, Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n);
+      const last = positionClock.get(key);
+      if (Number.isFinite(p.position) && last != null) positions.played(key, p.position - last);
+      if (Number.isFinite(p.position)) positionClock.set(key, p.position);
+    }
     if (!nativeFollowTime() && Number.isFinite(p.position)) {
       const now = Date.now();
       const d = watchClock.pos === null ? 0 : p.position - watchClock.pos;
@@ -2425,6 +2439,9 @@ export function createAnime(deps) {
     const n = Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
     if (p.duration > 0) {
       recordWatch(cur.m, n, p.position, p.duration, cur.userId);
+      // الرقم وحده إلى حسابك: الجهاز الآخر يكمل من الدقيقة نفسها (ANX1)
+      positions.record(`anime:${cur.m.id}`, animePositionKey(cur.m.id, n), p.position, p.duration, { final: Boolean(p.final) });
+      if (p.final) { positions.end(animePositionKey(cur.m.id, n)); positionClock.clear(); }
       account?.recordView(cur.m, n);
       // 90% = شوهدت، في حسابك (مرة واحدة)
       const watchedRatio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);
@@ -2613,7 +2630,8 @@ export function createAnime(deps) {
       };
 
       const extraFoot = [];
-      if (hub && !hub.matches(togetherRef, n)) {
+      // داخل أي غرفة: لا «شاهد مع أصدقائك» ثانية (كانت تنشئ غرفة جديدة وتخرجك من الأولى بصمت، TG18)
+      if (hub && !hub.session) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'anime',

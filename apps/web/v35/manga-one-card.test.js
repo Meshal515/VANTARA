@@ -74,6 +74,20 @@ describe('manga listing: one work = one card', () => {
     expect(merged[0].coverImage.large).toBe('/cover.jpg');
   });
 
+  // ID6: بطاقة AniList بلا نسخ تنضم لبطاقة المصدر باسمها الرسمي؛ وبطاقتان تحملان الاسم = غموض فلا دمج
+  it('an AniList-only card (popular, categories) joins the source card that carries its official name', () => {
+    const anilist = { id: 'ext:until no demon remains', _metaId: 214315, title: { english: 'Until No Demon Remains', romaji: 'Myeolgwisudojeon', native: '멸귀수도전' }, synonyms: ['The Tale of Cultivation'], coverImage: { large: '/al.jpg' }, _work: { key: 'until no demon remains', editions: [] } };
+    const asura = card('ar.asura', 'Myeolgwisudojeon', '/m');
+    const merged = mergeWorkPages([anilist, asura]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]._work.editions).toHaveLength(1);
+    // اسماه الرسميان عند بطاقتين منفصلتين بلا دليل يجمعهما: لا يُعرف أيهما، فتبقى بطاقة AniList وحدها
+    resetAliases();
+    const twoOwners = mergeWorkPages([anilist, card('ar.a', 'Myeolgwisudojeon', '/a'), card('ar.b', '멸귀수도전', '/b')]);
+    expect(twoOwners).toHaveLength(3);
+    expect(twoOwners.find((w) => w.id === 'ext:until no demon remains')._work.editions).toHaveLength(0);
+  });
+
   it('a thinner refreshed edition does not erase the already loaded cover', () => {
     const known = card('ar.a', 'Magic Emperor', '/magic', { thumbnailUrl: '/known-cover.jpg' });
     const fresh = card('ar.a', 'Magic Emperor', '/magic', { thumbnailUrl: null });

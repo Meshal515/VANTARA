@@ -94,3 +94,13 @@ describe('#311 anime genre faces', () => {
     expect(discover.retainedGenreCards()).toBe(0);
   });
 });
+
+describe('DS1: an AniList rate limit is said as such, not as a lost connection', () => {
+  it('busy, offline and other failures each say their own reason', async () => {
+    const { anilistFailureText } = await import('./anime-discover.js');
+    expect(anilistFailureText({ code: 'anilist_busy' }, 'البحث')).toContain('مزدحم');
+    expect(anilistFailureText(new Error('anilist_429'), 'البحث')).toContain('مزدحم');
+    expect(anilistFailureText(new Error('boom'), 'البحث')).toBe('تعذّر البحث — حاول مرة ثانية بعد لحظات.');
+    expect(anilistFailureText(new Error('boom'))).not.toContain('الاتصال');
+  });
+});

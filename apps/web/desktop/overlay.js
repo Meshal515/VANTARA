@@ -213,7 +213,14 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     if (!state.duration) return;
     showPreview(dragging && dragMs != null ? dragMs : msAt(e.clientX));
   });
-  const endDrag = () => { if (!dragging) return; dragging = false; bar.classList.remove('pp-bar--drag'); if (dragMs != null) cmd('seek', dragMs); hidePreview(); showControls(); };
+  const endDrag = () => {
+    if (!dragging) return; dragging = false; bar.classList.remove('pp-bar--drag');
+    if (dragMs != null) {
+      if (Math.abs(dragMs - (state.position ?? 0)) >= FAR_SEEK_MS) { farSeek = { at: Date.now(), done: state.seekDone ?? 0 }; paintStage(); }
+      cmd('seek', dragMs);
+    }
+    hidePreview(); showControls();
+  };
   bar.addEventListener('pointerup', endDrag);
   bar.addEventListener('pointercancel', endDrag);
   bar.addEventListener('pointerleave', () => { hoverTip.hidden = true; if (!dragging) hidePreview(); });
@@ -694,6 +701,11 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const safeArt = (url) => (typeof url === 'string' && /^https:\/\//i.test(url) ? url : null);
   let stageMode = null, stageStart = 0, stageProgress = 0, stageEpoch = null, stageLogo = null, stageBgSrc = null;
   let stageTick = 0, stageNameTimer = 0, stageShowTimer = 0, stageHideTimer = 0;
+  // WS1 (طلب المالك، 19 نوفمبر): قفزة كبيرة (دقيقة فأكثر) تُظهر شاشة الإطار والشعار فورًا كما عند فتح الفيديو، بدل بقاء
+  // الإطار القديم ثوانيَ بلا علامة حتى ينفد كاش mpv. تختفي حين يعلن المشغّل وصول الموضع الجديد (seekDone).
+  const FAR_SEEK_MS = 60000;
+  let farSeek = null;
+  const farSeekActive = () => farSeek != null && Date.now() - farSeek.at < 120000;
   const paintFill = () => {
     const p = stageMode === 'startup' ? stageProgress : 1;
     logoFill.style.clipPath = `inset(0 ${Math.round((1 - p) * 1000) / 10}% 0 0)`;
@@ -749,7 +761,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     paintArt();
     const failed = !!state.status?.error;
     const startup = !state.ready && !failed;
-    const stalled = !!state.ready && !!state.buffering && !state.paused && !failed;
+    const far = farSeekActive();
+    const stalled = !!state.ready && ((!!state.buffering && !state.paused) || far) && !failed;
     if (startup) {
       timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
       if (stageEpoch !== state.loadEpoch && stageMode === 'startup') { stageStart = Date.now(); stageProgress = 0; }
@@ -757,7 +770,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       showStage('startup'); advanceStage();
     } else if (stalled) {
       // أثناء المشاهدة بعد مهلة قصيرة فقط، فلا يومض الشعار مع كل توقف لحظي
-      if (stageMode !== 'stalled' && !stageShowTimer) stageShowTimer = timers.setTimeout(() => { stageShowTimer = 0; if (state.ready && state.buffering && !state.paused) showStage('stalled'); }, 450);
+      // القفزة البعيدة بعد 200ms (قفزة داخل المحمَّل تنتهي قبلها فلا تومض الشاشة)، والتوقف العادي بعد 450ms
+      if (stageMode !== 'stalled' && !stageShowTimer) stageShowTimer = timers.setTimeout(() => { stageShowTimer = 0; if (state.ready && ((state.buffering && !state.paused) || farSeekActive())) showStage('stalled'); }, far ? 200 : 450);
       else if (stageMode === 'startup') finishStage();
     } else {
       timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
@@ -807,6 +821,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     volBtn.innerHTML = (state.volume ?? 100) > 0 ? ICON.volume : ICON.mute;
     fullTop.innerHTML = fullBottom.innerHTML = state.fullscreen ? ICON.fullExit : ICON.full;
     if (state.skip) { skipBtn.hidden = false; skipBtn.textContent = state.skip; } else skipBtn.hidden = true;
+    if (farSeek && (state.seekDone ?? 0) !== farSeek.done) farSeek = null;
     paintTime();
     paintStage();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }

@@ -17,6 +17,7 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { cinemaPositionKey, createPositionSync, overlayAllPositions } from '../lib/watch-position.js';
 import { isNative } from '../pwa/platform.js';
 import { addonName, createServerSheet } from './server-sheet.js';
 import { isChecking, isUnavailable, isValid, validity } from '../lib/route-validity.js';
@@ -211,7 +212,10 @@ export function createCinema(deps) {
 
   // ───────────── التخزين المحلي ─────────────
 
-  const watchAll = () => readJson(userKey('watch', currentUser()), {});
+  // سجل الجهاز، وفوقه موضع التوقف الأحدث من أجهزتك الأخرى (ANX1). الكتابة دائمًا في سجل الجهاز نفسه.
+  const watchAll = () => overlayAllPositions(readJson(userKey('watch', currentUser()), {}), deps.sync, 'cinema');
+  const positions = createPositionSync(deps.sync);
+  const positionClock = new Map();
   // خلفية صفحة العمل التي ظهرت فعلًا لكل عمل: الفتح التالي يرسمها من أول إطار (لا ملصق ثم خلفية)
   const HERO_PICK_KEY = 'vantara.cinema.heroPick.v1';
   const heroPick = {
@@ -230,10 +234,12 @@ export function createCinema(deps) {
     const all = watchAll();
     const w = all[m.id] ?? { ...slim(m), episodes: {} };
     Object.assign(w, slim(m));
+    delete w._remoteOnly; // شُغّل هنا فعلًا: سجل جهاز كامل
     const ep = `${season ?? 0}:${n}`;
     const was = Boolean(w.episodes[ep]?.done);
     const done = was || (duration > 0 && position / duration >= 0.9);
-    w.episodes[ep] = { ...w.episodes[ep], position, duration, done };
+    // `at` لكل حلقة: وقت القياس هنا، فيُقارن بموضع الحساب (الأحدث يفوز، ANX1)
+    w.episodes[ep] = { ...w.episodes[ep], position, duration, done, at: Date.now() };
     // اكتمال التشغيل علامة «شوهدت» في الحساب أيضًا (تتغلّب على إلغاء قديم من جهاز آخر)
     if (done && !was) markAccount(m, [[season ?? 0, n]], true);
     w.season = season;
@@ -2355,7 +2361,8 @@ export function createCinema(deps) {
         resume: position > 5000 ? `تكمل من ${engine.clock(position)}` : null,
       };
       const extraFoot = [];
-      if (hub && !hub.matches(togetherRef, togetherEp)) {
+      // داخل أي غرفة: لا «شاهد مع أصدقائك» ثانية (كانت تنشئ غرفة جديدة وتخرجك من الأولى بصمت، TG18)
+      if (hub && !hub.session) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'cinema',
@@ -2603,6 +2610,14 @@ export function createCinema(deps) {
   engine.on('playback', (p) => {
     const cur = state.playing;
     if (!cur || String(p.animeId ?? '') !== cur.key || cur.userId !== currentUser()) return;
+    // ANX1: زمن التشغيل الفعلي لهذه الحلقة في الجلسة؛ الرفع لا يبدأ قبل 30 ث منه
+    {
+      const ep = cur.m.type === 'series' && Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
+      const key = cinemaPositionKey(cur.m.id, cur.m.type === 'series' ? cur.season : 0, ep);
+      const last = positionClock.get(key);
+      if (Number.isFinite(p.position) && last != null) positions.played(key, p.position - last);
+      if (Number.isFinite(p.position)) positionClock.set(key, p.position);
+    }
     if (!nativeFollowTime() && Number.isFinite(p.position)) {
       const now = Date.now();
       const d = clock.pos === null ? 0 : p.position - clock.pos;
@@ -2615,6 +2630,9 @@ export function createCinema(deps) {
     const n = cur.m.type === 'series' && Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
     if (p.duration > 0) {
       recordWatch(cur.m, cur.m.type === 'series' ? cur.season : 0, n, p.position, p.duration);
+      // الرقم وحده إلى حسابك: الجهاز الآخر يكمل من الدقيقة نفسها (ANX1)
+      positions.record(`cinema:${cur.m.id}`, cinemaPositionKey(cur.m.id, cur.m.type === 'series' ? cur.season : 0, n), p.position, p.duration, { final: Boolean(p.final) });
+      if (p.final) { positions.end(cinemaPositionKey(cur.m.id, cur.m.type === 'series' ? cur.season : 0, n)); positionClock.clear(); }
       // «أنهى S02E03» / «أنهى فيلم» للأصدقاء (حسب خصوصيتك في الخادم)، مرة لكل حلقة
       const ratio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);
       if (ratio >= 0.9) completeOnce(cur.m, cur.m.type === 'series' ? cur.season : null, n);

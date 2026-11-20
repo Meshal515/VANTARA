@@ -32,14 +32,14 @@ import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, createSavedWorks, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { readerEngine } from '../lib/reader-engine.js';
 import { endWorkSession, setTranslation, translationOn } from './reader-translate.js';
 import engine from '../lib/extension-engine.js';
-import { chapterKeyOf, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
-import { countMainChapters, titlesMatch } from '../lib/catalog.js';
+import { chapterKeyOf, chapterKeysAcross, clearChapterMarks, continueChapter, isChapterRead, mainChapters, markChapter, markChapters, sameChapterKey, startChapter } from './reading.js';
+import { countMainChapters, normalizeTitle, titlesMatch } from '../lib/catalog.js';
 import { announceCover, cachedCover, coverCandidates, coverPreview, forgetCover, knownCover, nativeCover, onCoverKnown, rememberCover } from './covers.js';
 import { readTranslateSettings, setTranslationLocked, translationLocked, writeTranslateSettings } from '../lib/translate-settings.js';
 import { benchmarkEngines, benchmarkPage, diagnoseCleaning, downloadModels, formatBytes, jobFinished, jobProgress, jobStop, modelsStatus, nativeTranslationAvailable, notificationPermission, removeModels } from '../lib/translation-native.js';
@@ -68,7 +68,7 @@ import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
-import { artRatio, createArtStore } from '../lib/art.js';
+import { artRatio, createArtStore, isLocalArt } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { installRemovedGate, isRemovedAny, removeWorkEverywhere, removedChanged, restoreRemovedWork, setRemovedSource, tagWork } from '../lib/removed-works.js';
@@ -84,7 +84,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { canonicalRefOf, noteRefAliases, refsOf } from '../lib/manga-alias-store.js';
+import { canonicalRefOf, learnAliases, noteOfficialIds, noteRefAliases, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -260,6 +260,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
   if (globalThis.Capacitor?.getPlatform?.() === 'android') root.classList.add('native-android');
   root.innerHTML = SHELL_HTML;
   const sourceVerification = createSourceVerification();
+  // SY2: تخزين الجهاز ممتلئ فلم يُحفظ سجل الدمج أو قرار غلاف: يُقال مرة في الجلسة بدل أن يضيع بصمت
+  let storageFullSaid = false;
+  const onStorageFull = () => { if (storageFullSaid) return; storageFullSaid = true; setTimeout(() => toast('مساحة التخزين في التطبيق ممتلئة: بعض ما تعلّمه عن أعمالك لن يُحفظ بعد إعادة الفتح. امسح الكاش من الإعدادات', 6000), 0); };
+  globalThis.addEventListener?.('vantara:storage-full', onStorageFull);
+  // ES1: ملف إعدادات الإضافات كان تالفًا فحُفظ جانبًا وأقلع التطبيق بلا إضافات المستخدم بدل أن ينهار
+  const onExtensionsRecovered = () => setTimeout(() => toast('ملف إعدادات الإضافات كان تالفًا فحفظناه جانبًا. أضف مستودعاتك وإضافاتك من جديد من صفحة الإضافات', 7000), 0);
+  globalThis.addEventListener?.('vantara:extensions-recovered', onExtensionsRecovered);
 
   // Startup invariant: the shell must mount before any optional native bridge work.
   // Follow-time is telemetry/accounting; a missing, stale, or temporarily broken
@@ -400,22 +407,22 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // العمل من المكتبة بلا بحث جديد.
 
   const serverWork = (ref) => sync.rows('works', (x) => x.series_ref === ref)[0] ?? null;
+  // يُقرأ مرة ويبقى في الذاكرة (SY4)
+  const savedWorks = createSavedWorks({ key: WORKS_KEY });
   /**
    * يحفظ نسخ العمل في الجهاز، ويخبر الخادم بما لا يعرفه منها: عملٌ فتحتَه
    * يُفتح بعدها على كل جهاز بنفس نسخه، بلا بحث.
    */
   function rememberWork(w) {
-    const all = readJson(WORKS_KEY, {});
     // عمل فُتح من مصدر محدد: تُضاف نسخته إلى المحفوظ ولا تستبدل نسخ بقية المصادر
-    const editions = w._pinnedSource ? [...(all[w.id]?.editions ?? []).filter((e) => e.sourceId !== w._pinnedSource), ...(w._work.editions ?? [])] : w._work.editions ?? [];
-    all[w.id] = { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions };
-    writeJson(WORKS_KEY, all);
+    const editions = w._pinnedSource ? [...(savedWorks.get(w.id)?.editions ?? []).filter((e) => e.sourceId !== w._pinnedSource), ...(w._work.editions ?? [])] : w._work.editions ?? [];
+    savedWorks.put(w.id, { key: w._work.key, title: titleOf(w), thumbnailUrl: w._work.thumbnailUrl, editions });
     const facts = { title: titleOf(w), coverUrl: w._work.thumbnailUrl ?? null, editions };
     if (!editions.length || !describesMore(serverWork(String(w.id)), facts)) return;
     sync.enqueue('work.describe', { seriesRef: String(w.id), ...facts, editions: compactEditions(editions) });
   }
   function workFromRef(ref, fallbackTitle, cover) {
-    const saved = readJson(WORKS_KEY, {})[ref];
+    const saved = savedWorks.get(ref);
     const row = serverWork(ref);
     const title = displayTitle(ref, row?.title, saved?.title, fallbackTitle);
     // الغلاف الموحّد (الخادم) أولًا، ثم ما عرفه هذا الجهاز: نفس الغلاف في كل الشاشات
@@ -529,9 +536,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
       sourceId: '',
       chapter: { chapterNumber: Number(row.chapter_number), name: row.chapter_label ?? '' },
     });
-    // بحث بالمفتاح: السجل يُرسم كثيرًا، ومسح كل العلامات لكل صف كان يثقله
-    if (sync.row('chapter_marks', `${me()}/${chapterKey}`)?.read) return true;
-    return Number(sync.row('progress', `${me()}/${chapterKey}`)?.ratio) >= 0.2;
+    // بحث بالمفتاح: السجل يُرسم كثيرًا، ومسح كل العلامات لكل صف كان يثقله. وبكل مراجع العمل (المرحلة 1، RD6)
+    const keys = chapterKeysAcross(String(row.series_ref), chapterKey);
+    if (isChapterRead(sync, String(row.series_ref), chapterKey)) return true;
+    return keys.some((k) => Number(sync.row('progress', `${me()}/${k}`)?.ratio) >= 0.2);
   }
   const viewRows = (userId = me()) =>
     sync
@@ -618,7 +626,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
    * فتجده صفحة العمل محسومًا بأبعاده (يظهر بنسبته من أول إطار، والغلاف نفسه في الخارج والداخل). كانت ثلاث
    * قواعد (البطاقات: أول رابط يتحمّل، وصفحة العمل: بالقياس، والفهرس: بشكل الرابط) وأربع ذاكرات.
    */
-  const art = createArtStore();
+  // المرحلة 1 (CV4): قرار غلاف العمل يُقرأ من كل مراجعه (refsOf)، فلا يتبدل الغلاف حين يتغيّر مفتاح البطاقة
+  const art = createArtStore({ refsOf });
+  // اسم ثانٍ للمخزن حيث يظلّل معامل «art» (قرار الفن) الاسم الأول
+  const artStore = art;
   // حُذف مصدر: أغلفته المحسومة تُنسى فتُحسم من غيره (قاعدة المالك: الغلاف ثابت إلا بحذف مصدره)
   // قائمة فارغة لا تُصدَّق (لم تكتمل بعد، أو المحرك غير متاح): لا يُنسى شيء
   void engine.sources().then((list) => { if (Array.isArray(list) && list.length) art.forgetSources(new Set(list.map((x) => x.id))); }).catch(() => {});
@@ -658,6 +669,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
           // كل غلاف يدخل سباق «أول مقبول يفوز» لحظة وصوله (قاعدة المالك 16 نوفمبر)، لا ينتظر أبطأ الأربعة
           const sources = artSources(work).slice(0, 4).map((c) => ({
             url: Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url),
+            // القرار بالرابط الأصلي، والملف المحلي كاش يُقرأ بـcachedCover (CV1)
+            origin: c.url,
             sid: c.sourceId,
           }));
           const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);
@@ -687,7 +700,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     img.decoding = fade ? 'async' : 'sync';
     if (fade) img.classList.add('img-fade');
     if (position) img.style.objectPosition = position;
-    img.onerror = () => { art.forget(String(work?.id ?? '')); onFail?.(); };
+    // CV1/CV3: فشل الملف المحلي (قلّمه المحرّك) ← الرابط الأصلي، ويُعاد تخزينه لاحقًا. فشل الأصل لا يمحو القرار
+    // (art.failed يعدّه)، وتعرض البطاقة بديلها الآن والفتحة التالية تعيد المحاولة بالغلاف نفسه
+    img.onerror = () => {
+      if (img.getAttribute('src') !== d.cover && !isLocalArt(d.cover)) { forgetCover(d.cover); img.src = d.cover; return; }
+      art.failed(String(work?.id ?? ''));
+      onFail?.();
+    };
+    img.onload = () => art.shown(String(work?.id ?? ''));
     img.src = src;
     container.replaceChildren(img);
     return d.cover;
@@ -961,6 +981,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     try {
       const matches = await fetchMangaMatches(batch.map((b) => b.title));
       batch.forEach(({ title, resolve, resolveArt }) => { resolve(matches.get(title)?.rating ?? null); resolveArt(matches.get(title)?.art ?? null); });
+      // الهوية الرسمية المؤكدة تُتعلَّم (ID1، ID2): المعرّف دليل دمج، وأسماء AniList البديلة أسماء للعمل نفسه. تُستعمل في بناء
+      // الفهرس التالي لا في البطاقات الظاهرة الآن (لا يتبدل شيء تحت عينك). الحارسان في matchMangaIdentity وفي الدمج نفسه
+      const learnedIds = [];
+      for (const { title } of batch) {
+        const identity = matches.get(title)?.identity;
+        if (!identity) continue;
+        const key = normalizeTitle(title);
+        learnedIds.push([key, identity.id]);
+        learnAliases(key, identity.names);
+      }
+      if (learnedIds.length) noteOfficialIds(learnedIds);
     } catch {
       batch.forEach(({ title, resolve, resolveArt }) => { ratingPromises.delete(title); artPromises.delete(title); resolve(null); resolveArt(null); });
     } finally {
@@ -1005,6 +1036,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }, { tone: 'manga' });
   }
 
+  /**
+   * بطاقة حُجبت بعد ظهورها (AF2): تُخفى في مكانها بـvisibility ولا تُزال، فلا تقفز الشبكة تحت الإصبع؛ وتختفي فعلًا
+   * في الرسم التالي للقائمة لأن مفتاحها محجوب. inert يُخرجها من اللمس والتركيز وقارئ الشاشة.
+   */
+  function hideBlockedCard(a) {
+    a.dataset.blocked = '';
+    a.inert = true;
+    a.setAttribute('aria-hidden', 'true');
+    a.onclick = null;
+  }
+
   function card(work, { meta } = {}) {
     const a = el('article', 'work-card');
     // محذوف من التطبيق: لا بطاقة في أي قائمة (المكتبة والسجل لا يمران من فلتر البحث)
@@ -1038,7 +1080,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
         // AniList يعرف العمل للكبار (هنتاي، إيتشي…): يُحجب ويختفي من هنا ومن كل قائمة بعدها
-        if (rated.adult) { for (const k of [work._work?.key, ...(work._work?.keys ?? [])]) blockKey(k); a.remove(); return; }
+        if (rated.adult) { for (const k of [work._work?.key, ...(work._work?.keys ?? [])]) blockKey(k); hideBlockedCard(a); return; }
         score.innerHTML = `${glyph('star', { size: 11, filled: true })}<b>${rated.score.toFixed(1)}</b>`;
         score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
         score.setAttribute('aria-label', score.title);
@@ -1346,6 +1388,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (host.children[i] !== block) host.insertBefore(block, host.children[i] ?? null);
     });
     for (const child of [...host.children]) if (!blocks.includes(child)) child.remove();
+  }
+  // آخر لمس أو تمرير (طوابع فقط، لا تحريك): ما يصل من المزامنة ينتظر سكون اليد قبل أن يمس ما تحتها
+  let handsAt = 0;
+  let handsDown = 0;
+  const noteHands = () => { handsAt = Date.now(); };
+  document.addEventListener('pointerdown', () => { handsDown += 1; noteHands(); }, { passive: true, capture: true });
+  for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, () => { handsDown = Math.max(0, handsDown - 1); noteHands(); }, { passive: true, capture: true });
+  document.addEventListener('scroll', noteHands, { passive: true, capture: true });
+  document.addEventListener('wheel', noteHands, { passive: true, capture: true });
+  const handsBusy = () => handsDown > 0 || Date.now() - handsAt < HANDS_QUIET_MS;
+  const HANDS_QUIET_MS = 700;
+  let homeRepaintTimer = 0;
+  /** RB2: رسم واحد للرئيسية بعد سكون اللمس والتمرير وانتهاء الحركة، مهما تتابعت التغييرات. */
+  function repaintHomeWhenIdle() {
+    if (homeRepaintTimer) return;
+    const tick = () => {
+      if (currentPage() !== 'home') { homeRepaintTimer = 0; return; }
+      if (handsBusy() || motionActive(q('home'))) { homeRepaintTimer = setTimeout(tick, HANDS_QUIET_MS); return; }
+      homeRepaintTimer = 0;
+      if (!state.heroItems.length) refreshFriendsHero();
+      renderHome();
+    };
+    homeRepaintTimer = setTimeout(tick, 250);
   }
   /** بطاقة «مكتمل»: عمل واحد يُقرأ دفعة واحدة، بضوء من غلافه نفسه وفعل واحد. */
   function pickBlock(existing, title, w) {
@@ -1821,13 +1886,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {
-      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null });
+      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null, fresh: true });
       if (state.current?.id !== work.id) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
       if (!full._chapters?.length) {
         // مصدرٌ ردّ بلا فصول ليس مصدرًا صامتًا: نقول ما حدث فعلًا ولكل مصدر سببه
         const failed = full._failedSources ?? [];
+        // مصدر يطلب تحققًا بيد إنسان (صفحة تحقق بقيت بعد المتصفح المخفي): زر يفتح صفحة التحقق ثم يعيد الجلب،
+        // كما في الـAPK. «أعد المحاولة» وحدها لا تفيد: الموقع سيرد بالصفحة نفسها
+        const blocked = failed.some((f) => /تحقق|Cloudflare/i.test(String(f.reason ?? ''))) ? sourceVerification.list().map((x) => x.host) : [];
         emptyState(q('chapterPanel'), {
           icon: 'offline',
           error: true,
@@ -1835,7 +1903,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
           text: failed.length
             ? failed.map((f) => `${displayName(f.label, f.sourceId)}: ${f.reason ?? 'لم يرد في الوقت'}`).join(' · ')
             : 'ردّت المصادر، ولا فصول فيها لهذا العمل الآن.',
-          action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
+          action: blocked.length
+            ? { label: 'تحقق من المصدر', icon: 'refresh', run: async () => {
+              for (const host of blocked) {
+                const out = await sourceVerification.begin(host);
+                if (!out?.ok && out?.error) toast(out.error);
+              }
+              if (state.current?.id === work.id) void openWork(work);
+            } }
+            : { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
         });
         setReadCta(null);
       }
@@ -2079,7 +2155,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.decoding = 'async';
         img.classList.add('img-fade');
         if (fit) img.classList.add('mw-fit');
-        img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); workReady(); };
+        img.onerror = () => {
+          // الملف المحلي ← الرابط الأصلي (CV1)؛ فشل الأصل يُعدّ ولا يمحو القرار (CV3)
+          if (img.getAttribute('src') !== art.cover && !isLocalArt(art.cover)) { forgetCover(art.cover); img.src = art.cover; return; }
+          artStore.failed(ref);
+          if (live()) void mountImage(cover, w, { final: true });
+          workReady();
+        };
         // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
         img.onload = () => { if (live()) workReady(); };
         img.src = cachedCover(art.cover) ?? art.cover;
@@ -2653,7 +2735,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const src = q('sourcesBlock');
     src.hidden = false;
     q('sourceRow').replaceChildren(...[96, 84, 92].map((wpx) => {
-      const chip = el('span', 'source-chip skeleton');
+      const chip = el('span', 'source-chip skeleton-inline');
       chip.style.width = `${wpx}px`;
       return chip;
     }));
@@ -2667,7 +2749,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const ranges = q('chapterRanges');
     if (ranges) {
       ranges.hidden = false;
-      ranges.replaceChildren(...[0, 1, 2, 3].map(() => el('span', 'mw-range-skel skeleton')));
+      ranges.replaceChildren(...[0, 1, 2, 3].map(() => el('span', 'mw-range-skel skeleton-inline')));
     }
     // الهيكل بعدد ما سيأتي: نطاق كامل (50) في الشبكة إن عُرف أن الفصول أكثر، وإلا عددها
     const grid = lookIs('resume');
@@ -2689,7 +2771,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   const chapterNumberText = (r) => (Number.isFinite(r?.number) && r.number >= 0 ? String(Math.round(r.number * 10) / 10) : '—');
   /** اسمٌ لا يزيد على الرقم («الفصل 48»، «Chapter 48») لا يُكرَّر: يُكتب «الفصل 48» بالعربي. */
-  const plainChapterName = (name) => !name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name);
+  // اسم فصل بلا معنى زائد: رقم وحده، أو اسم العمل نفسه ثم الرقم («Raising villains the right way - 1»، بلاغ المالك):
+  // يُعرض «الفصل 1» بدل تكرار اسم العمل الطويل في الزر وفي صفوف الفصول
+  const titleWords = (t) => String(t ?? '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const plainChapterName = (name) => {
+    if (!name || /^\s*(?:الفصل|فصل|chapter|ch\.?|ep\.?)?\s*#?\s*[\d.]+\s*$/i.test(name)) return true;
+    const rest = titleWords(name);
+    const w = state.current;
+    const titles = [w?.title?.english, w?.title?.romaji, w?.title?.native, w?._work?.title, ...(w?.synonyms ?? [])].map(titleWords).filter((t) => t.length > 2);
+    return titles.some((t) => rest.startsWith(t) && /^(?:(?:الفصل|فصل|chapter|ch|ep)\s*)?[\d.\s]*$/i.test(rest.slice(t.length).trim()));
+  };
 
   /**
    * زرّ القراءة: «ابدأ» لمن لم يقرأ، «تابع» لمن قرأ، ومعه الفصل الذي سيُفتح ومصدره («الفصل 143 · Team X»).
@@ -2701,25 +2792,58 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const sub = q('readCtaSub');
     if (!btn) return;
     btn.disabled = !next;
-    // سطر الفصل يحجز مكانه دائمًا: الاسم لا يقفز للأعلى حين يصل
-    sub.textContent = '\u00a0';
+    // أثناء الجلب (next === undefined) سطر الفصل يحجز مكانه بهيكل ظاهر بعرضه، فيبقى الاسم والسطر متوسطين في الزر
+    // ولا يتحرك الاسم حين يصل الفصل. كانت مسافة غير مرئية فيبدو الاسم مرفوعًا عن الوسط (VI2). بلا فصل: السطر يُطوى
+    // (:empty في manga.css) فيتوسط الاسم وحده، وارتفاع الزر ثابت.
+    const pending = next === undefined;
+    sub.replaceChildren();
     const resume = lookIs('resume');
-    if (next === undefined) label.textContent = 'جارٍ جمع الفصول';
-    else if (next === null) {
+    if (pending) {
+      label.textContent = 'جارٍ جمع الفصول';
+      const bar = el('span', 'cta-skel');
+      bar.setAttribute('aria-hidden', 'true');
+      sub.append(bar);
+    } else if (next === null) {
       label.textContent = 'لا فصول متاحة';
-      if (q('sourceRow')?.querySelector('.skeleton')) q('sourcesBlock').hidden = true;
-      if (q('chapterRanges')?.querySelector('.skeleton')) q('chapterRanges').hidden = true;
+      if (q('sourceRow')?.querySelector('.skeleton-inline')) q('sourcesBlock').hidden = true;
+      if (q('chapterRanges')?.querySelector('.skeleton-inline')) q('chapterRanges').hidden = true;
     }
     else {
       label.textContent = resume ? (started ? 'تابع الآن' : 'ابدأ الآن') : started ? 'تابع القراءة' : 'ابدأ القراءة';
       const name = next.chapter?.name || '';
       const from = next.chapter?.scanlator || (state.current?._sources ?? []).find((x) => x.sourceId === next.sourceId)?.label || '';
-      sub.textContent = [plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ') || '\u00a0';
+      // الزر قصير وواضح: «الفصل N · المصدر» دائمًا متى عُرف الرقم؛ اسم الفصل الكامل مكانه قائمة الفصول (بلاغ المالك)
+      const known = Number.isFinite(next.number) && next.number >= 0;
+      sub.textContent = [known || plainChapterName(name) ? `الفصل ${chapterNumberText(next)}` : name, from].filter(Boolean).join(' · ');
     }
-    if (resume) {
-      q('resumeNum').textContent = next ? chapterNumberText(next) : '—';
-      q('resumeKick').textContent = next && !started ? 'ابدأ من أول فصل' : 'تابع من حيث وقفت';
-      q('resumeLabel').textContent = next && !started ? 'الفصل الأول' : 'الفصل التالي';
+    if (resume) setResumeHead(next, started);
+  }
+
+  /**
+   * رأس «من حيث وقفت»: لا يعلن استئنافًا ولا رقمًا قبل معرفة الفصول والتقدم (VI3). أثناء الجلب هيكل محايد
+   * (data-pending: النص شفاف بمقاسه فلا يتحرك شيء حين يصل)، ثم الحالة الصحيحة مرة واحدة.
+   */
+  function setResumeHead(next, started) {
+    const num = q('resumeNum');
+    const kick = q('resumeKick');
+    const what = q('resumeLabel');
+    const box = num?.closest('.mw-resume');
+    if (!num || !kick || !what || !box) return;
+    const pending = next === undefined;
+    box.toggleAttribute('data-pending', pending);
+    for (const n of [num, kick, what]) n.toggleAttribute('aria-hidden', pending);
+    if (pending) {
+      num.textContent = '00';
+      kick.textContent = 'ابدأ من أول فصل';
+      what.textContent = 'الفصل الأول';
+    } else if (next === null) {
+      num.textContent = '—';
+      kick.textContent = started ? 'تابع من حيث وقفت' : 'لم تبدأ بعد';
+      what.textContent = 'لا فصول متاحة';
+    } else {
+      num.textContent = chapterNumberText(next);
+      kick.textContent = started ? 'تابع من حيث وقفت' : 'ابدأ من أول فصل';
+      what.textContent = started ? 'الفصل التالي' : 'الفصل الأول';
     }
   }
 
@@ -2788,6 +2912,18 @@ export function mountV35(deps, { page = 'home' } = {}) {
       };
       body.append(row('spark', 'القارئ الذكي', w._chapters?.length ?? 0, null));
       for (const x of sources) body.append(row('layers', x.label, x.count, x.sourceId));
+      // فك دمج خاطئ (ID4): نسخة دخلت البطاقة باسم آخر تُفصل عنها. لا شيء يُحذف: علاماتها ومواضعها باقية بمرجعها
+      const cardKey = w._work?.key;
+      const merged = (w._editions ?? []).map((e) => ({ e, own: normalizeTitle(e.manga?.title) })).filter(({ own }) => cardKey && own && own !== cardKey);
+      for (const { e, own } of [...new Map(merged.map((m) => [m.own, m])).values()]) {
+        body.append(sheetItem('alert', `«${e.manga.title}» (${displayName(e.label, e.sourceId)}) ليس نفس العمل`, () => {
+          closeSheet();
+          if (!splitRefs(`ext:${own}`, `ext:${cardKey}`)) return;
+          resetSources();
+          toast(`فُصل «${e.manga.title}» عن هذا العمل. علاماته وتقدّمه باقية معه`);
+          void openWork(workFromRef(`ext:${cardKey}`, titleOf(w), w._work?.thumbnailUrl));
+        }));
+      }
       for (const f of failed) {
         const b = el('div', 'sheet-item');
         b.innerHTML = glyph('alert');
@@ -2920,6 +3056,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const sort = q('chapterSort')?.querySelector('span');
     if (sort) sort.textContent = state.chapterNewestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا';
     const nextKey = chapterKeyOf(ref, next);
+    state.chaptersPainted = { ref, nextKey };
     const parts = [];
     for(const source of w._lockedSources??[]){
       const note=el('p','chapter-locked-note');
@@ -2978,6 +3115,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const fromSkeleton = Boolean(panel.querySelector(':scope > [aria-busy="true"]'));
     panel.replaceChildren(...parts);
     if (fromSkeleton && currentPage() === 'detail') settleIn(panel);
+  }
+  /**
+   * RB1: وصل تغيير في chapter_marks (مزامنة من جهاز آخر، أو تعليم هنا) والقائمة ظاهرة: كان يعيد بناء القائمة كلها
+   * (panel.replaceChildren) والإصبع عليها. الآن يُحدَّث التعليم على الصفوف المعروضة نفسها ومعه العداد والزر، ولا
+   * يُعاد البناء إلا إن تغيّر «الفصل التالي» (علامة «وصلت هنا» تنتقل) أو لم تُرسم القائمة لهذا العمل بعد.
+   */
+  function patchChapterMarks(w) {
+    const ref = String(w.id);
+    const all = w._chapters ?? [];
+    const nodes = [...(q('chapterPanel')?.querySelectorAll('.mw-ch, .mw-cell') ?? [])].filter((n) => n._paintRead);
+    if (!all.length || !nodes.length || state.chaptersPainted?.ref !== ref) return renderChapters(w);
+    const read = (r) => isChapterRead(sync, ref, chapterKeyOf(ref, r));
+    const base = state.chapterSource ? editionRows(w, state.chapterSource) : all;
+    const next = continueRow(ref, base) ?? startChapter(base, read) ?? all[0];
+    if (chapterKeyOf(ref, next) !== state.chaptersPainted.nextKey) return renderChapters(w);
+    const counted = mainChapters(all);
+    const readCount = counted.filter(read).length;
+    state.nextRow = next;
+    setReadCta(next, { started: readCount > 0 });
+    paintProgress(w, readCount, counted.length);
+    for (const node of nodes) node._paintRead(read(node._chapterRow));
   }
   // ── «علّم فصول»: وضع تحديد فوق القائمة أو الشبكة في الأنماط الأربعة ──
   // لمسة الفصل تحدّده بدل أن تفتحه؛ والشريط السفلي: مقروء، غير مقروء، كل ما قبله، ما بينهما.
@@ -3132,6 +3290,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const { eye, paint } = markButton(w, r, { isNext, onPaint: (on) => row.classList.toggle('read', on) });
     paint(isRead);
     row.append(open, eye);
+    // RB1: تغيّر التعليم من مزامنة يُرسم على الصف نفسه، لا بإعادة بناء القائمة تحت الإصبع
+    row._chapterRow = r;
+    row._paintRead = paint;
     return row;
   }
   /**
@@ -3170,6 +3331,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChaptersSoon(w);
     };
     cell.append(open, mark);
+    cell._chapterRow = r;
+    cell._paintRead = (value) => { if (on !== value) { on = value; paint(); } };
     return cell;
   }
   function dateLabel(ms) {
@@ -3731,7 +3894,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           if (manual || !Number.isFinite(row?.number) || row.number < 0) return [];
           return (w._editions ?? [])
             .filter((e) => e.sourceId !== row.sourceId)
-            .map((e) => editionRows(w, e.sourceId).find((r) => r.number === row.number))
+            // DLX1: بديل بالرقم فقط حين يكون واحدًا بالضبط في ذلك المصدر؛ مصدر يحمل فصلين بالرقم نفسه (موسمان، جزءان)
+            // غموض، فلا يُنزَّل منه فصل آخر بصمت
+            .map((e) => { const same = editionRows(w, e.sourceId).filter((r) => r.number === row.number); return same.length === 1 ? same[0] : null; })
             .filter((r) => r?.chapter)
             .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))
             .slice(0, 4)
@@ -4135,7 +4300,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
   function chapterRatio(userId, ref, number) {
     if (number == null) return null;
     const key = chapterKeyOf(ref, { chapter: { chapterNumber: number, name: '' }, sourceId: '' });
-    const row = sync.rows('progress', (r) => r.user_id === userId && sameChapterKey(r.chapter_key, key)).sort((x, y) => (Number(y.ratio) || 0) - (Number(x.ratio) || 0))[0];
+    const keys = chapterKeysAcross(ref, key);
+    const row = sync.rows('progress', (r) => r.user_id === userId && keys.some((k) => sameChapterKey(r.chapter_key, k))).sort((x, y) => (Number(y.ratio) || 0) - (Number(x.ratio) || 0))[0];
     return row ? Math.max(0, Math.min(1, Number(row.ratio) || 0)) : null;
   }
   /**
@@ -5578,16 +5744,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const cleanup = () => {
       removeEventListener('touchstart', stop);
       removeEventListener('wheel', stop);
-      for (const timer of timers) clearTimeout(timer);
+      for (const timer of timers) if (typeof timer?.disconnect === 'function') timer.disconnect(); else clearTimeout(timer);
       if (scrollRestoreCleanup === cleanup) scrollRestoreCleanup = null;
     };
     const stop = () => { touched = true; cleanup(); };
     scrollRestoreCleanup = cleanup;
     addEventListener('touchstart', stop, { once: true, passive: true });
     addEventListener('wheel', stop, { once: true, passive: true });
-    for (const wait of [0, 120, 400]) timers.push(setTimeout(() => {
-      if (run === scrollRestore && !touched && Math.abs(window.scrollY - top) >= 2) window.scrollTo({ top, behavior: 'instant' });
-      if (wait === 400) cleanup();
+    // NV2: الاستعادة حين يكتمل طول الصفحة لا بعد 400ms ثابتة: محتوى يصل متأخرًا (الشبكة، الصور) كان يتركك في الأعلى.
+    // تتبع تغيّر الطول حتى تبلغ الموضع أو 3 ثوانٍ، وتتوقف فور لمسة أو عجلة من المستخدم
+    const settle = () => {
+      if (run !== scrollRestore || touched) return cleanup();
+      if (Math.abs(window.scrollY - top) >= 2 && document.documentElement.scrollHeight >= top + innerHeight - 2) window.scrollTo({ top, behavior: 'instant' });
+    };
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(settle) : null;
+    ro?.observe(document.documentElement);
+    if (ro) timers.push({ disconnect: () => ro.disconnect() });
+    for (const wait of [0, 120, 400, 1000, 3000]) timers.push(setTimeout(() => {
+      settle();
+      if (wait === 3000) cleanup();
     }, wait));
   }
   let pageMotionRequest = 0;
@@ -5728,8 +5903,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (id !== 'profile') profile?.hide();
     paintRail();
-    // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
-    if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
+    // رجوع: إلى حيث كان. انتقال جديد: من الأعلى. والتبويبات الرئيسية (NV1) ترجع لموضعها أيضًا حين تعود إليها بالتبويب نفسه
+    if ((!push || MAIN_PAGES.includes(id)) && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
     else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
@@ -7408,10 +7583,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // DL2: وصول حذف (أو إعادة) من جهاز آخر يُطبَّق على كل الشاشات الظاهرة فورًا
     if (tables?.includes?.('removed_work_tokens') || tables?.has?.('removed_work_tokens')) removedChanged();
     if (tables.includes('work_views') || tables.includes('progress')) {
-      if (currentPage() === 'home' && tables.includes('work_views')) {
-        if (!state.heroItems.length) refreshFriendsHero();
-        renderHome();
-      }
+      // RB2: قراءة صديق (work_views) لا تعيد رسم الرئيسية في الحال والإصبع عليها: تُجمع في رسم واحد بعد سكون اللمس
+      if (currentPage() === 'home' && tables.includes('work_views')) repaintHomeWhenIdle();
     }
     // المكتبة الظاهرة تتحدّث فورًا (كانت تبقى قديمة حتى تُفتح من جديد)، بإطار واحد مهما تتابعت الكتابات
     if (currentPage() === 'library' && tables.some((t) => ['library', 'collections', 'completions', 'work_views', 'ratings'].includes(t))) {
@@ -7427,7 +7600,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const rate = root.querySelector('.mw-rate') ?? document.querySelector('.mw-rate');
       if (rate) renderRating(rate, rate._target ?? null);
     }
-    if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
+    if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) patchChapterMarks(state.current);
     majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
     room.onChange(tables);
     profile.onChange(tables);
@@ -7613,7 +7786,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return sweeping;
   }
   setTimeout(() => void sweepLatest(), 15_000);
-  setInterval(() => void sweepLatest(), 2 * 60_000);
+  // لا مؤقت ثانٍ هنا (PF3): نبضة refreshChapters الواحدة تشغّل المسح بعد تحديث الرئيسية أو وحده.
 
   const profile = createProfile({
     sync,
@@ -7902,8 +8075,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ابدأ Latest عند دخول التطبيق مباشرة؛ loadHome وصفحته يتشاركان نفس الطلب.
   if (available()) void latestFirstPage();
   void loadHome();
+  // PF1: كانت الرئيسية الظاهرة تعيد طلب «آخر التحديثات» من كل المصادر كل 60 ث (60 جولة في الساعة). الآن كل 10 دقائق،
+  // ونبضة واحدة تجمعها مع مسح الفصول (PF3) فلا يعمل مؤقتان مستقلان على المصادر نفسها؛ و«آخر التحديثات» يبقى طازجًا
+  // بفتحها (latestFirstPage) وبالنبض والخادم.
+  const HOME_REFRESH_MS = 10 * 60_000;
   const refreshChapters = () => {
-    if (!document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= 60_000) void loadHome();
+    if (document.hidden) return;
+    if (currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= HOME_REFRESH_MS) {
+      void loadHome().finally(() => void sweepLatest());
+    } else void sweepLatest();
   };
   const chapterRefreshTimer = setInterval(refreshChapters, 60_000);
   document.addEventListener('visibilitychange', refreshChapters);
@@ -7955,6 +8135,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       ++pageMotionRequest;
       finishPageMotion();
       sourceVerification.close();
+      globalThis.removeEventListener?.('vantara:storage-full', onStorageFull);
+      globalThis.removeEventListener?.('vantara:extensions-recovered', onExtensionsRecovered);
       addonViewGeneration++;closeAddonSource();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}
