@@ -14,6 +14,7 @@
 const SOLVE_MS = 25_000;
 const POLL_MS = 500;
 const MAX_WINDOWS = 2;
+const VERIFY_MS = 3 * 60_000; // مهلة صفحة التحقق الظاهرة: وقت يكفي لحل لغز بيد المستخدم
 
 /** مضيف عام: لا اسم محلي ولا عنوان خاص/حلقة رجوع (لا وصول لشبكة المستخدم عبر تحويل). */
 function publicHttpUrl(value) {
@@ -79,6 +80,66 @@ function createSourceBrowser({ BrowserWindow, session, net, userAgent, isChallen
     return job;
   }
 
+  /**
+   * صفحة التحقق الظاهرة: نظير صفحة التحقق في الـAPK. حين يطلب الموقع إنسانًا (مربع اختيار أو لغز) لا يقدر عليه
+   * المتصفح المخفي، فتُفتح الصفحة نفسها للمستخدم في نافذة صغيرة على الجلسة نفسها (persist:vantara-sources): يحلها مرة
+   * فيُحفظ كوكي التحقق على القرص، وتُغلق النافذة وحدها لحظة زوال صفحة التحقق. القيود نفسها: sandbox بلا Node، لا
+   * أذونات ولا تنزيلات ولا نوافذ جديدة، وتنقل إلى مضيفات عامة فقط.
+   * النتيجة بشكل نتيجة الـAPK: { host, state: 'verified' | 'cancelled' | 'failed', reason }.
+   */
+  const verifying = new Map();
+  function verify({ url, parent = null, verifyMs = VERIFY_MS } = {}) {
+    const start = publicHttpUrl(url);
+    if (!start) return Promise.resolve({ host: null, state: 'failed', reason: 'invalid_endpoint' });
+    const host = start.hostname.toLowerCase();
+    if (verifying.has(host)) return verifying.get(host);
+    const job = new Promise((resolve) => {
+      let win;
+      try {
+        win = new BrowserWindow({
+          show: false, width: 520, height: 720, parent: parent && !parent.isDestroyed?.() ? parent : undefined,
+          title: 'تحقق من المصدر', autoHideMenuBar: true, backgroundColor: '#0b0a10',
+          webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false },
+        });
+      } catch { resolve({ host, state: 'failed', reason: 'launch_failed' }); return; }
+      let done = false;
+      let poll = null;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearInterval(poll);
+        if (!win.isDestroyed()) win.destroy();
+        resolve({ host, ...result });
+      };
+      const timer = setTimeout(() => finish({ state: 'failed', reason: 'timeout' }), verifyMs);
+      win.removeMenu?.();
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      const guard = (event, next) => { if (!publicHttpUrl(next)) event.preventDefault(); };
+      win.webContents.on('will-navigate', guard);
+      win.webContents.on('will-redirect', guard);
+      win.webContents.on('render-process-gone', () => finish({ state: 'failed', reason: 'renderer_gone' }));
+      win.on('closed', () => finish({ state: 'cancelled', reason: 'user_cancelled' }));
+      win.once('ready-to-show', () => { if (!done) win.show(); });
+      win.loadURL(start.href, { userAgent }).catch(() => {});
+      // يظهر حتى لو لم يصل ready-to-show (صفحة بطيئة)، فلا ينتظر المستخدم نافذة لا يراها
+      setTimeout(() => { if (!done && !win.isDestroyed() && !win.isVisible()) win.show(); }, 1500);
+      poll = setInterval(async () => {
+        if (done || win.isDestroyed()) return;
+        // الصفحة الحقيقية للمضيف نفسه وقد اكتمل تحميلها، لا صفحة فارغة بين تحويلين
+        const page = await win.webContents.executeJavaScript(
+          '({host: location.hostname, ready: document.readyState, title: document.title, text: document.body ? document.body.innerText.length : 0, html: document.documentElement ? document.documentElement.outerHTML.slice(0, 6000) : ""})', true,
+        ).catch(() => null);
+        if (!page || page.ready === 'loading' || !page.html || page.text < 1) return;
+        const same = String(page.host).toLowerCase() === host || String(page.host).toLowerCase().endsWith(`.${host}`) || host.endsWith(`.${page.host}`);
+        if (!same) return;
+        if (!isChallenge({ status: 200, headers: {}, text: `<title>${page.title}</title>${page.html}` })) finish({ state: 'verified' });
+      }, POLL_MS);
+    }).finally(() => verifying.delete(host));
+    verifying.set(host, job);
+    return job;
+  }
+
   /** طلب من جلسة Chromium نفسها (كوكي التحقق وبصمة المتصفح)، كل تحويل يُفحص قبل اتباعه. */
   function request({ url, method = 'GET', headers = {}, body = null, limit, timeout = 20_000 }) {
     return new Promise((resolve, reject) => {
@@ -138,7 +199,7 @@ function createSourceBrowser({ BrowserWindow, session, net, userAgent, isChallen
     return { text: res.body.toString('utf8'), status: res.status, url: res.url, headers: kept, location: null, viaBrowser: true };
   }
 
-  return { userAgent, fetch: fetchResource, solve };
+  return { userAgent, fetch: fetchResource, solve, verify };
 }
 
 /** هوية Chrome على ويندوز بإصدار Chromium الذي في Electron نفسه: هي ما يرسله المتصفح المخفي، فالطلبات كلها هوية واحدة. */

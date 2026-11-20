@@ -1318,7 +1318,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   }
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
   async function close(){closed=true;await dropPrewarm();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
-  return {requestResource,prewarmTorrent,startPlayback,stopPlayback,playbackCommand,inspectPlayback,previewFrame,smokeMpvBinding,close};
+  /** مضيف اجتاز صفحة التحقق الظاهرة: طلباته من جلسة المتصفح (فيها كوكي التحقق) كما بعد الحل المخفي. */
+  function trustBrowserHost(host){
+    const name=String(host??'').toLowerCase();
+    if(browserFetch&&/^[a-z0-9.-]+\.[a-z]{2,}$/.test(name))browserHosts.set(name,Date.now()+BROWSER_HOST_MS);
+  }
+  return {requestResource,prewarmTorrent,startPlayback,stopPlayback,playbackCommand,inspectPlayback,previewFrame,smokeMpvBinding,trustBrowserHost,close};
 }
 
 export function validateTorrentStorage(file,availableBytes) {

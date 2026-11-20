@@ -1065,7 +1065,8 @@ export function renderV7Addons({
           matched=true;sourcesChanged();await refresh();closeModal(true);break;
         }catch(e){lastError=fmtErr(e);}
       }
-      if(!matched)note.textContent=lastError||"صيغة المستودع غير متوافقة مع المحركات الحالية.";
+      // بلا محرك Mihon في هذا الجهاز (ويندوز): السبب صريحًا، لا خطأ محرك آخر جرّب المستودع
+      if(!matched)note.textContent=stores.some(s=>s.id==="manga")?(lastError||"صيغة المستودع غير متوافقة مع المحركات الحالية."):"إضافات Mihon للمانجا تعمل في تطبيق الجوال فقط حاليًا. مصادر المانجا هنا هي المصادر المدمجة في VANTARA.";
     }catch(e){note.textContent=fmtErr(e);}
     finally{busy=false;yes.disabled=false;}
   }
