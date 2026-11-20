@@ -89,7 +89,8 @@ describe('server collectors', () => {
       return new Response('');
     }) as typeof fetch });
     expect(requests).toHaveLength(2);
-    expect(requests.every((h) => h.get('User-Agent')?.includes('https://github.com/Meshal515/VANTARA'))).toBe(true);
+    // CL3: هوية عامة تعرّف التطبيق بلا رابط مستودع ولا بيانات شخصية
+    expect(requests.every((h) => h.get('User-Agent') === 'VANTARA/1.0 (release timeline collector)')).toBe(true);
     const status = await env.DB.prepare('SELECT last_success_at,last_error FROM collector_state WHERE source=?').bind('mangadex-ar').first<{ last_success_at: number; last_error: string | null }>();
     expect(status).toEqual({ last_success_at: now, last_error: null });
     const response = await handleUpdatesList(new URL('https://x/v1/updates?section=manga'), env);

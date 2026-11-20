@@ -68,7 +68,7 @@ import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
-import { artRatio, createArtStore } from '../lib/art.js';
+import { artRatio, createArtStore, isLocalArt } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { installRemovedGate, isRemovedAny, removeWorkEverywhere, removedChanged, restoreRemovedWork, setRemovedSource, tagWork } from '../lib/removed-works.js';
@@ -628,6 +628,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
    */
   // المرحلة 1 (CV4): قرار غلاف العمل يُقرأ من كل مراجعه (refsOf)، فلا يتبدل الغلاف حين يتغيّر مفتاح البطاقة
   const art = createArtStore({ refsOf });
+  // اسم ثانٍ للمخزن حيث يظلّل معامل «art» (قرار الفن) الاسم الأول
+  const artStore = art;
   // حُذف مصدر: أغلفته المحسومة تُنسى فتُحسم من غيره (قاعدة المالك: الغلاف ثابت إلا بحذف مصدره)
   // قائمة فارغة لا تُصدَّق (لم تكتمل بعد، أو المحرك غير متاح): لا يُنسى شيء
   void engine.sources().then((list) => { if (Array.isArray(list) && list.length) art.forgetSources(new Set(list.map((x) => x.id))); }).catch(() => {});
@@ -667,6 +669,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
           // كل غلاف يدخل سباق «أول مقبول يفوز» لحظة وصوله (قاعدة المالك 16 نوفمبر)، لا ينتظر أبطأ الأربعة
           const sources = artSources(work).slice(0, 4).map((c) => ({
             url: Promise.race([nativeCover(c.url, c.sourceId), new Promise((r) => setTimeout(() => r(null), 2500))]).then((local) => local || c.url),
+            // القرار بالرابط الأصلي، والملف المحلي كاش يُقرأ بـcachedCover (CV1)
+            origin: c.url,
             sid: c.sourceId,
           }));
           const wideHint = work?.wideBanner || (work?.bannerImage && work.bannerImage !== work.coverImage?.large ? work.bannerImage : null);
@@ -696,7 +700,14 @@ export function mountV35(deps, { page = 'home' } = {}) {
     img.decoding = fade ? 'async' : 'sync';
     if (fade) img.classList.add('img-fade');
     if (position) img.style.objectPosition = position;
-    img.onerror = () => { art.forget(String(work?.id ?? '')); onFail?.(); };
+    // CV1/CV3: فشل الملف المحلي (قلّمه المحرّك) ← الرابط الأصلي، ويُعاد تخزينه لاحقًا. فشل الأصل لا يمحو القرار
+    // (art.failed يعدّه)، وتعرض البطاقة بديلها الآن والفتحة التالية تعيد المحاولة بالغلاف نفسه
+    img.onerror = () => {
+      if (img.getAttribute('src') !== d.cover && !isLocalArt(d.cover)) { forgetCover(d.cover); img.src = d.cover; return; }
+      art.failed(String(work?.id ?? ''));
+      onFail?.();
+    };
+    img.onload = () => art.shown(String(work?.id ?? ''));
     img.src = src;
     container.replaceChildren(img);
     return d.cover;
@@ -1025,6 +1036,17 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }, { tone: 'manga' });
   }
 
+  /**
+   * بطاقة حُجبت بعد ظهورها (AF2): تُخفى في مكانها بـvisibility ولا تُزال، فلا تقفز الشبكة تحت الإصبع؛ وتختفي فعلًا
+   * في الرسم التالي للقائمة لأن مفتاحها محجوب. inert يُخرجها من اللمس والتركيز وقارئ الشاشة.
+   */
+  function hideBlockedCard(a) {
+    a.dataset.blocked = '';
+    a.inert = true;
+    a.setAttribute('aria-hidden', 'true');
+    a.onclick = null;
+  }
+
   function card(work, { meta } = {}) {
     const a = el('article', 'work-card');
     // محذوف من التطبيق: لا بطاقة في أي قائمة (المكتبة والسجل لا يمران من فلتر البحث)
@@ -1058,7 +1080,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
         // AniList يعرف العمل للكبار (هنتاي، إيتشي…): يُحجب ويختفي من هنا ومن كل قائمة بعدها
-        if (rated.adult) { for (const k of [work._work?.key, ...(work._work?.keys ?? [])]) blockKey(k); a.remove(); return; }
+        if (rated.adult) { for (const k of [work._work?.key, ...(work._work?.keys ?? [])]) blockKey(k); hideBlockedCard(a); return; }
         score.innerHTML = `${glyph('star', { size: 11, filled: true })}<b>${rated.score.toFixed(1)}</b>`;
         score.title = `تقييم AniList: ${rated.score.toFixed(1)} من 10`;
         score.setAttribute('aria-label', score.title);
@@ -1366,6 +1388,29 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if (host.children[i] !== block) host.insertBefore(block, host.children[i] ?? null);
     });
     for (const child of [...host.children]) if (!blocks.includes(child)) child.remove();
+  }
+  // آخر لمس أو تمرير (طوابع فقط، لا تحريك): ما يصل من المزامنة ينتظر سكون اليد قبل أن يمس ما تحتها
+  let handsAt = 0;
+  let handsDown = 0;
+  const noteHands = () => { handsAt = Date.now(); };
+  document.addEventListener('pointerdown', () => { handsDown += 1; noteHands(); }, { passive: true, capture: true });
+  for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, () => { handsDown = Math.max(0, handsDown - 1); noteHands(); }, { passive: true, capture: true });
+  document.addEventListener('scroll', noteHands, { passive: true, capture: true });
+  document.addEventListener('wheel', noteHands, { passive: true, capture: true });
+  const handsBusy = () => handsDown > 0 || Date.now() - handsAt < HANDS_QUIET_MS;
+  const HANDS_QUIET_MS = 700;
+  let homeRepaintTimer = 0;
+  /** RB2: رسم واحد للرئيسية بعد سكون اللمس والتمرير وانتهاء الحركة، مهما تتابعت التغييرات. */
+  function repaintHomeWhenIdle() {
+    if (homeRepaintTimer) return;
+    const tick = () => {
+      if (currentPage() !== 'home') { homeRepaintTimer = 0; return; }
+      if (handsBusy() || motionActive(q('home'))) { homeRepaintTimer = setTimeout(tick, HANDS_QUIET_MS); return; }
+      homeRepaintTimer = 0;
+      if (!state.heroItems.length) refreshFriendsHero();
+      renderHome();
+    };
+    homeRepaintTimer = setTimeout(tick, 250);
   }
   /** بطاقة «مكتمل»: عمل واحد يُقرأ دفعة واحدة، بضوء من غلافه نفسه وفعل واحد. */
   function pickBlock(existing, title, w) {
@@ -2099,7 +2144,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
         img.decoding = 'async';
         img.classList.add('img-fade');
         if (fit) img.classList.add('mw-fit');
-        img.onerror = () => { if (live()) void mountImage(cover, w, { final: true }); workReady(); };
+        img.onerror = () => {
+          // الملف المحلي ← الرابط الأصلي (CV1)؛ فشل الأصل يُعدّ ولا يمحو القرار (CV3)
+          if (img.getAttribute('src') !== art.cover && !isLocalArt(art.cover)) { forgetCover(art.cover); img.src = art.cover; return; }
+          artStore.failed(ref);
+          if (live()) void mountImage(cover, w, { final: true });
+          workReady();
+        };
         // الغلاف المحسوم جاهز للعرض = أساس الصفحة جاهز: يبدأ الانتقال
         img.onload = () => { if (live()) workReady(); };
         img.src = cachedCover(art.cover) ?? art.cover;
@@ -2994,6 +3045,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const sort = q('chapterSort')?.querySelector('span');
     if (sort) sort.textContent = state.chapterNewestFirst ? 'الأحدث أولًا' : 'الأقدم أولًا';
     const nextKey = chapterKeyOf(ref, next);
+    state.chaptersPainted = { ref, nextKey };
     const parts = [];
     for(const source of w._lockedSources??[]){
       const note=el('p','chapter-locked-note');
@@ -3052,6 +3104,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const fromSkeleton = Boolean(panel.querySelector(':scope > [aria-busy="true"]'));
     panel.replaceChildren(...parts);
     if (fromSkeleton && currentPage() === 'detail') settleIn(panel);
+  }
+  /**
+   * RB1: وصل تغيير في chapter_marks (مزامنة من جهاز آخر، أو تعليم هنا) والقائمة ظاهرة: كان يعيد بناء القائمة كلها
+   * (panel.replaceChildren) والإصبع عليها. الآن يُحدَّث التعليم على الصفوف المعروضة نفسها ومعه العداد والزر، ولا
+   * يُعاد البناء إلا إن تغيّر «الفصل التالي» (علامة «وصلت هنا» تنتقل) أو لم تُرسم القائمة لهذا العمل بعد.
+   */
+  function patchChapterMarks(w) {
+    const ref = String(w.id);
+    const all = w._chapters ?? [];
+    const nodes = [...(q('chapterPanel')?.querySelectorAll('.mw-ch, .mw-cell') ?? [])].filter((n) => n._paintRead);
+    if (!all.length || !nodes.length || state.chaptersPainted?.ref !== ref) return renderChapters(w);
+    const read = (r) => isChapterRead(sync, ref, chapterKeyOf(ref, r));
+    const base = state.chapterSource ? editionRows(w, state.chapterSource) : all;
+    const next = continueRow(ref, base) ?? startChapter(base, read) ?? all[0];
+    if (chapterKeyOf(ref, next) !== state.chaptersPainted.nextKey) return renderChapters(w);
+    const counted = mainChapters(all);
+    const readCount = counted.filter(read).length;
+    state.nextRow = next;
+    setReadCta(next, { started: readCount > 0 });
+    paintProgress(w, readCount, counted.length);
+    for (const node of nodes) node._paintRead(read(node._chapterRow));
   }
   // ── «علّم فصول»: وضع تحديد فوق القائمة أو الشبكة في الأنماط الأربعة ──
   // لمسة الفصل تحدّده بدل أن تفتحه؛ والشريط السفلي: مقروء، غير مقروء، كل ما قبله، ما بينهما.
@@ -3206,6 +3279,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const { eye, paint } = markButton(w, r, { isNext, onPaint: (on) => row.classList.toggle('read', on) });
     paint(isRead);
     row.append(open, eye);
+    // RB1: تغيّر التعليم من مزامنة يُرسم على الصف نفسه، لا بإعادة بناء القائمة تحت الإصبع
+    row._chapterRow = r;
+    row._paintRead = paint;
     return row;
   }
   /**
@@ -3244,6 +3320,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       refreshChaptersSoon(w);
     };
     cell.append(open, mark);
+    cell._chapterRow = r;
+    cell._paintRead = (value) => { if (on !== value) { on = value; paint(); } };
     return cell;
   }
   function dateLabel(ms) {
@@ -5655,16 +5733,25 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const cleanup = () => {
       removeEventListener('touchstart', stop);
       removeEventListener('wheel', stop);
-      for (const timer of timers) clearTimeout(timer);
+      for (const timer of timers) if (typeof timer?.disconnect === 'function') timer.disconnect(); else clearTimeout(timer);
       if (scrollRestoreCleanup === cleanup) scrollRestoreCleanup = null;
     };
     const stop = () => { touched = true; cleanup(); };
     scrollRestoreCleanup = cleanup;
     addEventListener('touchstart', stop, { once: true, passive: true });
     addEventListener('wheel', stop, { once: true, passive: true });
-    for (const wait of [0, 120, 400]) timers.push(setTimeout(() => {
-      if (run === scrollRestore && !touched && Math.abs(window.scrollY - top) >= 2) window.scrollTo({ top, behavior: 'instant' });
-      if (wait === 400) cleanup();
+    // NV2: الاستعادة حين يكتمل طول الصفحة لا بعد 400ms ثابتة: محتوى يصل متأخرًا (الشبكة، الصور) كان يتركك في الأعلى.
+    // تتبع تغيّر الطول حتى تبلغ الموضع أو 3 ثوانٍ، وتتوقف فور لمسة أو عجلة من المستخدم
+    const settle = () => {
+      if (run !== scrollRestore || touched) return cleanup();
+      if (Math.abs(window.scrollY - top) >= 2 && document.documentElement.scrollHeight >= top + innerHeight - 2) window.scrollTo({ top, behavior: 'instant' });
+    };
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(settle) : null;
+    ro?.observe(document.documentElement);
+    if (ro) timers.push({ disconnect: () => ro.disconnect() });
+    for (const wait of [0, 120, 400, 1000, 3000]) timers.push(setTimeout(() => {
+      settle();
+      if (wait === 3000) cleanup();
     }, wait));
   }
   let pageMotionRequest = 0;
@@ -5805,8 +5892,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     }
     if (id !== 'profile') profile?.hide();
     paintRail();
-    // رجوع: إلى حيث كان. انتقال جديد: من الأعلى
-    if (!push && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
+    // رجوع: إلى حيث كان. انتقال جديد: من الأعلى. والتبويبات الرئيسية (NV1) ترجع لموضعها أيضًا حين تعود إليها بالتبويب نفسه
+    if ((!push || MAIN_PAGES.includes(id)) && from !== id && scrollOf.has(id)) restoreScroll(scrollOf.get(id));
     else { scrollRestore++; scrollRestoreCleanup?.(); window.scrollTo({ top: 0, behavior: 'instant' }); }
     if(id === 'utility')sourceView?.resume?.();
     // Renderers build the work synchronously after showPage; measure its real cover once afterwards.
@@ -7485,10 +7572,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     // DL2: وصول حذف (أو إعادة) من جهاز آخر يُطبَّق على كل الشاشات الظاهرة فورًا
     if (tables?.includes?.('removed_work_tokens') || tables?.has?.('removed_work_tokens')) removedChanged();
     if (tables.includes('work_views') || tables.includes('progress')) {
-      if (currentPage() === 'home' && tables.includes('work_views')) {
-        if (!state.heroItems.length) refreshFriendsHero();
-        renderHome();
-      }
+      // RB2: قراءة صديق (work_views) لا تعيد رسم الرئيسية في الحال والإصبع عليها: تُجمع في رسم واحد بعد سكون اللمس
+      if (currentPage() === 'home' && tables.includes('work_views')) repaintHomeWhenIdle();
     }
     // المكتبة الظاهرة تتحدّث فورًا (كانت تبقى قديمة حتى تُفتح من جديد)، بإطار واحد مهما تتابعت الكتابات
     if (currentPage() === 'library' && tables.some((t) => ['library', 'collections', 'completions', 'work_views', 'ratings'].includes(t))) {
@@ -7504,7 +7589,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const rate = root.querySelector('.mw-rate') ?? document.querySelector('.mw-rate');
       if (rate) renderRating(rate, rate._target ?? null);
     }
-    if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) renderChapters(state.current);
+    if (tables.includes('chapter_marks') && currentPage() === 'detail' && state.current?._chapters) patchChapterMarks(state.current);
     majlis.onChange(tables, { visible: currentPage() === 'majlis' && state.socialTab === 'recs' });
     room.onChange(tables);
     profile.onChange(tables);
@@ -7690,7 +7775,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return sweeping;
   }
   setTimeout(() => void sweepLatest(), 15_000);
-  setInterval(() => void sweepLatest(), 2 * 60_000);
+  // لا مؤقت ثانٍ هنا (PF3): نبضة refreshChapters الواحدة تشغّل المسح بعد تحديث الرئيسية أو وحده.
 
   const profile = createProfile({
     sync,
@@ -7979,8 +8064,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // ابدأ Latest عند دخول التطبيق مباشرة؛ loadHome وصفحته يتشاركان نفس الطلب.
   if (available()) void latestFirstPage();
   void loadHome();
+  // PF1: كانت الرئيسية الظاهرة تعيد طلب «آخر التحديثات» من كل المصادر كل 60 ث (60 جولة في الساعة). الآن كل 10 دقائق،
+  // ونبضة واحدة تجمعها مع مسح الفصول (PF3) فلا يعمل مؤقتان مستقلان على المصادر نفسها؛ و«آخر التحديثات» يبقى طازجًا
+  // بفتحها (latestFirstPage) وبالنبض والخادم.
+  const HOME_REFRESH_MS = 10 * 60_000;
   const refreshChapters = () => {
-    if (!document.hidden && currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= 60_000) void loadHome();
+    if (document.hidden) return;
+    if (currentPage() === 'home' && root.dataset.section === 'manga' && Date.now() - homeCheckedAt >= HOME_REFRESH_MS) {
+      void loadHome().finally(() => void sweepLatest());
+    } else void sweepLatest();
   };
   const chapterRefreshTimer = setInterval(refreshChapters, 60_000);
   document.addEventListener('visibilitychange', refreshChapters);

@@ -263,10 +263,17 @@ object RepoIndex {
         }
     }
 
-    /** المصادر التي تظهر في التطبيق: العربية إن وُجدت، وإلا مصادر لغة الإضافة. */
+    /**
+     * المصادر التي تظهر في التطبيق: العربية إن وُجدت، وإلا مصادر لغة الإضافة. حزمة متعددة اللغات بلا عربي (`all`): كان
+     * يُؤخذ أول مصدر بترتيب الفهرس (عشوائي بين الإصدارات)، والآن اختيار ثابت معلن (UE1): الإنجليزية، وإلا أصغر رمز لغة.
+     */
     fun visibleSources(ext: Extension): List<Source> =
         ext.sources.filter { it.lang.equals("ar", ignoreCase = true) }.ifEmpty {
-            ext.sources.filter { it.lang.equals(ext.lang, ignoreCase = true) }.ifEmpty { ext.sources.take(1) }
+            ext.sources.filter { it.lang.equals(ext.lang, ignoreCase = true) }.ifEmpty {
+                ext.sources.filter { it.lang.equals("en", ignoreCase = true) }.ifEmpty {
+                    ext.sources.minByOrNull { "${it.lang.lowercase()}|${it.id}" }?.let(::listOf).orEmpty()
+                }
+            }
         }
 }
 
@@ -450,9 +457,12 @@ class UserExtensionStore(private val file: File) {
             UserExtensionState()
         }
 
+        /**
+         * قراءة صارمة: ملف تالف أثناء العمل يرمي ولا يُكتب فوقه بنسخة الذاكرة القديمة (لا يُستبدل ما لا يُقرأ بلقطة
+         * قديمة، UserRepositoryRemovalTest). الإقلاع وحده يتسامح (ES1، في init أعلاه)، ونداءات الواجهة تلتقط الخطأ.
+         */
         fun refresh() {
-            // قراءة تالفة أثناء العمل لا تُسقط التطبيق ولا تمسح الحالة الحالية في الذاكرة
-            runCatching { storage.read(state) { json.decodeFromString<UserExtensionState>(it) } }.onSuccess(::accept)
+            accept(storage.read(state) { json.decodeFromString<UserExtensionState>(it) })
         }
 
         fun accept(next: UserExtensionState) {

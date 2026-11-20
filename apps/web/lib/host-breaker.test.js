@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BREAKER, createHostBreaker, guardFetcher, guardTransport, HOST_COOLING, retryAfterMs } from './host-breaker.js';
+import { BREAKER, createHostBreaker, guardFetcher, guardTransport, HOST_COOLING, HostCoolingError, retryAfterMs } from './host-breaker.js';
 import { createTransport } from '../addons/transport.js';
 import { failureText } from './route-validity.js';
 
@@ -136,5 +136,38 @@ describe('guards around the real fetch paths', () => {
     for (const lang of ['en', 'fr', 'es', 'de', 'it', 'pt', 'ru', 'tr', 'id'])
       await expect(g.text(`https://cdn.site.test/${lang}/latest`)).rejects.toMatchObject({ code: HOST_COOLING });
     expect(calls).toBe(1);
+  });
+});
+
+// AW26: ثلاثة أعمال معطوبة (500) كانت توقف الإضافة لكل الأعمال حتى 6 ساعات
+describe('AW26: نطاق الخطأ بنوعه', () => {
+  it('three broken work pages cool those pages only, not the whole host', () => {
+    let t = 0;
+    const b = createHostBreaker({ now: () => t });
+    for (const p of ['/manga/a', '/manga/b', '/manga/c']) b.record('src.test', 500, null, p);
+    expect(b.waitMs('src.test')).toBeNull();
+    expect(() => b.assertAllowed('src.test', '/manga/d')).not.toThrow();
+    // الصفحة نفسها ثلاث مرات: تتوقف هي وحدها
+    for (let i = 0; i < 2; i++) b.record('src.test', 500, null, '/manga/a');
+    expect(() => b.assertAllowed('src.test', '/manga/a')).toThrow(HostCoolingError);
+    expect(() => b.assertAllowed('src.test', '/manga/b')).not.toThrow();
+    t += BREAKER.BASE_MS + 1;
+    expect(() => b.assertAllowed('src.test', '/manga/a')).not.toThrow();
+  });
+  it('a host that fails on many different pages in a row is down; a healthy reply in between resets', () => {
+    const b = createHostBreaker({ now: () => 0 });
+    for (let i = 0; i < BREAKER.HOST_SPREAD - 1; i++) b.record('down.test', 500, null, `/p/${i}`);
+    b.record('down.test', 200, null, '/home');
+    for (let i = 0; i < BREAKER.HOST_SPREAD - 1; i++) b.record('down.test', 500, null, `/q/${i}`);
+    expect(b.waitMs('down.test')).toBeNull();
+    b.record('down.test', 500, null, '/q/last');
+    expect(b.waitMs('down.test')).toBeGreaterThan(0);
+  });
+  it('busy or down statuses (429, 502-504, 52x) still cool the host from any page', () => {
+    for (const code of [429, 502, 503, 504, 522]) {
+      const b = createHostBreaker({ now: () => 0 });
+      for (const p of ['/a', '/b', '/c']) b.record('busy.test', code, null, p);
+      expect(b.waitMs('busy.test'), String(code)).toBeGreaterThan(0);
+    }
   });
 });

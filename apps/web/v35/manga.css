@@ -2187,3 +2187,6 @@ html[data-motion='off'] .v35 .mg-copy > * { animation: none !important; transiti
 @media (prefers-reduced-motion: reduce) {
   .v35 #detail .mw-cover:empty, .v35 #detail .mw-cover > .skeleton, .v35 #detail .mw-ban:not(.mw-ban--art):not(.mw-ban--cover), .v35 #detail .mw-title:empty::before { animation: none; }
 }
+
+/* AF2: بطاقة حُجبت بعد ظهورها تحتفظ بمكانها حتى الرسم التالي (لا قفز في الشبكة) */
+.v35 [data-blocked] { visibility: hidden; pointer-events: none; }

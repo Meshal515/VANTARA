@@ -94,7 +94,9 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
       // مرشح المصدر: رابط، أو { url, sid } ليُعرف مصدره فيُعاد الحسم إن حُذف
       const seen = new Set();
       // url قد يكون وعدًا (غلاف المحرّك المحفوظ ثم الرابط): يدخل السباق لحظة وصوله، لا ينتظر غيره
-      const cands = sources.map((c) => (typeof c === 'string' || typeof c?.then === 'function' ? { url: c, sid: null } : { url: c?.url, sid: c?.sid ?? null }))
+      // origin (CV1): الرابط الأصلي حين يكون url ملفًا محليًا محفوظًا (غلاف المحرّك). القرار يُحفظ بالأصل، والملف كاش
+      // فقط (covers.js): كان المسار المحلي هو القرار، فإذا قلّمه المحرّك (MAX_COVERS) ضاع الغلاف وحُسم غيره
+      const cands = sources.map((c) => (typeof c === 'string' || typeof c?.then === 'function' ? { url: c, sid: null, origin: null } : { url: c?.url, sid: c?.sid ?? null, origin: c?.origin ?? null }))
         .filter((c) => c.url && (typeof c.url !== 'string' || (!seen.has(c.url) && seen.add(c.url)))).slice(0, 4);
       const measured = [];
       let winner = null;
@@ -117,7 +119,7 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
         measured.push(m);
         if (acceptable(m)) settle(m);
       };
-      const srcDone = cands.map((c) => Promise.resolve(c.url).catch(() => null).then((url) => url && measure(url, left()).then((m) => consider(m && { ...m, official: isOfficialArt(url), sid: isOfficialArt(url) ? null : c.sid }))));
+      const srcDone = cands.map((c) => Promise.resolve(c.url).catch(() => null).then((url) => url && measure(url, left()).then((m) => consider(m && { ...m, url: c.origin || m.url, official: isOfficialArt(url), sid: isOfficialArt(url) ? null : c.sid }))));
       const offDone = (async () => {
         const off = official ? await Promise.race([Promise.resolve(official).catch(() => null), new Promise((r) => setTimeout(() => r(null), left()))]) : null;
         const covers = [...new Set([off?.cover, ...(off?.more ?? []).map((x) => x?.cover)].filter(Boolean))];
@@ -162,7 +164,31 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     forgetSources,
     /** يُنادى حين يُحسم فن عمل: الشاشات الظاهرة التي تنتظره ترسمه (مرة، بلا تبديل لما ظهر). */
     onDecided(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    /** غلاف فشل تحميله (رابط مات): يُنسى قراره فيُحسم من جديد في الفتحة التالية. */
+    /**
+     * فشل عرض الغلاف المحسوم بعد تجربة الكاش والرابط الأصلي (CV3). فشل لحظي (شبكة، 403 مرة) لا يمحو القرار:
+     * يُعدّ فقط، والفتحة التالية تعيد المحاولة بالغلاف نفسه. يُنسى فقط إن مات الرابط فعلًا: STRIKES فشلًا تمتد
+     * يومًا على الأقل. قرار قديم مساره ملف محلي بلا أصل (قبل CV1) لا يُستعاد، فيُنسى فورًا كما كان.
+     * يعيد true إن نُسي القرار.
+     */
+    failed(id, now = Date.now()) {
+      const d = read()[id];
+      if (!d) return false;
+      if (isLocalArt(d.cover)) { this.forget(id); return true; }
+      const fail = { n: (d.fail?.n ?? 0) + 1, at: d.fail?.at ?? now };
+      if (fail.n >= STRIKES && now - fail.at >= STRIKE_SPAN_MS) { this.forget(id); return true; }
+      all[id] = { ...d, fail };
+      persist();
+      return false;
+    },
+    /** ظهر الغلاف المحسوم: تُصفّر محاولات الفشل. */
+    shown(id) {
+      const d = read()[id];
+      if (!d?.fail) return;
+      const { fail: _, ...rest } = d;
+      all[id] = rest;
+      persist();
+    },
+    /** يُنسى القرار فيُحسم من جديد في الفتحة التالية (رابط مات فعلًا، أو قرار قديم بلا أصل). */
     forget(id) {
       read();
       const dead = all[id]?.cover ?? null;
@@ -174,6 +200,12 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     },
   };
 }
+
+/** CV3: فشل الرابط الأصلي ثلاث مرات على امتداد يوم = رابط ميت فعلًا؛ أقل من ذلك فشل لحظي لا يمحو القرار. */
+const STRIKES = 3;
+const STRIKE_SPAN_MS = 24 * 60 * 60_000;
+/** مسار ملف محلي (غلاف محفوظ على الجهاز) لا رابط أصلي: لا يُستعاد إن حُذف الملف. */
+export const isLocalArt = (url) => /_capacitor_file_|^file:|^blob:|^data:|^content:/.test(String(url ?? ''));
 
 /** حدود نسبة الغلاف المحجوزة: غلاف شاذ (شريط طويل جدًا أو صورة عريضة) لا يكسر تخطيط النمط؛ يُقص قليلًا. */
 export const COVER_RATIO = Object.freeze({ min: 0.55, max: 0.85 });

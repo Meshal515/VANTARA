@@ -108,3 +108,24 @@ describe('TG3: لوحة الغرفة لا تُبنى من جديد تحت الإ
     p.close(); p.hub.leave();
   });
 });
+
+// CH3: كل إعادة رسم للمحادثة كانت تطلق roomInfo لكل بطاقة دعوة
+describe('CH3: حالة غرفة الدعوة تُحفظ قليلًا ولا تُطلب مع كل رسم', () => {
+  it('two paints of the same invite ask the server once; a failure is not cached', async () => {
+    const { document } = parseHTML('<!doctype html><html><body></body></html>');
+    vi.stubGlobal('document', document);
+    let fail = true;
+    const roomInfoImpl = vi.fn(async ({ code }) => { if (code === 'BAD' && fail) throw new Error('net'); return { state: { started: true }, members: [] }; });
+    const hub = createTogether({ sync: { rows: () => [], user: { userId: 'me' } }, baseUrl: () => 'https://sync.test', roomInfoImpl, openMedia: vi.fn(), toast: vi.fn(), avatarNode: () => null });
+    const row = { code: 'ABCDEF', host_id: 'f', mode: 'sync', media_json: JSON.stringify({ kind: 'anime', label: 'X' }) };
+    hub.card(row); hub.card(row); hub.card({ ...row });
+    await Promise.resolve();
+    expect(roomInfoImpl.mock.calls.filter(([o]) => o.code === 'ABCDEF')).toHaveLength(1);
+    hub.card({ ...row, code: 'BAD' });
+    await new Promise((r) => setTimeout(r, 0));
+    fail = false;
+    hub.card({ ...row, code: 'BAD' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(roomInfoImpl.mock.calls.filter(([o]) => o.code === 'BAD')).toHaveLength(2);
+  });
+});

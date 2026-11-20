@@ -117,7 +117,19 @@ export function stripPeople(roster, max = 3) {
 export function createTogether(deps) {
   const join = deps.joinRoomImpl ?? joinRoom;
   const create = deps.createRoomImpl ?? createRoom;
-  const info = deps.roomInfoImpl ?? roomInfo;
+  const rawInfo = deps.roomInfoImpl ?? roomInfo;
+  // CH3: كل رسم للمحادثة كان يطلق roomInfo لكل بطاقة دعوة. حالة الغرفة تُحفظ 30 ث لكل رمز (والفشل لا يُحفظ)
+  const infoCache = new Map();
+  const INFO_TTL_MS = 30_000;
+  const cachedInfo = (opts) => {
+    const hit = infoCache.get(opts.code);
+    if (hit && Date.now() - hit.at < INFO_TTL_MS) return hit.promise;
+    const promise = Promise.resolve().then(() => rawInfo(opts));
+    infoCache.set(opts.code, { at: Date.now(), promise });
+    promise.catch(() => { if (infoCache.get(opts.code)?.promise === promise) infoCache.delete(opts.code); });
+    if (infoCache.size > 200) infoCache.delete(infoCache.keys().next().value);
+    return promise;
+  };
   const token = () => deps.sync.authorizationHeader?.replace(/^Bearer\s+/i, '') ?? null;
   const listeners = new Set();
   let session = null;
@@ -386,7 +398,7 @@ export function createTogether(deps) {
     body.append(cover, text);
     wrap.append(top, body, enter);
     // من لم يُدعَ للغرفة يرد الخادم عليه 403: البطاقة تبقى كما هي بلا خطأ صامت في الخلفية
-    void info({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).catch(() => undefined).then((r) => {
+    void cachedInfo({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).catch(() => undefined).then((r) => {
       if (r === undefined) return;
       alive = r != null;
       if (!r) {
@@ -646,7 +658,7 @@ export function createTogether(deps) {
       let mode = row?.mode;
       // إشعار سبق المزامنة: نقرأ الحلقة من الغرفة نفسها.
       if (!media) {
-        const r = await info({ baseUrl: deps.baseUrl(), token: token(), code }).catch(() => null);
+        const r = await rawInfo({ baseUrl: deps.baseUrl(), token: token(), code }).catch(() => null);
         if (!r) return ui().toast('انتهت الغرفة أو ما عاد لها وجود');
         media = mediaFromRoom(r);
         mode = r.mode ?? r.room?.mode ?? 'sync';
