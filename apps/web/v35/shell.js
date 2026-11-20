@@ -3802,7 +3802,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
           if (manual || !Number.isFinite(row?.number) || row.number < 0) return [];
           return (w._editions ?? [])
             .filter((e) => e.sourceId !== row.sourceId)
-            .map((e) => editionRows(w, e.sourceId).find((r) => r.number === row.number))
+            // DLX1: بديل بالرقم فقط حين يكون واحدًا بالضبط في ذلك المصدر؛ مصدر يحمل فصلين بالرقم نفسه (موسمان، جزءان)
+            // غموض، فلا يُنزَّل منه فصل آخر بصمت
+            .map((e) => { const same = editionRows(w, e.sourceId).filter((r) => r.number === row.number); return same.length === 1 ? same[0] : null; })
             .filter((r) => r?.chapter)
             .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))
             .slice(0, 4)

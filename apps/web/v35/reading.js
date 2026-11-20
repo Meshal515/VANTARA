@@ -6,7 +6,7 @@
  * ما قبله ولا العمل كله. ونسبة العمل تُشتق من الفصول المعلَّمة فعلًا.
  */
 
-import { chapterNumberOf } from '../lib/catalog.js';
+import { chapterNumberOf, legacyChapterNumber } from '../lib/catalog.js';
 import { refsOf as defaultRefsOf } from '../lib/manga-alias-store.js';
 
 export const AUTO_READ_RATIO = 0.9;
@@ -33,20 +33,34 @@ function shortRef(ref) {
 export function chapterKeyOf(seriesRef, row) {
   const n = chapterNumberOf(row.chapter);
   const suffix = n !== null && n >= 0 ? `n:${n}` : `u:${row.sourceId}:${row.chapter.url}`;
-  return `${shortRef(seriesRef)}#${suffix}`.slice(0, MAX_KEY);
+  const key = `${shortRef(seriesRef)}#${suffix}`.slice(0, MAX_KEY);
+  // RD7: رقم من الاسم تغيّرت قراءته («Vol.3 Ch.25» كان 3 وصار 25): علاماته وتقدّمه القديمة كُتبت بالمفتاح القديم.
+  // يُسجَّل فيقرؤه legacyChapterKeys مع الجديد (لا صف يُنقل)، بسقف حتى لا يكبر بلا حد
+  const given = Number(row.chapter?.chapterNumber);
+  if (!(Number.isFinite(given) && given >= 0)) {
+    const old = legacyChapterNumber(row.chapter?.name);
+    if (old >= 0 && old !== n) {
+      if (renumbered.size >= 20_000) renumbered.clear();
+      renumbered.set(key, `${shortRef(seriesRef)}#n:${old}`.slice(0, MAX_KEY));
+    }
+  }
+  return key;
 }
+const renumbered = new Map();
 
 /**
  * مفتاح الفصل العشري كما حُفظ قبل #323 U-28: الرقم كان يمر بـFloat فيُكتب `n:356.1000061035156`
  * بدل `n:356.1`. علامات الفصول وصفوف التقدم القديمة بهذا المفتاح تُقرأ منه ما لم يُكتب بالجديد.
  */
 export function legacyChapterKeys(key) {
+  const before = renumbered.get(String(key ?? ''));
+  const extra = before ? [before] : [];
   const match = /^(.*#n:)(-?\d+(?:\.\d+)?)$/.exec(String(key ?? ''));
-  if (!match) return [];
+  if (!match) return extra;
   const n = Number(match[2]);
   const widened = Math.fround(n);
-  if (Number.isInteger(n) || widened === n) return [];
-  return [`${match[1]}${widened}`.slice(0, MAX_KEY)];
+  if (Number.isInteger(n) || widened === n) return extra;
+  return [`${match[1]}${widened}`.slice(0, MAX_KEY), ...extra];
 }
 
 /** صف (تقدم أو علامة) مفتاحه هذا الفصل بالمفتاح الحالي أو القديم. */

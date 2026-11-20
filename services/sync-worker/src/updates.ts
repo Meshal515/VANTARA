@@ -168,10 +168,20 @@ export function decide(report: Report, mark: Mark | null, _now: number): { fresh
   if (report.kind === 'movie') return { fresh: report.units.filter((u) => u.publishedAt != null).slice(0, 1), mark: mark ?? { season: null, number: 0 } };
   const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
   const top = sorted[sorted.length - 1]!;
-  if (!mark) {
-    return { fresh: sorted.filter((u) => u.publishedAt != null), mark: { season: top.season, number: top.number } };
-  }
   const limit = JUMP[report.kind];
+  if (!mark) {
+    // UP1: خط الأساس الأول بفحص القفزة أيضًا. رقم شاذ كبير (قراءة خاطئة، RD7) كان يصير الخط من أول مشاهدة، فيرفض isAbove
+    // كل الفصول الحقيقية بعده ويختفي العمل من «آخر التحديثات». الخط = أعلى رقم في الموسم الأعلى يتصل بما تحته (فجوته عن
+    // الفصل الذي قبله ضمن حد القفزة)، والشاذ فوقه لا يصير خطًا ولا حدثًا. وحدة واحدة بلا ما يقارن بها تُقبل كما هي.
+    const season = sorted.filter((u) => (u.season ?? 0) === (top.season ?? 0));
+    let base = season[season.length - 1]!;
+    for (let i = season.length - 1; i > 0; i--) {
+      if (season[i]!.number - season[i - 1]!.number <= limit) { base = season[i]!; break; }
+      base = season[i - 1]!;
+    }
+    const outlier = (u: Unit) => (u.season ?? 0) === (base.season ?? 0) && u.number > base.number;
+    return { fresh: sorted.filter((u) => u.publishedAt != null && !outlier(u)), mark: { season: base.season, number: base.number } };
+  }
   const above = sorted.filter((u) => {
     if (!isAbove(u, mark)) return false;
     // موسم جديد يبدأ من أوله؛ وفي نفس الموسم قفزة معقولة فقط

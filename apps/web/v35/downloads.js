@@ -10,7 +10,10 @@
  */
 
 import { downloads } from '../lib/downloads/index.js';
-import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localCinemaSeasons, localWork, matchesNumberList, numberLabel, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel } from '../lib/downloads/model.js';
+import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localCinemaSeasons, localWork, matchesNumberList, numberLabel, onDeviceWorks, parseNumberList, pickUnits, queueSummary, sameWork, setWorkGroup, unitLabel } from '../lib/downloads/model.js';
+import { canonicalRefOf } from '../lib/manga-alias-store.js';
+// مرجعا العمل الواحد بعد الدمج بطاقة واحدة في «على الجهاز» (DLX1)
+setWorkGroup((ref) => (String(ref).startsWith('ext:') ? canonicalRefOf(ref) : ref));
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
 import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
@@ -868,7 +871,7 @@ export function createDownloadsUI(deps) {
     if (!view.select || !ctx) return [];
     const list = ctx.manager.list();
     if (view.select.scope === 'queue') return list.filter((i) => view.select.ids.has(i.id) && i.state !== STATES.ready);
-    return list.filter((i) => i.state === STATES.ready && view.select.ids.has(i.work.ref));
+    return list.filter((i) => i.state === STATES.ready && [...view.select.ids].some((ref) => sameWork(i.work.ref, ref)));
   }
 
   /** شريط التحديد: العدد، الكل/لا شيء، والأوامر على المحدد. */

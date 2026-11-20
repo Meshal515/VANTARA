@@ -155,9 +155,23 @@ export function titlesMatch(a, b) {
  * أول عدد في النص: «Chapter 330 - القوات الخاصة» ← 330، و«1288.5» ←
  * 1288.5، و«الفصل ٣٣٠» ← 330 بعد طيّ الأرقام.
  */
-export function parseChapterNumber(name) {
+// RD7: «أول عدد في الاسم» كان يقرأ «Vol.3 Ch.25» ← 3، و«Season 2 Chapter 15» ← 2، و«الموسم 2 الفصل 7» ← 2، فتتساوى
+// فصول مختلفة برقم واحد ويُسقطها الدمج. الآن: الرقم بعد علامة الفصل أولًا (ch، chapter، الفصل، فصل، 第…話/章)، وإلا يُحذف
+// المجلد والموسم والجزء برقمها ثم أول رقم يبقى. الكسور (10.5) مدعومة. تنفيذ مستقل على فكرة ChapterRecognition في Mihon.
+const CHAPTER_MARK = /(?:\bch(?:apter|ap)?\.?|\bep(?:isode)?\.?|\bep\b|الفصل|فصل|الحلقة|第)\s*#?\s*(\d+(?:\.\d+)?)/iu;
+const VOLUME_MARK = /(?:\bvol(?:ume)?\.?|\bv\.|\bseason|\bs(?=\d)|\bpart|المجلد|مجلد|الموسم|موسم|الجزء|جزء|第\s*\d+\s*[巻部季])\s*#?\s*\d+(?:\.\d+)?/giu;
+/** القراءة القديمة (أول عدد في الاسم) كما كُتبت بها مفاتيح العلامات قبل RD7: لقراءة العلامات القديمة لا للعرض. */
+export function legacyChapterNumber(name) {
 	if (typeof name !== 'string') return -1;
 	const match = foldDigits(name.normalize('NFKC')).match(/\d+(?:\.\d+)?/);
+	return match ? Number(match[0]) : -1;
+}
+export function parseChapterNumber(name) {
+	if (typeof name !== 'string') return -1;
+	const text = foldDigits(name.normalize('NFKC'));
+	const marked = text.match(CHAPTER_MARK);
+	if (marked) return Number(marked[1]);
+	const match = text.replace(VOLUME_MARK, ' ').match(/\d+(?:\.\d+)?/);
 	return match ? Number(match[0]) : -1;
 }
 
@@ -789,6 +803,7 @@ export function isPlaceholderChapter(chapter) {
 export function mergeChapters(editions, { rank = null } = {}) {
 	const byNumber = new Map();
 	const loose = new Map();
+	const extra = [];
 	// `rank` (اختياري): أولوية المصدر، الأصغر أولًا — المصادر الموثوقة تفوز بالفصل
 	// حين تملكه، والبقية تكمل ما ينقصها. التساوي بعدد الفصول كما كان.
 	const tier = (e) => (rank ? rank(e.sourceId) : 0);
@@ -810,11 +825,20 @@ export function mergeChapters(editions, { rank = null } = {}) {
 				if (!loose.has(key)) loose.set(key, row);
 			} else if (!byNumber.has(number)) {
 				byNumber.set(number, row);
+			} else {
+				// المصدر نفسه يسرد فصلين مختلفين برقم واحد (موسمان، «فصل 1» و«فصل 1 الجزء 2»): لا يُسقط الثاني (RD7).
+				// نسخ الفصل نفسه من فرق ترجمة مختلفة (MangaDex) تبقى واحدة: الاسم نفسه أو فريق آخر
+				const first = byNumber.get(number);
+				const sameEdition = first.sourceId === edition.sourceId && first.manga?.url === edition.manga?.url;
+				const otherLink = chapter?.url && first.chapter?.url && chapter.url !== first.chapter.url;
+				const otherName = normalizeTitle(chapter?.name) !== normalizeTitle(first.chapter?.name);
+				const sameTeam = (chapter?.scanlator ?? '') === (first.chapter?.scanlator ?? '');
+				if (sameEdition && otherLink && otherName && sameTeam) extra.push(row);
 			}
 		}
 	}
 
-	const numbered = [...byNumber.values()].sort((a, b) => b.number - a.number);
+	const numbered = [...byNumber.values(), ...extra].sort((a, b) => b.number - a.number);
 	return [...numbered, ...loose.values()];
 }
 

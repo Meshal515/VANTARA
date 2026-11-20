@@ -90,6 +90,18 @@ describe('model', () => {
     expect(onDeviceWorks(items, { section: 'anime' })).toHaveLength(1);
   });
 
+  it('DLX1: two references of one merged work are one on-device card, and opening it shows both', async () => {
+    const { setWorkGroup } = await import('./model.js');
+    const old = { ...createItem({ ...mangaSpec(1), work: { ref: 'ext:solo old name', title: 'Solo' } }), state: 'ready' };
+    const now = { ...createItem(mangaSpec(2)), state: 'ready' };
+    setWorkGroup((ref) => (ref === 'ext:solo old name' ? 'ext:solo' : ref));
+    try {
+      expect(onDeviceWorks([old, now])).toHaveLength(1);
+      expect(localWork([old, now], 'ext:solo').ready).toHaveLength(2);
+    } finally { setWorkGroup(null); }
+    expect(onDeviceWorks([old, now])).toHaveLength(2);
+  });
+
   it('shows only the downloaded chapters of a 150-chapter work, keeping 1, 4, 7 as 1, 4, 7', () => {
     const items = [7, 1, 4].map((n) => ({ ...createItem(mangaSpec(n)), state: 'ready' }));
     const view = localWork(items, 'ext:solo');
