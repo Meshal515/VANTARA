@@ -70,6 +70,12 @@ async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, p
     });
     for (const pkg of pkgs) chains.push(await chainFor(engine, repo, pkg));
   } catch { /* الأساس فشل؛ مسجل */ }
+  // تشخيص فقط (لا يستعمله التطبيق): تثبيت إضافة بمتجر Suwayomi نفسه. إن نجح ورفض رفعُنا الإضافة نفسها فالخلل في طريقنا
+  const storeProbe = {};
+  if (steps.length === 4 && steps.every((s) => s.ok) && typeof engine.diagnoseStoreInstall === 'function') {
+    try { Object.assign(storeProbe, await engine.diagnoseStoreInstall(`${repo}/index.min.json`, 'eu.kanade.tachiyomi.extension.en.mangabuddy')); }
+    catch (error) { storeProbe.error = String(error?.message ?? error).slice(0, 300); }
+  }
   // أسطر الأخطاء نفسها (لا ذيل التتبع وحده) ثم آخر السجل؛ السر محجوب فيه أصلًا
   let log = '';
   try {
@@ -78,7 +84,7 @@ async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, p
     log = [...errors, '---', ...lines.slice(-20)].join('\n');
   } catch { /* */ }
   const working = chains.filter((c) => c.ok).map((c) => c.pkg);
-  const report = { complete: steps.length === 4 && steps.every((s) => s.ok) && working.length > 0, working, steps, chains, engine: runtime.state(), log };
+  const report = { complete: steps.length === 4 && steps.every((s) => s.ok) && working.length > 0, working, steps, chains, storeProbe, engine: runtime.state(), log };
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
   return report;
 }

@@ -34,7 +34,7 @@
 | الخطوط العربية (Cairo وTajawal وAmiri وNoto وغيرها) | `android/app/src/main/assets/fonts/` | SIL Open Font License 1.1 (ملف OFL بجانب كل خط) |
 | إضافات Keiyoushi المضمّنة في نسخة الإصدار | `android/app/src/release/assets/extensions/` | Apache-2.0 |
 | AndroidX وMedia3 وOkHttp وOkio وKotlin وkotlinx وjsoup وJackson وRxJava وInjekt وQuickJS وONNX Runtime | تبعيات Gradle | Apache-2.0 / MIT |
-| Suwayomi-Server v2.4.2366 (محرك إضافات Mihon في ويندوز؛ لا يُشحن مع التطبيق: يُنزَّل من إصداره الرسمي عند أول حاجة ويُتحقق من بصمته SHA-256 المثبّتة في `apps/desktop/suwayomi-runtime.cjs`، ويعمل عملية منفصلة لا يُدمج كوده في VANTARA) | `userData/suwayomi/engine` على جهاز المستخدم | MPL-2.0 — https://github.com/Suwayomi/Suwayomi-Server (يحمل معه Azul Zulu JRE: GPL-2.0 مع استثناء Classpath) |
+| Suwayomi-Server v2.4.2490 (إصدار المعاينة الرسمي؛ محرك إضافات Mihon في ويندوز؛ لا يُشحن مع التطبيق: يُنزَّل من إصداره الرسمي عند أول حاجة ويُتحقق من بصمته SHA-256 المثبّتة في `apps/desktop/suwayomi-runtime.cjs`، ويعمل عملية منفصلة لا يُدمج كوده في VANTARA) | `userData/suwayomi/engine` على جهاز المستخدم | MPL-2.0 — https://github.com/Suwayomi/Suwayomi-Server (يحمل معه Azul Zulu JRE: GPL-2.0 مع استثناء Classpath) |
 | تبعيات npm للويب والأدوات | `package.json` | MIT / ISC / BSD / Apache-2.0 وما يماثلها |
 
 أدوات التطوير في `.claude/` (مهارات ووكلاء) ليست جزءًا من التطبيق الموزَّع، وتحتفظ كل منها برخصتها في مجلدها.

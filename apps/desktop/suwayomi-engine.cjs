@@ -522,7 +522,31 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     return true;
   }
 
-  return { call, media, autoUpdate, warmUp, isEngineSource, METHODS: Object.keys(METHODS) };
+  /**
+   * تشخيص لإثبات ويندوز وحده (ليس في METHODS فلا تصله الواجهة): تثبيت إضافة بمتجر Suwayomi نفسه ثم إزالتها ومتجره،
+   * لمقارنة طريقه بطريقنا (رفع APK موقّع) حين يرفض المحرك الإضافات.
+   */
+  async function diagnoseStoreInstall(indexUrl, pkg) {
+    const out = { indexUrl, pkg };
+    try {
+      const added = await gql(`mutation { addExtensionStore(input:{indexUrl:${gqlString(indexUrl)}}) { extensionStore { indexUrl } } }`);
+      out.store = added.data?.addExtensionStore?.extensionStore?.indexUrl ?? null;
+      if (added.errors.length) out.storeError = cleanError(added.errors[0]?.message);
+      const fetched = await gql('mutation { fetchExtensions(input:{}) { extensions { pkgName } } }');
+      out.listed = (fetched.data?.fetchExtensions?.extensions ?? []).some((x) => x.pkgName === pkg);
+      const done = await gql(`mutation { updateExtension(input:{id:${gqlString(pkg)}, patch:{install:true}}) { extension { pkgName isInstalled } } }`);
+      out.installed = done.data?.updateExtension?.extension?.isInstalled === true;
+      if (done.errors.length) out.installError = cleanError(done.errors[0]?.message);
+      out.sources = await engineSourceIds(pkg);
+      out.recent = String(runtime.recentOutput?.() ?? '').split(/\r?\n/).filter((l) => /VerifyError|Exception|Reason:|not assignable|IncompatibleClassChange/.test(l)).slice(-6);
+    } finally {
+      await engineUninstall(pkg).catch(() => {});
+      await gql(`mutation { removeExtensionStore(input:{indexUrl:${gqlString(out.store ?? indexUrl)}}) { extensionStore { indexUrl } } }`).catch(() => {});
+    }
+    return out;
+  }
+
+  return { call, media, autoUpdate, warmUp, diagnoseStoreInstall, isEngineSource, METHODS: Object.keys(METHODS) };
 }
 
 module.exports = { createSuwayomiEngine, splitSourceId, isEngineSource, mediaPath, toManga, MEDIA };

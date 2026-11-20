@@ -12,11 +12,13 @@ const path = require('node:path');
 const net = require('node:net');
 const childProcess = require('node:child_process');
 
+// الإصدار المستقر v2.4.2366 رفض كل إضافات Keiyoushi الحالية على ويندوز حقيقي (VerifyError: إضافات ProGuard مع طبقة
+// توافق أندرويد قديمة). المعاينة v2.4.2490 (7 نوفمبر) من مستودع Suwayomi الرسمي للمعاينات، ببصمة مثبّتة كذلك.
 const PINNED = Object.freeze({
-  version: 'v2.4.2366',
-  url: 'https://github.com/Suwayomi/Suwayomi-Server/releases/download/v2.4.2366/Suwayomi-Server-v2.4.2366-windows-x64.zip',
-  sha256: 'b955f374a8d94b8d1c2750ae28fa7eb2066b479957561b5ba9cf8ac993c8fc13',
-  folder: 'Suwayomi-Server-v2.4.2366-windows-x64',
+  version: 'v2.4.2490',
+  url: 'https://github.com/Suwayomi/Suwayomi-Server-preview/releases/download/v2.4.2490/Suwayomi-Server-v2.4.2490-windows-x64.zip',
+  sha256: '999de5d1b93168a6b155e3d8fdee938330bcd9128ee8fc4fccd456aa1d0666c5',
+  folder: 'Suwayomi-Server-v2.4.2490-windows-x64',
   maxBytes: 420 * 1024 * 1024,
 });
 const USER = 'vantara';
