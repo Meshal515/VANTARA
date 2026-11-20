@@ -1,5 +1,6 @@
 package com.vantara.anime.player.together
 
+import java.io.File
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -54,6 +55,10 @@ class TogetherImages(private val context: Context, http: OkHttpClient) {
         key.startsWith("http://") || key.startsWith("https://") ->
             client.newCall(Request.Builder().url(key).build()).execute().use { r -> if (r.isSuccessful) r.body.bytes().takeIf { it.size <= MAX_BYTES } else null }
         key.startsWith("/") && !key.contains("..") -> context.assets.open("public$key").use { it.readBytes() }
+        // فن التحميلات: ملف داخل مجلد التطبيق فقط (بجانب الحلقة المحمّلة)، لا أي مسار
+        key.startsWith("file://") -> android.net.Uri.parse(key).path?.let(::File)
+            ?.takeIf { f -> f.isFile && f.length() <= MAX_BYTES && f.canonicalPath.let { it.startsWith(context.filesDir.canonicalPath) || context.getExternalFilesDir(null)?.canonicalPath?.let(it::startsWith) == true } }
+            ?.readBytes()
         else -> null
     }
 

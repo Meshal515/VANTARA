@@ -816,6 +816,8 @@ describe('the downloads player gets the saved logo', () => {
     expect(play).toContain('...(logo ? { logo } : {})');
     expect(play).toContain('...(backdrop ? { backdrop } : {})');
     const kt = dlReadSource(new URL('../../../../android/app/src/main/kotlin/com/vantara/downloads/DownloadsPlugin.kt', import.meta.url), 'utf8');
-    expect(kt).toContain('logo = call.getString("logo")');
+    // يُحفظ ملفًا بجانب الحلقة ويُمرَّر مساره، لا محتواه (Intent بحد ~1MB)
+    expect(kt).toContain('logo = stageArt("logo")');
+    expect(kt).toContain('val file = File(dir, "art-$kind")');
   });
 });

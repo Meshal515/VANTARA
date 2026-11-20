@@ -296,6 +296,23 @@ class DownloadsPlugin : Plugin() {
         )
         val session = "local-$id-$now"
         engine.openLocal(session, candidate)
+        // الشعار والبنر ملفان بجانب الحلقة (مرة، ثم يُعاد استعمالهما): يُمرَّر مسارهما لا محتواهما، فلا يقترب
+        // Intent من حده (~1MB) ولا ينهار التشغيل، ويبقيان مع التحميل نفسه بلا إنترنت (بلاغ المالك، 20 نوفمبر)
+        fun stageArt(kind: String): String? {
+            val given = call.getString(kind)?.takeIf { it.isNotBlank() } ?: return null
+            if (!given.startsWith("data:")) return given.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+            val file = File(dir, "art-$kind")
+            return runCatching {
+                val bytes = android.util.Base64.decode(given.substringAfter(','), android.util.Base64.DEFAULT)
+                if (bytes.isEmpty() || bytes.size > 4 * 1024 * 1024) return null
+                if (!file.isFile || file.length() != bytes.size.toLong()) {
+                    val tmp = File(dir, "art-$kind.tmp")
+                    tmp.writeBytes(bytes)
+                    if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+                }
+                android.net.Uri.fromFile(file).toString()
+            }.getOrNull()
+        }
         val launch = com.vantara.anime.player.PlayerActivity.Launch(
             session = session,
             title = call.getString("title") ?: job.title,
@@ -308,8 +325,8 @@ class DownloadsPlugin : Plugin() {
             candidate = candidate.id,
             poster = call.getString("poster"),
             // شعار العمل وبنره لشاشة التشغيل من نسخة التحميل نفسها (data:)، فيظهر الشعار لا اسم العمل ولو بلا إنترنت
-            backdrop = call.getString("backdrop"),
-            logo = call.getString("logo"),
+            backdrop = stageArt("backdrop"),
+            logo = stageArt("logo"),
             usageUserId = call.getString("usageUserId"),
         )
         activity.startActivity(com.vantara.anime.player.PlayerActivity.intent(context, launch))
