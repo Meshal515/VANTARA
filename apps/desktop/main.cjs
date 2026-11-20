@@ -3,7 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
 const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
-const { firstPartyRequest } = require('./first-party.cjs');
+const { firstPartyRequest, serverOrigin, ORIGIN: FIRST_PARTY_ORIGIN } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
@@ -234,7 +234,10 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     setTimeout(() => app.quit(), 50);
     return true;
   });
-  register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
+  // خادم المزامنة: الأصلي، أو البديل الذي ضبطه المستخدم في الإعدادات (يُعلنه الواجهة عند الإقلاع)
+  let configuredServer = null;
+  register('first-party-origin', ({ origin } = {}) => { const o = serverOrigin(origin); configuredServer = o && o !== FIRST_PARTY_ORIGIN ? o : null; return Boolean(o); });
+  register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options),[FIRST_PARTY_ORIGIN, configuredServer].filter(Boolean)));
   register('show-app',()=>{videoHost?.hide();window.show();window.focus();return true;});
   register('show-player',()=>{videoHost?.show();window.show();window.focus();return true;});
   register('player-viewport',args=>{overlay?.viewport(args);return videoHost?.viewport(args)??false;});

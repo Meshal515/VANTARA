@@ -26,6 +26,8 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const DEFAULT_ORIGINS = [
   'https://localhost',
   'capacitor://localhost',
+  // ويندوز (Electron): أصل الواجهة. بدونه لا يعمل ويندوز على خادم بديل يشغّله المستخدم (خطة Cloudflare الاختيارية)
+  'vantara://app',
   'http://localhost:4173',
   'http://localhost:5173',
 ];

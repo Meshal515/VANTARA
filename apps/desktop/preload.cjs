@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   builtAt: argument('built', /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/),
   requestResource: call('request-resource'),
   requestFirstParty: call('request-first-party'),
+  setFirstPartyOrigin: call('first-party-origin'),
   verifySource: call('verify-source'),
   // محرك إضافات المانجا (Suwayomi محليًا): دالة واحدة بأسماء معروفة فقط تُفحص في العملية الرئيسية
   mangaEngine: call('manga-engine'),
