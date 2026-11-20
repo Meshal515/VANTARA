@@ -15,7 +15,7 @@ import { canonicalRefOf } from '../lib/manga-alias-store.js';
 // مرجعا العمل الواحد بعد الدمج بطاقة واحدة في «على الجهاز» (DLX1)
 setWorkGroup((ref) => (String(ref).startsWith('ext:') ? canonicalRefOf(ref) : ref));
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
-import { artUrl, dropWorkArt, saveWorkArt, withoutLocalUrls } from '../lib/downloads/art.js';
+import { artDataUrl, artUrl, dropWorkArt, durableUrl, saveWorkArt, withoutLocalUrls } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
 import { isFiller } from './works.js';
 import { createStorageView } from './storage-view.js';
@@ -640,10 +640,17 @@ export function createDownloadsUI(deps) {
     if (!item) return toast('هذه الحلقة لم تعد على الجهاز');
     const native = ctx.caps.video ? (await import('../lib/downloads/index.js')).nativeDownloads() : null;
     if (!native?.play) return toast('التشغيل من الجهاز يعمل في تطبيق Android وويندوز');
+    // شعار العمل وبنره وغلافه من نسخة التحميل نفسها، ثم الرابط الحقيقي إن وُجد إنترنت: المشغّل يعرض الشعار لا اسم العمل
+    const online = navigator.onLine !== false;
+    const saved = async (kind, fallback) => (await artDataUrl(ctx.store, item.work.ref, kind).catch(() => null)) ?? (online && durableUrl(fallback) ? fallback : null);
+    const [logo, backdrop, poster] = await Promise.all([saved('logo', item.work.logo), saved('banner', item.work.banner), saved('cover', item.work.cover)]);
     try {
       await native.play({
         id: item.id,
         title: item.work.title,
+        ...(logo ? { logo } : {}),
+        ...(backdrop ? { backdrop } : {}),
+        ...(poster ? { poster } : {}),
         section: item.section,
         animeId: String(item.work.ref).split(':').slice(1).join(':'),
         episode: item.unit.number ?? 1,

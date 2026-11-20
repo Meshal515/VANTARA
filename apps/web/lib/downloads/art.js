@@ -155,6 +155,19 @@ export async function artUrl(store, ref, kind) {
   return url;
 }
 
+/**
+ * الصورة المحفوظة كنص data: (للمشغّل الأصلي: لا يرى روابط blob: في الواجهة)، أو null. الشعار والبنر صغيران بعد
+ * التصغير (600px و1080px)، فيعبران الجسر بلا عبء. بلاغ المالك (20 نوفمبر): مشغّل التحميلات يعرض اسم العمل بدل شعاره.
+ */
+export async function artDataUrl(store, ref, kind) {
+  const art = await store?.getArt?.(`${ref}|${kind}`).catch?.(() => null);
+  if (!art?.data) return null;
+  const bytes = new Uint8Array(art.data);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${art.type || 'image/png'};base64,${btoa(binary)}`;
+}
+
 /** حُذف العمل كله: صوره وروابطها. */
 export async function dropWorkArt(store, ref) {
   await pending.get(store)?.get(ref);
