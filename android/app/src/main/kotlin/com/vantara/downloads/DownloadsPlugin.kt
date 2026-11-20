@@ -307,6 +307,9 @@ class DownloadsPlugin : Plugin() {
             positionMs = (call.getDouble("position") ?: 0.0).toLong(),
             candidate = candidate.id,
             poster = call.getString("poster"),
+            // شعار العمل وبنره لشاشة التشغيل من نسخة التحميل نفسها (data:)، فيظهر الشعار لا اسم العمل ولو بلا إنترنت
+            backdrop = call.getString("backdrop"),
+            logo = call.getString("logo"),
             usageUserId = call.getString("usageUserId"),
         )
         activity.startActivity(com.vantara.anime.player.PlayerActivity.intent(context, launch))

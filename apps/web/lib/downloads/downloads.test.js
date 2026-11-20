@@ -798,3 +798,24 @@ describe('downloaded work art never keeps temporary urls', () => {
     expect(dlDurableUrl('blob:https://x/1')).toBe(false);
   });
 });
+
+// بلاغ المالك (20 نوفمبر): مشغّل التحميلات يعرض اسم العمل بدل شعاره
+import { artDataUrl as dlArtDataUrl } from './art.js';
+import { readFileSync as dlReadSource } from 'node:fs';
+describe('the downloads player gets the saved logo', () => {
+  it('turns the saved logo into a data url the native player can draw offline', async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const store = { getArt: async (key) => (key === 'anime:1|logo' ? { type: 'image/png', data: bytes.buffer } : null) };
+    expect(await dlArtDataUrl(store, 'anime:1', 'logo')).toBe(`data:image/png;base64,${Buffer.from(bytes).toString('base64')}`);
+    expect(await dlArtDataUrl(store, 'anime:1', 'banner')).toBeNull();
+  });
+  it('playItem passes logo, banner and cover to the native player', () => {
+    const src = dlReadSource(new URL('../../v35/downloads.js', import.meta.url), 'utf8');
+    const play = src.slice(src.indexOf('async function playItem'), src.indexOf('function confirmDelete'));
+    expect(play).toContain("saved('logo', item.work.logo)");
+    expect(play).toContain('...(logo ? { logo } : {})');
+    expect(play).toContain('...(backdrop ? { backdrop } : {})');
+    const kt = dlReadSource(new URL('../../../../android/app/src/main/kotlin/com/vantara/downloads/DownloadsPlugin.kt', import.meta.url), 'utf8');
+    expect(kt).toContain('logo = call.getString("logo")');
+  });
+});
