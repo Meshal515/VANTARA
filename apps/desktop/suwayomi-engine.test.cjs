@@ -31,17 +31,21 @@ function fakeSuwayomi({ declares = [SRC] } = {}) {
     start: async () => { engine.running = true; return { base: engine.base, auth: 'Basic x' }; },
     request: async (pathname, { method = 'GET', body } = {}) => {
       engine.calls.push(`${method} ${pathname}`);
-      if (pathname === '/api/v1/extension/install') {
-        const file = body.get('file');
+      if (pathname.startsWith('/api/v1/manga/')) return new Response(Buffer.from('IMG'), { headers: { 'content-type': 'image/webp' } });
+      // رفع GraphQL المعياري (operations + map + الملف)، كما في Suwayomi بعد v2.4.2366
+      if (pathname === '/api/graphql' && typeof body?.get === 'function') {
+        const operations = JSON.parse(body.get('operations'));
+        assert.match(operations.query, /installExternalExtension\(input: \{ extensionFile: \$file \}\)/);
+        assert.deepEqual(JSON.parse(body.get('map')), { 0: ['variables.file'] });
+        const file = body.get('0');
         const bytes = Buffer.from(await file.arrayBuffer());
         engine.uploads.push(bytes);
         engine.names = [...(engine.names ?? []), file.name];
         engine.installed.set(PKG, { pkgName: PKG, versionName: bytes.equals(APK_NEW) ? '1.4.13' : '1.4.12', versionCodeLong: bytes.equals(APK_NEW) ? 13 : 12, isInstalled: true });
-        return new Response('', { status: 201 });
+        return respond({ installExternalExtension: { extension: { pkgName: PKG, isInstalled: true } } });
       }
-      if (pathname.startsWith('/api/v1/extension/uninstall/')) { engine.installed.delete(decodeURIComponent(pathname.split('/').pop())); return new Response('', { status: 200 }); }
-      if (pathname.startsWith('/api/v1/manga/')) return new Response(Buffer.from('IMG'), { headers: { 'content-type': 'image/webp' } });
       const query = JSON.parse(body).query;
+      if (query.includes('uninstall:true')) { engine.installed.delete(/id:"([^"]+)"/.exec(query)[1]); return respond({ updateExtension: { extension: { pkgName: PKG, isInstalled: false } } }); }
       engine.calls.push(query.replace(/\s+/g, ' ').slice(0, 60));
       if (query.includes('extensions {')) return respond({ extensions: { nodes: [...engine.installed.values()] } });
       if (query.includes('extension(pkgName:')) return respond({ extension: engine.installed.has(PKG) && query.includes(PKG) ? { source: { nodes: declares.map((id) => ({ id })) } } : null });
@@ -228,14 +232,14 @@ test('an extension the JVM verifier refuses is reported plainly and not recorded
   const t = setup();
   const request = t.fake.runtime.request;
   t.fake.runtime.recentOutput = () => 'java.util.concurrent.CompletionException: java.lang.VerifyError: Bad type on operand stack';
-  t.fake.runtime.request = async (p, o) => (p === '/api/v1/extension/install' ? new Response('Server Error', { status: 500 }) : request(p, o));
+  t.fake.runtime.request = async (p, o) => (typeof o?.body?.get === 'function' ? new Response(JSON.stringify({ data: { installExternalExtension: null }, errors: [{ message: 'java.lang.VerifyError: Bad type on operand stack' }] })) : request(p, o));
   await t.engine.call('addRepo', { url: ROOT });
   await assert.rejects(t.engine.call('installExtension', { repo: ROOT, pkg: PKG }), (e) => e.code === 'ENGINE_VERIFY' && /لا تعمل في محرك ويندوز/.test(e.message));
   assert.deepEqual((await t.engine.call('repos')).installed, []);
   const u = setup();
   u.fake.runtime.recentOutput = () => 'java.lang.IllegalStateException: other';
   const base = u.fake.runtime.request;
-  u.fake.runtime.request = async (p, o) => (p === '/api/v1/extension/install' ? new Response('Server Error', { status: 500 }) : base(p, o));
+  u.fake.runtime.request = async (p, o) => (typeof o?.body?.get === 'function' ? new Response(JSON.stringify({ data: null, errors: [{ message: 'Extension already installed' }] })) : base(p, o));
   await u.engine.call('addRepo', { url: ROOT });
   await assert.rejects(u.engine.call('installExtension', { repo: ROOT, pkg: PKG }), (e) => e.code === 'ENGINE_INSTALL');
 });

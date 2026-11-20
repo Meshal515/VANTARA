@@ -116,15 +116,26 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     const { data } = await gql(`{ extension(pkgName:${gqlString(pkg)}) { source { nodes { id } } } }`).catch(() => ({ data: null }));
     return (data?.extension?.source?.nodes ?? []).map((s) => String(s.id));
   }
+  /**
+   * رفع APK موقّع عبر GraphQL (installExternalExtension، مواصفة رفع الملفات المعيارية: operations وmap والملف). مسار
+   * REST القديم /api/v1/extension/install أُزيل من Suwayomi بعد v2.4.2366 (ويندوز حقيقي: Not Found).
+   */
   async function uploadOnce(pkg, bytes, version) {
     const form = new FormData();
+    form.append('operations', JSON.stringify({
+      query: 'mutation ($file: Upload!) { installExternalExtension(input: { extensionFile: $file }) { extension { pkgName isInstalled } } }',
+      variables: { file: null },
+    }));
+    form.append('map', JSON.stringify({ 0: ['variables.file'] }));
     // الاسم يحمل الإصدار: Suwayomi يشتق منه اسم ملف jar، فإصداران مختلفان لا يتصادمان عند التحديث والرجوع
-    form.append('file', new Blob([bytes], { type: 'application/vnd.android.package-archive' }), `${pkg}-v${String(version ?? '0').replace(/[^\w.-]/g, '')}.apk`);
-    const before = runtime.recentOutput?.().length ?? 0;
-    const r = await runtime.request('/api/v1/extension/install', { method: 'POST', body: form, timeout: 180_000 });
-    if (r.status < 400) return { ok: true };
+    form.append('0', new Blob([bytes], { type: 'application/vnd.android.package-archive' }), `${pkg}-v${String(version ?? '0').replace(/[^\w.-]/g, '')}.apk`);
+    const r = await runtime.request('/api/graphql', { method: 'POST', body: form, timeout: 180_000 });
+    const body = await r.json().catch(() => null);
+    const installed = body?.data?.installExternalExtension?.extension;
+    if (r.status < 400 && installed?.pkgName && !body?.errors?.length) return { ok: true };
     const said = runtime.recentOutput?.() ?? '';
-    return { ok: false, verify: /java\.lang\.VerifyError/.test(said.slice(Math.max(0, before - 200))) || /java\.lang\.VerifyError/.test(said.slice(-6000)), text: await r.text().catch(() => '') };
+    const text = body?.errors?.[0]?.message ?? (body ? '' : `HTTP ${r.status}`);
+    return { ok: false, verify: /VerifyError/.test(text) || /java\.lang\.VerifyError/.test(said.slice(-6000)), text };
   }
   /**
    * رفع إضافة موقّعة. رفض مدقق الـJVM (VerifyError: كود تحويل DEX إلى JVM تالف) يُقال صراحة: تشغيلها بلا تدقيق أسقط
@@ -135,8 +146,9 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     if (!out.ok) throw arabic(out.verify ? 'هذه الإضافة لا تعمل في محرك ويندوز بعد (كودها لا يتحوّل سليمًا)؛ تعمل في تطبيق الجوال' : `المحرك لم يقبل الإضافة: ${cleanError(out.text)}`.trim(), out.verify ? 'ENGINE_VERIFY' : 'ENGINE_INSTALL');
   }
   async function engineUninstall(pkg) {
-    const r = await runtime.request(`/api/v1/extension/uninstall/${encodeURIComponent(pkg)}`);
-    if (r.status >= 400 && r.status !== 404) throw arabic('تعذّر إزالة الإضافة من المحرك', 'ENGINE_UNINSTALL');
+    // GraphQL (مسار REST القديم أُزيل). إضافة غير موجودة في المحرك ليست خطأ: النتيجة المطلوبة حاصلة
+    const { errors } = await gql(`mutation { updateExtension(input:{id:${gqlString(pkg)}, patch:{uninstall:true}}) { extension { pkgName isInstalled } } }`).catch((error) => ({ errors: [{ message: error.message }] }));
+    if (errors.length && !/not found|no such|could not find|Collection is empty/i.test(String(errors[0]?.message))) throw arabic('تعذّر إزالة الإضافة من المحرك', 'ENGINE_UNINSTALL');
     loadedIn.delete(pkg);
   }
 
