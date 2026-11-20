@@ -10,6 +10,7 @@
  */
 
 import engine from '../lib/extension-engine.js';
+import { saveWithRelief } from '../lib/storage-relief.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
 import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
@@ -54,8 +55,7 @@ export function createSavedWorks({ key, storage = globalThis.localStorage, max =
       map[ref] = value;
       const keys = Object.keys(map);
       for (const k of keys.slice(0, Math.max(0, keys.length - max))) delete map[k];
-      try { storage?.setItem(key, JSON.stringify(map)); return true; }
-      catch { try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key } })); } catch { /* */ } return false; }
+      return saveWithRelief(storage, key, JSON.stringify(map));
     },
   };
 }

@@ -262,7 +262,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const sourceVerification = createSourceVerification();
   // SY2: تخزين الجهاز ممتلئ فلم يُحفظ سجل الدمج أو قرار غلاف: يُقال مرة في الجلسة بدل أن يضيع بصمت
   let storageFullSaid = false;
-  const onStorageFull = () => { if (storageFullSaid) return; storageFullSaid = true; setTimeout(() => toast('مساحة التخزين في التطبيق ممتلئة: بعض ما تعلّمه عن أعمالك لن يُحفظ بعد إعادة الفتح. امسح الكاش من الإعدادات', 6000), 0); };
+  const onStorageFull = () => { if (storageFullSaid) return; storageFullSaid = true; setTimeout(() => toast('ذاكرة التطبيق الصغيرة ممتلئة حتى بعد تفريغ الكاش؛ بعض ما يتعلمه عن أعمالك قد لا يبقى بعد إعادة الفتح. بياناتك المزامنة بأمان', 8000), 0); };
   globalThis.addEventListener?.('vantara:storage-full', onStorageFull);
   // ES1: ملف إعدادات الإضافات كان تالفًا فحُفظ جانبًا وأقلع التطبيق بلا إضافات المستخدم بدل أن ينهار
   const onExtensionsRecovered = () => setTimeout(() => toast('ملف إعدادات الإضافات كان تالفًا فحفظناه جانبًا. أضف مستودعاتك وإضافاتك من جديد من صفحة الإضافات', 7000), 0);

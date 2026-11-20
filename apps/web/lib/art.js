@@ -14,6 +14,7 @@
  * الترحيل: قرار محفوظ بالصيغة السابقة (vantara.manga.art.v2) يُقرأ ولا يُمسح.
  */
 import { chooseBanner, chooseCover, probe as probeImage } from './manga-art.js';
+import { saveWithRelief } from './storage-relief.js';
 
 const KEY = 'vantara.art.v1';
 const LEGACY = 'vantara.manga.art.v2';
@@ -43,7 +44,7 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
       const keys = Object.keys(all);
       for (const k of keys.slice(0, Math.max(0, keys.length - MAX))) delete all[k];
       // فشل الحفظ (تخزين ممتلئ) يُعلن (SY2): القرار يبقى للجلسة، لكن ضياعه يعني غلافًا آخر بعد إعادة الفتح
-      try { storage?.setItem(KEY, JSON.stringify(all)); } catch { try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key: KEY } })); } catch { /* */ } }
+      saveWithRelief(storage, KEY, JSON.stringify(all));
     }, 300);
   };
   const legacyOf = (id) => {
