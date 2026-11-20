@@ -17,6 +17,7 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { isDurableArtUrl } from '../lib/art.js';
 import { cinemaPositionKey, createPositionSync, overlayAllPositions } from '../lib/watch-position.js';
 import { isNative } from '../pwa/platform.js';
 import { addonName, createServerSheet } from './server-sheet.js';
@@ -218,10 +219,17 @@ export function createCinema(deps) {
   const positionClock = new Map();
   // خلفية صفحة العمل التي ظهرت فعلًا لكل عمل: الفتح التالي يرسمها من أول إطار (لا ملصق ثم خلفية)
   const HERO_PICK_KEY = 'vantara.cinema.heroPick.v1';
+  // يُحفظ رابط ويب حقيقي فقط، ويُتجاهل عند القراءة ما سواه (رابط blob: من عمل محمّل كان يُحفظ فيموت بإغلاق التطبيق)
   const heroPick = {
-    get: (id) => readJson(HERO_PICK_KEY, {})[id] ?? null,
+    get: (id) => { const src = readJson(HERO_PICK_KEY, {})[id] ?? null; return isDurableArtUrl(src) ? src : null; },
+    drop(id) {
+      const all = readJson(HERO_PICK_KEY, {});
+      if (!(id in all)) return;
+      delete all[id];
+      writeJson(HERO_PICK_KEY, all);
+    },
     set(id, src) {
-      if (!id || !src) return;
+      if (!id || !isDurableArtUrl(src)) return;
       const all = readJson(HERO_PICK_KEY, {});
       if (all[id] === src) return;
       all[id] = src;
@@ -1945,7 +1953,9 @@ export function createCinema(deps) {
     } else if (want) {
       backdrop = unified
         ? image(want, 'cn-img', { eager: true, fallback: [m.poster && m.poster.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/'), m.poster].filter((u) => u && u !== want) })
-        : image(want, 'cn-img', { eager: true, hero: !remembered });
+        : image(want, 'cn-img', { eager: true, hero: !remembered, ...(remembered ? { fallback: [m.background, m.poster].filter((u) => u && u !== want) } : {}) });
+      // الخلفية المحفوظة لم تُحمَّل (رابط مات): تُنسى، والبدائل أعلاه (خلفية العمل ثم ملصقه) تظهر مكانها
+      if (remembered && !unified) backdrop.addEventListener('error', () => heroPick.drop(m.id), { once: true });
       backdrop.dataset.want = want;
       backdrop.addEventListener('load', () => {
         if (!unified && (!partial || remembered)) heroPick.set(m.id, backdrop.currentSrc || backdrop.src);

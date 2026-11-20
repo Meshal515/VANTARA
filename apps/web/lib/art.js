@@ -207,6 +207,12 @@ const STRIKES = 3;
 const STRIKE_SPAN_MS = 24 * 60 * 60_000;
 /** مسار ملف محلي (غلاف محفوظ على الجهاز) لا رابط أصلي: لا يُستعاد إن حُذف الملف. */
 export const isLocalArt = (url) => /_capacitor_file_|^file:|^blob:|^data:|^content:/.test(String(url ?? ''));
+/**
+ * رابط يصلح أن يُحفظ لما بعد الجلسة: رابط ويب حقيقي، لا رابط ذاكرة مؤقت (blob: يموت بإغلاق التطبيق) ولا ملف محلي
+ * قد يُحذف. بلاغ المالك (20 نوفمبر): بنر عمل محمّل فُتح من «على الجهاز» حُفظ رابطه المؤقت «بنرًا ظهر»، فظهرت
+ * صورة مكسورة في الفتح التالي حتى مع الإنترنت.
+ */
+export const isDurableArtUrl = (url) => /^https?:\/\//i.test(String(url ?? '')) && !isLocalArt(url) && !/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/i.test(String(url));
 
 /** حدود نسبة الغلاف المحجوزة: غلاف شاذ (شريط طويل جدًا أو صورة عريضة) لا يكسر تخطيط النمط؛ يُقص قليلًا. */
 export const COVER_RATIO = Object.freeze({ min: 0.55, max: 0.85 });

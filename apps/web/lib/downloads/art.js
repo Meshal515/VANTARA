@@ -6,6 +6,24 @@
  */
 
 const SIZES = { cover: 360, banner: 1080, logo: 600 };
+/** رابط مؤقت أو محلي (blob:، ملف التطبيق): يموت بإغلاق التطبيق أو بمسح الكاش، فلا يُجلب منه ولا يُحفظ. */
+const LOCAL_URL = /^(blob|data|file|content):|_capacitor_file_/i;
+export const durableUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u) && !LOCAL_URL.test(u);
+
+/**
+ * نسخة من تفاصيل العمل بلا روابط مؤقتة (بلاغ المالك، 20 نوفمبر): صفحة فُتحت من «على الجهاز» صورها blob:، فإن حُفظت
+ * تفاصيلها كما هي ظهرت صور مكسورة لاحقًا حتى مع الإنترنت. كل نص رابطه مؤقت يصير null فيُستعمل البديل الحقيقي.
+ */
+export function withoutLocalUrls(value) {
+  if (typeof value === 'string') return LOCAL_URL.test(value) ? null : value;
+  if (Array.isArray(value)) return value.map(withoutLocalUrls);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = withoutLocalUrls(v);
+    return out;
+  }
+  return value;
+}
 const urls = new Map();
 const pending = new WeakMap();
 const retryTimers = new WeakMap();
@@ -85,7 +103,8 @@ export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, l
     if (previous) await previous;
     let saved = 0;
     for (const [kind, src] of [...Object.keys(SIZES).map((kind) => [kind, work[kind]]), ...Object.entries(extras)]) {
-      if (!src || typeof src !== 'string') continue;
+      // رابط مؤقت (صفحة فُتحت من «على الجهاز»): لا يُجلب منه ولا يحل محل الرابط الحقيقي المحفوظ للمحاولة
+      if (!durableUrl(src)) continue;
       const key = `${work.ref}|${kind}`;
       try {
         const existing = await store.getArt(key);

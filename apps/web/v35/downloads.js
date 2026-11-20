@@ -15,7 +15,7 @@ import { canonicalRefOf } from '../lib/manga-alias-store.js';
 // مرجعا العمل الواحد بعد الدمج بطاقة واحدة في «على الجهاز» (DLX1)
 setWorkGroup((ref) => (String(ref).startsWith('ext:') ? canonicalRefOf(ref) : ref));
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
-import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
+import { artUrl, dropWorkArt, saveWorkArt, withoutLocalUrls } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
 import { isFiller } from './works.js';
 import { createStorageView } from './storage-view.js';
@@ -542,7 +542,8 @@ export function createDownloadsUI(deps) {
       artUrl(c.store, ref, 'cover'), artUrl(c.store, ref, 'banner'), artUrl(c.store, ref, 'logo'),
     ]);
     let base = null;
-    try { base = saved?.json ? JSON.parse(saved.json) : null; } catch { base = null; }
+    // تفاصيل حُفظت قبل الإصلاح قد تحمل روابط مؤقتة ميتة: تُتجاهل فيظهر البديل الحقيقي (الإنترنت أو صورة محفوظة)
+    try { base = saved?.json ? withoutLocalUrls(JSON.parse(saved.json)) : null; } catch { base = null; }
     const w = data.work;
     if (navigator.onLine !== false) {
       const extras = data.section === 'cinema' ? cinemaArt(base?.seasons, new Set(data.ready.map((i) => i.unit.key))) : {};
@@ -1389,7 +1390,8 @@ export function createDownloadsUI(deps) {
           const extras = spec.section === 'cinema' ? cinemaArt(spec.snapshot?.seasons, new Set(added.map((i) => i.unit.key))) : {};
           void saveWorkArt(c.store, spec.work, { local: localArt(spec.work), extras });
           if (spec.snapshot) {
-            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
+            // بلا روابط مؤقتة: تنزيل إضافي من صفحة فُتحت من «على الجهاز» كان يحفظ روابط blob: تموت بعد الإغلاق
+            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(withoutLocalUrls(spec.snapshot), (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
           }
           closeSheet();
           paintEntry();
