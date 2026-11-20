@@ -35,6 +35,10 @@ describe('next episode warmup matches the APK window', () => {
     expect(shouldWarmNext(1_440_000, 1_200_000)).toBe(true);
     expect(shouldWarmNext(1_440_000, 1_440_000)).toBe(false);
     expect(shouldWarmNext(0, 10)).toBe(false);
+    // في الغرفة: قبل النهاية بثلاث دقائق (قرار المالك)، لا أربع
+    const { ROOM_WARMUP_WINDOW_MS } = await import('./player.js');
+    expect(shouldWarmNext(1_440_000, 1_200_000, ROOM_WARMUP_WINDOW_MS)).toBe(false);
+    expect(shouldWarmNext(1_440_000, 1_270_000, ROOM_WARMUP_WINDOW_MS)).toBe(true);
   });
   it('documents every keyboard shortcut it handles', async () => {
     const { SHORTCUTS } = await import('./player.js');

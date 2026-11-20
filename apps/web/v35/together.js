@@ -241,12 +241,14 @@ export function createTogether(deps) {
     return true;
   }
 
-  function leave() {
+  // explicit: المستخدم ضغط «اطلع من الغرفة» (لا طرد ولا انتقال لغرفة أخرى): تُرسل «bye» فتنتقل الاستضافة فورًا
+  function leave(explicit = false) {
     if (!session) return;
     const s = session;
     session = null;
     for (const off of s.offs) off();
-    s.room.close();
+    if (explicit && typeof s.room.leave === 'function') s.room.leave();
+    else s.room.close();
     for (const node of s.strips) node.replaceChildren();
     emit();
   }
@@ -570,7 +572,7 @@ export function createTogether(deps) {
           const mode = s.room.info?.mode ?? s.mode;
           actions.append(button('tg-action', `${glyph('refresh', { size: 18 })}<span>${mode === 'sync' ? 'حوّلها منفصلة' : 'حوّلها متزامنة'}</span>`, () => s.room.setMode(mode === 'sync' ? 'free' : 'sync')));
         }
-        actions.append(button('tg-action tg-leave', `${glyph('back', { size: 18 })}<span>اطلع من الغرفة</span>`, () => { ui().closeSheet(); leave(); ui().toast('طلعت من الغرفة'); }));
+        actions.append(button('tg-action tg-leave', `${glyph('back', { size: 18 })}<span>اطلع من الغرفة</span>`, () => { ui().closeSheet(); leave(true); ui().toast('طلعت من الغرفة'); }));
       };
       paint();
       const offs = [s.room.on('roster', paint), s.room.on('room', paint), s.room.on('connection', paint), s.room.on('state', paint)];
@@ -595,7 +597,7 @@ export function createTogether(deps) {
     card,
     mountStrip,
     openPanel,
-    leave,
+    leave: () => leave(true),
     /** هل الجلسة النشطة لهذا العمل (و/أو هذه الحلقة)؟ */
     matches(seriesRef, episode = null) {
       const m = session?.room.timeline?.media ?? session?.media;
