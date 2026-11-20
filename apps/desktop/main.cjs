@@ -210,6 +210,8 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     register('manga-engine', ({ method, args } = {}) => mangaEngine.call(String(method ?? ''), args));
     // التحديث الذاتي الآمن مرة كل يوم وقت عمل المحرك فقط (لا يُشغَّل من أجله)
     setInterval(() => { void mangaEngine.autoUpdate().catch(() => {}); }, 60 * 60_000).unref?.();
+    // تسخين بعد أن تظهر الواجهة (لا يبطئ الإقلاع)، لمن عنده إضافات فقط؛ ثم فحص التحديث اليومي
+    if (!mangaEngineReportOption) setTimeout(() => { void mangaEngine.warmUp().then((on) => on && mangaEngine.autoUpdate()).catch(() => {}); }, 8000).unref?.();
   }
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {

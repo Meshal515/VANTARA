@@ -209,3 +209,17 @@ test('uninstall removes it from the engine, the list and the disk copies', async
   assert.deepEqual(fs.readdirSync(path.join(t.dir, 'apks')), []);
   await assert.rejects(t.engine.call('popular', { sourceId: `${PKG}#${SRC}` }), /غير مثبت على هذا الجهاز/);
 });
+
+test('warm-up starts the engine only for someone who has Mihon extensions', async () => {
+  const t = setup();
+  let started = 0;
+  const start = t.fake.runtime.start;
+  t.fake.runtime.start = async () => { started += 1; return start(); };
+  assert.equal(await t.engine.warmUp(), false);
+  assert.equal(started, 0);
+  await t.engine.call('addRepo', { url: ROOT });
+  await t.engine.call('installExtension', { repo: ROOT, pkg: PKG });
+  started = 0;
+  assert.equal(await t.make().warmUp(), true);
+  assert.equal(started, 1);
+});

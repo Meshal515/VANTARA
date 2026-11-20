@@ -80,7 +80,7 @@ test('install: pinned download, SHA-256 verified, only jre and bin extracted, th
   const password = java.args.find((a) => a.includes('authPassword')).split('=').slice(1).join('=').replace(/"/g, '');
   assert.match(password, /^v[0-9a-f]{48}$/);
   assert.equal(endpoint.auth, `Basic ${Buffer.from(`vantara:${password}`).toString('base64')}`);
-  assert.deepEqual([...new Set(h.progress)], ['download', 'extract', 'installed', 'running']);
+  assert.deepEqual([...new Set(h.progress)], ['download', 'extract', 'installed', 'starting', 'running']);
   // السر لا يُكتب في سجل المحرك، ولا يبقى ملف التنزيل
   assert.doesNotMatch(fs.readFileSync(path.join(h.root, 'engine.log'), 'utf8'), new RegExp(password));
   assert.equal(fs.existsSync(path.join(h.root, 'downloads')), false);

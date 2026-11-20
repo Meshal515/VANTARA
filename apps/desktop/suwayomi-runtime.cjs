@@ -3,7 +3,7 @@
 // مرة عند أول حاجة، بإصدار مثبّت وبصمة SHA-256 مثبّتة، ويعمل محليًا فقط:
 //  - يستمع على 127.0.0.1 بمنفذ عشوائي، بمصادقة BASIC وسر عشوائي جديد كل تشغيل (لا يعرفه إلا هذا التطبيق).
 //  - واجهته الويب وأيقونة الشريط وفتح المتصفح معطلة؛ VANTARA تبقى الواجهة الوحيدة (قرار المالك: «محرك فقط»).
-//  - بياناته في userData/suwayomi/data (لا تُمسح مع الكاش)، ويتوقف مع إغلاق التطبيق أو بعد خمول طويل.
+//  - بياناته في userData/suwayomi/data (لا تُمسح مع الكاش)، ويتوقف مع إغلاق التطبيق أو بعد 45 دقيقة بلا استعمال.
 // لا شيء من هذا يمر عبر Cloudflare.
 const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
@@ -21,7 +21,7 @@ const PINNED = Object.freeze({
 });
 const USER = 'vantara';
 const START_TIMEOUT_MS = 150_000;
-const IDLE_STOP_MS = 20 * 60_000;
+const IDLE_STOP_MS = 45 * 60_000;
 const LOG_LIMIT = 2 * 1024 * 1024;
 
 const arabic = (message, code) => Object.assign(new Error(message), { code });
@@ -153,11 +153,13 @@ function createSuwayomiRuntime({
   }
 
   /** يشغّل المحرك (ويثبّته أولًا إن لزم) ويعيد `{ base, auth }`. نداء واحد في كل مرة. */
-  function start() {
+  function start({ quiet = false } = {}) {
     lastUse = now();
     if (live && live.child.exitCode == null && !live.child.killed) return Promise.resolve(live.endpoint);
     starting ??= (async () => {
       await install();
+      // تسخين الخلفية لا يُظهر شيئًا؛ طلب ينتظره المستخدم يقول ما يحدث بدل انتظار صامت
+      if (!quiet) onProgress({ stage: 'starting' });
       await fsp.mkdir(dataDir, { recursive: true });
       const port = await freePort();
       const password = `v${crypto.randomBytes(24).toString('hex')}`;

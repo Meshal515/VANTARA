@@ -499,7 +499,19 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     return fn(args ?? {});
   }
 
-  return { call, media, autoUpdate, isEngineSource, METHODS: Object.keys(METHODS) };
+  /**
+   * تسخين بعد الإقلاع: من عنده إضافات Mihon يجد المحرك جاهزًا (إقلاع JVM يأخذ 20–40 ثانية)، فلا يتجاوز أول تصفح
+   * مهلة الشاشة. لا يُنزّل المحرك ولا يشغّله لمن لا إضافات عنده.
+   */
+  async function warmUp() {
+    if (!runtime.installed()) return false;
+    const st = await load().catch(() => null);
+    if (!st?.extensions?.length) return false;
+    await runtime.start({ quiet: true });
+    return true;
+  }
+
+  return { call, media, autoUpdate, warmUp, isEngineSource, METHODS: Object.keys(METHODS) };
 }
 
 module.exports = { createSuwayomiEngine, splitSourceId, isEngineSource, mediaPath, toManga, MEDIA };
