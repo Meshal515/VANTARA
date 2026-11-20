@@ -116,12 +116,29 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     const { data } = await gql(`{ extension(pkgName:${gqlString(pkg)}) { source { nodes { id } } } }`).catch(() => ({ data: null }));
     return (data?.extension?.source?.nodes ?? []).map((s) => String(s.id));
   }
-  async function upload(pkg, bytes, version) {
+  async function uploadOnce(pkg, bytes, version) {
     const form = new FormData();
     // الاسم يحمل الإصدار: Suwayomi يشتق منه اسم ملف jar، فإصداران مختلفان لا يتصادمان عند التحديث والرجوع
     form.append('file', new Blob([bytes], { type: 'application/vnd.android.package-archive' }), `${pkg}-v${String(version ?? '0').replace(/[^\w.-]/g, '')}.apk`);
+    const before = runtime.recentOutput?.().length ?? 0;
     const r = await runtime.request('/api/v1/extension/install', { method: 'POST', body: form, timeout: 180_000 });
-    if (r.status >= 400) throw arabic(`المحرك لم يقبل الإضافة: ${cleanError(await r.text().catch(() => ''))}`.trim(), 'ENGINE_INSTALL');
+    if (r.status < 400) return { ok: true };
+    const said = runtime.recentOutput?.() ?? '';
+    return { ok: false, verify: /java\.lang\.VerifyError/.test(said.slice(Math.max(0, before - 200))) || /java\.lang\.VerifyError/.test(said.slice(-6000)), text: await r.text().catch(() => '') };
+  }
+  /**
+   * رفع إضافة موقّعة. المدقق يبقى شغالًا؛ إن رفضها بـVerifyError (تحويل DEX إلى JVM) يُوسَّع مرة ويُعاد المحرك ثم
+   * تُرفع ثانية (قرار المالك 20 نوفمبر). أي رفض آخر يبقى رفضًا بسببه.
+   */
+  async function upload(pkg, bytes, version) {
+    let out = await uploadOnce(pkg, bytes, version);
+    if (!out.ok && out.verify && typeof runtime.widenVerifier === 'function' && !runtime.verifierWidened()) {
+      onEvent({ type: 'manga-engine/progress', stage: 'starting' });
+      await runtime.widenVerifier(true);
+      loadedIn.clear();
+      out = await uploadOnce(pkg, bytes, version);
+    }
+    if (!out.ok) throw arabic(out.verify ? 'هذه الإضافة لا تعمل في محرك ويندوز (رفض المدقق كودها)' : `المحرك لم يقبل الإضافة: ${cleanError(out.text)}`.trim(), out.verify ? 'ENGINE_VERIFY' : 'ENGINE_INSTALL');
   }
   async function engineUninstall(pkg) {
     const r = await runtime.request(`/api/v1/extension/uninstall/${encodeURIComponent(pkg)}`);

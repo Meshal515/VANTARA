@@ -223,3 +223,35 @@ test('warm-up starts the engine only for someone who has Mihon extensions', asyn
   assert.equal(await t.make().warmUp(), true);
   assert.equal(started, 1);
 });
+
+test('an extension refused by the JVM verifier widens it once, restarts the engine and installs; other refusals stay refusals', async () => {
+  const t = setup();
+  let widened = false, refusals = 1, output = '';
+  const request = t.fake.runtime.request;
+  t.fake.runtime.recentOutput = () => output;
+  t.fake.runtime.verifierWidened = () => widened;
+  t.fake.runtime.widenVerifier = async (on) => { widened = on; return true; };
+  t.fake.runtime.request = async (pathname, opts) => {
+    if (pathname === '/api/v1/extension/install' && refusals > 0) {
+      refusals -= 1;
+      output += 'java.util.concurrent.CompletionException: java.lang.VerifyError: Bad type on operand stack\n';
+      return new Response('Server Error', { status: 500 });
+    }
+    return request(pathname, opts);
+  };
+  await t.engine.call('addRepo', { url: ROOT });
+  const out = await t.engine.call('installExtension', { repo: ROOT, pkg: PKG });
+  assert.equal(widened, true);
+  assert.deepEqual(out.sources, [`${PKG}#${SRC}`]);
+  // رفض لسبب آخر لا يوسّع شيئًا ولا يُخفى
+  const u = setup();
+  u.fake.runtime.recentOutput = () => 'java.lang.IllegalStateException: other';
+  u.fake.runtime.verifierWidened = () => false;
+  let asked = false;
+  u.fake.runtime.widenVerifier = async () => { asked = true; return true; };
+  const base = u.fake.runtime.request;
+  u.fake.runtime.request = async (p, o) => (p === '/api/v1/extension/install' ? new Response('Server Error', { status: 500 }) : base(p, o));
+  await u.engine.call('addRepo', { url: ROOT });
+  await assert.rejects(u.engine.call('installExtension', { repo: ROOT, pkg: PKG }), /المحرك لم يقبل الإضافة/);
+  assert.equal(asked, false);
+});

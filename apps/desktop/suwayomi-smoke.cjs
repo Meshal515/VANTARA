@@ -6,6 +6,7 @@ const fs = require('node:fs/promises');
 
 const REPO = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo';
 const PKG = 'eu.kanade.tachiyomi.extension.all.mangadex';
+const EXTRA = ['eu.kanade.tachiyomi.extension.ar.teamx', 'eu.kanade.tachiyomi.extension.ar.mangaswat', 'eu.kanade.tachiyomi.extension.ar.azora'];
 
 async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, pkg = PKG }) {
   const steps = [];
@@ -53,15 +54,27 @@ async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, p
       return r.status;
     });
   } catch { /* الخطوة الفاشلة مسجلة؛ التقرير يُكتب كما هو */ }
+  // مصادر عربية حقيقية بجانب MangaDex: مؤشر فقط (المواقع نفسها قد تتوقف أو تطلب تحققًا)، والشرط يبقى MangaDex كاملًا
+  const extras = [];
+  if (steps.length === 11 && steps.every((s) => s.ok)) for (const other of EXTRA) {
+    const row = { pkg: other };
+    try {
+      const id = (await engine.call('installExtension', { repo, pkg: other })).sources[0];
+      row.installed = true;
+      const list = await engine.call('popular', { sourceId: id, page: 1 });
+      row.popular = list.mangas.length;
+    } catch (error) { row.error = String(error?.message ?? error).slice(0, 200); }
+    extras.push(row);
+  }
   // آخر سطور سجل المحرك للتشخيص (السر محجوب فيه أصلًا)
   let log = '';
   // أسطر الأخطاء نفسها (لا ذيل التتبع وحده) ثم آخر السجل
   try {
     const lines = (await fs.readFile(runtime.logFile, 'utf8')).split(/\r?\n/);
-    const errors = lines.filter((l) => /Exception|Caused by|ERROR|WARN|Error:/.test(l) && !/^\s+at /.test(l)).slice(-40);
+    const errors = lines.filter((l) => /Exception|Caused by|ERROR|WARN|Error:|Reason:|Location:|Current Frame|Type '/.test(l) && !/^\s+at /.test(l)).slice(-60);
     log = [...errors, '---', ...lines.slice(-25)].join('\n');
   } catch { /* */ }
-  const report = { passed: steps.filter((s) => s.ok).length, total: steps.length, complete: steps.length === 11 && steps.every((s) => s.ok), steps, engine: runtime.state(), log };
+  const report = { passed: steps.filter((s) => s.ok).length, total: steps.length, complete: steps.length === 11 && steps.every((s) => s.ok), steps, extras, engine: runtime.state(), log };
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
   return report;
 }

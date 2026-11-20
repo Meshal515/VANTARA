@@ -104,3 +104,19 @@ test('an engine that exits during start reports it in Arabic; other platforms do
   const other = createSuwayomiRuntime({ root: tmp(), platform: 'linux' });
   await assert.rejects(other.install(), /متاح في ويندوز/);
 });
+
+test('the bytecode verifier stays on by default and is widened only on request, persisted across restarts', async () => {
+  const flag = '-XX:-BytecodeVerificationRemote';
+  assert.equal(launchArgs({ dataDir: 'd', port: 1, password: 'p' }).includes(flag), false);
+  assert.equal(launchArgs({ dataDir: 'd', port: 1, password: 'p', widenVerifier: true }).includes(flag), true);
+  const h = harness();
+  await h.runtime.start();
+  assert.equal(h.spawned.find((s) => s.file.endsWith('java.exe')).args.includes(flag), false);
+  assert.equal(await h.runtime.widenVerifier(true), true);
+  const javas = h.spawned.filter((s) => s.file.endsWith('java.exe'));
+  assert.equal(javas.length, 2, 'restarted with the widened verifier');
+  assert.equal(javas[1].args.includes(flag), true);
+  assert.equal(h.runtime.state().verifierWidened, true);
+  assert.equal(await h.runtime.widenVerifier(true), false, 'already widened: no restart');
+  await h.runtime.close();
+});
