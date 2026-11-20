@@ -287,3 +287,34 @@ describe('limits', () => {
     expect(overLimit('heavy', now + 60_000)).toBe(false);
   });
 });
+
+// «جسرك الخاص» (خطة فانتارا بلا خادمنا): نسخة ينشرها المستخدم في حسابه بمفتاح، بلا حساب فانتارا
+describe('your own bridge mode', () => {
+  const KEY = 'my-own-bridge-key-at-least-24-chars';
+  const bridgeEnv: Env = { VANTARA_IDENTITY_SECRET: '', VANTARA_BRIDGE_KEY: KEY };
+  it('accepts the bridge key instead of a VANTARA account and rejects anything else', async () => {
+    const upstream = fakeUpstream({ 'https://myseed.pics/': () => new Response('<html>ok</html>', { status: 200 }) });
+    const handle = createHandler(upstream.impl);
+    const ok = await handle(fetchReq({ url: 'https://myseed.pics/' }, `Bearer ${KEY}`), bridgeEnv);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toContain('ok');
+    expect(ok.headers.get('access-control-allow-origin')).toBe(ORIGIN); // واجهة فانتارا مقبولة افتراضيًا
+    expect((await handle(fetchReq({ url: 'https://myseed.pics/' }, `Bearer ${KEY}x`), bridgeEnv)).status).toBe(401);
+    expect((await handle(fetchReq({ url: 'https://myseed.pics/' }, await bearer()), bridgeEnv)).status).toBe(401); // توكن حساب لا يكفي هنا
+    expect((await handle(fetchReq({ url: 'https://myseed.pics/' }), bridgeEnv)).status).toBe(401);
+  });
+  it('a short key does not turn bridge mode on, and health says whether it is a bridge', async () => {
+    const handle = createHandler(fakeUpstream({}).impl);
+    const weak = await handle(fetchReq({ url: 'https://myseed.pics/' }, 'Bearer short'), { VANTARA_IDENTITY_SECRET: '', VANTARA_BRIDGE_KEY: 'short' });
+    expect(weak.status).toBe(503);
+    const health = await handle(new Request('https://b.example/health', { headers: { origin: ORIGIN } }), bridgeEnv);
+    expect(await health.json()).toMatchObject({ ok: true, bridge: true });
+  });
+  it('media grants are signed with the bridge key', async () => {
+    const handle = createHandler(fakeUpstream({}).impl);
+    const res = await handle(new Request('https://b.example/v1/grant', { method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${KEY}` } }), bridgeEnv);
+    expect(res.status).toBe(200);
+    const { grant } = (await res.json()) as { grant: string };
+    expect(await verifyGrant(grant, KEY)).toBe('bridge-owner');
+  });
+});

@@ -24,7 +24,27 @@ import { isPlaylist, rewritePlaylist } from './hls.ts';
 export interface Env extends BrowserEnv {
   VANTARA_IDENTITY_SECRET: string;
   ALLOWED_ORIGINS?: string;
+  /**
+   * «جسرك الخاص» (خطة فانتارا بلا خادمنا): نسخة ينشرها المستخدم في حساب Cloudflare الخاص به. المفتاح سر بين متصفحه
+   * وجسره، يغني عن حساب فانتارا وعن خادمنا: المحتوى يمر عبر حسابه هو لا حسابنا. 24 حرفًا على الأقل.
+   */
+  VANTARA_BRIDGE_KEY?: string;
 }
+
+/** سر التوقيع: مفتاح الجسر الخاص إن وُجد، وإلا سر هوية فانتارا. */
+const signingSecret = (env: Env): string => (bridgeMode(env) ? env.VANTARA_BRIDGE_KEY! : env.VANTARA_IDENTITY_SECRET);
+const bridgeMode = (env: Env): boolean => typeof env.VANTARA_BRIDGE_KEY === 'string' && env.VANTARA_BRIDGE_KEY.length >= 24;
+
+/** مقارنة بزمن ثابت: لا يُستنتج المفتاح من توقيت الرد. */
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** أصل واجهة فانتارا الرسمي: الجسر الخاص يقبله افتراضيًا (ويضيف المستخدم غيره في ALLOWED_ORIGINS). */
+const VANTARA_WEB_ORIGINS = ['https://vantara-bcf.pages.dev', 'https://localhost', 'capacitor://localhost', 'vantara://app'];
 
 /** ترويسات من المصدر تمرّ للعميل باسم x-vf-h-<الاسم>. */
 const PASSED_HEADERS = ['x-videa-xs'];
@@ -76,7 +96,8 @@ const NOT_MEDIA = /^(text\/html|application\/(json|xml|xhtml|javascript)|text\/(
 // ───────────────────────── CORS ─────────────────────────
 
 function allowedOrigins(env: Env): string[] {
-  return (env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const listed = (env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return bridgeMode(env) ? [...new Set([...listed, ...VANTARA_WEB_ORIGINS])] : listed;
 }
 
 function corsHeaders(request: Request, env: Env): Record<string, string> {
@@ -105,6 +126,8 @@ async function bearerUser(request: Request, env: Env): Promise<string | null> {
   const header = request.headers.get('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return null;
+  // الجسر الخاص: مفتاحه وحده يكفي (مستخدم واحد هو صاحب الحساب)، بلا حساب فانتارا
+  if (bridgeMode(env)) return sameSecret(token, env.VANTARA_BRIDGE_KEY!) ? 'bridge-owner' : null;
   const claims = await verifyIdentityToken(token, env.VANTARA_IDENTITY_SECRET);
   return claims?.userId ?? null;
 }
@@ -319,13 +342,13 @@ function safeHost(raw: unknown): string | null {
 async function handleGrant(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
   const userId = await bearerUser(request, env);
   if (!userId) return json(401, { error: 'unauthorized' }, cors);
-  return json(200, await mintGrant(userId, env.VANTARA_IDENTITY_SECRET), cors);
+  return json(200, await mintGrant(userId, signingSecret(env)), cors);
 }
 
 /** صورة أو فيديو أو قائمة HLS بإذن في الرابط (`<img>`/`<video>` لا يرسلان ترويسات). */
 async function handleMedia(request: Request, env: Env, cors: Record<string, string>, fetchImpl: typeof fetch): Promise<Response> {
   const params = new URL(request.url).searchParams;
-  const userId = await verifyGrant(params.get('g'), env.VANTARA_IDENTITY_SECRET);
+  const userId = await verifyGrant(params.get('g'), signingSecret(env));
   if (!userId) return json(401, { error: 'unauthorized' }, cors);
   if (overLimit(userId)) return json(429, { error: 'rate_limited' }, cors);
   const target = parseTarget(params.get('u'));
@@ -399,12 +422,13 @@ export function createHandler(fetchImpl: typeof fetch = fetch) {
     const cors = corsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
     const { pathname } = new URL(request.url);
-    if (!env.VANTARA_IDENTITY_SECRET && pathname.startsWith('/v1/')) return json(503, { error: 'not_configured' }, cors);
+    if (!env.VANTARA_IDENTITY_SECRET && !bridgeMode(env) && pathname.startsWith('/v1/')) return json(503, { error: 'not_configured' }, cors);
     if (pathname === '/v1/fetch' && request.method === 'POST') return handleFetch(request, env, cors, fetchImpl);
     if (pathname === '/v1/grant' && request.method === 'POST') return handleGrant(request, env, cors);
     if (pathname === '/v1/media' && request.method === 'GET') return handleMedia(request, env, cors, fetchImpl);
     if (pathname === '/health/hosts' && request.method === 'GET') return handleHosts(request, cors, fetchImpl);
-    if (pathname === '/health') return json(200, { ok: true, hosts: ALLOW.hosts.length }, cors);
+    // `bridge`: الواجهة تعرف أنها تكلم جسرًا خاصًا يعمل (فحص الاتصال في الإعدادات)
+    if (pathname === '/health') return json(200, { ok: true, hosts: ALLOW.hosts.length, bridge: bridgeMode(env) }, cors);
     return json(404, { error: 'not_found' }, cors);
   };
 }
