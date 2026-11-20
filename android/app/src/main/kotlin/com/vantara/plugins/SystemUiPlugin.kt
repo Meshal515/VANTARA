@@ -21,6 +21,35 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "SystemUi")
 class SystemUiPlugin : Plugin() {
 
+    /**
+     * حفظ ملف نصي أو مشاركته («إضافاتي»): WebView لا يتعامل مع تنزيل blob:، فيُكتب الملف في `cacheDir/exports`
+     * ويُفتح لوح المشاركة (الملفات، Drive، أو إرسال لنفسك). اسم الملف يُنقّى، والحجم محدود.
+     */
+    @PluginMethod
+    fun shareFile(call: PluginCall) {
+        val text = call.getString("text") ?: return call.reject("المحتوى مطلوب")
+        if (text.length > 2 * 1024 * 1024) return call.reject("الملف أكبر من المسموح")
+        val name = (call.getString("name") ?: "vantara.json").replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifEmpty { "vantara.json" }
+        val mime = call.getString("mime")?.takeIf { it.matches(Regex("^[a-z]+/[a-z0-9.+-]+$")) } ?: "application/json"
+        try {
+            val dir = java.io.File(context.cacheDir, "exports").apply { mkdirs() }
+            dir.listFiles()?.forEach { it.delete() }
+            val file = java.io.File(dir, name).apply { writeText(text, Charsets.UTF_8) }
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                putExtra(android.content.Intent.EXTRA_SUBJECT, call.getString("title") ?: name)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = android.content.Intent.createChooser(send, call.getString("title") ?: "احفظ الملف").apply { addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK) }
+            (activity ?: return call.reject("التطبيق في الخلفية")).startActivity(chooser)
+            call.resolve()
+        } catch (t: Throwable) {
+            call.reject(t.message ?: "تعذّر حفظ الملف")
+        }
+    }
+
     /** The sole local preference, shared with native playback UI. Stable is denied in Kotlin. */
     @PluginMethod
     fun diagnostics(call: PluginCall) {
