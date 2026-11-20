@@ -55,7 +55,12 @@ async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, p
   } catch { /* الخطوة الفاشلة مسجلة؛ التقرير يُكتب كما هو */ }
   // آخر سطور سجل المحرك للتشخيص (السر محجوب فيه أصلًا)
   let log = '';
-  try { log = (await fs.readFile(runtime.logFile, 'utf8')).split('\n').slice(-40).join('\n'); } catch { /* */ }
+  // أسطر الأخطاء نفسها (لا ذيل التتبع وحده) ثم آخر السجل
+  try {
+    const lines = (await fs.readFile(runtime.logFile, 'utf8')).split(/\r?\n/);
+    const errors = lines.filter((l) => /Exception|Caused by|ERROR|WARN|Error:/.test(l) && !/^\s+at /.test(l)).slice(-40);
+    log = [...errors, '---', ...lines.slice(-25)].join('\n');
+  } catch { /* */ }
   const report = { passed: steps.filter((s) => s.ok).length, total: steps.length, complete: steps.length === 11 && steps.every((s) => s.ok), steps, engine: runtime.state(), log };
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
   return report;
