@@ -10,7 +10,7 @@ import { configureLink } from "./addons-view.js";
 import { choosePackage, isBundled, packageOf } from "../lib/source-entitlement.js";
 import { manifestEndpoint } from "../addons/import.js";
 import { verificationMessage } from "../lib/source-verification.js";
-import { FORMAT as TRANSFER_FORMAT, GROUPS as TRANSFER_GROUPS, collectExtensions, fileName as transferFileName, installItem, parseExtensions, planImport, serialize } from "../lib/extensions-transfer.js";
+import { FORMAT as TRANSFER_FORMAT, GROUPS as TRANSFER_GROUPS, collectExtensions, fileName as transferFileName, installItem, parseExtensions, planImport, serialize, extensionsFromFile } from "../lib/extensions-transfer.js";
 
 const icons = {
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -996,7 +996,7 @@ export function renderV7Addons({
     if(!value){note.textContent="ألصق رابطًا أولًا.";return;}
     // نص «إضافاتي» ملصوق (نُسخ من جهاز آخر)
     if(value.startsWith("{")&&value.includes(TRANSFER_FORMAT)){
-      try{showTransferImport(parseExtensions(value));}catch(e){note.textContent=fmtErr(e);}
+      try{showTransferImport(extensionsFromFile(value));}catch(e){note.textContent=fmtErr(e);}
       return;
     }
     let uri;
@@ -1087,7 +1087,7 @@ export function renderV7Addons({
   async function processFiles(files,note){
     // ملف «إضافاتي» من فانتارا: قائمة استيراد بحالة كل إضافة لا معاينة إضافة واحدة
     if(files.length===1){
-      try{const raw=await files[0].text();if(raw.includes(TRANSFER_FORMAT)){showTransferImport(parseExtensions(raw));return;}}
+      try{const raw=await files[0].text();const doc=extensionsFromFile(raw);if(doc){showTransferImport(doc);return;}}
       catch(e){note.textContent=fmtErr(e);return;}
     }
     if(!registry.inspectData){note.textContent="استيراد JSON غير مدعوم.";return;}

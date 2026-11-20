@@ -158,5 +158,21 @@ export async function installItem(item, { stores = [], registry = null, sites = 
   }
 }
 
+/**
+ * «إضافاتي» من أي ملف لفانتارا: ملف الإضافات نفسه، أو «نسختي» (lib/backup.js) التي تحمله داخلها.
+ * `null` إن لم يكن ملفًا منهما (فيُعامل كما كان: إضافة ويب أو مستودع).
+ */
+export function extensionsFromFile(raw) {
+  const text = String(raw ?? '');
+  if (!text.includes(FORMAT)) return null;
+  let doc = null;
+  try { doc = JSON.parse(text); } catch { return parseExtensions(text); }
+  if (doc?.format === 'vantara.backup') {
+    if (!doc.extensions) throw new Error('هذه النسخة لا تحوي إضافات');
+    return parseExtensions(JSON.stringify(doc.extensions));
+  }
+  return parseExtensions(text);
+}
+
 /** اسم ملف بتاريخ اليوم. */
 export const fileName = (now = Date.now()) => `vantara-extensions-${new Date(now).toISOString().slice(0, 10)}.json`;

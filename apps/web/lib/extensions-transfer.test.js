@@ -88,3 +88,15 @@ describe('extensions transfer file', () => {
     expect(parseExtensions(serialize(doc))).toEqual(doc);
   });
 });
+
+describe('extensionsFromFile', () => {
+  it('reads «إضافاتي» directly or from inside a «نسختي» backup; other files are not ours', async () => {
+    const { extensionsFromFile } = await import('./extensions-transfer.js');
+    const ext = { format: 'vantara.extensions', version: 1, native: {}, addons: [{ url: 'https://a.example/manifest.json', name: 'A' }], sites: [] };
+    expect(extensionsFromFile(JSON.stringify(ext)).addons[0].url).toBe('https://a.example/manifest.json');
+    expect(extensionsFromFile(JSON.stringify({ format: 'vantara.backup', version: 1, data: {}, extensions: ext })).addons).toHaveLength(1);
+    expect(() => extensionsFromFile(JSON.stringify({ format: 'vantara.backup', version: 1, data: {}, extensions: null, note: 'vantara.extensions' }))).toThrow('لا تحوي إضافات');
+    expect(extensionsFromFile('{"manifest":true}')).toBeNull();
+  });
+});
+
