@@ -779,3 +779,22 @@ it('records a failed artwork request and recovers it after the backoff without t
   await dropWorkArt(store, work.ref);
   expect(await artUrl(store, work.ref, 'cover')).toBeNull();
 });
+
+// بلاغ المالك (20 نوفمبر): بنرات ومعلومات العمل المحمّل خربت، ومع رجوع الإنترنت لم يرجع البنر
+import { durableUrl as dlDurableUrl, withoutLocalUrls as dlWithoutLocalUrls } from './art.js';
+import { createItem as dlCreateItem } from './model.js';
+describe('downloaded work art never keeps temporary urls', () => {
+  it('drops blob/local urls from saved details and queue items, keeping real links', () => {
+    const snap = { poster: 'blob:https://app/1', background: 'https://images.metahub.space/background/medium/tt1/img',
+      seasons: [{ n: 1, poster: 'http://localhost/_capacitor_file_/x.webp', episodes: [{ n: 1, thumb: 'blob:x', thumbHd: 'https://img/1.jpg' }] }] };
+    const clean = dlWithoutLocalUrls(snap);
+    expect(clean.poster).toBeNull();
+    expect(clean.background).toBe(snap.background);
+    expect(clean.seasons[0].poster).toBeNull();
+    expect(clean.seasons[0].episodes[0]).toEqual({ n: 1, thumb: null, thumbHd: 'https://img/1.jpg' });
+    const item = dlCreateItem({ section: 'cinema', kind: 'movie', work: { ref: 'cinema:tt1', title: 'X', cover: 'blob:a', banner: 'https://b/1.jpg', logo: 'file:///l.png' } });
+    expect(item.work).toMatchObject({ cover: null, banner: 'https://b/1.jpg', logo: null });
+    expect(dlDurableUrl('https://x/y.jpg')).toBe(true);
+    expect(dlDurableUrl('blob:https://x/1')).toBe(false);
+  });
+});

@@ -7,6 +7,8 @@
  * (`canonicalIndex` في catalog.js)، ومنها تُربط المراجع القديمة بالعمل.
  */
 
+import { saveWithRelief } from './storage-relief.js';
+
 const KEY = 'vantara.manga.aliases.v1';
 const TWINS_KEY = 'vantara.manga.twins.v1';
 const REFS_KEY = 'vantara.manga.refAliases.v1';
@@ -23,14 +25,10 @@ const read = (key) => {
 // يبقى في الذاكرة للجلسة، ويُعلن مرة (vantara:storage-full) فتقوله الواجهة.
 export let storageFailures = 0;
 const write = (key, value) => {
-  try {
-    globalThis.localStorage?.setItem(key, JSON.stringify(value));
-    return true;
-  } catch {
-    storageFailures++;
-    try { globalThis.dispatchEvent?.(new CustomEvent('vantara:storage-full', { detail: { key } })); } catch { /* بيئة بلا أحداث */ }
-    return false;
-  }
+  // الكاش يُفسح أولًا (lib/storage-relief.js)، والإعلان فقط إن بقي ممتلئًا
+  const ok = saveWithRelief(globalThis.localStorage, key, JSON.stringify(value));
+  if (!ok) storageFailures++;
+  return ok;
 };
 
 let shipped = {};

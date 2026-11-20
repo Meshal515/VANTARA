@@ -3,6 +3,7 @@ import { episodeCount, episodePage, isSingleMovie, normalizeEpisodeRange, resume
 import { createEpisodeControls } from './anime-episode-controls.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { isDurableArtUrl } from '../lib/art.js';
 import { animePositionKey, createPositionSync, overlayAllPositions } from '../lib/watch-position.js';
 /**
  * VANTARA ANIME — الرئيسية، صفحة الأنمي، اكتشف، قائمتي.
@@ -822,9 +823,11 @@ export function createAnime(deps) {
   };
   const heroMemory = {
     get(id) {
-      try { return JSON.parse(globalThis.localStorage?.getItem(HERO_KEY) ?? '{}')?.[id] ?? null; } catch { return null; }
+      // رابط ويب حقيقي فقط: رابط blob: من عمل محمّل يموت بإغلاق التطبيق (بلاغ المالك، 20 نوفمبر)
+      try { const src = JSON.parse(globalThis.localStorage?.getItem(HERO_KEY) ?? '{}')?.[id] ?? null; return isDurableArtUrl(src) ? src : null; } catch { return null; }
     },
     set(id, src) {
+      if (src && !isDurableArtUrl(src)) return;
       try {
         const all = JSON.parse(globalThis.localStorage?.getItem(HERO_KEY) ?? '{}') ?? {};
         if (src) all[id] = src;

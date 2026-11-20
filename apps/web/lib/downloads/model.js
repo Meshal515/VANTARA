@@ -137,6 +137,8 @@ export function unitLabel(item) {
   return u.season > 0 && item?.section === 'cinema' ? `م${u.season} · ${ep}` : ep;
 }
 
+const realUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) && !/^(blob|data|file|content):|_capacitor_file_/i.test(u) ? u : null);
+
 /** تطبيع مواصفات عنصر جديد قبل دخوله الطابور. يرمي إن نقصه ما لا يُنزَّل بدونه. */
 export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
   const section = SECTIONS.includes(spec?.section) ? spec.section : null;
@@ -155,9 +157,10 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
     work: {
       ref: String(ref),
       title: String(spec.work.title ?? ''),
-      cover: spec.work.cover ?? null,
-      banner: spec.work.banner ?? null,
-      logo: spec.work.logo ?? null,
+      // روابط حقيقية فقط: صفحة فُتحت من «على الجهاز» صورها blob: مؤقتة تموت بالإغلاق (بلاغ المالك، 20 نوفمبر)
+      cover: realUrl(spec.work.cover),
+      banner: realUrl(spec.work.banner),
+      logo: realUrl(spec.work.logo),
       color: spec.work.color ?? null,
       // مصدر غلاف المانجا: يُجلب بعميله وترويساته (الطلب المباشر من الواجهة يرفضه الموقع)
       coverSource: spec.work.coverSource ?? null,

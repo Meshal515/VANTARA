@@ -126,3 +126,14 @@ describe('قرار فن العمل الواحد (lib/art.js)', () => {
     expect(artRatio({ w: 1000, h: 800 })).toBe('0.85');
   });
 });
+
+// بلاغ المالك (20 نوفمبر): بنر عمل محمّل (رابط blob: مؤقت) حُفظ «خلفية ظهرت»، فظهرت صورة مكسورة في الفتح التالي
+describe('durable art urls', () => {
+  it('only real web urls may be remembered past the session', async () => {
+    const { isDurableArtUrl } = await import('./art.js');
+    expect(isDurableArtUrl('https://images.metahub.space/background/medium/tt0111161/img')).toBe(true);
+    for (const bad of ['blob:https://app/1234', 'blob:capacitor://localhost/abc', 'http://localhost/_capacitor_file_/data/x.webp', 'file:///x.jpg', 'data:image/png;base64,AA', 'content://media/1', 'http://127.0.0.1:3000/x', null, '']) {
+      expect(isDurableArtUrl(bad), String(bad)).toBe(false);
+    }
+  });
+});
