@@ -480,6 +480,34 @@ export function createDownloadsUI(deps) {
     return images;
   }
 
+  /**
+   * لقطات حلقات الأنمي المحمّلة (طلب المالك 20 نوفمبر: «يحمل ما يحتاج مثل صورة الحلقة مع كل تحميل»): كالسينما،
+   * فتظهر صفوف الحلقات بصورها بلا إنترنت. المصدر بترتيب صفحة الأنمي نفسها (metahub ثم AniList ثم ani.zip).
+   */
+  async function animeArt(work, snapshot, numbers) {
+    const images = {};
+    const nums = [...numbers].map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    if (!nums.length) return images;
+    const { loadAnimeArt, loadHdStills } = await import('../lib/anime-art.js');
+    const id = String(work?.ref ?? '').replace(/^anime:/, '');
+    const art = await loadAnimeArt(id).catch(() => null);
+    const hd = art ? await loadHdStills(art).catch(() => ({})) : {};
+    for (const n of nums) {
+      const src = hd?.[String(n)]?.mid ?? snapshot?.thumbs?.[n]?.thumbnail ?? art?.episodes?.[String(n)]?.image ?? null;
+      if (src) images[`still-e${n}`] = src;
+    }
+    return images;
+  }
+  /** فن العمل وصور وحداته معًا، بلا انتظار من الواجهة (الشبكة قد تأخذ ثوانٍ). */
+  function saveDownloadArt(store, work, section, snapshot, items) {
+    void (async () => {
+      const extras = section === 'cinema' ? cinemaArt(snapshot?.seasons, new Set(items.map((i) => i.unit.key)))
+        : section === 'anime' ? await animeArt(work, snapshot, new Set(items.map((i) => i.unit.number ?? 1))).catch(() => ({}))
+          : {};
+      await saveWorkArt(store, work, { local: localArt(work), extras });
+    })().catch(() => {});
+  }
+
   function workCard(w) {
     const a = tagWork(el('article', 'work-card dl-card'), w.ref, w.work?.ref, w.work?.id);
     a.tabIndex = 0;
@@ -546,8 +574,7 @@ export function createDownloadsUI(deps) {
     try { base = saved?.json ? withoutLocalUrls(JSON.parse(saved.json)) : null; } catch { base = null; }
     const w = data.work;
     if (navigator.onLine !== false) {
-      const extras = data.section === 'cinema' ? cinemaArt(base?.seasons, new Set(data.ready.map((i) => i.unit.key))) : {};
-      void saveWorkArt(c.store, w, { local: localArt(w), extras });
+      saveDownloadArt(c.store, w, data.section, base, data.ready);
     }
     const online = navigator.onLine !== false;
     const art = { cover: cover ?? (online ? w.cover : null), banner: banner ?? (online ? w.banner : null), logo: logo ?? (online ? w.logo : null) };
@@ -561,9 +588,13 @@ export function createDownloadsUI(deps) {
       snapshot = { ...(base ?? { id: /^\d+$/.test(id) ? Number(id) : id, title: w.title, format: w.format, color: w.color }),
         poster: art.cover, posterSmall: art.cover, banner: art.banner ?? null };
       if (!(snapshot.aired >= max)) snapshot.aired = Math.max(Number(snapshot.aired) || 0, max);
+      // صور الحلقات المحفوظة مع التنزيل: أولًا في السلسلة (بلا إنترنت لا تُجرَّب روابط الشبكة قبلها)
+      const stills = {};
+      await Promise.all([...numbers].map(async (n) => { const u = await artUrl(c.store, ref, `still-e${n}`); if (u) stills[String(n)] = u; }));
+      if (Object.keys(stills).length) snapshot.thumbs = { ...(snapshot.thumbs ?? {}), ...Object.fromEntries(Object.entries(stills).map(([n, u]) => [n, { ...(snapshot.thumbs?.[n] ?? {}), thumbnail: u }])) };
       local = {
         ref, numbers,
-        art: { ...(art.logo ? { logo: art.logo } : {}), ...(art.banner ? { fanart: art.banner } : {}) },
+        art: { ...(art.logo ? { logo: art.logo } : {}), ...(art.banner ? { fanart: art.banner } : {}), ...(Object.keys(stills).length ? { episodes: Object.fromEntries(Object.entries(stills).map(([n, u]) => [n, { image: u }])) } : {}) },
         play: (n, options) => playItem(data.ready.find((i) => (i.unit.number ?? 1) === n), options),
       };
     } else if (data.section === 'cinema') {
@@ -1394,8 +1425,7 @@ export function createDownloadsUI(deps) {
             });
           }
           const { added, skipped } = await c.manager.enqueue(specs);
-          const extras = spec.section === 'cinema' ? cinemaArt(spec.snapshot?.seasons, new Set(added.map((i) => i.unit.key))) : {};
-          void saveWorkArt(c.store, spec.work, { local: localArt(spec.work), extras });
+          saveDownloadArt(c.store, spec.work, spec.section, spec.snapshot, added);
           if (spec.snapshot) {
             // بلا روابط مؤقتة: تنزيل إضافي من صفحة فُتحت من «على الجهاز» كان يحفظ روابط blob: تموت بعد الإغلاق
             try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(withoutLocalUrls(spec.snapshot), (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
