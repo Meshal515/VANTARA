@@ -2613,7 +2613,8 @@ export function createAnime(deps) {
       };
 
       const extraFoot = [];
-      if (hub && !hub.matches(togetherRef, n)) {
+      // داخل أي غرفة: لا «شاهد مع أصدقائك» ثانية (كانت تنشئ غرفة جديدة وتخرجك من الأولى بصمت، TG18)
+      if (hub && !hub.session) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'anime',

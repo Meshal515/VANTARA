@@ -71,6 +71,9 @@ export function stateLabel(state, kind = 'anime') {
 }
 
 /** تنبيه قصير لتغيّر حالة غيرك. null = لا يستحق تنبيهًا. */
+/** مهلة السماح قبل إعلان «طلع» (WT8): الرجوع خلالها لا يُعلن شيئًا. */
+export const LEFT_GRACE_MS = 8000;
+
 export function statusToast(msg, kind = 'anime') {
   const name = msg?.name || 'صديق';
   if (msg?.state === 'playing') return kind === 'manga' ? `${name} بدأ القراءة` : `اشتغل الفيديو عند ${name}`;
@@ -158,10 +161,29 @@ export function createTogether(deps) {
     const artOf = deps.resolveArtImpl ?? (typeof window !== 'undefined' ? resolveArt : null);
     if (artOf && media && media.kind !== 'manga') void artOf(media).then((a) => { s.art = a; }).catch(() => {});
     const kind = () => (s.room.timeline?.media ?? s.media)?.kind ?? 'anime';
-    s.offs.push(room.on('joined', (m) => pop({ displayName: m.name, avatarKey: m.avatarKey ?? null }, `${m.name} دخل`, 'in')));
-    s.offs.push(room.on('left', (m) => pop(personByName(s, m.name), m.kicked ? `المضيف أخرج ${m.name}` : `${m.name} طلع`)));
+    // «طلع» بعد مهلة سماح: انقطاع لحظي (تبدّل شبكة) ثم رجوع لا يُعلن «طلع» ثم «دخل» عند الجميع (WT8)
+    const pendingLeft = new Map();
+    s.offs.push(() => { for (const t of pendingLeft.values()) clearTimeout(t); pendingLeft.clear(); });
+    s.offs.push(room.on('joined', (m) => {
+      const back = pendingLeft.get(m.name);
+      if (back) { clearTimeout(back); pendingLeft.delete(m.name); return; }
+      pop({ displayName: m.name, avatarKey: m.avatarKey ?? null }, `${m.name} دخل`, 'in');
+    }));
+    s.offs.push(room.on('left', (m) => {
+      if (m.kicked) { pop(personByName(s, m.name), `المضيف أخرج ${m.name}`); return; }
+      clearTimeout(pendingLeft.get(m.name));
+      const person = personByName(s, m.name);
+      pendingLeft.set(m.name, setTimeout(() => { pendingLeft.delete(m.name); if (session === s) pop(person, `${m.name} طلع`); }, LEFT_GRACE_MS));
+    }));
+    // «اشتغل الفيديو عند X» مرة لكل شخص في كل حلقة، لا مع كل استئناف أو تحميل (WT1)
+    const announced = new Set();
     s.offs.push(room.on('status', (m) => {
       if (m.userId === room.me) return;
+      if (m.state === 'playing') {
+        const once = `${m.userId}|${room.timeline?.media?.key ?? ''}`;
+        if (announced.has(once)) return;
+        announced.add(once);
+      }
       const text = statusToast(m, kind());
       if (text) pop(personByName(s, m.name), text, m.state === 'failed' ? 'bad' : m.state === 'playing' ? 'ok' : '');
     }));
@@ -464,9 +486,29 @@ export function createTogether(deps) {
       const actions = el('div', 'tg-actions');
       body.append(head, list, actions);
       let confirmKick = null;
+      // اللوحة تُبنى من جديد فقط حين يتغير شكلها؛ الوقت والفرق يتحدثان في مكانهما، فلا يُستبدل زر تحت الإصبع (TG3)
+      let shape = null;
+      const live = new Map();
+      const showsDrift = (r) => (s.room.info?.mode ?? s.mode) === 'sync' && r.driftMs != null && !r.host && media?.kind !== 'manga';
+      const shapeOf = () => JSON.stringify([s.room.isHost, s.room.me, s.room.info?.mode ?? s.mode, confirmKick,
+        s.room.roster.map((r) => [r.userId, r.name, r.state, r.source ?? null, Boolean(r.host), r.sameVersion ?? null, r.avatarKey ?? null, showsDrift(r)])]);
+      const paintLive = (now) => {
+        for (const r of s.room.roster) {
+          const cells = live.get(r.userId);
+          if (!cells) continue;
+          const pos = positionLabel(r, media, now);
+          if (cells.pos.textContent !== pos) cells.pos.textContent = pos;
+          if (cells.drift) { const d = `فرق ${Math.abs(r.driftMs)}ms`; if (cells.drift.textContent !== d) cells.drift.textContent = d; }
+        }
+      };
       const paint = () => {
         const now = s.room.clock.serverNow();
-        count.textContent = `${s.room.roster.length} في الغرفة · ${connectionLabel(s.room.status)}`;
+        const counted = `${s.room.roster.length} في الغرفة · ${connectionLabel(s.room.status)}`;
+        if (count.textContent !== counted) count.textContent = counted;
+        const next = shapeOf();
+        if (next === shape) { paintLive(now); return; }
+        shape = next;
+        live.clear();
         list.replaceChildren(...s.room.roster.map((r) => {
           const row = el('div', 'tg-row');
           const who = el('div', 'tg-row-who');
@@ -479,12 +521,16 @@ export function createTogether(deps) {
           names.append(el('span', `tg-row-state is-${r.state}`, line));
           who.append(names);
           const where = el('div', 'tg-row-where');
-          where.append(el('span', 'tg-row-pos', positionLabel(r, media, now)));
+          const pos = el('span', 'tg-row-pos', positionLabel(r, media, now));
+          where.append(pos);
           if (r.host) where.append(el('span', 'tg-badge', 'المضيف'));
           if (r.sameVersion === false) where.append(el('span', 'tg-badge is-warn', 'نسخة مختلفة'));
-          if ((s.room.info?.mode ?? s.mode) === 'sync' && r.driftMs != null && !r.host && media?.kind !== 'manga') {
-            where.append(el('span', 'tg-drift', `فرق ${Math.abs(r.driftMs)}ms`));
+          let drift = null;
+          if (showsDrift(r)) {
+            drift = el('span', 'tg-drift', `فرق ${Math.abs(r.driftMs)}ms`);
+            where.append(drift);
           }
+          live.set(r.userId, { pos, drift });
           row.append(who, where);
           // المضيف: «اجعله المضيف» و«أخرج» لكل شخص غيره (الإخراج بضغطتين حتى لا يقع خطأً)
           if (s.room.isHost && r.userId !== s.room.me) {

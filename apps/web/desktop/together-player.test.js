@@ -202,4 +202,36 @@ describe('توافق مع خادم قديم (بروتوكول 1)', () => {
     expect(f.bridge.playbackCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'pause', value: true }));
     f.player.close();
   });
+
+  // TG10/TG11 (#349): التحويل من منفصلة إلى متزامنة يعيد خط الغرفة القديم، فيشتغل الفيديو والمضيف موقِف أو يرجع الكل لحلقة قديمة
+  it('switching to sync: the paused host re-announces its own state instead of following the stale room line', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, { started: true, playing: true, pos: 10000, seq: 3 });
+    f.room.info.mode = 'free'; f.emit('room', f.room.info);
+    f.event('progress', { position: 30000, duration: 120000, paused: true }); f.event('ready');
+    f.room.command.mockClear(); f.bridge.playbackCommand.mockClear();
+    f.room.info.mode = 'sync'; f.emit('room', f.room.info);
+    expect(f.room.command).toHaveBeenCalledWith('pause', expect.objectContaining({ pos: 30000 }));
+    expect(f.bridge.playbackCommand).not.toHaveBeenCalledWith(expect.objectContaining({ command: 'pause', value: false }));
+    f.player.close();
+  });
+  it('switching to sync on another episode moves the room to the host episode', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, { started: true, playing: false, pos: 0, seq: 3 });
+    f.room.info.mode = 'free'; f.emit('room', f.room.info);
+    f.event('ready'); f.room.command.mockClear();
+    // خط الغرفة القديم بعد التحويل: حلقة الغرفة قبل أن يتنقل المضيف وحده في المنفصلة (TG11)
+    f.room.timeline = { ...f.room.timeline, media: { key: 'cinema:tt123#5', kind: 'cinema' } };
+    f.room.info.mode = 'sync'; f.emit('room', f.room.info);
+    expect(f.room.command).toHaveBeenCalledWith('load', expect.objectContaining({ media: expect.objectContaining({ key: 'cinema:tt123#1' }) }));
+    f.player.close();
+  });
+  it('a room update that is not a mode change keeps following the room (no host re-announcement)', () => {
+    vi.useFakeTimers();
+    const f = fixture(true, { started: true, playing: true, pos: 10000, seq: 3 });
+    f.event('ready'); f.room.command.mockClear();
+    f.emit('room', { ...f.room.info, hostUserId: 'host' });
+    expect(f.room.command).not.toHaveBeenCalled();
+    f.player.close();
+  });
 });
