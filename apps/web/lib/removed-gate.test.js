@@ -69,3 +69,12 @@ it('a removal synced from another device (friends) hides what is already on scre
   removedChanged();
   expect(visible(shown)).toBe(false);
 });
+
+// DL5: الأصدقاء والمجلس ورفيق كانت ترسم بطاقات أعمال بلا مفاتيحها، فلا يراها الحارس ويظهر فيها العمل المحذوف
+it('DL5: friends, majlis and rafiq tag every work they draw for the one removal gate', async () => {
+  const { readFileSync } = await import('node:fs');
+  for (const [file, min] of [['../v35/friends.js', 2], ['../v35/majlis.js', 3], ['../v35/rafiq.js', 1]]) {
+    const src = readFileSync(new URL(file, import.meta.url), 'utf8');
+    expect([file, (src.match(/\btagWork\(/g) ?? []).length >= min]).toEqual([file, true]);
+  }
+});

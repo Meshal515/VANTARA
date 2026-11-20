@@ -14,6 +14,7 @@
  */
 
 import { glyph } from './icons.js';
+import { tagWork } from '../lib/removed-works.js';
 import { countLabel } from './plural.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { EMOJI_GROUPS } from './emoji.js';
@@ -407,7 +408,7 @@ export function createMajlis(ctx) {
   }
   function readingCard(p) {
     const work = workOf(p.seriesRef, p.seriesTitle);
-    const b = el('button', 'mj-now');
+    const b = tagWork(el('button', 'mj-now'), p.seriesRef, work?.id);
     b.type = 'button';
     b.dataset.tone = toneOf(p.seriesRef);
     const cover = el('span', 'mj-now-cover');
@@ -541,7 +542,8 @@ export function createMajlis(ctx) {
 
   function recCard(e) {
     const r = e.row;
-    const card = el('article', 'mj-card mj-card--rec');
+    // DL5: عمل محذوف لا يظهر في المجلس (data-work لحارس الحذف)
+    const card = tagWork(el('article', 'mj-card mj-card--rec'), r.series_ref);
     const anime = sectionOfRef(r.series_ref) !== 'manga';
     const cinema = sectionOfRef(r.series_ref) === 'cinema';
     card.dataset.tone = toneOf(r.series_ref);
@@ -603,7 +605,7 @@ export function createMajlis(ctx) {
     const a = e.row;
     const payload = parse(a.payload, {});
     const work = a.series_ref ? workOf(a.series_ref) : null;
-    const b = el('button', 'mj-line');
+    const b = tagWork(el('button', 'mj-line'), a.series_ref, work?.id);
     b.type = 'button';
     if (a.series_ref) b.dataset.tone = toneOf(a.series_ref);
     const face = el('span', 'mj-line-face');
