@@ -21,10 +21,10 @@ function fakeChild(onStart) {
   return child;
 }
 
-function harness({ sha = pinned.sha256, javaExits = false, healthyAfter = 2 } = {}) {
+function harness({ sha = pinned.sha256, javaExits = false, healthyAfter = 2, exitIf = () => false } = {}) {
   const root = tmp();
   const spawned = [];
-  let health = 0;
+  let health = 0, refused = false;
   const spawn = (file, args, options) => {
     spawned.push({ file, args, options });
     if (String(file).endsWith('tar.exe')) {
@@ -38,16 +38,17 @@ function harness({ sha = pinned.sha256, javaExits = false, healthyAfter = 2 } = 
         child.emit('exit', 0);
       });
     }
+    refused = exitIf(args);
     return fakeChild((child) => {
       child.stdout.emit('data', `started with ${args.find((a) => a.includes('authPassword'))}\n`);
-      if (javaExits) { child.exitCode = 1; child.emit('exit', 1); }
+      if (javaExits || exitIf(args)) { child.exitCode = 1; child.emit('exit', 1); }
     });
   };
   const requests = [];
   const fetch = async (url, init = {}) => {
     requests.push({ url: String(url), auth: init.headers?.authorization ?? null });
     if (String(url) === pinned.url) return new Response(zipBytes, { headers: { 'content-length': String(zipBytes.length) } });
-    if (String(url).endsWith('/api/v1/settings/about')) { health += 1; return new Response('{}', { status: health >= healthyAfter ? 200 : 503 }); }
+    if (String(url).endsWith('/api/v1/settings/about')) { health += 1; return new Response('{}', { status: !refused && health >= healthyAfter ? 200 : 503 }); }
     return new Response('ok');
   };
   const progress = [];
@@ -107,8 +108,11 @@ test('an engine that exits during start reports it in Arabic; other platforms do
 
 test('the bytecode verifier stays on by default and is widened only on request, persisted across restarts', async () => {
   const flag = '-XX:-BytecodeVerificationRemote';
+  const unlock = '-XX:+UnlockDiagnosticVMOptions';
   assert.equal(launchArgs({ dataDir: 'd', port: 1, password: 'p' }).includes(flag), false);
-  assert.equal(launchArgs({ dataDir: 'd', port: 1, password: 'p', widenVerifier: true }).includes(flag), true);
+  const widened = launchArgs({ dataDir: 'd', port: 1, password: 'p', widenVerifier: true });
+  // الخيار تشخيصي: فتح الخيارات التشخيصية يسبقه وإلا لا تقلع الـJVM (ما حدث على ويندوز حقيقي)
+  assert.ok(widened.indexOf(unlock) >= 0 && widened.indexOf(unlock) < widened.indexOf(flag));
   const h = harness();
   await h.runtime.start();
   assert.equal(h.spawned.find((s) => s.file.endsWith('java.exe')).args.includes(flag), false);
@@ -118,5 +122,17 @@ test('the bytecode verifier stays on by default and is widened only on request, 
   assert.equal(javas[1].args.includes(flag), true);
   assert.equal(h.runtime.state().verifierWidened, true);
   assert.equal(await h.runtime.widenVerifier(true), false, 'already widened: no restart');
+  await h.runtime.close();
+});
+
+test('a widened verifier that stops the JVM from starting is reverted, and the engine starts as before', async () => {
+  const h = harness({ exitIf: (args) => args.includes('-XX:-BytecodeVerificationRemote') });
+  await h.runtime.start();
+  await assert.rejects(h.runtime.widenVerifier(true), /توقف المحرك عند الإقلاع/);
+  assert.equal(h.runtime.verifierWidened(), false, 'reverted on disk');
+  const javas = h.spawned.filter((s) => s.file.endsWith('java.exe'));
+  assert.equal(javas.length, 3, 'original, widened (refused), original again');
+  assert.equal(javas[2].args.includes('-XX:-BytecodeVerificationRemote'), false);
+  assert.equal(h.runtime.state().running, true);
   await h.runtime.close();
 });

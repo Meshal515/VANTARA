@@ -45,7 +45,8 @@ function launchArgs({ dataDir, port, password, widenVerifier = false }) {
     // مدقق بايت كود الـJVM يبقى شغالًا افتراضيًا (قرار المالك 20 نوفمبر: «المدقق كويس لكن وسّع صلاحياته»). يُوسَّع
     // للفئات المحمّلة من خارج الـJVM فقط حين ترفض إضافةٌ موقّعة بـVerifyError (تحويل DEX إلى JVM؛ MangaDex 1.6.4 على
     // ويندوز حقيقي)، وتبقى فئات الـJVM نفسها مدققة. الحماية الفعلية للإضافات: توقيع المستودع (apk-signature.cjs).
-    ...(widenVerifier ? ['-XX:-BytecodeVerificationRemote'] : []),
+    // الخيار «تشخيصي» في JRE المرفق: يلزمه فتح الخيارات التشخيصية قبله (وإلا لا تقلع الـJVM: ويندوز حقيقي، 20 نوفمبر)
+    ...(widenVerifier ? ['-XX:+UnlockDiagnosticVMOptions', '-XX:-BytecodeVerificationRemote'] : []),
     p('rootDir', dataDir), p('ip', q('127.0.0.1')), p('port', port),
     p('authMode', q('BASIC_AUTH')), p('authUsername', q(USER)), p('authPassword', q(password)),
     p('webUIEnabled', 'false'), p('initialOpenInBrowserEnabled', 'false'), p('systemTrayEnabled', 'false'),
@@ -224,8 +225,18 @@ function createSuwayomiRuntime({
   async function widenVerifier(on = true) {
     if (widened() === Boolean(on)) return false;
     await fsp.mkdir(root, { recursive: true });
-    await fsp.writeFile(verifierFile, JSON.stringify({ widen: Boolean(on), at: now() }));
-    if (live) { await stop(); await start({ quiet: true }); }
+    const write = (value) => fsp.writeFile(verifierFile, JSON.stringify({ widen: value, at: now() }));
+    await write(Boolean(on));
+    if (!live) return true;
+    await stop();
+    try {
+      await start({ quiet: true });
+    } catch (error) {
+      // الإعداد الجديد لم يُقلع المحرك: يعود كما كان ويقلع به، فلا يعلق المحرك معطّلًا بعد محاولة فاشلة
+      await write(!on);
+      await start({ quiet: true });
+      throw error;
+    }
     return true;
   }
 
