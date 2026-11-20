@@ -46,9 +46,15 @@ function harness({ sha = pinned.sha256, javaExits = false, healthyAfter = 2, exi
   };
   const requests = [];
   const fetch = async (url, init = {}) => {
-    requests.push({ url: String(url), auth: init.headers?.authorization ?? null });
+    requests.push({ url: String(url), auth: init.headers?.authorization ?? null, cookie: init.headers?.cookie ?? null });
     if (String(url) === pinned.url) return new Response(zipBytes, { headers: { 'content-length': String(zipBytes.length) } });
-    if (String(url).endsWith('/api/v1/settings/about')) { health += 1; return new Response('{}', { status: !refused && health >= healthyAfter ? 200 : 503 }); }
+    if (String(url).endsWith('/api/v1/settings/about')) {
+      health += 1;
+      const headers = new Headers();
+      headers.append('set-cookie', 'JSESSIONID=node0abc; Path=/; HttpOnly');
+      headers.append('set-cookie', 'suwayomi-basic-csrf=tok-1; Path=/; HttpOnly; SameSite=Strict');
+      return new Response('{}', { status: !refused && health >= healthyAfter ? 200 : 503, headers });
+    }
     return new Response('ok');
   };
   const progress = [];
@@ -109,4 +115,17 @@ test('an engine that exits during start reports it in Arabic; other platforms do
 test('the JVM bytecode verifier is never switched off (a widened run crashed the JVM on real Windows)', () => {
   const args = launchArgs({ dataDir: 'd', port: 1, password: 'p' });
   assert.equal(args.some((a) => /BytecodeVerification|Xverify|noverify|UnlockDiagnosticVMOptions/.test(a)), false);
+});
+
+test('file uploads carry the engine session and CSRF cookies (new Suwayomi answers 401 without them)', async () => {
+  const h = harness();
+  await h.runtime.start();
+  const form = new FormData();
+  form.append('operations', '{}');
+  await h.runtime.request('/api/graphql', { method: 'POST', body: form });
+  const upload = h.requests.filter((r) => r.url.endsWith('/api/graphql')).at(-1);
+  assert.equal(upload.cookie, 'JSESSIONID=node0abc; suwayomi-basic-csrf=tok-1');
+  // ردود غير متوقعة لا تُدخل كوكيز أخرى
+  assert.doesNotMatch(upload.cookie, /Path|HttpOnly/);
+  await h.runtime.close();
 });

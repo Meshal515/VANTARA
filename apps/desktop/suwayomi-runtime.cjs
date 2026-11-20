@@ -210,12 +210,40 @@ function createSuwayomiRuntime({
     }
   }
 
+  /**
+   * كوكيز جلسة المحرك (لكل تشغيل): Suwayomi الجديد يطلب مع رفع الملفات (multipart) رمز CSRF من جلسته
+   * (`suwayomi-basic-csrf` مع JSESSIONID) وإلا يرد 401 «CSRF mismatch» (ويندوز حقيقي، التشغيل 64). تبقى بين التطبيق
+   * والمحرك على 127.0.0.1 ولا تُحفظ على القرص.
+   */
+  const jar = new Map();
+  let jarFor = null;
+  const remember = (response, base) => {
+    if (jarFor !== base) { jar.clear(); jarFor = base; }
+    const lines = typeof response?.headers?.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+    for (const line of lines) {
+      const m = /^\s*([^=;\s]+)=([^;]*)/.exec(line);
+      if (m && /^(JSESSIONID|suwayomi-basic-csrf)$/i.test(m[1])) jar.set(m[1], m[2]);
+    }
+  };
+  const cookieHeader = (base) => (jarFor === base && jar.size ? [...jar].map(([k, v]) => `${k}=${v}`).join('; ') : null);
+
   /** طلب للمحرك بمصادقته. `path` يبدأ بـ/ ولا يغادر 127.0.0.1. */
   async function request(pathname, { method = 'GET', headers = {}, body = undefined, timeout = 90_000 } = {}) {
     if (typeof pathname !== 'string' || !pathname.startsWith('/') || pathname.startsWith('//')) throw arabic('مسار غير صالح', 'ENGINE_PATH');
     const endpoint = await start();
     lastUse = now();
-    return fetch(`${endpoint.base}${pathname}`, { method, headers: { ...headers, authorization: endpoint.auth }, body, signal: AbortSignal.timeout(timeout) });
+    const send = async (target, init) => {
+      const cookie = cookieHeader(endpoint.base);
+      const response = await fetch(`${endpoint.base}${target}`, { ...init, headers: { ...init.headers, authorization: endpoint.auth, ...(cookie ? { cookie } : {}) }, signal: AbortSignal.timeout(timeout) });
+      remember(response, endpoint.base);
+      return response;
+    };
+    // رفع ملف بلا جلسة بعد: طلب خفيف أولًا يمنح المحرك فرصة إصدار رمز الجلسة
+    if (typeof body?.append === 'function' && !cookieHeader(endpoint.base)?.includes('suwayomi-basic-csrf')) {
+      const probe = await send('/api/v1/settings/about', { method: 'GET', headers: {} });
+      await probe.arrayBuffer().catch(() => {});
+    }
+    return send(pathname, { method, headers, body });
   }
 
   return {
