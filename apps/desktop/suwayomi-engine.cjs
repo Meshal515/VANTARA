@@ -127,18 +127,12 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     return { ok: false, verify: /java\.lang\.VerifyError/.test(said.slice(Math.max(0, before - 200))) || /java\.lang\.VerifyError/.test(said.slice(-6000)), text: await r.text().catch(() => '') };
   }
   /**
-   * رفع إضافة موقّعة. المدقق يبقى شغالًا؛ إن رفضها بـVerifyError (تحويل DEX إلى JVM) يُوسَّع مرة ويُعاد المحرك ثم
-   * تُرفع ثانية (قرار المالك 20 نوفمبر). أي رفض آخر يبقى رفضًا بسببه.
+   * رفع إضافة موقّعة. رفض مدقق الـJVM (VerifyError: كود تحويل DEX إلى JVM تالف) يُقال صراحة: تشغيلها بلا تدقيق أسقط
+   * المحرك كله على ويندوز حقيقي، فلا تُشغَّل.
    */
   async function upload(pkg, bytes, version) {
-    let out = await uploadOnce(pkg, bytes, version);
-    if (!out.ok && out.verify && typeof runtime.widenVerifier === 'function' && !runtime.verifierWidened()) {
-      onEvent({ type: 'manga-engine/progress', stage: 'starting' });
-      await runtime.widenVerifier(true);
-      loadedIn.clear();
-      out = await uploadOnce(pkg, bytes, version);
-    }
-    if (!out.ok) throw arabic(out.verify ? 'هذه الإضافة لا تعمل في محرك ويندوز (رفض المدقق كودها)' : `المحرك لم يقبل الإضافة: ${cleanError(out.text)}`.trim(), out.verify ? 'ENGINE_VERIFY' : 'ENGINE_INSTALL');
+    const out = await uploadOnce(pkg, bytes, version);
+    if (!out.ok) throw arabic(out.verify ? 'هذه الإضافة لا تعمل في محرك ويندوز بعد (كودها لا يتحوّل سليمًا)؛ تعمل في تطبيق الجوال' : `المحرك لم يقبل الإضافة: ${cleanError(out.text)}`.trim(), out.verify ? 'ENGINE_VERIFY' : 'ENGINE_INSTALL');
   }
   async function engineUninstall(pkg) {
     const r = await runtime.request(`/api/v1/extension/uninstall/${encodeURIComponent(pkg)}`);

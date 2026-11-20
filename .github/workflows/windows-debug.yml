@@ -330,7 +330,8 @@ jobs:
           if (-not $p.WaitForExit(1080000)) { Stop-Process -Id $p.Id -Force; throw 'manga engine smoke timed out' }
           Get-Content $report
           $r = Get-Content $report | ConvertFrom-Json
-          Write-Host "Mihon extensions on Windows: $($r.passed)/$($r.total) complete=$($r.complete)"
+          Write-Host "Mihon extensions on Windows: working=$($r.working -join ', ') complete=$($r.complete)"
+          foreach ($c in $r.chains) { $last = $c.steps[-1]; Write-Host "  $($c.pkg): ok=$($c.ok) at '$($last.name)' $($last.error)" }
           if (-not $r.complete) { throw 'manga engine smoke incomplete' }
       - name: Real-swarm A/B (libtorrent vs rqbit) on legal CC-BY films — indicative
         if: needs.changes.outputs.engine == 'true'

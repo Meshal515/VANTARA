@@ -36,17 +36,15 @@ function freePort() {
 }
 
 /** معاملات JVM: إعدادات Suwayomi تُمرَّر كخصائص نظام (SystemPropertyOverridableConfigModule) فتعلو ملف الإعداد. */
-function launchArgs({ dataDir, port, password, widenVerifier = false }) {
+function launchArgs({ dataDir, port, password }) {
   // القيمة تُقرأ HOCON (`internal=<قيمة>`): النصوص بين علامتي تنصيص فلا تُفسَّر رقمًا أو تركيبًا
   const p = (key, value) => `-Dsuwayomi.tachidesk.config.server.${key}=${value}`;
   const q = (value) => JSON.stringify(String(value));
   return [
     '-Xmx768m', '-Dfile.encoding=UTF-8', '-Djava.awt.headless=true',
-    // مدقق بايت كود الـJVM يبقى شغالًا افتراضيًا (قرار المالك 20 نوفمبر: «المدقق كويس لكن وسّع صلاحياته»). يُوسَّع
-    // للفئات المحمّلة من خارج الـJVM فقط حين ترفض إضافةٌ موقّعة بـVerifyError (تحويل DEX إلى JVM؛ MangaDex 1.6.4 على
-    // ويندوز حقيقي)، وتبقى فئات الـJVM نفسها مدققة. الحماية الفعلية للإضافات: توقيع المستودع (apk-signature.cjs).
-    // الخيار «تشخيصي» في JRE المرفق: يلزمه فتح الخيارات التشخيصية قبله (وإلا لا تقلع الـJVM: ويندوز حقيقي، 20 نوفمبر)
-    ...(widenVerifier ? ['-XX:+UnlockDiagnosticVMOptions', '-XX:-BytecodeVerificationRemote'] : []),
+    // مدقق بايت كود الـJVM شغال دائمًا ولا يُعطَّل. جُرّب توسيعه على ويندوز حقيقي (20 نوفمبر): MangaDex 1.6.4 الذي
+    // رفضه المدقق بـVerifyError أسقط الـJVM كلها (EXCEPTION_ACCESS_VIOLATION) حين شُغّل بلا تدقيق. المدقق يمنع انهيار
+    // المحرك بكود تحويل تالف؛ الإضافة المرفوضة تُقال للمستخدم صراحة ولا تُشغَّل.
     p('rootDir', dataDir), p('ip', q('127.0.0.1')), p('port', port),
     p('authMode', q('BASIC_AUTH')), p('authUsername', q(USER)), p('authPassword', q(password)),
     p('webUIEnabled', 'false'), p('initialOpenInBrowserEnabled', 'false'), p('systemTrayEnabled', 'false'),
@@ -66,9 +64,6 @@ function createSuwayomiRuntime({
   const dataDir = path.join(root, 'data');
   const marker = path.join(engineDir, 'vantara-installed.json');
   let installing = null, starting = null, live = null, lastUse = 0, idleTimer = null, downloading = null, output = '';
-  const verifierFile = path.join(root, 'verifier.json');
-  /** هل وُسّع المدقق؟ يُحفظ على القرص فلا تُعاد التجربة الفاشلة بعد كل إقلاع. */
-  const widened = () => { try { return JSON.parse(fs.readFileSync(verifierFile, 'utf8'))?.widen === true; } catch { return false; } };
 
   const supported = () => platform === 'win32';
   const installed = () => fs.existsSync(marker) && fs.existsSync(path.join(engineDir, 'jre', 'bin', 'java.exe')) && fs.existsSync(path.join(engineDir, 'bin', 'Suwayomi-Server.jar'));
@@ -175,7 +170,7 @@ function createSuwayomiRuntime({
       const prior = await fsp.stat(logFile).catch(() => null);
       if (prior && prior.size > LOG_LIMIT) await fsp.rm(logFile, { force: true }).catch(() => {});
       const log = fs.createWriteStream(logFile, { flags: 'a' });
-      const child = spawn(path.join(engineDir, 'jre', 'bin', 'java.exe'), launchArgs({ dataDir, port, password, widenVerifier: widened() }), { cwd: engineDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(path.join(engineDir, 'jre', 'bin', 'java.exe'), launchArgs({ dataDir, port, password }), { cwd: engineDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let tail = '';
       const keep = (d) => { tail = (tail + d).slice(-4000); output = (output + String(d).replaceAll(password, '***')).slice(-16000); log.write(String(d).replaceAll(password, '***')); };
       child.stdout?.on('data', keep); child.stderr?.on('data', keep);
@@ -221,31 +216,11 @@ function createSuwayomiRuntime({
     return fetch(`${endpoint.base}${pathname}`, { method, headers: { ...headers, authorization: endpoint.auth }, body, signal: AbortSignal.timeout(timeout) });
   }
 
-  /** يوسّع المدقق (أو يعيده) ويعيد تشغيل المحرك بالإعداد الجديد إن كان يعمل. */
-  async function widenVerifier(on = true) {
-    if (widened() === Boolean(on)) return false;
-    await fsp.mkdir(root, { recursive: true });
-    const write = (value) => fsp.writeFile(verifierFile, JSON.stringify({ widen: value, at: now() }));
-    await write(Boolean(on));
-    if (!live) return true;
-    await stop();
-    try {
-      await start({ quiet: true });
-    } catch (error) {
-      // الإعداد الجديد لم يُقلع المحرك: يعود كما كان ويقلع به، فلا يعلق المحرك معطّلًا بعد محاولة فاشلة
-      await write(!on);
-      await start({ quiet: true });
-      throw error;
-    }
-    return true;
-  }
-
   return {
     pinned, supported, installed, install, start, stop, request, logFile: path.join(root, 'engine.log'),
-    widenVerifier, verifierWidened: widened,
-    /** آخر ما كتبه المحرك (لتشخيص رفض إضافة؛ السر غير موجود فيه: لا يُطبع أبدًا). */
+    /** آخر ما كتبه المحرك (لتشخيص رفض إضافة؛ السر محجوب فيه). */
     recentOutput: () => output,
-    state: () => ({ supported: supported(), installed: installed(), running: Boolean(live), starting: Boolean(starting), downloading, version: pinned.version, verifierWidened: widened() }),
+    state: () => ({ supported: supported(), installed: installed(), running: Boolean(live), starting: Boolean(starting), downloading, version: pinned.version }),
     close: async () => { if (idleTimer) clearInterval(idleTimer); idleTimer = null; await stop(); },
   };
 }

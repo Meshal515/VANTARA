@@ -106,33 +106,7 @@ test('an engine that exits during start reports it in Arabic; other platforms do
   await assert.rejects(other.install(), /متاح في ويندوز/);
 });
 
-test('the bytecode verifier stays on by default and is widened only on request, persisted across restarts', async () => {
-  const flag = '-XX:-BytecodeVerificationRemote';
-  const unlock = '-XX:+UnlockDiagnosticVMOptions';
-  assert.equal(launchArgs({ dataDir: 'd', port: 1, password: 'p' }).includes(flag), false);
-  const widened = launchArgs({ dataDir: 'd', port: 1, password: 'p', widenVerifier: true });
-  // الخيار تشخيصي: فتح الخيارات التشخيصية يسبقه وإلا لا تقلع الـJVM (ما حدث على ويندوز حقيقي)
-  assert.ok(widened.indexOf(unlock) >= 0 && widened.indexOf(unlock) < widened.indexOf(flag));
-  const h = harness();
-  await h.runtime.start();
-  assert.equal(h.spawned.find((s) => s.file.endsWith('java.exe')).args.includes(flag), false);
-  assert.equal(await h.runtime.widenVerifier(true), true);
-  const javas = h.spawned.filter((s) => s.file.endsWith('java.exe'));
-  assert.equal(javas.length, 2, 'restarted with the widened verifier');
-  assert.equal(javas[1].args.includes(flag), true);
-  assert.equal(h.runtime.state().verifierWidened, true);
-  assert.equal(await h.runtime.widenVerifier(true), false, 'already widened: no restart');
-  await h.runtime.close();
-});
-
-test('a widened verifier that stops the JVM from starting is reverted, and the engine starts as before', async () => {
-  const h = harness({ exitIf: (args) => args.includes('-XX:-BytecodeVerificationRemote') });
-  await h.runtime.start();
-  await assert.rejects(h.runtime.widenVerifier(true), /توقف المحرك عند الإقلاع/);
-  assert.equal(h.runtime.verifierWidened(), false, 'reverted on disk');
-  const javas = h.spawned.filter((s) => s.file.endsWith('java.exe'));
-  assert.equal(javas.length, 3, 'original, widened (refused), original again');
-  assert.equal(javas[2].args.includes('-XX:-BytecodeVerificationRemote'), false);
-  assert.equal(h.runtime.state().running, true);
-  await h.runtime.close();
+test('the JVM bytecode verifier is never switched off (a widened run crashed the JVM on real Windows)', () => {
+  const args = launchArgs({ dataDir: 'd', port: 1, password: 'p' });
+  assert.equal(args.some((a) => /BytecodeVerification|Xverify|noverify|UnlockDiagnosticVMOptions/.test(a)), false);
 });
