@@ -72,8 +72,10 @@ export function flushFollowTime(sync) {
           section: owner.section, seriesRef: owner.seriesRef, seriesTitle: owner.title,
           coverUrl: owner.coverUrl, activeMs: item.activeMs,
         }, { opId: `${item.id}:work`, requireDurable: true });
-        if (owner.section === 'anime') sync.enqueue('usage.watch', {
-          section: 'anime', day: item.day, activeMs: item.activeMs,
+        // وقت المشاهدة اليومي للقسم: كان للأنمي وحده، فمسلسلات وأفلام «السينما» من مشغّل الجوال لا تُضاف لوقت
+        // مشاهدتك أبدًا (حلقة 40-60 دقيقة تُحسب للعمل ولا تُحسب لك). المشغّل الأصلي يقيسها بالدقيقة الفعلية.
+        if (owner.section === 'anime' || owner.section === 'cinema') sync.enqueue('usage.watch', {
+          section: owner.section, day: item.day, activeMs: item.activeMs,
         }, { opId: `${item.id}:watch`, requireDurable: true });
         ids.push(item.id);
       }

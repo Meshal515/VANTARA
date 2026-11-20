@@ -236,6 +236,9 @@ export function repositories() {
 		},
 		install: (repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg }),
 		uninstall: (pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg }),
+		// التحديث الذاتي الآمن (قرار المالك 20 نوفمبر): حالة التحديث، والرجوع لآخر إصدار سليم محفوظ على الجهاز
+		updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null,
+		rollback: typeof plugin.rollbackExtension === 'function' ? (pkg) => plugin.rollbackExtension({ pkg }) : null,
 	};
 }
 

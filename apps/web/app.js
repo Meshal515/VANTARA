@@ -2013,6 +2013,8 @@ async function drainProgressOutbox() {
 
   for (const row of rows) {
     if (!row?.chapterKey) continue;
+    // موضع حلقة أو فيلم (ANX1) ليس تقدم مانجا: لا مالك له، فيُقرّ كما هو ولا يُدفع
+    if (/^(anime|cinema):/.test(String(row.seriesRef ?? ''))) { sync.enqueue('progress.confirm', { chapterKey: row.chapterKey, page: Number(row.page ?? 0) }); continue; }
     const key = encodeURIComponent(row.chapterKey);
     const mirrorPage = Number(row.page ?? 0);
 
