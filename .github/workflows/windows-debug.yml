@@ -315,6 +315,23 @@ jobs:
           Get-Content $report
           $r = Get-Content $report | ConvertFrom-Json
           Write-Host "Manga sources through Windows: $($r.passed)/$($r.total)"
+      - name: Mihon extensions through the local Suwayomi engine on real Windows — indicative
+        # تنزيل المحرك المثبّت ببصمته، تشغيله على 127.0.0.1، مستودع Keiyoushi الحقيقي، تثبيت إضافة موقّعة، تصفح،
+        # فصول، وصورة صفحة فعلية. مؤشر لا بوابة: GitHub والمستودع ومواقع المصادر خارج يدنا؛ التقرير يُقرأ في كل نشر.
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'candidate') -Filter '*-x64.zip' | Select-Object -First 1
+          $out = Join-Path $env:RUNNER_TEMP 'engine-portable'; Expand-Archive $zip.FullName $out -Force
+          $exe = Get-ChildItem $out -Recurse -Filter 'VANTARA*.exe' | Where-Object { $_.Name -notmatch '^vantara-|Uninstall|Setup' } | Select-Object -First 1
+          $report = Join-Path $env:RUNNER_TEMP 'candidate\manga-engine-smoke.json'
+          $p = Start-Process $exe.FullName -ArgumentList "--manga-engine-smoke-report=`"$report`"" -PassThru
+          if (-not $p.WaitForExit(1080000)) { Stop-Process -Id $p.Id -Force; throw 'manga engine smoke timed out' }
+          Get-Content $report
+          $r = Get-Content $report | ConvertFrom-Json
+          Write-Host "Mihon extensions on Windows: $($r.passed)/$($r.total) complete=$($r.complete)"
+          if (-not $r.complete) { throw 'manga engine smoke incomplete' }
       - name: Real-swarm A/B (libtorrent vs rqbit) on legal CC-BY films — indicative
         if: needs.changes.outputs.engine == 'true'
         continue-on-error: true

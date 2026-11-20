@@ -56,6 +56,29 @@ it('جسر المانجا في ويندوز لا يعلن وظائف Mihon ال�
   for (const method of ['sources', 'chapters', 'pages', 'image', 'cover', 'sites']) expect(typeof ExtensionEngine[method]).toBe('function');
 });
 
+it('ويندوز بمحرك Suwayomi: وظائف المستودعات تُعلن وتذهب للمحرك، ومصادر pkg#id تُوجَّه إليه، ومصادر الويب تبقى', async () => {
+  const calls = [];
+  const mangaEngine = async ({ method, args }) => {
+    calls.push([method, args]);
+    if (method === 'sources') return { sources: [{ id: 'eu.kanade.tachiyomi.extension.ar.teamx#7154', label: 'Team X', user: true }], stateRecovered: false };
+    if (method === 'popular') return { mangas: [{ url: '/s', title: 'س' }], hasNextPage: false, page: 1 };
+    return { ok: method };
+  };
+  const g = { VantaraDesktop: { platform: 'windows', mangaEngine, requestResource: async () => ({}), startPlayback: async () => ({}), onEvent: () => () => {} } };
+  const { ExtensionEngine } = installDesktopBridges(g);
+  for (const method of ['addRepo', 'repos', 'repoIndex', 'installExtension', 'uninstallExtension', 'rollbackExtension', 'updateState']) expect(method in ExtensionEngine).toBe(true);
+  expect(await ExtensionEngine.addRepo({ url: 'https://repo.example' })).toEqual({ ok: 'addRepo' });
+  expect(calls.at(-1)).toEqual(['addRepo', { url: 'https://repo.example' }]);
+  expect((await ExtensionEngine.popular({ sourceId: 'eu.kanade.tachiyomi.extension.ar.teamx#7154', page: 1 })).mangas[0].title).toBe('س');
+  // صورة من بروتوكول المحرك لا تمر عبر جلب الويب؛ وغلافه يعود كما هو
+  await ExtensionEngine.image({ sourceId: 'x', page: { imageUrl: 'vantara-engine://suwayomi/manga/1/chapter/1/page/0' } });
+  expect(calls.at(-1)[0]).toBe('image');
+  expect(await ExtensionEngine.cover({ sourceId: 'x', url: 'vantara-engine://suwayomi/manga/1/thumbnail' })).toEqual({ path: 'vantara-engine://suwayomi/manga/1/thumbnail' });
+  // مصادر الويب تفشل في بيئة الاختبار (لا runtime): مصادر المحرك تبقى ظاهرة
+  const listed = await ExtensionEngine.sources();
+  expect(listed.sources.map((s) => s.id)).toContain('eu.kanade.tachiyomi.extension.ar.teamx#7154');
+});
+
 it('التحقق في ويندوز بشكل إضافة الـAPK: المضيف المحجوب يُعلن، وbegin يفتح الصفحة الظاهرة ثم يزيله', async () => {
   const { createDesktopVerification } = await import('./boot.js');
   const { desktopChallenges } = await import('./source-fetcher.js');

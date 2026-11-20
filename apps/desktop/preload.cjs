@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   requestResource: call('request-resource'),
   requestFirstParty: call('request-first-party'),
   verifySource: call('verify-source'),
+  // محرك إضافات المانجا (Suwayomi محليًا): دالة واحدة بأسماء معروفة فقط تُفحص في العملية الرئيسية
+  mangaEngine: call('manga-engine'),
   showApp:call('show-app'),
   showPlayer:call('show-player'),
   playerViewport:call('player-viewport'),

@@ -109,7 +109,7 @@ for (const name of ['vcruntime140.dll', 'vcruntime140_1.dll']) await fs.copyFile
 await fs.copyFile(path.join(vcExtract, 'u31'), path.join(native, 'MICROSOFT-VC-RUNTIME-LICENSE.rtf'));
 await fs.cp(path.join(repo, 'apps', 'desktop'), app, {
   recursive: true,
-  filter: filename => !/(?:^|[/\\])node_modules(?:[/\\]|$)|\.test\.(?:mjs|cjs)$|windows\.nsi$/.test(filename),
+  filter: filename => !/(?:^|[/\\])(?:node_modules|test-fixtures)(?:[/\\]|$)|\.test\.(?:mjs|cjs)$|windows\.nsi$/.test(filename),
 });
 await fs.copyFile(videoHost,path.join(native,'vantara-video-host.exe'));
 // محرك libtorrent الأصلي (tools/torrent-host): ملف تنفيذي واحد مربوط ستاتيكيًا. rqbit يبقى بجواره احتياطًا.

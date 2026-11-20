@@ -10,7 +10,11 @@ const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
 const channelInfo = require('./channel.cjs').readChannel(__dirname);
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+  // صور صفحات وأغلفة إضافات المانجا من المحرك المحلي (suwayomi-engine.cjs: مساران مسموحان فقط)
+  { scheme: 'vantara-engine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+]);
 // Debug: اسم ومعرّف مستقلان ⇒ userData وقفل نسخة واحدة ومجلد تثبيت منفصلة عن Stable.
 app.setName(channelInfo.productName);
 if (process.platform === 'win32') app.setAppUserModelId(channelInfo.appId);
@@ -24,6 +28,8 @@ const profileReady=portable?migratePortableProfile(previousProfile,portableProfi
   .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
 let window;
 let services;
+let mangaRuntime=null;
+let mangaEngine=null;
 let videoHost;
 let overlay=null;
 let overlayWindow=null;
@@ -67,6 +73,7 @@ const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-
 const torrentReportOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-report='));
 const updateReportOption=process.argv.find(x=>x.startsWith('--update-smoke-report='));
 const sourceReportOption=process.argv.find(x=>x.startsWith('--source-smoke-report='));
+const mangaEngineReportOption=process.argv.find(x=>x.startsWith('--manga-engine-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
@@ -179,6 +186,31 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if (result.state === 'verified') services.trustBrowserHost(name);
     return result;
   });
+  // إضافات Mihon في ويندوز: محرك Suwayomi محلي (127.0.0.1، مصادقة بسر عشوائي)، والثقة والمستودعات عندنا
+  {
+    const { createSuwayomiRuntime } = require('./suwayomi-runtime.cjs');
+    const { createSuwayomiEngine } = require('./suwayomi-engine.cjs');
+    const mangaRoot = path.join(app.getPath('userData'), 'suwayomi');
+    const loopback = url => /^http:\/\/127\.0\.0\.1:\d+\//.test(String(url));
+    // الشبكة الخارجية عبر Chromium (إعدادات الوكيل في النظام)؛ المحرك المحلي عبر fetch الخاص بـNode
+    const fetchFor = (url, init) => loopback(url) ? globalThis.fetch(url, init) : net.fetch(url, init);
+    const fetchBytes = async (url, limit) => {
+      if (!/^https:\/\//i.test(String(url))) throw new Error('رابط المستودع يجب أن يكون HTTPS');
+      const response = await net.fetch(url, { redirect: 'follow' });
+      if (!response.ok) throw new Error(`تعذر الوصول (HTTP ${response.status})`);
+      const declared = Number(response.headers.get('content-length'));
+      if (declared && declared > limit) throw new Error('الملف أكبر من الحد المسموح');
+      const parts = []; let size = 0;
+      for await (const chunk of response.body) { size += chunk.length; if (size > limit) throw new Error('الملف أكبر من الحد المسموح'); parts.push(Buffer.from(chunk)); }
+      return Buffer.concat(parts);
+    };
+    mangaRuntime = createSuwayomiRuntime({ root: mangaRoot, fetch: fetchFor, onProgress: p => publish({ type: 'manga-engine/progress', ...p }) });
+    mangaEngine = createSuwayomiEngine({ root: mangaRoot, runtime: mangaRuntime, fetchBytes, onEvent: publish });
+    protocol.handle('vantara-engine', request => mangaEngine.media(request.url));
+    register('manga-engine', ({ method, args } = {}) => mangaEngine.call(String(method ?? ''), args));
+    // التحديث الذاتي الآمن مرة كل يوم وقت عمل المحرك فقط (لا يُشغَّل من أجله)
+    setInterval(() => { void mangaEngine.autoUpdate().catch(() => {}); }, 60 * 60_000).unref?.();
+  }
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
     await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
@@ -273,6 +305,12 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     await require('./torrent-smoke.cjs').runEmbeddedTorrentSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-torrent-smoke-fixture='.length),reportPath:torrentReportOption.slice('--native-torrent-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
     app.quit();return;
   }
+  if (mangaEngineReportOption) {
+    // إثبات إضافات Mihon في ويندوز الحقيقي: تنزيل المحرك الموثّق، تشغيله، مستودع حقيقي، تثبيت، تصفح، فصول، صورة صفحة
+    await require('./suwayomi-smoke.cjs').runMangaEngineSmoke({ engine: mangaEngine, runtime: mangaRuntime, reportPath: mangaEngineReportOption.slice('--manga-engine-smoke-report='.length) }).catch(() => {});
+    await mangaRuntime.close().catch(() => {});
+    app.quit();return;
+  }
   if (sourceReportOption) {
     // إثبات مصادر المانجا في ويندوز الحقيقي: Node ثم المتصفح المخفي عند صفحة تحقق (source-smoke.cjs)
     await require('./source-smoke.cjs').runSourceSmoke({ services, reportPath: sourceReportOption.slice('--source-smoke-report='.length) }).catch(() => {});
@@ -306,5 +344,5 @@ app.on('before-quit', event => {
   event.preventDefault(); quitting = true;
   for (const popup of settingsWindows) popup.destroy();
   overlay?.destroy();
-  Promise.resolve(services.close()).catch(() => {}).finally(() => app.quit());
+  Promise.allSettled([services.close(), mangaRuntime?.close()]).finally(() => app.quit());
 });
