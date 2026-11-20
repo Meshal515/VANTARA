@@ -41,4 +41,12 @@ class ImagePayloadPolicyAppTest {
         assertEquals("image/png", ImagePayloadPolicy.sniffType(tinyPng))
         assertNull(ImagePayloadPolicy.sniffType("<html>".encodeToByteArray()))
     }
+
+    /** IP1: HEIC يُعرَّف بنوعه (ليُحوَّل JPEG قبل الحفظ) لا يُترك بلا نوع فيُحفظ ‎.jpg‎ ولا يفكه WebView. */
+    @Test
+    fun `a HEIC page is identified as HEIC, not left untyped`() {
+        val heic = byteArrayOf(0, 0, 0, 24) + "ftypheic".encodeToByteArray() + ByteArray(64)
+        assertTrue(ImagePayloadPolicy.validate("image/heic", heic).accepted)
+        assertEquals("image/heic", ImagePayloadPolicy.sniffType(heic))
+    }
 }

@@ -78,12 +78,12 @@ export const MangaEngine = {
   catalogue: (args) => listing('catalogue', args),
   search: (args) => listing('search', args),
   genre: (args) => listing('genre', args),
-  async series({ sourceId, manga }) {
-    const out = await series(sourceId, manga);
+  async series({ sourceId, manga, fresh = false }) {
+    const out = await series(sourceId, manga, { fresh });
     return { manga: out.manga, chapters: out.chapters, count: out.chapters.length };
   },
-  async chapters({ sourceId, manga }) {
-    const out = await series(sourceId, manga);
+  async chapters({ sourceId, manga, fresh = false }) {
+    const out = await series(sourceId, manga, { fresh });
     return { chapters: out.chapters, count: out.chapters.length };
   },
   async pages({ sourceId, chapter }) {

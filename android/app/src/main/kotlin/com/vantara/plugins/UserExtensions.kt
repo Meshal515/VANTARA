@@ -358,6 +358,8 @@ class UserExtensionStore(private val file: File) {
     private val shared = open(file)
 
     val state: UserExtensionState get() = shared.state
+    /** ES1: نسخة الحالة التالفة التي نُقلت جانبًا عند الإقلاع، أو null. */
+    val quarantined: File? get() = shared.quarantined
 
     class InstallToken internal constructor(
         internal val owner: UserExtensionStore,
@@ -439,10 +441,18 @@ class UserExtensionStore(private val file: File) {
         val storage = ExtensionStateFile(file)
         val packageRevisions = mutableMapOf<String, Long>()
         val repositoryRevisions = mutableMapOf<String, Long>()
-        @Volatile var state = storage.read(UserExtensionState()) { json.decodeFromString<UserExtensionState>(it) }
+        /** ES1: مسار نسخة الحالة التالفة إن نُقلت جانبًا عند الإقلاع (لإعلام المستخدم مرة)، وإلا null. */
+        @Volatile var quarantined: File? = null
+        @Volatile var state = try {
+            storage.read(UserExtensionState()) { json.decodeFromString<UserExtensionState>(it) }
+        } catch (unreadable: IllegalStateException) {
+            quarantined = storage.quarantine()
+            UserExtensionState()
+        }
 
         fun refresh() {
-            accept(storage.read(state) { json.decodeFromString<UserExtensionState>(it) })
+            // قراءة تالفة أثناء العمل لا تُسقط التطبيق ولا تمسح الحالة الحالية في الذاكرة
+            runCatching { storage.read(state) { json.decodeFromString<UserExtensionState>(it) } }.onSuccess(::accept)
         }
 
         fun accept(next: UserExtensionState) {

@@ -65,8 +65,14 @@ function required() {
  * `warning` تصنيف الفهرس كما هو: `SAFE` أو `MIXED` (MangaDex). المحظور
  * بالسياسة لا يصل إلى هنا أصلًا.
  */
+let recoveredSaid = false;
 export async function sources() {
-	const { sources: list } = await required().sources();
+	const { sources: list, stateRecovered } = await required().sources();
+	// ES1: ملف الإضافات كان تالفًا فنُقل جانبًا والتطبيق أقلع بحالة فارغة: يُقال مرة في الجلسة
+	if (stateRecovered && !recoveredSaid) {
+		recoveredSaid = true;
+		try { globalThis.dispatchEvent?.(new CustomEvent('vantara:extensions-recovered')); } catch { /* بيئة بلا أحداث */ }
+	}
 	return (list ?? []).filter((source) => visible(source));
 }
 
@@ -136,15 +142,17 @@ function sense(sourceId, manga, list) {
 	}
 }
 
-export async function series(sourceId, manga) {
-	const out = await forSource(sourceId).series({ sourceId, manga });
+// WB1: `fresh` = فتح صريح من المستخدم: الويب وويندوز يتجاوزان كاش قائمة الفصول (30 دقيقة) فيظهر الفصل الجديد. المحرك
+// الأصلي (الـAPK) يتجاهل الحقل كما يتجاهل أي حقل لا يعرفه.
+export async function series(sourceId, manga, { fresh = false } = {}) {
+	const out = await forSource(sourceId).series({ sourceId, manga, ...(fresh ? { fresh: true } : {}) });
 	sense(sourceId, out.manga ?? manga, out.chapters ?? []);
 	return { manga: out.manga, chapters: out.chapters ?? [] };
 }
 
 /** فصول عمل. نفس قاعدة `memo`: مرّر كائن العمل كما جاءك من البحث أو الرائج. */
-export async function chapters(sourceId, manga) {
-	const { chapters: list } = await forSource(sourceId).chapters({ sourceId, manga });
+export async function chapters(sourceId, manga, { fresh = false } = {}) {
+	const { chapters: list } = await forSource(sourceId).chapters({ sourceId, manga, ...(fresh ? { fresh: true } : {}) });
 	sense(sourceId, manga, list ?? []);
 	return list ?? [];
 }

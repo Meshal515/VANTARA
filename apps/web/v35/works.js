@@ -1080,7 +1080,9 @@ const loading = new Map();
  * تصغر أبدًا: فصلٌ عرفناه لا يختفي لأن مصدره تأخّر اليوم.
  * @returns {Promise<object>} العمل بعد أن ردّ كل ما يمكن أن يردّ
  */
-export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false, pinnedSource = null } = {}) {
+export async function loadWork(v35work, { onUpdate = () => {}, discover = true, requestedChapter = null, arabicOnly = false, pinnedSource = null, fresh = false } = {}) {
+  // WB1: فتح صريح من المستخدم يطلب قائمة الفصول طازجة (الويب وويندوز)، لا من كاش قد يعود لنصف ساعة
+  const listOpts = fresh ? [{ fresh: true }] : [];
   const id = String(v35work.id);
   // مصدر محدد: نسخته وحدها، ولا اكتشاف في بقية المصادر (المعرّف قد يكون مشتركًا بهوية AniList/MangaDex)
   if (pinnedSource) discover = false;
@@ -1121,7 +1123,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
       list.map(async (edition) => {
         try {
           if (edition === primary && !detail) {
-            const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+            const out = await withTimeout(engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
             detail = out.manga ?? detail;
             // التفاصيل كشفت كوميكس غربية: لا تعود للقوائم على هذا الجهاز
             if (isWesternManga(detail)) learnWestern(v35work._work?.key);
@@ -1130,7 +1132,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
             learnDetailAliases(v35work._work?.key, detail);
             edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {
-            edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS) };
+            edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS) };
           }
           failed.delete(edition.sourceId);
           if (Array.isArray(edition.chapters)) noteEditionChapters(mirrorFamily(edition.sourceId), edition.manga?.url, edition.chapters.length);
@@ -1151,7 +1153,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
       const rest = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId)).filter((e) => e !== primary).slice(0, 2);
       for (const edition of rest) {
         try {
-          const out = await withTimeout(engine.series(edition.sourceId, edition.manga), CHAPTERS_TIMEOUT_MS);
+          const out = await withTimeout(engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
           if (!out?.manga) continue;
           if (isWesternManga(out.manga)) learnWestern(v35work._work?.key);
           if (adultManga(out.manga)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);

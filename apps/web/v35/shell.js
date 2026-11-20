@@ -264,6 +264,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
   let storageFullSaid = false;
   const onStorageFull = () => { if (storageFullSaid) return; storageFullSaid = true; setTimeout(() => toast('مساحة التخزين في التطبيق ممتلئة: بعض ما تعلّمه عن أعمالك لن يُحفظ بعد إعادة الفتح. امسح الكاش من الإعدادات', 6000), 0); };
   globalThis.addEventListener?.('vantara:storage-full', onStorageFull);
+  // ES1: ملف إعدادات الإضافات كان تالفًا فحُفظ جانبًا وأقلع التطبيق بلا إضافات المستخدم بدل أن ينهار
+  const onExtensionsRecovered = () => setTimeout(() => toast('ملف إعدادات الإضافات كان تالفًا فحفظناه جانبًا. أضف مستودعاتك وإضافاتك من جديد من صفحة الإضافات', 7000), 0);
+  globalThis.addEventListener?.('vantara:extensions-recovered', onExtensionsRecovered);
 
   // Startup invariant: the shell must mount before any optional native bridge work.
   // Follow-time is telemetry/accounting; a missing, stale, or temporarily broken
@@ -1838,7 +1841,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if(settled&&expectedChapter!==null&&!requestedChapterRow(full,expectedChapter,{arabicOnly:true}))toast(`الفصل ${expectedChapter} غير متاح للقراءة في المصادر العربية التي أجابت`);
     };
     try {
-      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null });
+      const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null, fresh: true });
       if (state.current?.id !== work.id) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
@@ -8030,6 +8033,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       finishPageMotion();
       sourceVerification.close();
       globalThis.removeEventListener?.('vantara:storage-full', onStorageFull);
+      globalThis.removeEventListener?.('vantara:extensions-recovered', onExtensionsRecovered);
       addonViewGeneration++;closeAddonSource();
       followTimeClosed = true;
       try { stopFollowTime(); } catch {}

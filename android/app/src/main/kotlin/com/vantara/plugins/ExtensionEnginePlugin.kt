@@ -242,7 +242,8 @@ class ExtensionEnginePlugin : Plugin() {
                         )
                     }
                 }
-                call.resolve(JSObject().put("sources", list))
+                // ES1: حالة الإضافات كانت تالفة فنُقلت جانبًا عند الإقلاع: الواجهة تقولها مرة (لا انهيار ولا صمت)
+                call.resolve(JSObject().put("sources", list).put("stateRecovered", userStore.quarantined != null))
             } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
         }
     }
@@ -275,7 +276,7 @@ class ExtensionEnginePlugin : Plugin() {
         scope.launch(Dispatchers.IO) {
             try {
                 forget(pkg)
-                loaded.keys.removeAll { splitSourceId(it.substringBefore('#')).first == pkg }
+                loaded.keys.removeAll { ownedBy(it, pkg) }
                 staged.remove(pkg)
                 builtinSpecs.reset(pkg)
                 loader.prune(pkg, emptySet())
@@ -493,8 +494,15 @@ class ExtensionEnginePlugin : Plugin() {
     /** يُخرج الحزمة من الذاكرة فقط؛ ملفاتها في المخزن تبقى (الحذف بـ[FileExtensionLoader.erase]). */
     private fun forget(pkg: String) {
         packages.remove(pkg)
-        loaded.keys.removeAll { it.startsWith("$pkg#") }
+        loaded.keys.removeAll { ownedBy(it, pkg) }
+        // SE2: إصدار جديد (تحديث، رجوع، حذف) = حقبة جديدة لكاش صفحاته؛ صورة «تحذير» قديمة بتوقيع صورة سليم لا تبقى
+        runCatching { cacheEpochs.edit().putLong(pkg, System.currentTimeMillis()).apply() }
     }
+
+    /** حقبة كاش صفحات الحزمة (0 = لم تُحدَّث منذ وُجد الكاش، فيبقى مفتاحه القديم صالحًا). */
+    private val cacheEpochs by lazy { context.getSharedPreferences("vantara_page_cache_epochs", android.content.Context.MODE_PRIVATE) }
+    private fun pageCacheKey(sourceId: String, url: String): String =
+        pageCacheKeyOf(cacheEpochs.getLong(splitSourceId(sourceId.substringBefore('#')).first, 0L), url)
 
     /** مالك كل معرّف مصدر محمَّل: حزمتان بمعرّف واحد تتشاركان تفضيلات `source_<id>` وكوكيزه. */
     private val owners = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -715,14 +723,16 @@ class ExtensionEnginePlugin : Plugin() {
     fun image(call: PluginCall) {
         scope.launch {
             try {
-                val source = obtain(requireSourceId(call))
+                val sourceId = requireSourceId(call)
+                val source = obtain(sourceId)
                 val asHttp = source as? HttpSource
                 val page = pageFrom(call.getObject("page"))
                 val url = page.imageUrl
                     ?: asHttp?.let { runCatching { it.getImageUrl(page) }.getOrNull() }
                     ?: throw PageImageException("page carries no imageUrl", noImageUrl = true)
 
-                val hit = withContext(Dispatchers.IO) { cacheHit(url) }
+                val cacheKey = pageCacheKey(sourceId, url)
+                val hit = withContext(Dispatchers.IO) { cacheHit(cacheKey) }
                 val file: java.io.File
                 val bytes: ByteArray
                 val type: String
@@ -752,7 +762,8 @@ class ExtensionEnginePlugin : Plugin() {
                             }
                         }
                     }
-                    bytes = fetched.first
+                    // IP1: HEIC لا يفكه WebView: يُحوَّل JPEG هنا (أندرويد 9+ يفكه)، وإلا سبب واضح لا صفحة فارغة
+                    bytes = if (ImagePayloadPolicy.sniffType(fetched.first) == "image/heic") heicToJpeg(fetched.first) else fetched.first
                     // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: التوقيع هو الحكم (لا الحجم: صفحة فاصلة
                     // بيضاء PNG أقل من كيلوبايت صورة صحيحة، وكانت تُرفض فيفشل الفصل كله). يُفحص قبل الكاش
                     val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
@@ -761,7 +772,7 @@ class ExtensionEnginePlugin : Plugin() {
                     type = ImagePayloadPolicy.sniffType(bytes) ?: fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")
                     } ?: typeForUrl(url)
-                    file = cacheFile(url, extensionForType(type))
+                    file = cacheFile(cacheKey, extensionForType(type))
                     // كتابة ذرّية: القارئ والترجمة المقدّمة قد يطلبان الصفحة نفسها معًا، وملفٌ
                     // نصف مكتوب كان يُقرأ «موجودًا» فتُحلَّل صفحة مبتورة. مؤقت ثم إعادة تسمية
                     // كاش الصفحات كان بلا سقف: كل صفحة قُرئت تبقى للأبد (جيجابايتات). يُسقَّف كل 150 صفحة جديدة
@@ -899,6 +910,17 @@ class ExtensionEnginePlugin : Plugin() {
             }
             call.resolve(JSObject().put("freedBytes", freed))
         }
+    }
+
+    private fun heicToJpeg(heic: ByteArray): ByteArray {
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(heic, 0, heic.size)
+            ?: throw PageImageException("HEIC page image cannot be decoded on this Android version")
+        return try {
+            java.io.ByteArrayOutputStream().use { out ->
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
+                out.toByteArray()
+            }
+        } finally { bitmap.recycle() }
     }
 
     @Volatile private var pageWrites = 0

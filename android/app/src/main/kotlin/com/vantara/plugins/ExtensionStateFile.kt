@@ -38,6 +38,22 @@ internal class ExtensionStateFile(private val file: File) {
         }
     }
 
+    /**
+     * ES1: الملف ونسخته تالفان معًا فلا يُقرأ أيهما. كان الاستثناء يُسقط التطبيق عند كل إقلاع. يُنقلان جانبًا باسم
+     * `.corrupt-<وقت>` (لا يُحذفان: للاستعادة والتشخيص)، والإقلاع يكمل بحالة فارغة مع إعلام المستخدم. يعيد مسار النسخة.
+     */
+    fun quarantine(now: Long = System.currentTimeMillis()): File? {
+        var kept: File? = null
+        for (source in listOf(file, backup, staged)) {
+            if (!source.exists()) continue
+            val target = File("${source.path}.corrupt-$now")
+            if (source.renameTo(target) || runCatching { source.copyTo(target, overwrite = true); source.delete() }.getOrDefault(false)) {
+                if (source == file || kept == null) kept = target
+            }
+        }
+        return kept
+    }
+
     fun write(text: String) {
         file.parentFile?.mkdirs()
         try {

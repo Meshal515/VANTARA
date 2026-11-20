@@ -24,7 +24,7 @@ import { reportSource } from '../lib/source-report.js';
 import { glyph, iconButton } from './icons.js';
 import { FORMAT_AR, RELATION_AR, SEASON_AR, STATUS_AR, fetchAnimeDetail, fetchAnimeHome, fetchMalEpisodes, meccaDay, relativeAr } from '../lib/anime-meta.js';
 import { animeTitle } from '../lib/anime-title.js';
-import { createAnimeDiscover } from './anime-discover.js';
+import { anilistFailureText, createAnimeDiscover } from './anime-discover.js';
 import { pop, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { isNative } from '../pwa/platform.js';
@@ -422,8 +422,8 @@ export function createAnime(deps) {
     q('animeHome').replaceChildren(box);
   }
 
-  function renderError(retry) {
-    const box = emptyBox('offline', 'تعذّر جلب الأنمي', 'تحقّق من الاتصال ثم أعد المحاولة.');
+  function renderError(retry, error = null) {
+    const box = emptyBox('offline', 'تعذّر جلب الأنمي', anilistFailureText(error, 'جلب الأنمي'));
     box.append(button('an-btn an-btn--primary', 'أعد المحاولة', retry));
     q('animeHome').replaceChildren(box);
   }
@@ -451,8 +451,8 @@ export function createAnime(deps) {
           const view = renderHome(fresh);
           if (first) revealIn(view);
         }
-      } catch {
-        if (!state.home) renderError(() => void loadHome({ force: true }));
+      } catch (error) {
+        if (!state.home) renderError(() => void loadHome({ force: true }), error);
       }
     };
     state.loading = run().finally(() => (state.loading = null));
