@@ -465,6 +465,7 @@ class PlayerActivity : Activity() {
         }
     }
     private val seekBudget = PlaybackSeekBudget()
+    private val seekRecovery = SeekRecovery()
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
     private val stallWatchdog = Runnable {
@@ -786,6 +787,7 @@ class PlayerActivity : Activity() {
             main.removeCallbacksAndMessages(embeddedCues)
             if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                seekRecovery.seeked(SystemClock.elapsedRealtime())
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
                 watchStall()
             }
@@ -984,6 +986,17 @@ class PlayerActivity : Activity() {
 
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
+        // TS1: عطل بعد تشغيل ناجح وبعد قفزة قريبة = الموضع الجديد لم يجهز بعد، لا سيرفر ميت. يُعاد فتح المصدر نفسه عند
+        // الموضع (مرتين على الأكثر)، ولا يُعلَّم فاشلًا ولا يُبدَّل بمصدر يبدأ من الصفر عند الدقيقة 20
+        val retry = current?.takeIf { seekRecovery.shouldRetry(it.id, reportedStart, SystemClock.elapsedRealtime()) }
+        if (retry != null) {
+            main.removeCallbacks(stallWatchdog)
+            main.removeCallbacks(startupWatchdog)
+            if (BuildConfig.DEBUG) diag.error("seek recovery: reopen same candidate at the new position after $reason")
+            message("نجهّز هذا الموضع…")
+            start(retry, position())
+            return
+        }
         clearSkipTimings()
         startup.cancel()
         usageStarted = false
@@ -1041,7 +1054,7 @@ class PlayerActivity : Activity() {
     private fun switchTo(route: Route) {
         val p = prep ?: return
         val s = session ?: return
-        val c = p.rank(p.candidatesOf(route.id)).firstOrNull()?.let { s.take(it.id) }
+        val c = p.rank(p.candidatesOf(route.id)).firstOrNull()?.let { s.take(it.id, manual = true) }
         if (c == null) {
             message("هذا السيرفر لم يعد متاحًا")
             return
