@@ -1493,8 +1493,13 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
         const out = await withTimeout(engine.series(source.id, manga), SEARCH_TIMEOUT_MS).catch(() => null);
         return detailEvidence(out?.manga, own, guard) ? { manga: { ...manga, ...(out?.manga ?? {}), url: manga.url }, ev: 'detail' } : null;
       };
+      // التحقق لما يحتاجه فقط (كلفته طلب تفاصيل): نتيجة قريبة باسم محفوظ، أو عنوان بأبجدية غير أبجديات أسماء العمل كلها
+      // (عربي لعمل عرفناه بالإنجليزي، وهي الحالة التي وُجد لها). وطلب واحد لكل مصدر: ثلاثون مصدرًا لا تصير ستين طلبًا
+      const scripts = (t) => new Set([...String(t ?? '')].map((c) => (/[a-z0-9]/i.test(c) ? 'latin' : /[\u0600-\u06ff]/.test(c) ? 'arabic' : /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(c) ? 'cjk' : null)).filter(Boolean));
+      const ownScripts = new Set([...own].flatMap((n) => [...scripts(n)]));
+      const foreign = (manga) => { const sc = scripts(normalizeTitle(manga.title)); return sc.size > 0 && [...sc].every((x) => !ownScripts.has(x)); };
       if (!hit && !accepted.length && list.length && results <= 6) {
-        const order = [...list].sort((x, y) => Number(near.has(y)) - Number(near.has(x))).slice(0, 2);
+        const order = [...list].filter((manga) => near.has(manga) || foreign(manga)).sort((x, y) => Number(near.has(y)) - Number(near.has(x))).slice(0, 1);
         const verified = [];
         for (const manga of order) {
           const v = await verify(manga);

@@ -60,6 +60,7 @@ describe('plan B, end to end on 1911 real works', () => {
   let model;
   let first;
   let second;
+  let detailCalls = 0;
   const pages = [];
   beforeAll(async () => {
     model = sourcesModel();
@@ -96,6 +97,7 @@ describe('plan B, end to end on 1911 real works', () => {
       pages.push({ card, full });
     }
     resetSources();
+    detailCalls = engine.series.mock.calls.length;
     second = (await browse({ kind: 'catalogue' })).items;
   }, 300_000);
 
@@ -155,6 +157,12 @@ describe('plan B, end to end on 1911 real works', () => {
     // المتجانسات (اسم واحد لعملين) لا تفرّقها الأسماء: تُعدّ ولا يُسمح بزيادتها
     expect(homonyms).toBeLessThanOrEqual(68);
     expect(found / expected).toBeGreaterThanOrEqual(0.966);
+  });
+
+  it('verification costs little: about one detail request per opened work, not one per source', () => {
+    // صفحة التفاصيل: واحدة لنبذة العمل في كل فتحة، والتحقق فوقها لما يحتاجه فقط (عنوان بأبجدية أخرى أو اسم محفوظ)
+    console.log(`[pipeline] detail requests=${detailCalls} for ${pages.length} opened works (${(detailCalls / pages.length).toFixed(2)} per work)`);
+    expect(detailCalls / pages.length).toBeLessThan(1.3);
   });
 
   it('the identity graph never joined two works with different AniList ids', async () => {
