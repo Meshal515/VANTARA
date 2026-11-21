@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'e84d8e7f3c8be2f3c0383d650654915ddab55001a3b1d9af10ce2c564cbcb861';
+const SHELL_DIGEST = 'd66facb9c758d69defecffe782a9bdaff63c2d81ab437a19017e61a6f45980eb';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -132,6 +132,8 @@ const SHELL = [
   '/lib/chapter-access.js',
   '/lib/manga-aliases.js',
   '/lib/manga-alias-store.js',
+  '/lib/work-identity.js',
+  '/lib/work-evidence.js',
   '/lib/manga-cover.js',
   '/lib/unified-identity.js',
   '/lib/manga-twins.js',

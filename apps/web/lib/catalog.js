@@ -456,7 +456,7 @@ function preparedAliases(aliases) {
 	return hit;
 }
 
-export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set() } = {}) {
+export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set(), editionRefOf = null } = {}) {
 	const entries = [];
 	const rejected = [];
 	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
@@ -479,12 +479,16 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		rejected.length = 0;
 		const parent = new Map();
 		const families = new Map(); // جذر ← Map<عائلة، Set<مفتاح>>
+		// جذر ← معرّفاته الرسمية المؤكدة. معرّفان مختلفان في بطاقة واحدة = دمج خاطئ مؤكد (الخطة ب): يُرفض أيًّا كان الدليل
+		const officials = new Map();
 		const nodes = new Set();
 		const touch = (k) => {
 			if (!nodes.has(k)) {
 				nodes.add(k);
 				parent.set(k, k);
 				families.set(k, new Map());
+				const id = officialIds.get(k);
+				officials.set(k, Number.isSafeInteger(id) ? new Set([id]) : new Set());
 			}
 		};
 		const find = (k) => {
@@ -535,7 +539,14 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 					return false;
 				}
 			}
+			const ids = new Set([...officials.get(ra), ...officials.get(rb)]);
+			if (ids.size > 1) {
+				rejected.push(`«${a}» ≠ «${b}» (${why}): معرّفان رسميان مختلفان (${[...ids].sort((x, y) => x - y).join(' ≠ ')})`);
+				return false;
+			}
 			parent.set(rb, ra);
+			officials.set(ra, ids);
+			officials.delete(rb);
 			for (const [f, keys] of families.get(rb)) {
 				if (!families.get(ra).has(f)) families.get(ra).set(f, new Set());
 				for (const k of keys) families.get(ra).get(f).add(k);
@@ -545,6 +556,17 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		};
 
 		const entryKeys = [...new Set(entries.map((e) => e.own))].sort();
+		// 0) الهوية (الخطة ب): نسخة رُبطت بعملها بدليل موثَّق (صفحة العمل، اسمها في صفحة المصدر، معرّف رسمي) تنضم إليه
+		// في كل قائمة، مهما اختلف عنوانها. الحراس نفسها فوقها: مصدر يعرضهما عملين، فصل المستخدم، معرّفان مختلفان
+		const linkTargets = new Set();
+		if (editionRefOf) {
+			for (const e of [...entries].sort((x, y) => (x.own < y.own ? -1 : x.own > y.own ? 1 : 0))) {
+				const target = String(editionRefOf(e.entry) ?? '').replace(/^ext:/, '') || null;
+				if (!target) continue;
+				touch(target);
+				if (union(target, e.own, 'هوية')) linkTargets.add(target);
+			}
+		}
 		// 1) توائم العناوين: نفس المفتاح المرن
 		const byLoose = new Map();
 		for (const k of entryKeys) {
@@ -655,11 +677,12 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		}
 		const repOf = new Map();
 		for (const [r, keys] of members) {
-			const rank = (k) => [staticOwners.has(k) ? 0 : 1, -(pointed.get(k) ?? 0), -k.length];
+			// مرجع عمل مربوط (فتحته وربطت نسخه) يبقى مفتاح بطاقته: لا يتبدل مرجع ما كُتبت به بياناتك
+			const rank = (k) => [linkTargets.has(k) ? 0 : 1, staticOwners.has(k) ? 0 : 1, -(pointed.get(k) ?? 0), -k.length];
 			const rep = [...keys].sort((a, b) => {
 				const ra = rank(a);
 				const rb = rank(b);
-				return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || (a < b ? -1 : a > b ? 1 : 0);
+				return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || ra[3] - rb[3] || (a < b ? -1 : a > b ? 1 : 0);
 			})[0];
 			repOf.set(r, rep);
 		}

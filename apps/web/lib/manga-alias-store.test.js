@@ -74,3 +74,30 @@ describe('ID4: a merge can be undone, and undoing deletes nothing', () => {
     expect(refsOf('ext:solo leveling')).toEqual(['ext:solo leveling', 'ext:ragnarok arise']);
   });
 });
+
+describe('plan B: the stored merge record heals itself on the device', () => {
+  it('an old record that joined the Zoro spin-off to One Piece is cut as soon as both official ids are known, and saved in both forms', async () => {
+    const data = new Map([['vantara.manga.refAliases.v1', JSON.stringify({ 'ext:one piece': ['ext:ون بيس', 'ext:roronoa zoro umi ni chiru'] })]]);
+    vi.stubGlobal('localStorage', { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, v) });
+    _reset();
+    const { noteOfficialIds, workIdentity } = await import('./manga-alias-store.js');
+    expect(refsOf('ext:one piece')).toEqual(['ext:one piece', 'ext:ون بيس', 'ext:roronoa zoro umi ni chiru']);
+    noteOfficialIds([['one piece', 30013], ['roronoa zoro umi ni chiru', 187943]]);
+    expect(refsOf('ext:one piece')).toEqual(['ext:one piece', 'ext:ون بيس']);
+    expect(refsOf('ext:roronoa zoro umi ni chiru')).toEqual(['ext:roronoa zoro umi ni chiru']);
+    // الشكل القديم بلا المقطوع (يقرؤه إصدار أقدم سليمًا)، والقطع بسببه في سجل الهوية
+    expect(JSON.parse(data.get('vantara.manga.refAliases.v1'))).toEqual({ 'ext:one piece': ['ext:ون بيس'] });
+    expect(JSON.parse(data.get('vantara.manga.identity.v1')).e.some((row) => row[5] === 'official')).toBe(true);
+    // وبعد إعادة التشغيل يبقى مقطوعًا، والهوية واحدة لمراجع العمل كلها
+    _reset();
+    expect(refsOf('ext:roronoa zoro umi ni chiru')).toEqual(['ext:roronoa zoro umi ni chiru']);
+    expect(workIdentity('ext:ون بيس')).toBe(workIdentity('ext:one piece'));
+  });
+
+  it('a listing cannot join two works whose official ids differ', async () => {
+    const { noteOfficialIds, noteRefAliases } = await import('./manga-alias-store.js');
+    noteOfficialIds([['solo leveling', 105398], ['solo leveling ragnarok', 176009]]);
+    noteRefAliases([['ext:solo leveling ragnarok', 'ext:solo leveling']]);
+    expect(refsOf('ext:solo leveling')).toEqual(['ext:solo leveling']);
+  });
+});
