@@ -205,7 +205,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       return Buffer.concat(parts);
     };
     mangaRuntime = createSuwayomiRuntime({ root: mangaRoot, fetch: fetchFor, onProgress: p => publish({ type: 'manga-engine/progress', ...p }) });
-    mangaEngine = createSuwayomiEngine({ root: mangaRoot, runtime: mangaRuntime, fetchBytes, onEvent: publish });
+    mangaEngine = createSuwayomiEngine({ root: mangaRoot, runtime: mangaRuntime, fetchBytes, convert: (bytes) => mangaRuntime.convert(bytes), onEvent: publish });
     protocol.handle('vantara-engine', request => mangaEngine.media(request.url));
     register('manga-engine', ({ method, args } = {}) => mangaEngine.call(String(method ?? ''), args));
     // التحديث الذاتي الآمن مرة كل يوم وقت عمل المحرك فقط (لا يُشغَّل من أجله)

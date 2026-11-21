@@ -2,18 +2,22 @@
 // وضع إثبات صريح (سطر أوامر فقط: --manga-engine-smoke-report=<ملف>): إضافات Mihon في ويندوز الحقيقي كما يمر بها
 // المستخدم: تنزيل المحرك الموثّق وتشغيله، إضافة مستودع Keiyoushi الحقيقي، ثم لكل إضافة حقيقية سلسلة كاملة (تثبيت موقّع،
 // قائمة، رائج، عمل بفصوله، صفحات، صورة صفحة فعلية، غلاف). لا يغيّر سلوك التطبيق العادي.
-// «كامل» = الأساس سليم وسلسلة واحدة على الأقل من أولها لآخرها؛ التقرير يسمّي ما عمل وما رُفض وسببه (MangaDex 1.6.4
-// يرفضه مدقق الـJVM على ويندوز حقيقي: كوده لا يتحوّل سليمًا، فهو حالة معروفة لا تُخفى).
+// كل إضافة تمر بطبقة التحويل (engine-tools) ويُسجَّل تقريرها. «كامل» = الأساس سليم وكل الإضافات المطلوبة (Team X
+// وMangaSwat، طلب المالك) من أولها لآخرها؛ التقرير يسمّي ما عمل وما رُفض وسببه.
 const fs = require('node:fs/promises');
 
 const REPO = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo';
 const PKGS = Object.freeze([
   'eu.kanade.tachiyomi.extension.ar.teamx',
   'eu.kanade.tachiyomi.extension.ar.mangaswat',
+  'eu.kanade.tachiyomi.extension.ar.mangalek',
+  'eu.kanade.tachiyomi.extension.ar.mangastarz',
+  'eu.kanade.tachiyomi.extension.ar.mangalionz',
+  'eu.kanade.tachiyomi.extension.ar.mangalink',
   'eu.kanade.tachiyomi.extension.ar.azora',
-  'eu.kanade.tachiyomi.extension.en.mangabuddy',
   'eu.kanade.tachiyomi.extension.all.mangadex',
 ]);
+const REQUIRED = Object.freeze(['eu.kanade.tachiyomi.extension.ar.teamx', 'eu.kanade.tachiyomi.extension.ar.mangaswat']);
 
 const record = (list) => async (name, fn) => {
   const started = Date.now();
@@ -50,9 +54,14 @@ async function chainFor(engine, repo, pkg) {
       return { status: r.status, type: r.headers.get('content-type'), bytes: bytes.length };
     });
     await link('cover', async () => { const r = await engine.media(chosen.manga.thumbnailUrl ?? popular.mangas[0]?.thumbnailUrl); return { status: r.status, bytes: (await r.arrayBuffer()).byteLength }; });
+    await link('search', async () => {
+      const query = String(popular.mangas[0]?.title ?? '').split(/\s+/).find((w) => w.length > 2) ?? 'a';
+      const out = await engine.call('search', { sourceId, query, page: 1 });
+      return { query, count: out.mangas.length };
+    });
   } catch { /* السلسلة تتوقف عند أول فشل، مسجلًا */ }
   for (const s of steps) if (s.detail?.mangas) delete s.detail.mangas;
-  return { pkg, ok: steps.length === 7 && steps.every((s) => s.ok), steps };
+  return { pkg, ok: steps.length === 8 && steps.every((s) => s.ok), conversion: engine.conversion?.(pkg) ?? null, steps };
 }
 
 async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, pkgs = PKGS }) {
@@ -70,12 +79,6 @@ async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, p
     });
     for (const pkg of pkgs) chains.push(await chainFor(engine, repo, pkg));
   } catch { /* الأساس فشل؛ مسجل */ }
-  // تشخيص فقط (لا يستعمله التطبيق): تثبيت إضافة بمتجر Suwayomi نفسه. إن نجح ورفض رفعُنا الإضافة نفسها فالخلل في طريقنا
-  const storeProbe = {};
-  if (steps.length === 4 && steps.every((s) => s.ok) && typeof engine.diagnoseStoreInstall === 'function') {
-    try { Object.assign(storeProbe, await engine.diagnoseStoreInstall(`${repo}/index.min.json`, 'eu.kanade.tachiyomi.extension.en.mangabuddy')); }
-    catch (error) { storeProbe.error = String(error?.message ?? error).slice(0, 300); }
-  }
   // أسطر الأخطاء نفسها (لا ذيل التتبع وحده) ثم آخر السجل؛ السر محجوب فيه أصلًا
   let log = '';
   try {
@@ -84,9 +87,13 @@ async function runMangaEngineSmoke({ engine, runtime, reportPath, repo = REPO, p
     log = [...errors, '---', ...lines.slice(-20)].join('\n');
   } catch { /* */ }
   const working = chains.filter((c) => c.ok).map((c) => c.pkg);
-  const report = { complete: steps.length === 4 && steps.every((s) => s.ok) && working.length > 0, working, steps, chains, storeProbe, engine: runtime.state(), log };
+  const required = REQUIRED.filter((pkg) => pkgs.includes(pkg));
+  const report = {
+    complete: steps.length === 4 && steps.every((s) => s.ok) && working.length > 0 && required.every((pkg) => working.includes(pkg)),
+    working, required, steps, chains, engine: runtime.state(), log,
+  };
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
   return report;
 }
 
-module.exports = { runMangaEngineSmoke, REPO, PKGS };
+module.exports = { runMangaEngineSmoke, REPO, PKGS, REQUIRED };

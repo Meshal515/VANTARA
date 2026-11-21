@@ -124,7 +124,7 @@ await fs.cp(path.join(repo, 'apps', 'web'), path.join(app, 'web'), {
   filter: filename => !/\.test\.js$|(?:^|[/\\])node_modules(?:[/\\]|$)/.test(filename),
 });
 const binaries = await Promise.all(['VANTARA.exe', ...(torrentHost ? ['resources/app/native/vantara-torrent.exe'] : []), 'resources/app/native/rqbit.exe', 'resources/app/native/mpv.exe', 'resources/app/native/vantara-video-host.exe', 'resources/app/native/vulkan-1.dll', 'resources/app/native/vcruntime140.dll', 'resources/app/native/vcruntime140_1.dll'].map(name => pe64(path.join(portable, name))));
-const required = ['resources/app/channel.json', 'resources/app/channel.cjs', 'resources/app/main.cjs', 'resources/app/preload.cjs', 'resources/app/src/services.mjs', 'resources/app/web/desktop/index.html', 'resources/app/web/desktop/boot.js', 'resources/app/web/fonts/NotoSansArabic.var.woff2'];
+const required = ['resources/app/engine-tools/vantara-extension-jar.jar', 'resources/app/engine-tools/vantara-extension-jar.json', 'resources/app/channel.json', 'resources/app/channel.cjs', 'resources/app/main.cjs', 'resources/app/preload.cjs', 'resources/app/src/services.mjs', 'resources/app/web/desktop/index.html', 'resources/app/web/desktop/boot.js', 'resources/app/web/fonts/NotoSansArabic.var.woff2'];
 await Promise.all(required.map(name => fs.access(path.join(portable, name))));
 
 const sourceDirectory = path.join(portable, 'SOURCES');
