@@ -505,11 +505,29 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 			}
 			return r;
 		};
+		// المتجانسات (الخطة ب): عقدة الفهرس هي العنوان المطبَّع، فعملان مختلفان بالاسم نفسه حرفيًا (فصل تجريبي يحمل اسم
+		// السلسلة الروماجي) يقعان في عقدة واحدة. نسخة ربطتها صفحة عملها بدليل موثَّق، وعنوانها وعملها يعرضهما مصدر آخر
+		// عملين منفصلين، تُفصل في عقدة خاصة بها فتنضم لعملها، ولا تجرّ معها نسخة العمل الآخر الذي يحمل اسمها
+		const SPLIT = '\u0001';
+		const targets = new Map();
+		if (editionRefOf) {
+			const familyKeys = new Map();
+			for (const e of entries) (familyKeys.get(e.family) ?? familyKeys.set(e.family, new Set()).get(e.family)).add(e.own);
+			for (const e of entries) {
+				e.node = e.own;
+				const target = String(editionRefOf(e.entry) ?? '').replace(/^ext:/, '') || null;
+				if (!target) continue;
+				targets.set(e, target);
+				if (target === e.own || familyKeys.get(e.family)?.has(target)) continue;
+				const homonym = [...familyKeys].some(([family, keys]) => family !== e.family && keys.has(target) && keys.has(e.own));
+				if (homonym) e.node = `${e.own}${SPLIT}${e.family}`;
+			}
+		} else for (const e of entries) e.node = e.own;
 		for (const e of entries) {
-			touch(e.own);
-			const fam = families.get(e.own);
+			touch(e.node);
+			const fam = families.get(e.node);
 			if (!fam.has(e.family)) fam.set(e.family, new Set());
-			fam.get(e.family).add(e.own);
+			fam.get(e.family).add(e.node);
 		}
 		/** مصدرٌ يعرض المفتاحين عملين منفصلين؟ */
 		const conflict = (ra, rb) => {
@@ -558,17 +576,15 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 			return true;
 		};
 
-		const entryKeys = [...new Set(entries.map((e) => e.own))].sort();
+		const entryKeys = [...new Set(entries.map((e) => e.node))].filter((k) => !k.includes(SPLIT)).sort();
 		// 0) الهوية (الخطة ب): نسخة رُبطت بعملها بدليل موثَّق (صفحة العمل، اسمها في صفحة المصدر، معرّف رسمي) تنضم إليه
 		// في كل قائمة، مهما اختلف عنوانها. الحراس نفسها فوقها: مصدر يعرضهما عملين، فصل المستخدم، معرّفان مختلفان
 		const linkTargets = new Set();
-		if (editionRefOf) {
-			for (const e of [...entries].sort((x, y) => (x.own < y.own ? -1 : x.own > y.own ? 1 : 0))) {
-				const target = String(editionRefOf(e.entry) ?? '').replace(/^ext:/, '') || null;
-				if (!target) continue;
-				touch(target);
-				if (union(target, e.own, 'هوية')) linkTargets.add(target);
-			}
+		for (const e of [...entries].sort((x, y) => (x.node < y.node ? -1 : x.node > y.node ? 1 : 0))) {
+			const target = targets.get(e);
+			if (!target) continue;
+			touch(target);
+			if (union(target, e.node, 'هوية')) linkTargets.add(target);
 		}
 		// 1) توائم العناوين: نفس المفتاح المرن
 		const byLoose = new Map();
@@ -598,8 +614,8 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		const pointers = new Map();
 		for (const e of entries) {
 			if (!e.names.length) continue;
-			const own = pointers.get(e.own) ?? [];
-			pointers.set(e.own, own.concat(e.names));
+			const own = pointers.get(e.node) ?? [];
+			pointers.set(e.node, own.concat(e.names));
 		}
 		const words = new Map(entryKeys.map((k) => [k, keyWords(k)]));
 		// نسخة تشير أسماؤها إلى عدة أعمال (مجموعة قصص قصيرة عند MangaDex تسرد أسماء قصصها): أسماؤها ليست
@@ -641,7 +657,7 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 			byOriginal.get(o).add(k);
 		};
 		for (const k of entryKeys) for (const raw of aliases.get(k) ?? []) noteOriginal(k, raw);
-		for (const e of entries) if (!ambiguous.has(e.own)) for (const n of e.names) noteOriginal(e.own, n.raw);
+		for (const e of entries) if (!ambiguous.has(e.node) && !e.node.includes(SPLIT)) for (const n of e.names) noteOriginal(e.node, n.raw);
 		// اسمٌ يحوي الآخر ويزيد عليه («The Ravages of Time» و«… Blue Hawk») جزءٌ ثانٍ أو جانبي يشارك
 		// الأصل عنوانه غالبًا: لا يُدمج بهذا الدليل وحده
 		const spinOff = (a, b) => {
@@ -681,11 +697,11 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		const repOf = new Map();
 		for (const [r, keys] of members) {
 			// مرجع عمل مربوط (فتحته وربطت نسخه) يبقى مفتاح بطاقته: لا يتبدل مرجع ما كُتبت به بياناتك
-			const rank = (k) => [linkTargets.has(k) ? 0 : 1, staticOwners.has(k) ? 0 : 1, -(pointed.get(k) ?? 0), -k.length];
+			const rank = (k) => [k.includes(SPLIT) ? 1 : 0, linkTargets.has(k) ? 0 : 1, staticOwners.has(k) ? 0 : 1, -(pointed.get(k) ?? 0), -k.length];
 			const rep = [...keys].sort((a, b) => {
 				const ra = rank(a);
 				const rb = rank(b);
-				return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || ra[3] - rb[3] || (a < b ? -1 : a > b ? 1 : 0);
+				return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || ra[3] - rb[3] || ra[4] - rb[4] || (a < b ? -1 : a > b ? 1 : 0);
 			})[0];
 			repOf.set(r, rep);
 		}
@@ -693,7 +709,7 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		for (const k of nodes) keyOf.set(k, repOf.get(find(k)));
 		const works = new Map();
 		for (const e of entries) {
-			const key = keyOf.get(e.own);
+			const key = keyOf.get(e.node);
 			let work = works.get(key);
 			if (!work) {
 				work = { key, title: e.entry.manga.title, thumbnailUrl: null, editions: [], aliases: [], keys: [] };
@@ -701,7 +717,8 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 			}
 			work.editions.push(e.entry);
 			work.thumbnailUrl ??= e.entry.manga.thumbnailUrl ?? null;
-			if (!work.keys.includes(e.own)) work.keys.push(e.own);
+			// النسخة المفصولة لا تحمل عنوانها مفتاحًا للبطاقة: مفتاحه لعمل آخر
+			if (e.node === e.own && !work.keys.includes(e.own)) work.keys.push(e.own);
 		}
 		for (const work of works.values()) {
 			// اسم العمل الأصلي يظهر أيًّا كان المصدر الذي وصل أولًا؛ والبقية أسماء بديلة
