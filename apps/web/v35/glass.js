@@ -235,10 +235,11 @@ const TAB_GROUPS = Object.freeze([
   { sel: '.cn-kinds', item: '.cn-kind', padX: 12, h: 32 },
   { sel: '.mw-tabs', item: 'button', padX: 12, h: 34 },
   { sel: '.uv-tabs', item: 'button', padX: 12, h: 34 },
+  { sel: '.sx-tabs', item: '.sx-tab', padX: 10, h: 32 },
   { sel: '.drawer-sections', item: '.drawer-section', fill: true, tone: true },
 ]);
 const TAB_SEL = TAB_GROUPS.map((g) => g.sel).join(',');
-const ACTIVE = '.active, .on, [aria-selected="true"], [aria-checked="true"], [aria-pressed="true"]';
+const ACTIVE = '.active, .on, .is-on, [aria-selected="true"], [aria-checked="true"], [aria-pressed="true"]';
 const lastSpot = new Map();
 let tabsObserver = null, tabsResize = null, tabsQueued = false;
 
