@@ -13,7 +13,9 @@ import engine from '../lib/extension-engine.js';
 import { saveWithRelief } from '../lib/storage-relief.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
-import { aliasMap, canonicalRefOf, learnAliases, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
+import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
+import { RANK, editionKey } from '../lib/work-identity.js';
+import { detailEvidence, detailNames, isPartName, listingEvidence, namesPointElsewhere, officialConflict, ownNames, pickEdition } from '../lib/work-evidence.js';
 import { twinAliases } from '../lib/manga-twins.js';
 import { coverCandidates, pickCover } from '../lib/manga-cover.js';
 import { aliasesFromText } from '../lib/manga-aliases.js';
@@ -64,6 +66,13 @@ export function seriesRefOf(work) {
   return `ext:${work.key}`;
 }
 
+/** مفتاح نسخة المصدر في رسم الهوية (العائلة + مسار الرابط). */
+export const editionKeyOf = (edition) => editionKey(mirrorFamily(edition?.sourceId), edition?.manga?.url);
+/** مرجع العمل الذي رُبطت به النسخة بدليل موثَّق، أو null. */
+const editionRefOf = (edition) => editionWork(editionKeyOf(edition));
+/** خيارات الفهرس الواحدة لكل قائمة: الأسماء والمعرّفات الرسمية وفصل المستخدم وروابط الهوية. */
+const indexOptions = () => ({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet(), editionRefOf });
+
 /**
  * فهرس الأعمال بالهوية الواحدة (ZERO DUPLICATE): نفس العمل بأسماء مختلفة بين
  * المصادر بطاقة واحدة، بالأسماء البديلة المعروفة (المشحونة + ما تعلّمه الجهاز).
@@ -83,7 +92,7 @@ function loadTwins() {
 function workIndex() {
   void loadAliases();
   loadTwins();
-  const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
+  const index = canonicalIndex(indexOptions());
   const list = index.list;
   index.list = () => {
     const works = list();
@@ -102,7 +111,7 @@ function workIndex() {
 export function canonicalEventWorks(events) {
   void loadAliases();
   loadTwins();
-  const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
+  const index = canonicalIndex(indexOptions());
   const own = new Map();
   for (const e of events ?? []) {
     const work = String(e?.work ?? '');
@@ -924,8 +933,19 @@ export function failureOf(error) {
  */
 function learnDetailAliases(key, detail) {
   if (!key || !detail) return;
-  const names = detail.altNames?.length ? detail.altNames : aliasesFromText(detail.description);
-  if (names.length) learnAliases(key, names);
+  const names = (detail.altNames?.length ? detail.altNames : aliasesFromText(detail.description)).filter((n) => typeof n === 'string');
+  // الخطة ب: لا يُتعلَّم ما يجمع عملين. صفحة تسرد أسماء أعمال عدة (مجموعة قصص قصيرة) لا تُتعلَّم كلها، واسم عمل رسمي آخر
+  // لا يُتعلَّم، واسم السلسلة الأم أو جزء منها لا يُتعلَّم (قصة زورو الجانبية تذكر «One Piece» في أسمائها)
+  const officialOf = (k) => officialIdMap().get(k) ?? null;
+  if (namesPointElsewhere(names, null, officialOf)) return;
+  const own = officialOf(key);
+  const clean = names.filter((n) => {
+    const k = normalizeTitle(n);
+    if (!k || k === key || isPartName(k, key)) return false;
+    const id = officialOf(k);
+    return !Number.isSafeInteger(id) || !Number.isSafeInteger(own) || id === own;
+  });
+  if (clean.length) learnAliases(key, clean);
 }
 
 /** تفاصيل العمل من نسخته الأولى، وفصوله اتحادُ فصول كل نسخه. */
@@ -1086,6 +1106,58 @@ function unionEditions(...lists) {
 
 const loading = new Map();
 
+/** معرّف العمل الرسمي المؤكد: من مرجع بطاقته، ثم مفتاحه، ثم عنوانه، ثم معرّف بطاقة AniList نفسها. */
+export function workOfficialOf(v35work) {
+  const map = officialIdMap();
+  for (const key of [String(v35work?.id ?? '').replace(/^ext:/, ''), v35work?._work?.key, normalizeTitle(v35work?.title?.english), normalizeTitle(v35work?._work?.title)]) {
+    const id = key ? map.get(key) : null;
+    if (Number.isSafeInteger(id)) return id;
+  }
+  return Number.isSafeInteger(v35work?._metaId) ? v35work._metaId : null;
+}
+
+/**
+ * مراجعة نسخ العمل المحفوظة (الخطة ب). تبقى: نسخ البطاقة نفسها، والمربوطة بهذا العمل، والقديمة بلا تعارض. وتخرج: المربوطة
+ * بعمل آخر يتعارض معه، وذات المعرّف الرسمي المختلف، وما اسمه اسم السلسلة الأم أو جزء منها بلا دليل من المصدر.
+ * @returns {{ kept: object[], dropped: string[] }} `dropped`: مصادر تُسأل من جديد
+ */
+export function reviewStoredEditions(v35work, list, { detail = null } = {}) {
+  const id = String(v35work?.id ?? '');
+  const listed = new Set((v35work?._work?.editions ?? []).map(editionKeyOf));
+  const workOfficial = workOfficialOf(v35work);
+  const officialOf = (key) => officialIdMap().get(key) ?? null;
+  const own = ownNames(v35work, { workOfficial, officialOf, more: detailNames(detail) });
+  const graph = identityGraph();
+  const kept = [];
+  const dropped = [];
+  for (const e of list ?? []) {
+    const key = editionKeyOf(e);
+    let ok = true;
+    if (!listed.has(key)) {
+      const linked = editionRef(key);
+      if (linked && !graph.sameClass(linked, id)) ok = !graph.contradiction(linked, id, RANK.SOURCE);
+      else if (!linked) {
+        const title = normalizeTitle(e?.manga?.title);
+        ok = !officialConflict(e?.manga, workOfficial, officialOf)
+          && (!title || ![...own].some((m) => isPartName(title, m)) || Boolean(listingEvidence(e?.manga, own, { workOfficial, officialOf })));
+      }
+    }
+    if (ok) kept.push(e);
+    else if (e?.sourceId) dropped.push(String(e.sourceId));
+  }
+  return { kept, dropped: [...new Set(dropped)] };
+}
+
+/** نسخ البطاقة التي تحمل اسمها نفسه: نسخها بدليل المصدر، فتُربط بها (لا تأخذها بطاقة أخرى بدليل ضعيف). */
+function noteOwnEditions(v35work) {
+  const id = String(v35work?.id ?? '');
+  if (!id.startsWith('ext:')) return;
+  const key = id.slice(4);
+  for (const e of v35work?._work?.editions ?? []) {
+    if (normalizeTitle(e?.manga?.title) === key) linkEdition(editionKeyOf(e), id, { rank: RANK.SOURCE, why: 'اسم البطاقة' });
+  }
+}
+
 /**
  * يفتح عملًا كـVANTARA: فورًا مما حُفظ، ثم يكبر مع كل مصدر يردّ.
  *
@@ -1101,12 +1173,19 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   if (pinnedSource) discover = false;
   const scoped = (list) => (pinnedSource ? (list ?? []).filter((e) => e?.sourceId === pinnedSource) : list);
   const stored = await readWork(id);
-  const cached = stored && pinnedSource ? { ...stored, editions: scoped(stored.editions) } : stored;
+  // الخطة ب: نسخة محفوظة من فتحة سابقة تُراجع قبل أن تُعرض. نسخة مربوطة بعمل آخر يتعارض معه، أو بمعرّف رسمي مختلف،
+  // أو اسمها اسم السلسلة الأم بلا دليل من المصدر (فصول ون بيس في قصة زورو)، لا تبقى في هذا العمل. لا يُحذف شيء: سجلها
+  // في عملها باقٍ، ومصدرها يُسأل من جديد بالقواعد الجديدة
+  const { kept: storedEditions, dropped } = reviewStoredEditions(v35work, stored?.editions ?? [], { detail: stored?.detail });
+  const reviewed = stored ? { ...stored, editions: storedEditions } : stored;
+  const cached = reviewed && pinnedSource ? { ...reviewed, editions: scoped(reviewed.editions) } : reviewed;
+  const sameEdition = (a, b) => a.sourceId === b.sourceId && editionKeyOf(a) === editionKeyOf(b);
   let editions = unionEditions(
-    (v35work._work?.editions ?? []).map((e) => ({ ...e, chapters: cached?.editions?.find((c) => c.sourceId === e.sourceId)?.chapters ?? null })),
+    (v35work._work?.editions ?? []).map((e) => ({ ...e, chapters: cached?.editions?.find((c) => sameEdition(c, e))?.chapters ?? null })),
     cached?.editions,
-    scoped(v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>c.sourceId===e.sourceId&&c.manga?.url===e.manga?.url)?.chapters??null})),
+    scoped(v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>sameEdition(c,e))?.chapters??null})),
   );
+  noteOwnEditions(v35work);
   if (pinnedSource) editions = scoped(editions);
   let detail = cached?.detail ?? null;
   const failed = new Map();
@@ -1198,7 +1277,9 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   const knownIds = editions.map((e) => String(e.sourceId));
   // (نسخةٌ محفوظة قبل هذا الحقل تُعامل كأنها لم تُسأل عن أي مصدر: تُكتشف مرة)
   const askedBefore = new Set(cached ? cached.discoveredSources ?? [] : []);
-  const retryAt = cached?.discoveryRetryAt ?? {};
+  const retryAt = { ...(cached?.discoveryRetryAt ?? {}) };
+  // مصدر نسخته المحفوظة لم تثبت: يُسأل في هذه الفتحة
+  for (const sid of dropped) { askedBefore.delete(sid); delete retryAt[sid]; }
   const now = Date.now();
   // سجل الإصدار السابق (بلا discoveryRetryAt) كان يحسب من فاتته المهلة «مسؤولًا»: لا يُوثق به، فيُعاد السؤال مرة كاملة
   // (بلاغ المالك 21 نوفمبر: عمل فُتح قبل الإصلاح بقي بلا مصدره العربي)
@@ -1210,7 +1291,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   const hasTarget=()=>target!==null&&editions.some(e=>(!arabicOnly||arabicSource(e.sourceId))&&(e.chapters??[]).some(c=>chapterNumberOf(c)===target));
   const discoverMore = async (options = {}) => {
         try {
-          const out = await discoverEditions(assemble(v35work, editions, detail), options);
+          const out = await discoverEditions(assemble(v35work, editions, detail), { ...options, moreNames: () => detailNames(detail) });
           const found = out.filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
           if (found.length) {
             editions = unionEditions(editions, found.map((e) => ({ ...e, chapters: null })));
@@ -1319,7 +1400,7 @@ export function matchingWork(items, saved) {
   if (exact) return exact;
   const variants = titleVariants(saved);
   if (!variants.length) return null;
-  const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
+  const index = canonicalIndex(indexOptions());
   const own = index.add({ sourceId: 'saved-work-reference', manga: { title: variants[0], altNames: variants.slice(1) } }).key;
   const candidates = items.map((item) => ({ item, keys: (item._work?.editions ?? []).map((edition) => index.add(edition)?.key).filter(Boolean) }));
   const matches = candidates.filter(({ keys }) => keys.some((key) => index.keyOf(key) === index.keyOf(own)));
@@ -1331,7 +1412,7 @@ export function matchingWork(items, saved) {
  * يردّ خلال 15 ثانية يُتجاوز بلا أن يؤخّر غيره.
  * @returns {Promise<Array<{sourceId, label, manga}>>}
  */
-export function discoverEditions(v35work, { refresh = false, arabicOnly = false, only = null } = {}) {
+export function discoverEditions(v35work, { refresh = false, arabicOnly = false, only = null, moreNames = null } = {}) {
   const key = `${arabicOnly?`${v35work.id}|ar`:v35work.id}${only ? `|${[...only].sort().join(',')}` : ''}`;
   if(refresh)discovered.delete(key);
   if (discovered.has(key)) return discovered.get(key);
@@ -1341,36 +1422,93 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
     if (!variants.length) return [];
     const known = new Set((v35work._work?.editions ?? []).map((e) => e.sourceId));
     const others = (await sources()).filter((s) => !known.has(s.id)&&(!arabicOnly||arabicSource(s.id))&&(!only||only.has(String(s.id))));
-    // العنوان كما يُكتب أولًا (بعض المواقع تطابق النص حرفيًّا)، ثم بلا رموز،
-    // ثم عنوان النسخة الثانية إن اختلف — ثلاثة أسئلة على الأكثر لكل مصدر
-    const queries = [...new Set([variants[0].trim(), normalizeTitle(variants[0]), variants[1]?.trim()].filter(Boolean))].slice(0, 3);
+    // خطة الأسئلة: العنوان كما يُكتب (بعض المواقع تطابق النص حرفيًّا)، ثم بلا رموز، ثم الاسم العربي للمصدر العربي أو اسم
+    // النسخة الثانية، ثم أسماء العمل الموثوقة الأخرى (الروماجي حيث العنوان إنجليزي والعكس). تتوقف عند أول دليل، فالشائع سؤال
+    // واحد، وخمسة على الأكثر. كانت ثلاثة ثابتة، فمصدر يسمّي العمل باسم رابع لا يُسأل به أبدًا
+    const arabic = (v) => /[\u0600-\u06ff]/.test(v);
+    const queriesFor = (source, own) => {
+      const named = variants.filter((v) => own.has(normalizeTitle(v)));
+      const plan = [variants[0].trim(), normalizeTitle(variants[0]), (arabicSource(source.id) && variants.find(arabic)) || variants[1]?.trim(), variants[1]?.trim(), ...named.filter((v) => !arabic(v))];
+      const seen = new Set();
+      return plan.filter((q) => {
+        const k = q ? `${normalizeTitle(q)}|${q === normalizeTitle(q)}` : '';
+        if (!q || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      }).slice(0, 5);
+    };
+    // الخطة ب: أسماء العمل الموثوقة وحدها دليل قبول (لا ما تعلّمه الجهاز من النصوص)، ومعرّفه الرسمي حارس
+    const workRef = String(v35work.id);
+    const workOfficial = workOfficialOf(v35work);
+    const officialOf = (key) => officialIdMap().get(key) ?? null;
+    // `moreNames`: أسماء العمل في صفحة تفاصيل نسخته (loadWork)، تُقرأ عند كل مصدر لأن التفاصيل قد تصل أثناء البحث
+    const ownNow = () => ownNames(v35work, { workOfficial, officialOf, more: moreNames?.() ?? [] });
+    const graph = identityGraph();
+    const ownedElsewhere = (manga, sourceId) => {
+      const linked = editionRef(editionKeyOf({ sourceId, manga }));
+      return Boolean(linked) && !graph.sameClass(linked, workRef) && Boolean(graph.contradiction(linked, workRef, RANK.SOURCE));
+    };
     const ask = async (source) => {
       const candidates = new Map();
       // «سُئل» = ردّ فعلًا على سؤال واحد على الأقل. مهلة أو خطأ في كل الأسئلة ليس جوابًا «ليس عندي»: كان يُحسب
       // مسؤولًا فلا يُسأل 12 ساعة، فإضافة جديدة تفوت مهلة أول تحميل لها تغيب عن العمل (بلاغ المالك 21 نوفمبر)
       let answered = false;
-      for (const query of queries) {
+      let results = 0;
+      const guard = { workOfficial, officialOf };
+      for (const query of queriesFor(source, ownNow())) {
         const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS).catch(() => null);
         if (page) answered = true;
-        for (const manga of page?.mangas ?? []) candidates.set(manga.url || normalizeTitle(manga.title), manga);
+        results = Math.max(results, page?.mangas?.length ?? 0);
+        for (const manga of page?.mangas ?? []) if (!candidates.has(manga.url || normalizeTitle(manga.title))) candidates.set(manga.url || normalizeTitle(manga.title), manga);
+        if ((page?.mangas ?? []).some((manga) => listingEvidence(manga, ownNow(), guard))) break;
       }
       if (!answered) throw new Error('unanswered');
-      const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
+      // الأسماء من جديد بعد الأجوبة: صفحة تفاصيل نسخة العمل ربما وصلت أثناء البحث
+      const own = ownNow();
+      const list = [...candidates.values()].filter((manga) => !officialConflict(manga, workOfficial, officialOf) && !ownedElsewhere(manga, source.id));
+      // 1) ما قاله المصدر في القائمة نفسها: عنوانها، أسماؤها البديلة، رابطها
+      const accepted = list.map((manga) => ({ manga, ev: listingEvidence(manga, own, guard) })).filter((a) => a.ev);
+      // 2) الأسماء البديلة المحفوظة (المشحونة من صفحات المصادر، وما تعلّمه الجهاز): تقبل النسخة إن لم تكن اسم سلسلة
+      // أم أو جزء منها (قصة زورو ليست ون بيس)، ولا تُحفظ في الهوية إلا بعد أن تؤكدها صفحة تفاصيل النسخة
+      const index = canonicalIndex(indexOptions());
       const base = (v35work._work?.editions ?? []).map((e) => index.add(e)?.key).filter(Boolean);
       if (!base.length) base.push(index.add({ sourceId: 'known-work', manga: { title: variants[0], altNames: variants.slice(1) } }).key);
-      const hits = [...candidates.values()].map((manga) => ({ manga, key: index.add({ sourceId: source.id, manga })?.key }));
-      const matches = hits.filter(({ manga, key }) => key && (
-        variants.some((v) => normalizeTitle(manga.title) === normalizeTitle(v) || titleTwins(manga.title, v))
-        || base.some((k) => index.keyOf(k) === index.keyOf(key))
-      ));
-      // SRC1: عنوان يطابق حرفيًا أحد أسماء العمل المعروفة (بعد التطبيع) دليل كافٍ وحده، ولو اختلف المفتاح الموحد عن
-      // النسخ المعروفة (عمل عُرف بعنوانه العربي واسمه الإنجليزي بديل). كان يُرفض فلا تظهر إضافة المستخدم في الورقة.
-      const exact = matches.filter(({ manga }) => variants.some((v) => normalizeTitle(manga.title) === normalizeTitle(v)));
-      const sameKey = matches.filter(({ key }) => base.some((k) => index.keyOf(k) === index.keyOf(key)));
-      // Several distinct URLs claiming the same work are ambiguous; never
-      // silently select whichever result the source happened to return first.
-      const hit = exact.length === 1 ? exact[0] : exact.length === 0 && matches.length === 1 && sameKey.length === 1 ? sameKey[0] : null;
-      return hit ? { sourceId: source.id, label: source.label, manga: hit.manga } : null;
+      const near = new Set(list.filter((manga) => {
+        const key = index.add({ sourceId: source.id, manga })?.key;
+        return key && base.some((k) => index.keyOf(k) === index.keyOf(key));
+      }));
+      const mains = [...own];
+      for (const manga of near) {
+        const key = normalizeTitle(manga.title);
+        if (accepted.some((a) => a.manga === manga) || mains.some((m) => isPartName(key, m))) continue;
+        accepted.push({ manga, ev: 'alias' });
+      }
+      let hit = pickEdition(accepted);
+      // 3) لا دليل في القائمة: صفحة تفاصيل أقرب النتائج تُسأل عن أسمائها (عنوان عربي لعمل عرفناه بالإنجليزي). قليل
+      // النتائج فقط (البحث وجد العمل لا قائمة عامة)، ونتيجتان على الأكثر لكل مصدر
+      const verify = async (manga) => {
+        const out = await withTimeout(engine.series(source.id, manga), SEARCH_TIMEOUT_MS).catch(() => null);
+        return detailEvidence(out?.manga, own, guard) ? { manga: { ...manga, ...(out?.manga ?? {}), url: manga.url }, ev: 'detail' } : null;
+      };
+      if (!hit && !accepted.length && list.length && results <= 6) {
+        const order = [...list].sort((x, y) => Number(near.has(y)) - Number(near.has(x))).slice(0, 2);
+        const verified = [];
+        for (const manga of order) {
+          const v = await verify(manga);
+          if (v) verified.push(v);
+        }
+        hit = pickEdition(verified);
+      }
+      if (!hit) return null;
+      // اسم محفوظ وحده ليس دليلًا: صفحة تفاصيل النسخة تؤكده أو لا تُقبل (الفصل التجريبي ليس السلسلة، وقصة زورو ليست
+      // ون بيس، ولو حمل الجهاز اسمًا متعلَّمًا يجمعهما)
+      if (hit.ev === 'alias') hit = await verify(hit.manga);
+      if (!hit) return null;
+      // الربط في الهوية: النسخة صارت لهذا العمل في كل قائمة. نسخة لعمل آخر لا يتعارض معه تجمعهما (لا تكرار)،
+      // والمتعارض يُرفض فلا تُلصق
+      const link = linkEdition(editionKeyOf({ sourceId: source.id, manga: hit.manga }), workRef, { rank: RANK.SOURCE, why: `بحث صفحة العمل: ${hit.ev}` });
+      if (!link.ok) return null;
+      return { sourceId: source.id, label: source.label, manga: hit.manga, evidence: hit.ev };
     };
     const first = await gather(others, ask);
     // جولة ثانية فورًا لمن لم يرد: أول بحث في إضافة لم تُحمَّل بعد يفوت مهلته وهو يفك حزمتها، وبعدها صارت جاهزة

@@ -140,8 +140,8 @@ describe('manga listing: one work = one card', () => {
 
   it('merges a thousand works with five sources without writing the full reference graph per edition', () => {
     const data = new Map();
-    let writes = 0;
-    vi.stubGlobal('localStorage', { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { writes++; data.set(key, value); } });
+    const writes = new Map();
+    vi.stubGlobal('localStorage', { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { writes.set(key, (writes.get(key) ?? 0) + 1); data.set(key, value); } });
     resetAliases();
     const cards = Array.from({ length: 1000 }, (_, i) => Array.from({ length: 5 }, (_, s) =>
       card(`source.${s}`, s === 0 ? `Saga Hero ${i}` : `قصة بطل ${i}`, `/work/${i}`, s === 0 ? { altNames: [`قصة بطل ${i}`] } : {})
@@ -151,7 +151,10 @@ describe('manga listing: one work = one card', () => {
     expect(merged.every((w) => w._work.editions.length === 5)).toBe(true);
     const persisted = JSON.parse(data.get('vantara.manga.refAliases.v1'));
     expect(Object.values(persisted).flat()).toHaveLength(2000);
-    expect(writes).toBeLessThanOrEqual(2);
+    // مرة للدفعة لكل سجل (سجل الدمج بشكله القديم، وأدلته في سجل الهوية)، لا مرة لكل نسخة
+    expect(writes.get('vantara.manga.refAliases.v1')).toBeLessThanOrEqual(2);
+    expect(writes.get('vantara.manga.identity.v1') ?? 0).toBeLessThanOrEqual(2);
+    expect([...writes.keys()].sort()).toEqual(['vantara.manga.identity.v1', 'vantara.manga.refAliases.v1']);
   });
 
   it('preserves chapter editions and detail facts when a saved work merges with a later page', () => {
