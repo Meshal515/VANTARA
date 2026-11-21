@@ -73,8 +73,9 @@ import { kitsuArt } from '../lib/kitsu-art.js';
 import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { installRemovedGate, isRemovedAny, removeWorkEverywhere, removedChanged, restoreRemovedWork, setRemovedSource, tagWork } from '../lib/removed-works.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
+import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, glassDockLayers, readyGate, settleIn, veil } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
+import { syncGlass } from './glass.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -7048,6 +7049,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = root.dataset.content === 'unified' ? 'ALL' : s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(root.dataset.content === 'unified' ? 'unified' : s.id, [root, document.documentElement]);
+    // المادة: «الحالي» بلا أي سمة، وGlass سمة على <html> بمستوى الجهاز (glass.js). الشريط ينشئ عدسته أو يزيلها
+    syncGlass({ doc: document });
+    dockCtl?.refreshMaterial?.();
     // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
     for (const [section, home] of Object.entries(HOMES)) { const view = q(home); if (view) applyAppearance(section, [view]); }
     // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
@@ -7121,7 +7125,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     dockMotion = null;
     dockCtl?.activate(currentPage());
     if (document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches || !nav.animate) return;
-    const a = nav.animate([{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' });
+    const timing = { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' };
+    // Glass: opacity على الشريط تعزل زجاجه (الخطة 7.R1)، فالتلاشي نفسه على طبقاته، وscale على الشريط
+    const glass = glassDockLayers(nav, 0.35, 1, timing);
+    const a = nav.animate(glass ? [{ scale: '0.94' }, { scale: '1' }] : [{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], timing);
     // بعد الحركة: الدائرة تُوضع من جديد على مركز وجهتها بلا حركة (الشريط تغيّر عرضه)
     a?.finished?.then(() => dockCtl?.repaint?.(true)).catch(() => {});
   }
@@ -7399,7 +7406,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const onScroll = () => {
     // كما في نموذج المالك: الشريط يصير صلبًا مع الاسم بعد 220px
     if (currentPage() === 'detail') q('detailTop').classList.toggle('collapsed', window.scrollY > 220);
+    // Glass: حالة تصغير الشريط بالاتجاه (صنف وانتقال CSS، لا حركة إطار بإطار). الحالي لا يتغير
+    dockCtl?.scrolled?.(window.scrollY);
   };
+  // مراقب الأداء أنزل مستوى الزجاج على هذا الجهاز: الشريط يتبع (قد يرجع للحالي)
+  window.addEventListener('vantara:glass-tier', () => dockCtl?.refreshMaterial?.());
   window.addEventListener('scroll', onScroll, { passive: true });
 
   const onKey = (e) => {

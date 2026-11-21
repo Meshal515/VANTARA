@@ -26,7 +26,11 @@ VANTARA تطبيق ترفيهي للمانجا والأنمي والأفلام �
 **التمرير (العمق):**
 - كل حركة مربوطة بالتمرير تُعرَّف صفًّا في `DEPTH_SPECS` وتُركَّب بـ`mountDepth` (`apps/web/v35/depth.js`). يولّد منها CSS بـ`animation-timeline: scroll()` يجري على خيط الرسم مع الإصبع.
 - ممنوع تحريك عنصر من JavaScript في حدث `scroll` أو `requestAnimationFrame`: يتأخر إطارًا عن الصفحة فيهتز. وممنوع `animation: none` على طبقة عمق.
-- الاستثناء الوحيد تسليم الانزلاق في `collapse-hero.js`، وسببه خلل في Android WebView يحبس الانزلاق ([crbug 572898003](https://issuetracker.google.com/issues/572898003)).
+- استثناء عدسة Glass في `glass-lens.js` (قرار المالك، 21 نوفمبر): نوابض نموذج v9 تعمل في `requestAnimationFrame` لأنها حركة بالإصبع والنقر لا بالتمرير.
+  - لا تقرأ التمرير ولا تُستدعى منه، وتكتب على العدسة وطبقة أيقوناتها وحدهما (لا عناصر `DEPTH_SPECS` ولا الصفحة ولا حاوية الشريط).
+  - تتوقف حين تستقر، وتثبت فورًا والشريط يغادر (`inert`)، وتقليل الحركة يجعلها فورية.
+  - لا تعمّمه ولا تنسخه. التفصيل في `docs/audits/GLASS_UI_PLACEMENT.md` (7.R5).
+- الاستثناء الآخر تسليم الانزلاق في `collapse-hero.js`، وسببه خلل في Android WebView يحبس الانزلاق ([crbug 572898003](https://issuetracker.google.com/issues/572898003)).
   - يعمل في WebView وحده (`flingHoldRisk`).
   - يتسلّم عند حد الإطار التالي لا في حدث رفع الإصبع.
   - لا تعمّمه ولا تنسخه.

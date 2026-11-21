@@ -150,7 +150,7 @@ export const ACCENTS = Object.freeze([
 const SECTIONS = ['manga', 'anime', 'cinema'];
 
 function blank() {
-  return { style: {}, accent: {}, pureBlack: false, unifiedLook: false };
+  return { style: {}, accent: {}, pureBlack: false, unifiedLook: false, material: 'current' };
 }
 
 export function readAppearance(storage = globalThis.localStorage) {
@@ -162,6 +162,8 @@ export function readAppearance(storage = globalThis.localStorage) {
       accent: v.accent && typeof v.accent === 'object' ? v.accent : {},
       pureBlack: v.pureBlack === true,
       unifiedLook: v.unifiedLook === true,
+      // المادة (قرار المالك، 21 نوفمبر): «الحالي» الافتراضي، وGlass خيار مستقل (docs/audits/GLASS_UI_PLACEMENT.md)
+      material: v.material === 'glass' ? 'glass' : 'current',
     };
   } catch {
     return blank();
@@ -173,6 +175,8 @@ export function readAppearance(storage = globalThis.localStorage) {
  * ومتاح دائمًا. حين يُفعَّل يتقدّم على نمط كل قسم في صفحة العمل وحدها.
  */
 export const unifiedLookOn = (a = readAppearance()) => a?.unifiedLook === true;
+/** هل اختار المستخدم التأثير الزجاجي؟ (ما يُرسم فعلًا يقرره مستوى الجهاز في glass.js) */
+export const glassChosen = (a = readAppearance()) => a?.material === 'glass';
 
 export function writeAppearance(next, storage = globalThis.localStorage) {
   writePreference(KEY, JSON.stringify(next), storage);
