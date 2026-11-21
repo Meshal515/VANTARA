@@ -833,7 +833,8 @@ it('audit §13 RS1: «استعادة» on a formerly bundled source restores it 
 it('safe self-update: rollback only when a previous version is kept, and the last automatic check is explained', () => {
   const ui = readSourceForRollback(new URL('./addons-v7.js', import.meta.url), 'utf8');
   const engine = readSourceForRollback(new URL('../lib/extension-engine.js', import.meta.url), 'utf8');
-    expect(engine).toContain("rollback: typeof plugin.rollbackExtension === 'function' ? (pkg) => plugin.rollbackExtension({ pkg }) : null");
+    // الرجوع يبلّغ صفحات الأعمال بتغيّر المصادر بعد نجاحه (changing)
+    expect(engine).toContain("rollback: typeof plugin.rollbackExtension === 'function' ? changing((pkg) => plugin.rollbackExtension({ pkg })) : null");
     expect(engine).toContain("updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null");
     const part = ui.slice(ui.indexOf('async function renderUpdateState'), ui.indexOf('function canOpenRemote'));
     expect(part).toContain('if(!st.previous)return;');

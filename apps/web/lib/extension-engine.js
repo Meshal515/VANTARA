@@ -15,6 +15,22 @@
 import { webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
 
+/**
+ * تغيّر المصادر (تثبيت، حذف، تحديث، رجوع، ترحيل، موقع ويب): من يحفظ قائمتها يمسحها فورًا (works.js). كانت قائمة
+ * المصادر تُحفظ للجلسة، فإضافة ثُبّتت والتطبيق مفتوح لا تظهر في مصادر أي عمل حتى إعادة التشغيل (بلاغ المالك 21 نوفمبر).
+ */
+const sourcesListeners = new Set();
+export function onSourcesChanged(fn) {
+	sourcesListeners.add(fn);
+	return () => sourcesListeners.delete(fn);
+}
+function sourcesChanged() {
+	for (const fn of sourcesListeners) { try { fn(); } catch { /* مستمع معطوب لا يوقف الباقي */ } }
+	try { globalThis.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed')); } catch { /* بيئة بلا أحداث */ }
+}
+/** نداء يغيّر المصادر: يُبلَّغ بعد نجاحه فقط. */
+const changing = (fn) => async (...args) => { const out = await fn(...args); sourcesChanged(); return out; };
+
 /** حزم مثبّتة كإضافات على هذا الجهاز (`user` في بيان المحرك)، من آخر قراءة للبيان. */
 const installedPackages = new Set();
 function noteInstalled(list) {
@@ -52,7 +68,7 @@ export async function migrateBuiltins(plugin, decision, pkgs) {
 	if (decision.state === 'unknown' && !decision.standalone) return null;
 	const out = await plugin.migrateBuiltins({ pkgs, keepRepository: decision.state === 'legacy' || decision.standalone === true });
 	for (const pkg of out?.migrated ?? []) installedPackages.add(String(pkg));
-	if (out?.migrated?.length) globalThis.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed'));
+	if (out?.migrated?.length) sourcesChanged();
 	return out;
 }
 
@@ -262,11 +278,11 @@ export function repositories() {
 				return { ...ext, builtin: false, formerlyBundled: true, ...legacyInstallation(source, visible({ id: ext.pkg })), update: false };
 			});
 		},
-		install: (repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg }),
-		uninstall: (pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg }),
+		install: changing((repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg })),
+		uninstall: changing((pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg })),
 		// التحديث الذاتي الآمن (قرار المالك 20 نوفمبر): حالة التحديث، والرجوع لآخر إصدار سليم محفوظ على الجهاز
 		updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null,
-		rollback: typeof plugin.rollbackExtension === 'function' ? (pkg) => plugin.rollbackExtension({ pkg }) : null,
+		rollback: typeof plugin.rollbackExtension === 'function' ? changing((pkg) => plugin.rollbackExtension({ pkg })) : null,
 	};
 }
 
@@ -335,8 +351,8 @@ export function readySources() {
 		},
 		extensions: () => items(),
 		// مثل مستودعها الأصلي: التثبيت يُنزّل ويحمّل فعلًا، والحذف يمحو نسختها من الجهاز
-		install: (_repo, pkg) => installFormer(required(), pkg),
-		uninstall: (pkg) => removeFormer(required(), pkg),
+		install: changing((_repo, pkg) => installFormer(required(), pkg)),
+		uninstall: changing((pkg) => removeFormer(required(), pkg)),
 	};
 }
 
@@ -349,12 +365,13 @@ export function sites() {
 	if (typeof plugin?.addSite !== 'function') return null;
 	return {
 		list: async () => (await plugin.sites()).sites ?? [],
-		add: (url) => plugin.addSite({ url }),
-		remove: (id) => plugin.removeSite({ id }),
+		add: changing((url) => plugin.addSite({ url })),
+		remove: changing((id) => plugin.removeSite({ id })),
 	};
 }
 
 export default {
+	onSourcesChanged,
 	cover,
 	repositories,
 	readySources,
