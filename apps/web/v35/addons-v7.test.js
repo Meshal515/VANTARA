@@ -840,3 +840,41 @@ it('safe self-update: rollback only when a previous version is kept, and the las
     expect(part).toContain('ارجع للإصدار السابق');
     expect(part).toMatch(/SKIP_REJECTED:`الإصدار \$\{st\.lastVersion\} لم يعمل في الفحص، فبقي الحالي`/);
 });
+
+// طلب المالك (20 نوفمبر): «إضافاتي» — تصدير، ثم لصق على جهاز آخر، فقائمة بحالة كل إضافة وزر تثبيت
+it('exports my extensions and imports them on another device: list, one trust confirmation, install all', async () => {
+  const d = setup();
+  const repo = { url: 'https://repo.example/index.min.json', name: 'Repo' };
+  const source = { list: vi.fn(async () => ({ repos: [repo], installed: [{ pkg: 'eu.kanade.tachiyomi.extension.ar.one', name: 'One', version: '1.4', repo: repo.url }, { pkg: 'eu.kanade.tachiyomi.extension.ar.two', name: 'Two', version: '2.0', repo: repo.url }] })), extensions: vi.fn(async () => []) };
+  const view = renderV7Addons({ registry: registry(), repositories: source });
+  d.body.append(view); await tick();
+  view.querySelector('.v7-tabs .v7-plus').click(); await tick();
+  view.querySelector('.v7-export').click(); await tick();
+  expect(view.querySelector('.v7-dialog').textContent).toContain('2 إضافتان جاهزة');
+  let copied = '';
+  vi.stubGlobal('navigator', { clipboard: { writeText: async (t) => { copied = t; } } });
+  [...view.querySelectorAll('.v7-dialog button')].find((b) => b.textContent === 'انسخ النص').click(); await tick();
+  expect(JSON.parse(copied)).toMatchObject({ format: 'vantara.extensions', native: { manga: { extensions: [{ pkg: 'eu.kanade.tachiyomi.extension.ar.one' }, { pkg: 'eu.kanade.tachiyomi.extension.ar.two' }] } } });
+  view.close();
+
+  // جهاز آخر: لا مستودع ولا إضافة
+  const state = { repos: [], installed: [] };
+  const target = { list: vi.fn(async () => structuredClone(state)), extensions: vi.fn(async () => []), add: vi.fn(async (url) => { state.repos.push({ url }); }), install: vi.fn(async (r, pkg) => { state.installed.push({ pkg, repo: r }); }) };
+  const other = renderV7Addons({ registry: registry(), repositories: target });
+  d.body.append(other); await tick();
+  other.querySelector('.v7-tabs .v7-plus').click(); await tick();
+  const input = other.querySelector('.v7-add-input'); input.value = copied;
+  [...other.querySelectorAll('.v7-dialog button')].find((b) => b.textContent === 'أضف').click(); await tick();
+  expect(other.querySelector('.v7-dialog h3').textContent).toBe('استيراد إضافاتي');
+  expect(other.querySelectorAll('.v7-transfer-row')).toHaveLength(2);
+  const all = [...other.querySelectorAll('.v7-dialog button')].find((b) => b.textContent === 'ثبّت الكل');
+  all.click(); await tick();
+  expect(target.install).not.toHaveBeenCalled(); // موافقة الثقة أولًا
+  expect(all.textContent).toContain('أثق');
+  all.click(); await tick(); await tick();
+  expect(target.add).toHaveBeenCalledTimes(1);
+  expect(target.install).toHaveBeenCalledTimes(2);
+  expect([...other.querySelectorAll('.v7-transfer-row')].every((r) => r.dataset.status === 'installed')).toBe(true);
+  expect(other.querySelector('.v7-dialog .v7-notice').textContent).toContain('2 مثبّتة');
+  other.close();
+});

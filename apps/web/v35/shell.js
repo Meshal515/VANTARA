@@ -90,6 +90,9 @@ import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
 import { createInsights, duration as insightDuration } from './insights.js';
 import { currentPlatform, supports } from '../lib/capabilities.js';
+import { bridgeConfig, clearBridge, setBridge, testBridge } from '../pwa/platform.js';
+import { collectBackup, fileName as backupFileName, parseBackup, restoreBackup, serialize as serializeBackup, summary as backupSummary } from '../lib/backup.js';
+import { collectExtensions } from '../lib/extensions-transfer.js';
 import { RELEASE, releaseNotesFor } from '../lib/release.js';
 import { paintWorkInsights } from './work-insights.js';
 import { ACCENTS, accentOf, applyAppearance, migrateAppearance, patchAppearance, toneCss, unifiedLookOn, workStyleOf } from './appearance.js';
@@ -6743,6 +6746,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (on('playback') && !(api && supports('translation'))) {
       body.append(el('p', 'settings-empty', 'لا خيارات للتشغيل أو الترجمة على هذه المنصة بعد. جودة التشغيل والسيرفر تُختار من المشغّل نفسه.'));
     }
+    // الويب وحده: المحتوى لا يمر عبر خادم فانتارا (قرار المالك 20 نوفمبر). جسر المستخدم في حسابه، أو مباشر
+    if (on('advanced') && currentPlatform() === 'pwa') {
+      const bridge = bridgeConfig();
+      group('قراءة المصادر في الويب', [
+        row('server', 'جسرك الخاص', bridge ? 'مضبوط: المصادر تُقرأ عبر حسابك على Cloudflare' : 'غير مضبوط: المصادر التي تسمح تُقرأ مباشرة، وغيرها يحتاجه', { value: bridge ? hostOf(bridge.url) : null, run: openBridgeSheet }),
+      ], { note: 'الجوال وويندوز لا يحتاجانه: يقرآن من جهازك مباشرة.' });
+    }
     if (on('advanced') && diagnosticsUi.available()) group('أدوات Debug', [
       toggle('activity', 'إظهار التشخيصات', 'أدوات الفحص على هذا الجهاز فقط', diagnosticsUi.visible(), async visible => {
         await diagnosticsUi.setVisible(visible);
@@ -6798,6 +6808,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    // «نسختي» (المرحلة 1 من خطة Cloudflare الاختيارية): كل ما يخصك في ملف على جهازك، يُستعاد على أي جهاز أو خادم
+    if (on('sync') && sync.signedIn) group('نسختي', [
+      row('download', 'صدّر نسختي', 'مكتبتك وتقدمك وقوائمك وإعداداتك وإضافاتك في ملف', { run: () => void exportBackup() }),
+      row('upload', 'استعد من ملف', 'يضيف ما ينقص حسابك ولا يغيّر الأحدث', { run: openRestoreSheet }),
+    ], { note: 'الملف لا يحوي كلمة مرورك ولا جلساتك. احتفظ به: يُستعاد ولو تغيّر الخادم أو توقف.' });
     if (on('sync')) body.append(el('p', 'settings-note', 'مكتبتك وتقدّمك يُحفظان في حسابك ويصلان أجهزتك بالمزامنة.'));
     if (!on('advanced')) return;
     if (api.resetWeb && available()) {
@@ -6974,6 +6989,150 @@ export function mountV35(deps, { page = 'home' } = {}) {
       return url;
     }
   }
+  /**
+   * «جسرك الخاص»: جالب ينشره المستخدم في حساب Cloudflare الخاص به (apps/web/bridge/vantara-bridge.js)، فتمر صفحات
+   * المصادر وصورها عبر حسابه هو لا عبر خادم فانتارا. الفحص قبل الحفظ يثبت أن الرابط جسر يعمل وأن المفتاح سره.
+   */
+  /** الملف إلى الجهاز: مشاركة في الجوال (اختر «حفظ في الملفات»)، وتنزيل في الويب وويندوز. */
+  async function saveTextFile(name, content, title) {
+    const native = globalThis.Capacitor?.Plugins?.SystemUi;
+    if (globalThis.Capacitor?.getPlatform?.() === 'android' && native?.shareFile) return native.shareFile({ name, text: content, mime: 'application/json', title });
+    const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+    const a = el('a');
+    a.href = url; a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  }
+  /** «إضافاتي» داخل النسخة: نفس ملف التصدير في صفحة الإضافات، فيُستورد من هناك بحالة كل إضافة. */
+  async function extensionsSnapshot() {
+    try {
+      const addons = await getAddonRuntime(); await addons.ready;
+      const stores = [
+        { id: 'manga', api: engine.repositories?.() ?? null },
+        { id: 'anime', api: animeRepositories() },
+        { id: 'cloudstream', api: (await addons.cloudstreamRepositories?.()) ?? null },
+      ].filter((x) => x.api);
+      return await collectExtensions({ stores, registry: addons.registry, sites: engine.sites?.() ?? null, platform: currentPlatform() });
+    } catch { return null; }
+  }
+  async function exportBackup() {
+    toast('نجهّز نسختك…');
+    try {
+      const doc = await collectBackup({ sync, extensions: await extensionsSnapshot(), platform: currentPlatform() });
+      const count = backupSummary(doc);
+      await saveTextFile(backupFileName(), serializeBackup(doc), 'نسختي من فانتارا');
+      toast(`نسختك جاهزة: ${count.library} في المكتبة، و${count.chapters} فصلًا بتقدمها`);
+    } catch (error) {
+      toast(String(error?.message ?? 'تعذّر تجهيز النسخة'));
+    }
+  }
+  function openRestoreSheet() {
+    openSheet((body) => {
+      body.append(el('h3', null, 'استعد نسختك'));
+      body.append(el('p', null, 'اختر ملف «نسختي». نضيف لحسابك ما ينقصه فقط: ما عندك أحدث يبقى كما هو، والتقدم لا يرجع.'));
+      const status = el('p', 'settings-note');
+      status.setAttribute('role', 'status');
+      const input = el('input');
+      input.type = 'file'; input.accept = 'application/json,.json'; input.hidden = true;
+      const pick = el('button', 'btn btn-primary btn-block', 'اختر الملف');
+      pick.type = 'button';
+      pick.onclick = () => input.click();
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        let doc;
+        try { doc = parseBackup(await file.text()); } catch (error) { status.textContent = error.message; return; }
+        const n = backupSummary(doc);
+        const when = doc.exportedAt ? new Date(doc.exportedAt).toLocaleDateString('ar', { day: 'numeric', month: 'long', year: 'numeric', numberingSystem: 'latn' }) : null;
+        status.textContent = [when && `نسخة ${when}`, `${n.library} في المكتبة`, `${n.lists} في القوائم`, `${n.chapters} فصلًا`, `${n.positions} موضع مشاهدة`].filter(Boolean).join(' · ');
+        pick.hidden = true;
+        const go = el('button', 'btn btn-primary btn-block', 'استعد الآن');
+        go.type = 'button';
+        go.onclick = async () => {
+          go.disabled = true;
+          try {
+            const out = await restoreBackup(doc, sync, { onProgress: ({ done, total }) => { status.textContent = total ? `نستعيد… ${done} من ${total}` : 'حسابك فيه كل ما في النسخة أصلًا.'; } });
+            status.textContent = out.total ? `اكتملت الاستعادة: ${out.restored} عنصرًا أُضيف لحسابك.` : 'حسابك فيه كل ما في النسخة أصلًا؛ لم يتغير شيء.';
+            if (out.skipped) status.textContent += ` و${out.skipped} موضع مشاهدة ينتظر تحديث الخادم.`;
+            if (doc.extensions) status.textContent += ' إضافاتك في الملف نفسه: افتح الإضافات ← «أضف» واختره لتثبّت ما تحتاجه.';
+            go.remove();
+            renderSettings();
+          } catch (error) {
+            status.textContent = String(error?.message ?? 'تعذّرت الاستعادة');
+            go.disabled = false;
+          }
+        };
+        body.append(go);
+      };
+      body.append(status, pick, input);
+    });
+  }
+
+  function openBridgeSheet() {
+    const current = bridgeConfig();
+    openSheet((body) => {
+      body.append(el('h3', null, 'جسرك الخاص'));
+      body.append(el('p', null, 'الويب لا يقرأ المصادر عبر خادم فانتارا. انشر جسرًا صغيرًا مجانيًا في حسابك على Cloudflare فتُقرأ كل المصادر عبر حسابك أنت.'));
+      const steps = el('ol', 'bridge-steps');
+      for (const t of [
+        'حمّل ملف الجسر من الزر أدناه.',
+        'في Cloudflare: Workers ← أنشئ Worker ← ألصق الملف كاملًا ← انشر.',
+        'في إعدادات الـWorker: أضف سرًّا باسم VANTARA_BRIDGE_KEY بقيمة طويلة (24 حرفًا فأكثر).',
+        'ألصق رابط الـWorker والمفتاح هنا، ثم «افحص واحفظ».',
+      ]) steps.append(el('li', null, t));
+      body.append(steps);
+      const download = el('button', 'btn btn-secondary btn-block', 'حمّل ملف الجسر');
+      download.type = 'button';
+      download.onclick = () => {
+        const a = el('a');
+        a.href = '/bridge/vantara-bridge.js';
+        a.download = 'vantara-bridge.js';
+        document.body.append(a);
+        a.click();
+        a.remove();
+      };
+      body.append(download);
+      const field = (label, value, { secret = false } = {}) => {
+        const wrap = el('label', 'field');
+        wrap.append(el('span', 'field-label', label));
+        const input = el('input', 'field-input');
+        input.value = value ?? '';
+        input.dir = 'ltr';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        if (secret) input.type = 'password';
+        else { input.placeholder = 'https://….workers.dev'; input.inputMode = 'url'; }
+        wrap.append(input);
+        body.append(wrap);
+        return input;
+      };
+      const urlInput = field('رابط الجسر', current?.url);
+      const keyInput = field('المفتاح (VANTARA_BRIDGE_KEY)', current?.key, { secret: true });
+      const status = el('p', 'settings-note');
+      status.setAttribute('role', 'status');
+      const save = el('button', 'btn btn-primary btn-block', 'افحص واحفظ');
+      save.type = 'button';
+      save.onclick = async () => {
+        save.disabled = true;
+        status.textContent = 'نفحص الجسر…';
+        const result = await testBridge({ url: urlInput.value, key: keyInput.value });
+        if (!result.ok) { status.textContent = result.reason; save.disabled = false; return; }
+        try { setBridge({ url: urlInput.value, key: keyInput.value }); } catch (e) { status.textContent = e.message; save.disabled = false; return; }
+        status.textContent = 'الجسر يعمل وحُفظ. المصادر تُقرأ عبر حسابك الآن.';
+        resetSources();
+        save.disabled = false;
+        renderSettings();
+      };
+      body.append(status, save);
+      if (current) {
+        const remove = el('button', 'btn btn-ghost btn-block', 'أزل الجسر');
+        remove.type = 'button';
+        remove.onclick = () => { clearBridge(); resetSources(); closeSheet(); renderSettings(); toast('أُزيل الجسر: المصادر التي تسمح تُقرأ مباشرة'); };
+        body.append(remove);
+      }
+    });
+  }
+
   function openServerSheet() {
     if (!canManageDangerZone(sync)) return;
     const api = deps.settings;

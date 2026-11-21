@@ -902,7 +902,8 @@ export function failureOf(error) {
   const status = /\b(4\d\d|5\d\d)\b/.exec(message)?.[1] ?? null;
   return {
     state: timeout ? 'SOURCE_TIMEOUT' : 'SOURCE_ERROR',
-    reason: timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
+    // الويب بلا «جسرك الخاص» والمصدر لا يسمح بالقراءة المباشرة (pwa/net/fetcher.js NEEDS_BRIDGE)
+    reason: error?.code === 'needs_bridge' || /القراءة المباشرة من المتصفح/.test(message) ? 'يحتاج «جسرك الخاص» في الويب (الإعدادات)' : error?.code === 'bridge_key' ? 'مفتاح جسرك الخاص غير صحيح' : timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
   };
 }
 

@@ -12,7 +12,7 @@
  * - صفحة تحقق Cloudflare لا تُعامل كصفحة: `FetchError('challenge')`.
  */
 
-import { fetchBase } from './endpoint.js';
+import { contentRoute } from './endpoint.js';
 
 /** ترويسات المصدر التي يمرّرها الجالب (services/web-fetcher PASSED_HEADERS). */
 const PASSED_HEADERS = ['x-videa-xs'];
@@ -40,7 +40,15 @@ const GRANT_KEY = 'vantara.fetch.grant';
  *   now?: () => number,
  * }} deps
  */
-export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...a) => globalThis.fetch(...a), storage = globalThis.localStorage, timeoutMs = 30_000, now = () => Date.now() }) {
+/** رسالة المصدر الذي لا يسمح بالقراءة المباشرة من المتصفح (بلا جسر). */
+export const NEEDS_BRIDGE = 'هذا المصدر لا يسمح بالقراءة المباشرة من المتصفح. اضبط «جسرك الخاص» من الإعدادات، أو افتحه من تطبيق الجوال أو ويندوز';
+
+/**
+ * `route()` يحدد طريق المحتوى (pwa/net/endpoint.js): جسر المستخدم بمفتاحه، أو جالب مستضاف صراحة بتوكن الحساب، أو
+ * مباشر من المتصفح. `base` للاختبارات القديمة: يفرض جالبًا مستضافًا بهذا الأساس.
+ */
+export function createFetcher({ auth, base = null, route = null, fetchImpl = (...a) => globalThis.fetch(...a), storage = globalThis.localStorage, timeoutMs = 30_000, now = () => Date.now() }) {
+  const routeOf = route ?? (base ? () => ({ mode: 'hosted', base: base() }) : () => contentRoute(storage));
   /** @type {Map<string, Map<string, string>>} */
   const jars = new Map();
   let grant = readGrant();
@@ -81,13 +89,16 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
   }
 
   async function post(path, body, { signal, retried = false } = {}) {
-    const header = auth.header();
+    const r = routeOf();
+    if (r.mode === 'direct') throw new FetchError('needs_bridge', { message: NEEDS_BRIDGE });
+    // الجسر الخاص: مفتاحه هو الهوية (بلا حساب فانتارا)؛ الجالب المستضاف: توكن الحساب
+    const header = r.mode === 'bridge' ? `Bearer ${r.key}` : auth.header();
     if (!header) throw new FetchError('signed_out', { message: 'سجّل دخولك أولًا' });
     const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal ?? timeout;
     let res;
     try {
-      res = await fetchImpl(`${base()}${path}`, {
+      res = await fetchImpl(`${r.base}${path}`, {
         method: 'POST',
         headers: { authorization: header, 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -101,6 +112,7 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
       }
       throw new FetchError(error?.name === 'TimeoutError' ? 'timeout' : 'network', { message: 'تعذّر الوصول لجالب الويب' });
     }
+    if (res.status === 401 && r.mode === 'bridge') throw new FetchError('bridge_key', { status: 401, message: 'مفتاح جسرك الخاص لا يطابق سره؛ صحّحه من الإعدادات' });
     if (res.status === 401 && !retried && auth.refresh) {
       await auth.refresh().catch(() => {});
       return post(path, body, { signal, retried: true });
@@ -128,6 +140,7 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
       headers['content-type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
     }
     const method = opts.method ?? (body !== undefined ? 'POST' : 'GET');
+    if (routeOf().mode === 'direct') return direct(url, { ...opts, method, headers, body });
     const res = await post('/v1/fetch', { url, method, headers, body, cookies: cookiesFor(url), ...(opts.follow === false ? { follow: false } : {}) }, { signal: opts.signal });
     if (!res.ok) {
       let info = {};
@@ -162,6 +175,24 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
     return out;
   }
 
+  /**
+   * الوضع المباشر: الطلب من المتصفح نفسه بلا وسيط. المتصفح يُسقط ترويسات المصدر الخاصة (Referer، الكوكيز)، والموقع
+   * الذي لا يسمح (CORS) يفشل: يُقال بوضوح ما يحتاجه بدل خطأ شبكة غامض.
+   */
+  async function direct(url, { method, headers, body, signal, follow }) {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const combined = signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal ?? timeout;
+    const safe = Object.fromEntries(Object.entries(headers ?? {}).filter(([k]) => !/^(referer|cookie|user-agent|origin|host)$/i.test(k)));
+    let res;
+    try {
+      res = await fetchImpl(url, { method, headers: safe, body, signal: combined, credentials: 'omit', mode: 'cors', redirect: follow === false ? 'manual' : 'follow' });
+    } catch (error) {
+      if (signal?.aborted) throw new FetchError('aborted');
+      throw new FetchError(error?.name === 'TimeoutError' ? 'timeout' : 'needs_bridge', { host: hostOf(url), message: error?.name === 'TimeoutError' ? 'المصدر لم يرد في الوقت' : NEEDS_BRIDGE });
+    }
+    return { status: res.status, url: res.url || url, text: await res.text(), challenge: 'none', location: res.headers.get('location'), headers: {} };
+  }
+
   /** نص الصفحة إن كانت 2xx، وإلا FetchError('http'). */
   async function page(url, opts = {}) {
     const out = await text(url, opts);
@@ -180,11 +211,16 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
 
   /** إذن الوسائط (12 ساعة)، يُجدَّد قبل نهايته بعشر دقائق. */
   async function ensureGrant() {
+    const r = routeOf();
+    // مباشر: لا جالب ولا إذن؛ الصور تُطلب من مصادرها مباشرة
+    if (r.mode === 'direct') return null;
+    // إذن من جالب آخر (تغيّر الجسر) لا يصلح هنا
+    if (grant && grant.base && grant.base !== r.base) grant = null;
     if (grant && grant.expiresAt - now() > 10 * 60_000) return grant.grant;
     granting ??= (async () => {
       const res = await post('/v1/grant', {});
       if (!res.ok) throw new FetchError('grant_failed', { status: res.status });
-      grant = await res.json();
+      grant = { ...(await res.json()), base: r.base };
       try {
         storage?.setItem(GRANT_KEY, JSON.stringify(grant));
       } catch {
@@ -199,10 +235,12 @@ export function createFetcher({ auth, base = () => fetchBase(), fetchImpl = (...
 
   /** رابط وسائط عبر الجالب. يحتاج الإذن جاهزًا: نادِ `ensureGrant()` قبله مرة. */
   function mediaUrl(url, referer) {
+    const r = routeOf();
+    if (r.mode === 'direct') return url;
     const params = new URLSearchParams({ u: url });
     if (referer) params.set('r', referer);
     params.set('g', grant?.grant ?? '');
-    return `${base()}/v1/media?${params}`;
+    return `${r.base}/v1/media?${params}`;
   }
 
   return { text, page, json, ensureGrant, mediaUrl, cookiesFor, currentGrant: () => grant };

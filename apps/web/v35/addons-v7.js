@@ -10,6 +10,7 @@ import { configureLink } from "./addons-view.js";
 import { choosePackage, isBundled, packageOf } from "../lib/source-entitlement.js";
 import { manifestEndpoint } from "../addons/import.js";
 import { verificationMessage } from "../lib/source-verification.js";
+import { FORMAT as TRANSFER_FORMAT, GROUPS as TRANSFER_GROUPS, collectExtensions, fileName as transferFileName, installItem, parseExtensions, planImport, serialize, extensionsFromFile } from "../lib/extensions-transfer.js";
 
 const icons = {
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -19,7 +20,9 @@ const icons = {
   down:'<path d="m6 9 6 6 6-6"/>',
   trash:'<path d="M3 6h18M8 6V4h8v2m-10 0 1 15h10l1-15M10 10v7m4-7v7"/>',
   open:'<path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>',
-  box:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 10h8M8 14h5"/>'
+  box:'<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 10h8M8 14h5"/>',
+  share:'<path d="M12 15V3m0 0-4 4m4-4 4 4"/><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/>',
+  check:'<path d="m5 12 5 5 9-10"/>'
 };
 const el=(tag,cls,text)=>{
   const e=document.createElement(tag);
@@ -971,12 +974,18 @@ export function renderV7Addons({
     const line=el("div","v7-search");
     const addFile=btn("","v7-upload",()=>file.click());addFile.append(ico("plus"));
     addFile.setAttribute("aria-label","اختيار ملف من مدير الملفات");
-    const input=el("input","v7-add-input");input.placeholder="ألصق الرابط...";
+    const input=el("input","v7-add-input");input.placeholder="ألصق رابطًا أو ملف «إضافاتي»...";
     input.setAttribute("aria-label","رابط المستودع أو الإضافة");input.dir="ltr";
     const file=el("input");file.type="file";file.accept=".json,application/json";file.multiple=true;file.hidden=true;
     file.dataset.importFile="";
     line.append(addFile,input,file);dialog.append(line);
     const note=el("div","v7-notice");dialog.append(note);
+    // «إضافاتي» في ملف واحد ينتقل بين أجهزتك (lib/extensions-transfer.js): التصدير هنا والاستيراد بالحقل نفسه
+    const transfer=el("div","v7-transfer-entry");
+    const exportBtn=btn("صدّر إضافاتي إلى ملف","v7-btn v7-export",()=>void showExport());
+    exportBtn.prepend(ico("share"));
+    transfer.append(el("span",null,"تنقل إضافاتك لجهاز آخر؟"),exportBtn);
+    dialog.append(transfer);
     const yes=bottomButtons("أضف",async()=>{await processInput(input.value.trim(),note,yes);});
     file.onchange=async()=>{
       if(!file.files?.length)return;
@@ -985,6 +994,11 @@ export function renderV7Addons({
   }
   async function processInput(value,note,yes){
     if(!value){note.textContent="ألصق رابطًا أولًا.";return;}
+    // نص «إضافاتي» ملصوق (نُسخ من جهاز آخر)
+    if(value.startsWith("{")&&value.includes(TRANSFER_FORMAT)){
+      try{showTransferImport(extensionsFromFile(value));}catch(e){note.textContent=fmtErr(e);}
+      return;
+    }
     let uri;
     try{uri=safe(/^stremio:\/\//i.test(value)?manifestEndpoint(value):value);}catch{}
     if(!uri){note.textContent="يتطلب رابط HTTPS صالحًا.";return;}
@@ -1071,6 +1085,11 @@ export function renderV7Addons({
     finally{busy=false;yes.disabled=false;}
   }
   async function processFiles(files,note){
+    // ملف «إضافاتي» من فانتارا: قائمة استيراد بحالة كل إضافة لا معاينة إضافة واحدة
+    if(files.length===1){
+      try{const raw=await files[0].text();const doc=extensionsFromFile(raw);if(doc){showTransferImport(doc);return;}}
+      catch(e){note.textContent=fmtErr(e);return;}
+    }
     if(!registry.inspectData){note.textContent="استيراد JSON غير مدعوم.";return;}
     if(files.length>100){note.textContent="الحد الأقصى 100 ملف.";return;}
     if([...files].reduce((a,f)=>a+f.size,0)>1048576){note.textContent="الحد الأقصى الإجمالي 1MB.";return;}
@@ -1100,6 +1119,118 @@ export function renderV7Addons({
         }catch(e){state.textContent=fmtErr(e);}finally{busy=false;}
       });
     }catch(e){note.textContent=fmtErr(e);}
+  }
+  // ───────── «إضافاتي»: تصدير واستيراد ─────────
+  const transferContext=()=>({stores,registry,sites});
+  async function showExport(){
+    if(busy)return;
+    showDialog("تصدير إضافاتي","ملف واحد فيه مستودعاتك وإضافاتك وإعداداتها. افتحه على أي جهاز من «أضف» فتظهر إضافاتك جاهزة للتثبيت.");
+    const note=el("p","v7-notice");note.setAttribute("role","status");note.textContent="جارٍ تجهيز القائمة…";dialog.append(note);
+    let doc;
+    try{doc=await collectExtensions({...transferContext(),platform:registry.runtimeName||"pwa"});}
+    catch(e){note.textContent=fmtErr(e);return;}
+    if(!alive||!dialog.contains(note))return;
+    const nativeCount=Object.values(doc.native).reduce((t,g)=>t+g.extensions.length,0);
+    const total=nativeCount+doc.addons.length+doc.sites.length;
+    if(!total){note.textContent="لا إضافات مثبتة لتصديرها بعد.";return;}
+    note.textContent=`${total} ${total===1?"إضافة":total===2?"إضافتان":total<=10?"إضافات":"إضافة"} جاهزة. الملف لا يحوي جلساتك ولا كلمات مرورك.`;
+    const content=serialize(doc),name=transferFileName();
+    const actions=el("div","v7-dialog-actions v7-transfer-actions");
+    const save=btn("احفظ الملف","v7-btn primary",async()=>{
+      try{
+        const native=globalThis.Capacitor?.Plugins?.SystemUi;
+        if(globalThis.Capacitor?.getPlatform?.()==="android"&&native?.shareFile)await native.shareFile({name,text:content,mime:"application/json",title:"إضافاتي من فانتارا"});
+        else{
+          const url=URL.createObjectURL(new Blob([content],{type:"application/json"}));
+          const a=el("a");a.href=url;a.download=name;document.body.append(a);a.click();a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url),30_000);
+        }
+        note.textContent="جاهز. افتح الملف على جهازك الآخر من «أضف».";
+      }catch(e){note.textContent=fmtErr(e);}
+    });
+    save.prepend(ico("share"));
+    const copy=btn("انسخ النص","v7-btn",async()=>{
+      try{await navigator.clipboard.writeText(content);note.textContent="نُسخ. ألصقه في «أضف» على جهازك الآخر.";}
+      catch{note.textContent="تعذّر النسخ هنا؛ احفظ الملف بدلًا منه.";}
+    });
+    actions.append(save,copy,btn("رجوع","v7-btn",()=>closeModal()));
+    dialog.append(actions);
+  }
+  function showTransferImport(doc){
+    const when=doc.exportedAt?new Date(doc.exportedAt).toLocaleDateString("ar",{day:"numeric",month:"long",year:"numeric",numberingSystem:"latn"}):null;
+    showDialog("استيراد إضافاتي",[when&&`من ملف بتاريخ ${when}`,"اضغط «تثبيت» على ما تريده، أو ثبّت الكل."].filter(Boolean).join(" · "));
+    const note=el("p","v7-notice");note.setAttribute("role","status");note.textContent="جارٍ مقارنة الملف بما على هذا الجهاز…";dialog.append(note);
+    const list=el("div","v7-transfer");dialog.append(list);
+    let items=[],trusted=false;
+    const rows=new Map();
+    const statusText={installed:"مثبّتة",ready:"",unavailable:"",failed:"تعذّر"};
+    function paintRow(item){
+      const row=rows.get(item.key);if(!row)return;
+      row.dataset.status=item.status;
+      const meta=row.querySelector(".v7-transfer-meta");
+      meta.textContent=[item.version&&`الإصدار ${item.version}`,item.status==="unavailable"?item.reason:item.status==="failed"?item.error:statusText[item.status]].filter(Boolean).join(" · ");
+      const slot=row.querySelector(".v7-transfer-act");slot.replaceChildren();
+      if(item.status==="installed"){const done=el("span","v7-transfer-done");done.append(ico("check"),el("span",null,"مثبّتة"));slot.append(done);}
+      else if(item.status==="installing")slot.append(el("span","v7-transfer-busy","جارٍ…"));
+      else if(item.status==="ready"||item.status==="failed")slot.append(btn(item.status==="failed"?"أعد المحاولة":"تثبيت","v7-btn v7-transfer-install",()=>void install([item])));
+    }
+    function summary(){
+      const ready=items.filter(i=>i.status==="ready"||i.status==="failed").length,done=items.filter(i=>i.status==="installed").length,off=items.filter(i=>i.status==="unavailable").length;
+      note.textContent=[`${done} مثبّتة`,ready&&`${ready} جاهزة للتثبيت`,off&&`${off} لا تعمل على هذا الجهاز وتبقى في الملف`].filter(Boolean).join(" · ");
+      all.disabled=!ready;all.hidden=!ready;
+      if(!trusted||!busy)all.textContent=items.some(i=>i.status==="ready")?"ثبّت الكل":"أعد محاولة ما فشل";
+    }
+    async function install(targets){
+      if(busy)return;
+      // المستودعات تحوي كودًا ينفَّذ على جهازك: موافقة صريحة مرة واحدة قبل إضافة أي مستودع
+      if(!trusted&&targets.some(t=>t.kind==="native")){
+        trusted=true;all.textContent="أثق بهذه المستودعات، ثبّت";
+        note.textContent="إضافات المستودعات تنفّذ كودًا على جهازك. ثبّت فقط إن كان الملف منك أو من مصدر تثق به؛ اضغط مجددًا للتأكيد.";
+        if(targets.length===1){const row=rows.get(targets[0].key);const b=row?.querySelector(".v7-transfer-install");if(b)b.textContent="أثق، ثبّت";}
+        return;
+      }
+      busy=true;let changed=false;
+      try{
+        const queue=targets.filter(t=>t.status==="ready"||t.status==="failed");
+        for(const [n,target] of queue.entries()){
+          if(!alive||!dialog.contains(list))break;
+          Object.assign(target,{status:"installing"});paintRow(target);
+          if(queue.length>1)note.textContent=`جارٍ التثبيت ${n+1} من ${queue.length}: ${target.name}`;
+          const result=await installItem(target,transferContext());
+          Object.assign(target,result);paintRow(target);
+          if(result.status==="installed")changed=true;
+        }
+      }finally{busy=false;}
+      summary();
+      if(changed){sourcesChanged({preserveAddonsView:true});void refresh();}
+    }
+    const actions=el("div","v7-dialog-actions");
+    const all=btn("ثبّت الكل","v7-btn primary",()=>void install(items));
+    actions.append(all,btn("تم","v7-btn",()=>closeModal()));
+    dialog.append(actions);
+    void planImport(doc,transferContext()).then((planned)=>{
+      if(!alive||!dialog.contains(list))return;
+      items=planned;
+      const titles={...TRANSFER_GROUPS,addons:"إضافات الويب",sites:"مواقع المانجا"};
+      for(const group of Object.keys(titles)){
+        const mine=items.filter(i=>i.group===group);
+        if(!mine.length)continue;
+        const section=el("section","v7-transfer-group");
+        // الاسم والعدد منفصلان: اسم إنجليزي داخل جملة عربية كان يقلب موضع العدد
+        const h=el("h4");const label=el("bdi",null,titles[group]);h.append(label,el("span","v7-transfer-count",String(mine.length)));
+        section.append(h);
+        for(const item of mine){
+          const row=el("div","v7-transfer-row");
+          const body=el("div","v7-transfer-body");
+          const title=el("strong",null,item.name);title.dir="auto";
+          body.append(title,el("small","v7-transfer-meta"));
+          row.append(body,el("div","v7-transfer-act"));
+          rows.set(item.key,row);section.append(row);paintRow(item);
+        }
+        list.append(section);
+      }
+      summary();
+    }).catch(e=>{note.textContent=fmtErr(e);});
   }
   function navigateBack(){
     if(!layer.hidden){closeModal();return true;}
