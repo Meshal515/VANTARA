@@ -152,6 +152,11 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   const { createSourceBrowser, chromeUserAgent } = require('./source-browser.cjs');
   // بلا جلسات Electron (بيئة اختبار): لا متصفح مخفي، والطلبات كما كانت
   const sourceBrowser = session?.fromPartition ? createSourceBrowser({ BrowserWindow, session, net, userAgent: chromeUserAgent(process.versions.chrome), isChallenge: challengePage }) : null;
+  // إضافات Mihon (Suwayomi) تحل Cloudflare بالمتصفح نفسه عبر جسر محلي بواجهة FlareSolverr (cf-bridge.cjs)
+  const cloudflareBridge = sourceBrowser ? require('./cf-bridge.cjs').createCloudflareBridge({
+    solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent,
+    onChallenge: host => publish({ type: 'source-verification/required', host }),
+  }) : null;
   if(process.platform==='win32')videoHost=createVideoHost({
     getWindow:()=>window,
     executable:process.env.VANTARA_VIDEO_HOST_BINARY||path.join(native,'vantara-video-host.exe'),
@@ -204,7 +209,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       for await (const chunk of response.body) { size += chunk.length; if (size > limit) throw new Error('الملف أكبر من الحد المسموح'); parts.push(Buffer.from(chunk)); }
       return Buffer.concat(parts);
     };
-    mangaRuntime = createSuwayomiRuntime({ root: mangaRoot, fetch: fetchFor, onProgress: p => publish({ type: 'manga-engine/progress', ...p }) });
+    mangaRuntime = createSuwayomiRuntime({ root: mangaRoot, fetch: fetchFor, cloudflare: cloudflareBridge ? () => cloudflareBridge.start() : null, onProgress: p => publish({ type: 'manga-engine/progress', ...p }) });
     mangaEngine = createSuwayomiEngine({ root: mangaRoot, runtime: mangaRuntime, fetchBytes, convert: (bytes) => mangaRuntime.convert(bytes), onEvent: publish });
     protocol.handle('vantara-engine', request => mangaEngine.media(request.url));
     register('manga-engine', ({ method, args } = {}) => mangaEngine.call(String(method ?? ''), args));

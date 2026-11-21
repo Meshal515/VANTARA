@@ -188,3 +188,14 @@ test('convert: a tool jar that does not match its manifest is never run', async 
   await assert.rejects(h.runtime.convert(Buffer.from('x')), (e) => e.code === 'ENGINE_CONVERT');
   assert.equal(h.runs.length, 0);
 });
+
+test('Cloudflare: with the local bridge the engine uses it as FlareSolverr; without it nothing changes', () => {
+  const on = launchArgs({ dataDir: 'D', port: 1, password: 'p', cloudflareUrl: 'http://127.0.0.1:5000/abc' });
+  assert.ok(on.includes('-Dsuwayomi.tachidesk.config.server.flareSolverrEnabled=true'));
+  assert.ok(on.includes('-Dsuwayomi.tachidesk.config.server.flareSolverrUrl="http://127.0.0.1:5000/abc"'));
+  assert.ok(on.includes('-Dsuwayomi.tachidesk.config.server.flareSolverrAsResponseFallback=true'));
+  assert.ok(on.includes('-Dsuwayomi.tachidesk.config.server.kcefEnabled=false'));
+  assert.ok(on.indexOf('-jar') > on.findIndex((a) => a.includes('flareSolverrUrl')), 'options before -jar');
+  const off = launchArgs({ dataDir: 'D', port: 1, password: 'p' });
+  assert.ok(!off.some((a) => a.includes('flareSolverr')));
+});
