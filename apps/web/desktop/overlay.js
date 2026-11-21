@@ -1,4 +1,12 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { syncGlass } from '../v35/glass.js';
+
+// Glass (خيار المظهر): نافذة الأدوات صفحة مستقلة، فتقرأ الاختيار نفسه وتتبعه إن تغيّر من النافذة الرئيسية.
+// لا قراءة لخلفية هنا (الفيديو في نافذة mpv)، فالقواعد في player.css «مظهر زجاجي» بلا backdrop-filter.
+if (globalThis.document) {
+  syncGlass({ doc: globalThis.document });
+  globalThis.addEventListener?.('storage', (e) => { if (!e.key || e.key === 'vantara.appearance.v1') syncGlass({ doc: globalThis.document }); });
+}
 /**
  * طبقة أدوات مشغل ويندوز — نفس تصميم مشغل الـAPK (PlayerActivity.kt) ونفس عناصر مشغل الويب
  * (pwa/player/player.js): تدرّج أعلى بالرجوع والعنوان والحلقة وملء الصورة وملء الشاشة والمزيد،

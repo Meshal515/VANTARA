@@ -65,11 +65,14 @@ export function syncGlass({ doc = globalThis.document, storage = globalThis.loca
   if (tier === 'off') {
     delete html.dataset.material;
     delete html.dataset.glassTier;
+    bindGlassTabs(doc, false);
     return tier;
   }
   html.dataset.material = 'glass';
   html.dataset.glassTier = tier;
-  if (tier !== 'c') ensureLensFilter(doc, tier);
+  if (tier !== 'c') { ensureLensFilter(doc, tier); ensureFamilyFilters(doc, tier); }
+  else for (const k of FAMILY_VARS) html.style.removeProperty(k);
+  if (doc.body) bindGlassTabs(doc, true);
   return tier;
 }
 
@@ -196,4 +199,123 @@ export function capFilters(caps, { doc = caps[0]?.ownerDocument ?? globalThis.do
     const url = glassFilter(doc, `g-cap${k}`, capMap(doc, w, h, 28, 12), 12 / w, 0.5, tier);
     if (url) cap.style.setProperty('--g-cap-f', `${url} blur(1.5px) saturate(1.7) brightness(1.05)`);
   });
+}
+
+// ── م2 لبقية الأسطح (الخطة 1 و8): مرشح لكل عائلة تشتت × شكل، بوحدات الصندوق فيعمل لأي مقاس قريب من شكله ──
+// العائلات: التنقل والأزرار 26، والقارئ 14، والمشغّل 10. الأشكال: دائرة (زر 40)، وكبسولة (~160)، وشريط عريض (~360).
+// القوة نسبة من العرض، فضُبطت لكل شكل على مقاسه النموذجي ليبقى انحناء الحافة ~6px.
+export const FAMILIES = Object.freeze({ nav: 1, reader: 14 / 26, player: 10 / 26 });
+const SHAPES = Object.freeze({
+  c: { map: (doc) => lensMap(doc, 96, { bevel: 0.45, magnify: 0 }), S: 10 / 40 },
+  p: { map: (doc) => capMap(doc, 160, 48, 24, 12), S: 12 / 160 },
+  b: { map: (doc) => capMap(doc, 360, 56, 28, 12), S: 12 / 360 },
+});
+const FAMILY_VARS = Object.keys(FAMILIES).flatMap((f) => Object.keys(SHAPES).map((sh) => `--g-m2${sh}-${f}`));
+let familiesBuilt = null;
+function ensureFamilyFilters(doc, tier) {
+  if (familiesBuilt === tier && doc.getElementById('g-m2c-nav')) return;
+  const maps = Object.fromEntries(Object.entries(SHAPES).map(([k, v]) => [k, v.map(doc)]));
+  for (const [family, spread] of Object.entries(FAMILIES)) {
+    for (const [sh, { S }] of Object.entries(SHAPES)) {
+      const url = glassFilter(doc, `g-m2${sh}-${family}`, maps[sh], S, spread, tier);
+      if (url) doc.documentElement.style.setProperty(`--g-m2${sh}-${family}`, `${url} blur(1.5px) saturate(1.7) brightness(1.05)`);
+    }
+  }
+  familiesBuilt = tier;
+}
+
+
+// ── عدسة الأقسام المجزأة (قرار المالك: تبويبات السينما فوق البطل، ومكتبتي والأصدقاء، وأقسام الشريط الجانبي) ──
+// عدسة م1 تنزلق بانتقال CSS (لا حركة من JavaScript إطارًا بإطار): JS يكتب الموضع والمقاس فقط حين يتغير المحدد.
+// تحفظ آخر موضع لكل مجموعة، فإعادة بناء الألسنة (renderLibrary وkindTabs يبنيانها من جديد) تنزلق ولا تقفز.
+// في الكمبيوتر: مرور الفأرة يميل العدسة قليلًا نحو العنصر دون تغيير المحدد.
+const TAB_GROUPS = Object.freeze([
+  { sel: '.social-tabs', item: '.social-tab', fill: true },
+  { sel: '.library-tabs', item: '.library-tab', padX: 12, h: 34 },
+  { sel: '.cn-kinds', item: '.cn-kind', padX: 12, h: 32 },
+  { sel: '.mw-tabs', item: 'button', padX: 12, h: 34 },
+  { sel: '.uv-tabs', item: 'button', padX: 12, h: 34 },
+  { sel: '.drawer-sections', item: '.drawer-section', fill: true, tone: true },
+]);
+const TAB_SEL = TAB_GROUPS.map((g) => g.sel).join(',');
+const ACTIVE = '.active, .on, [aria-selected="true"], [aria-checked="true"], [aria-pressed="true"]';
+const lastSpot = new Map();
+let tabsObserver = null, tabsResize = null, tabsQueued = false;
+
+function placeTab(group, box) {
+  const g = TAB_GROUPS.find((x) => box.matches(x.sel));
+  if (!g || !box.isConnected) return;
+  const items = [...box.querySelectorAll(`:scope > ${g.item}`)].filter((n) => !n.hidden);
+  const active = items.find((n) => n.matches(ACTIVE));
+  let ind = box.querySelector(':scope > .g-seg');
+  if (!active || !active.offsetWidth) { if (ind) ind.dataset.off = ''; return; }
+  const key = `${g.sel}@${box.closest('.page, .drawer, .dock')?.id ?? ''}`;
+  if (!ind) {
+    ind = box.ownerDocument.createElement('span');
+    ind.className = 'g-seg';
+    ind.setAttribute('aria-hidden', 'true');
+    ind.dataset.init = '';
+    box.prepend(ind);
+    const prev = lastSpot.get(key);
+    if (prev) for (const [k, v] of Object.entries(prev)) ind.style.setProperty(k, v);
+    tabsResize?.observe(box);
+  }
+  const w = g.fill ? active.offsetWidth : active.offsetWidth + 2 * g.padX;
+  const h = g.fill ? active.offsetHeight : g.h;
+  const spot = {
+    '--sx': `${active.offsetLeft + (active.offsetWidth - w) / 2}px`,
+    '--sy': `${active.offsetTop + (active.offsetHeight - h) / 2}px`,
+    '--sw': `${w}px`,
+    '--sh': `${h}px`,
+  };
+  if (g.tone) spot['--tint'] = box.ownerDocument.defaultView?.getComputedStyle?.(active)?.getPropertyValue('--tone')?.trim() || 'var(--accent)';
+  delete ind.dataset.off;
+  const apply = () => { for (const [k, v] of Object.entries(spot)) ind.style.setProperty(k, v); lastSpot.set(key, spot); };
+  if ('init' in ind.dataset && !lastSpot.has(key)) { apply(); (box.ownerDocument.defaultView?.requestAnimationFrame ?? globalThis.requestAnimationFrame)?.(() => delete ind.dataset.init); }
+  else { delete ind.dataset.init; apply(); }
+}
+function placeAll(doc) {
+  tabsQueued = false;
+  for (const box of doc.querySelectorAll(TAB_SEL)) placeTab(null, box);
+}
+const queueTabs = (doc) => { if (!tabsQueued) { tabsQueued = true; queueMicrotask(() => placeAll(doc)); } };
+const hoverNudge = (e) => {
+  const box = e.target.closest?.(TAB_SEL);
+  const ind = box?.querySelector(':scope > .g-seg');
+  if (!ind) return;
+  const g = TAB_GROUPS.find((x) => box.matches(x.sel));
+  const item = e.target.closest?.(`${g.sel} > ${g.item}`);
+  const active = box.querySelector(`:scope > ${g.item}:is(${ACTIVE})`);
+  if (!item || !active || item === active || e.type === 'pointerout') return ind.style.setProperty('--hx', '0px');
+  const d = (item.offsetLeft + item.offsetWidth / 2) - (active.offsetLeft + active.offsetWidth / 2);
+  ind.style.setProperty('--hx', `${(d * 0.12).toFixed(1)}px`);
+};
+
+/** يربط عدسة الأقسام المجزأة في Glass، ويفكها ويزيل عدساتها حين يرجع المظهر الحالي. */
+export function bindGlassTabs(doc = globalThis.document, on = doc?.documentElement?.dataset?.material === 'glass') {
+  const win = doc?.defaultView ?? globalThis;
+  if (!on) {
+    tabsObserver?.disconnect(); tabsObserver = null;
+    tabsResize?.disconnect(); tabsResize = null;
+    doc?.removeEventListener?.('pointerover', hoverNudge, true);
+    doc?.removeEventListener?.('pointerout', hoverNudge, true);
+    doc?.querySelectorAll?.('.g-seg').forEach((n) => n.remove());
+    return;
+  }
+  if (tabsObserver) return queueTabs(doc);
+  const MO = win.MutationObserver ?? globalThis.MutationObserver;
+  if (typeof MO !== 'function' || !doc.body) return;
+  tabsObserver = new MO((records) => {
+    for (const r of records) {
+      const t = r.target;
+      if (t.closest?.(TAB_SEL) || (r.type === 'childList' && [...r.addedNodes].some((n) => n.nodeType === 1 && (n.matches?.(TAB_SEL) || n.querySelector?.(TAB_SEL))))) return queueTabs(doc);
+    }
+  });
+  tabsObserver.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'aria-selected', 'aria-checked', 'aria-pressed', 'hidden'] });
+  tabsResize = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(() => queueTabs(doc)) : null;
+  if (win.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches) {
+    doc.addEventListener('pointerover', hoverNudge, true);
+    doc.addEventListener('pointerout', hoverNudge, true);
+  }
+  queueTabs(doc);
 }

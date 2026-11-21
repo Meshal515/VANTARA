@@ -210,3 +210,252 @@ html[data-motion='off'][data-material='glass'] .v35 .dock,
 html[data-motion='off'][data-material='glass'] .v35 .g-glyph {
   transition: none;
 }
+
+/* ═══════════════════ المرحلة 2: الأدوات العائمة فوق البنرات والمحتوى (الخطة 8.2–8.4 و8.9) ═══════════════════
+ * م2 = انكسار الحافة بتشتت عائلتها + ضباب 1.5px + صبغة + لمعة حافة. الأشكال: دائرة c، كبسولة p، شريط عريض b.
+ * الأزرار الرئيسية داخلها (شاهد، ابدأ القراءة) تبقى صلبة بلون القسم: الزجاج للحاوية لا للفعل الأهم. */
+html[data-material='glass'] {
+  --g-tint: rgba(255, 255, 255, 0.06);
+  --g-rim: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 -1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --g-lift: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --g-m3: blur(24px) saturate(1.6);
+  --g-m3-bg: color-mix(in srgb, var(--bg) 58%, transparent);
+}
+/* أزرار الرجوع وأدوات صفحة العمل فوق البنر (أفضل مكان للزجاج في التطبيق) */
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar) > .icon-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .aw-tools,
+html[data-material='glass'] .v35 .an-btn--glass {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .cn-detail-bar .aw-tools .aw-tool,
+html[data-material='glass'] .v35 .cn-detail-bar.collapsed > .icon-btn {
+  background: transparent;
+}
+/* الأنماط التي تبدأ فوق لون صلب (مقاسة في 8.9): رموز كما اليوم، وتتجسد زجاجًا حين ينطوي البطل.
+ * ضباب فقط (يتدرج، F3) فلا قفزة ولا تسطيح. */
+html[data-material='glass'] .v35 :is(.aw[data-style='screen'], #detail[data-look='page'], #detail[data-look='gallery'], #detail[data-look='resume'], .cn-detail[data-style='marquee']) :is(.aw-bar, .cn-detail-bar) > :is(.icon-btn, .aw-tools) {
+  backdrop-filter: blur(0px) saturate(1);
+  -webkit-backdrop-filter: blur(0px) saturate(1);
+  background: transparent;
+  box-shadow: none;
+  transition: backdrop-filter 0.26s ease, background-color 0.26s ease, box-shadow 0.26s ease;
+}
+html[data-material='glass'] .v35 :is(.aw[data-style='screen'], #detail[data-look='page'], #detail[data-look='gallery'], #detail[data-look='resume'], .cn-detail[data-style='marquee']) :is(.aw-bar, .cn-detail-bar).collapsed > :is(.icon-btn, .aw-tools) {
+  backdrop-filter: blur(12px) saturate(1.6);
+  -webkit-backdrop-filter: blur(12px) saturate(1.6);
+  background: var(--g-tint);
+  box-shadow: var(--g-rim);
+}
+@media (min-width: 1024px) {
+  html[data-material='glass'] .v35 :is(#detail[data-look='webtoon'], [data-unified]) :is(.aw-bar, .cn-detail-bar):not(.collapsed) > :is(.icon-btn, .aw-tools) {
+    backdrop-filter: blur(0px) saturate(1);
+    -webkit-backdrop-filter: blur(0px) saturate(1);
+    background: transparent;
+    box-shadow: none;
+    transition: backdrop-filter 0.26s ease, background-color 0.26s ease, box-shadow 0.26s ease;
+  }
+}
+/* الشريط العلوي حين ينطوي البطل: م3 يتجسد بالضباب (يتدرج) بدل لوح صلب يظهر بالشفافية */
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar)::before {
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: blur(0px) saturate(1);
+  -webkit-backdrop-filter: blur(0px) saturate(1);
+  transition: backdrop-filter 0.26s ease, background-color 0.26s ease, box-shadow 0.26s ease;
+}
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar).collapsed::before {
+  background: var(--g-m3-bg);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+/* أشرطة وكبسولات تطفو فوق المحتوى: صفحة الحلقة، والتحديد، والمجلس، والغرفة، وشريط الكتابة (تشتت 10، فيه نص يُكتب) */
+html[data-material='glass'] .v35 :is(.wl-mini, .mj-bar),
+html[data-material='glass'] .tg-pop,
+html[data-material='glass'] .mj-bar {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.wl-dock, .dl-selectbar, #detail .mw-selbar) {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2b-nav, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2b-nav, blur(16px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .rf-dock {
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2b-player, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2b-player, blur(16px) saturate(1.6));
+}
+
+/* ── عدسة الأقسام المجزأة (bindGlassTabs في glass.js): م1 تنزلق بنابض CSS، بلون القسم ── */
+html[data-material='glass'] .v35 :is(.library-tabs, .mw-tabs, .uv-tabs, .drawer-sections),
+html[data-material='glass'] .v35 .cn-kinds:not(.cn-hero-alt > .cn-kinds) {
+  position: relative;
+}
+html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .cn-kinds, .mw-tabs, .uv-tabs, .drawer-sections) > :not(.g-seg) {
+  position: relative;
+  z-index: 1;
+}
+html[data-material='glass'] .v35 .g-seg {
+  --tint: var(--accent);
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  width: var(--sw, 0px);
+  height: var(--sh, 0px);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(calc(var(--sx, 0px) + var(--hx, 0px)), var(--sy, 0px));
+  background: color-mix(in srgb, var(--tint) 18%, rgba(255, 255, 255, 0.05));
+  box-shadow: var(--g-rim), inset 0 0 12px color-mix(in srgb, var(--tint) 22%, transparent), 0 4px 14px rgba(0, 0, 0, 0.25);
+  backdrop-filter: var(--g-m2p-nav, blur(8px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(8px) saturate(1.6));
+  /* نابض CSS بتجاوز خفيف كعدسة v9، على المؤلِّف (transform) */
+  transition: transform 0.52s cubic-bezier(0.3, 1.25, 0.5, 1), width 0.52s cubic-bezier(0.3, 1.25, 0.5, 1), height 0.4s ease, --tint 0.35s ease;
+}
+html[data-material='glass'] .v35 .g-seg[data-init] {
+  transition: none;
+}
+html[data-material='glass'] .v35 .g-seg[data-off] {
+  visibility: hidden;
+}
+html[data-material='glass'] .v35 .drawer-sections .g-seg {
+  border-radius: var(--r-md);
+}
+/* التحديد القديم يُخفى في Glass وحده: الخط تحت الكلمة، والتعبئة، وحلقة القسم في الدرج */
+html[data-material='glass'] .v35 :is(.library-tab, .cn-kind, .mw-tabs button, .uv-tabs button)::after {
+  display: none;
+}
+html[data-material='glass'] .v35 .social-tab.active {
+  background: transparent;
+}
+html[data-material='glass'] .v35 .drawer-section,
+html[data-material='glass'] .v35 .drawer-section[aria-checked='true'] {
+  /* الشريط الجانبي صلب (قرار المالك)؛ الرقائق شفافة فتظهر العدسة المنزلقة تحتها بلون القسم */
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ═══════════════════ المرحلة 3: الأوراق والدرج والتنبيه والترويسات (م3، تشتت 0) ═══════════════════
+ * R3: تلاشي الستارة عبر الأب يعزل زجاج الورقة (F1). في Glass: الستارة لا تتلاشى بنفسها؛ التعتيم طبقة ::before
+ * تتلاشى، والورقة تتلاشى بنفسها (عنصر الزجاج ذاته لا يُعزل)، بنفس المدة والمنحنى. */
+html[data-material='glass'] .v35 .sheet-backdrop {
+  opacity: 1;
+  background: transparent;
+  visibility: hidden;
+  transition: visibility 0s linear var(--dur);
+}
+html[data-material='glass'] .v35 .sheet-backdrop.show {
+  visibility: visible;
+  transition-delay: 0s;
+}
+html[data-material='glass'] .v35 .sheet-backdrop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+html[data-material='glass'] .v35 .sheet-backdrop.show::before {
+  opacity: 1;
+}
+html[data-material='glass'] .v35 .sheet {
+  position: relative;
+  opacity: 0;
+  background: color-mix(in srgb, var(--bg-raised) 66%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 -1px 0 rgba(255, 255, 255, 0.06), 0 -18px 50px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  transition: transform var(--dur-slow) var(--ease-out), opacity var(--dur) var(--ease);
+}
+html[data-material='glass'] .v35 .show > .sheet {
+  opacity: 1;
+}
+/* الدرج في الجوال (من 1024 يصير شريطًا جانبيًا صلبًا بقرار المالك، فلا يُمس) */
+@media (max-width: 1023.98px) {
+  html[data-material='glass'] .v35 .drawer-backdrop {
+    opacity: 1;
+    background: transparent;
+    visibility: hidden;
+    transition: visibility 0s linear var(--dur);
+  }
+  html[data-material='glass'] .v35 .drawer-backdrop.open {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+  html[data-material='glass'] .v35 .drawer-backdrop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+  }
+  html[data-material='glass'] .v35 .drawer-backdrop.open::before {
+    opacity: 1;
+  }
+  html[data-material='glass'] .v35 .drawer {
+    background: color-mix(in srgb, var(--bg-raised) 64%, transparent);
+    border-inline-start: 0;
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.1), -18px 0 50px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(30px) saturate(1.6);
+    -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  }
+}
+/* التنبيه وترويسات الصفحات الفرعية: م3 بلا تشتت (نص يُقرأ) */
+html[data-material='glass'] .v35 .toast {
+  background: color-mix(in srgb, var(--surface-3) 60%, transparent);
+  box-shadow: var(--g-rim), 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+html[data-material='glass'] .v35 :is(.page-top, .ac-top),
+html[data-material='glass'] .us-head {
+  background: var(--g-m3-bg);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-material='glass'] .v35 .g-seg { transition: none; }
+}
+html[data-motion='off'][data-material='glass'] .v35 .g-seg {
+  transition: none;
+}
+
+/* ═══════════════════ المرحلة 4: قارئ المانجا (تشتت 14، الخطة 8.6) ═══════════════════
+ * الترويسة الذائبة في الصفحة لا تُمس (قرار المالك). صفحات المانجا لا زجاج عليها أبدًا. */
+html[data-material='glass'] .v35 .rd-bottom {
+  background: color-mix(in srgb, rgb(18, 16, 25) 42%, transparent);
+  box-shadow: var(--g-rim), 0 12px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: var(--g-m2b-reader, blur(18px) saturate(1.5));
+  -webkit-backdrop-filter: var(--g-m2b-reader, blur(18px) saturate(1.5));
+}
+html[data-material='glass'] .v35 .rd-tl-btn:not([aria-pressed='true']) {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2c-reader, blur(12px) saturate(1.5));
+  -webkit-backdrop-filter: var(--g-m2c-reader, blur(12px) saturate(1.5));
+}
+html[data-material='glass'] .v35 :is(.rd-tray, .rd-tl-gate) {
+  background: color-mix(in srgb, rgb(10, 9, 14) 62%, transparent);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
