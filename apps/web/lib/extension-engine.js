@@ -241,8 +241,9 @@ export async function pageImage(sourceId, page) {
  * غلاف عمل بعميل مصدره، محفوظ على الجهاز. يرجع رابطًا يقرؤه `<img>`.
  * `sourceId` اختياري: بدونه يُجلب بعميل عام (أفضل من لا شيء).
  */
-export async function cover(sourceId, url) {
-	const result = await required().cover({ sourceId: sourceId ?? null, url });
+export async function cover(sourceId, url, { budgetMs = null } = {}) {
+	// `budgetMs`: مهلة أطول لمحاولة صبورة بعد فشل (covers.js)؛ المحرك يحصرها بين ست ثوانٍ وعشرين
+	const result = await required().cover({ sourceId: sourceId ?? null, url, ...(Number.isFinite(budgetMs) ? { budgetMs } : {}) });
 	const convert = globalThis.Capacitor?.convertFileSrc;
 	return convert ? convert(result.path) : result.path;
 }

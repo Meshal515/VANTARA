@@ -12,7 +12,7 @@
 import engine from '../lib/extension-engine.js';
 import { saveWithRelief } from '../lib/storage-relief.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
-import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, titleTwins } from '../lib/catalog.js';
+import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, sourcePackage, titleTwins } from '../lib/catalog.js';
 import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
 import { RANK, editionKey } from '../lib/work-identity.js';
 import { detailEvidence, detailNames, isPartName, listingEvidence, namesPointElsewhere, officialConflict, ownNames, pickEdition } from '../lib/work-evidence.js';
@@ -530,10 +530,11 @@ const KNOWN_NAMES = {
  * للقارئ أبدًا. الاسم المعطى يُحترم إن لم يكن هو المعرّف نفسه.
  */
 export function displayName(label, sourceId) {
-  const id = String(sourceId ?? '').split('@')[0];
+  const id = sourcePackage(sourceId);
   const raw = String(label ?? '').trim();
-  if (raw && raw !== id && !/^[a-z]+(\.[a-z0-9_]+){2,}$/i.test(raw)) return raw;
-  const slug = (raw || id).split('.').pop()?.toLowerCase() ?? '';
+  // معرّف بأي صيغة (`pkg`، `pkg@lang`، `pkg#رقم`) ليس اسمًا: لا يظهر للقارئ
+  if (raw && raw !== id && raw !== String(sourceId ?? '') && !/^[a-z]+(\.[a-z0-9_]+){2,}(?:[#@][\w-]+)?$/i.test(raw)) return raw;
+  const slug = sourcePackage(raw || id).split('.').pop()?.toLowerCase() ?? '';
   if (KNOWN_NAMES[slug]) return KNOWN_NAMES[slug];
   return slug ? slug.charAt(0).toUpperCase() + slug.slice(1) : 'مصدر';
 }
@@ -553,7 +554,8 @@ const sourceList = (editions) =>
  * تتحدّى Cloudflare بقية النطاقات)، والبقية بدائل في صفحة العمل.
  */
 export function collapseMirrors(list) {
-  const rank = (s) => MIRROR_FAMILIES.find((f) => f.includes(String(s.id).split('.').pop()))?.indexOf(String(s.id).split('.').pop()) ?? 0;
+  const slug = (s) => sourcePackage(s.id).split('.').pop()?.toLowerCase() ?? '';
+  const rank = (s) => MIRROR_FAMILIES.find((f) => f.includes(slug(s)))?.indexOf(slug(s)) ?? 0;
   const best = new Map();
   for (const s of list) {
     const f = mirrorFamily(s.id);
@@ -1058,11 +1060,12 @@ const TRUSTED = ['mangalek', 'mangastarz', 'teamx', 'mangaswat', 'azora', 'manga
 const TRUSTED_EN = ['weebcentral', 'asurascans', 'mangadex', 'mangakakalot', 'mangahere', 'mangafire'];
 export function sourceRank(sourceId) {
   if (isFiller(sourceId)) {
-    const pkg = String(sourceId).split('@')[0].toLowerCase();
+    const pkg = sourcePackage(sourceId).toLowerCase();
     const i = TRUSTED_EN.findIndex((t) => pkg.endsWith(`.${t}`));
     return 1000 + (i < 0 ? TRUSTED_EN.length : i);
   }
-  const id = String(sourceId ?? '').toLowerCase();
+  // المثبّتة من مستودع (`حزمة#رقم`) بترتيب حزمتها: مانجا ليك من المستودع أوثق كما هي مدمجة
+  const id = sourcePackage(sourceId).toLowerCase();
   const i = TRUSTED.findIndex((t) => id.endsWith(`.${t}`) || id === t);
   return i < 0 ? TRUSTED.length : i;
 }

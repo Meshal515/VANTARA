@@ -1030,7 +1030,7 @@ class ExtensionEnginePlugin : Plugin() {
                 var lastError: Throwable? = null
                 var fetched: Pair<ByteArray, String?>? = null
                 // سقف واحد للغلاف كله (callTimeout يلغي الطلب الجاري فعلًا، لا يتركه في الخلفية)
-                val deadline = System.currentTimeMillis() + CoverReferers.BUDGET_MS
+                val deadline = System.currentTimeMillis() + CoverReferers.budget(call.getLong("budgetMs"))
                 for (attempt in CoverReferers.attempts(url, sourceHeaders != null)) {
                     val left = deadline - System.currentTimeMillis()
                     if (left <= 0) break

@@ -14,6 +14,7 @@
  */
 
 import engine from '../lib/extension-engine.js';
+import { outcomeOf, reportSource } from '../lib/source-report.js';
 
 const INDEX_KEY = 'vantara.covers.v1';
 const MAX_INDEX = 3000;
@@ -72,10 +73,11 @@ export function forgetCover(url) {
   save();
 }
 
-let active = 0;
-const waiting = [];
-function limited(task) {
-  return new Promise((resolve, reject) => {
+/** طابور بحد توازٍ: ستة للطلب العادي، واثنان للمحاولة الصبورة (لا تزاحم حدّ سرعة الإضافة نفسه). */
+function queue(max) {
+  let active = 0;
+  const waiting = [];
+  return (task) => new Promise((resolve, reject) => {
     const run = () => {
       active += 1;
       task()
@@ -85,10 +87,14 @@ function limited(task) {
           waiting.shift()?.();
         });
     };
-    if (active < MAX_PARALLEL) run();
+    if (active < max) run();
     else waiting.push(run);
   });
 }
+const limited = queue(MAX_PARALLEL);
+const patiently = queue(2);
+/** المحاولة الصبورة: مهلة أطول بعد فشل، لموقع بطيء أو إضافة تحدّ سرعة طلباتها (وضع المصدر يطلب شبكة أغلفة دفعة واحدة). */
+export const PATIENT_BUDGET_MS = 15_000;
 
 const inflight = new Map();
 /**
@@ -96,17 +102,22 @@ const inflight = new Map();
  * الناجح محفوظ في الفهرس (يُعاد منه فورًا)، والفاشل قد ينجح لاحقًا (#311 D-004، D-020: كانت الخريطة بلا حد
  * ومفتاحها الرابط وحده، فرابط واحد من مصدرين بترويسات مختلفة يأخذ نتيجة الأول).
  */
-export function nativeCover(url, sourceId) {
+export function nativeCover(url, sourceId, { patient = false } = {}) {
   if (!engine.isAvailable()) return Promise.resolve(null);
   if (index[url]) return Promise.resolve(index[url]);
-  const key = `${sourceId ?? ''}|${url}`;
+  const key = `${patient ? 'patient|' : ''}${sourceId ?? ''}|${url}`;
   if (inflight.has(key)) return inflight.get(key);
-  const promise = limited(() => engine.cover(sourceId, url))
+  const t0 = Date.now();
+  const promise = (patient ? patiently : limited)(() => engine.cover(sourceId, url, patient ? { budgetMs: PATIENT_BUDGET_MS } : {}))
     .then((src) => {
       if (src) { index[url] = src; save(); }
       return src ?? null;
     })
-    .catch(() => null)
+    .catch((error) => {
+      // سبب الفشل يُعدّ في تشخيص المصدر (مهلة؟ 403؟ ليست صورة؟): الغلاف الفارغ له دليل لا تخمين
+      if (sourceId) reportSource({ section: 'manga', sourceId, stage: patient ? 'cover_retry' : 'cover', outcome: outcomeOf(error), reason: String(error?.message ?? error ?? '').slice(0, 80), ms: Date.now() - t0 });
+      return null;
+    })
     .finally(() => inflight.delete(key));
   inflight.set(key, promise);
   return promise;

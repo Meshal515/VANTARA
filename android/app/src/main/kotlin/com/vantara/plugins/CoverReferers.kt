@@ -30,6 +30,13 @@ object CoverReferers {
     /** سقف الغلاف كله بكل محاولاته: يظهر خلال ثوانٍ، وما لم يصل يأخذ الحرف ولا يحجز غيره. */
     const val BUDGET_MS = 6_000L
 
+    /**
+     * المحاولة الصبورة بعد فشل (الواجهة تطلبها مرة واحدة بطابور أضيق): إضافة تحدّ سرعة طلباتها أو موقع بطيء لا يُترك
+     * غلافه فارغًا. السقف عشرون ثانية، ولا شيء أقل من المهلة العادية.
+     */
+    const val MAX_BUDGET_MS = 20_000L
+    fun budget(requested: Long?): Long = requested?.coerceIn(BUDGET_MS, MAX_BUDGET_MS) ?: BUDGET_MS
+
     /** علامتان: ترويسات المصدر كما هي، وطلب بلا Referer. */
     const val SOURCE_HEADERS = "\u0000source"
     const val NO_REFERER = "\u0000none"
