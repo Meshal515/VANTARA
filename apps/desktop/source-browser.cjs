@@ -199,7 +199,9 @@ function createSourceBrowser({ BrowserWindow, session, net, userAgent, isChallen
     return { text: res.body.toString('utf8'), status: res.status, url: res.url, headers: kept, location: null, viaBrowser: true };
   }
 
-  return { userAgent, fetch: fetchResource, solve, verify };
+  /** كوكيز الجلسة لرابط (جسر Cloudflare لمحرك ويندوز: cf-bridge.cjs). */
+  const cookies = (url) => (publicHttpUrl(url) ? ses.cookies.get({ url: String(url) }) : Promise.resolve([]));
+  return { userAgent, fetch: fetchResource, solve, verify, cookies, request };
 }
 
 /** هوية Chrome على ويندوز بإصدار Chromium الذي في Electron نفسه: هي ما يرسله المتصفح المخفي، فالطلبات كلها هوية واحدة. */

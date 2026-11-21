@@ -42,7 +42,7 @@ function freePort() {
 }
 
 /** معاملات JVM: إعدادات Suwayomi تُمرَّر كخصائص نظام (SystemPropertyOverridableConfigModule) فتعلو ملف الإعداد. */
-function launchArgs({ dataDir, port, password }) {
+function launchArgs({ dataDir, port, password, cloudflareUrl = null }) {
   // القيمة تُقرأ HOCON (`internal=<قيمة>`): النصوص بين علامتي تنصيص فلا تُفسَّر رقمًا أو تركيبًا
   const p = (key, value) => `-Dsuwayomi.tachidesk.config.server.${key}=${value}`;
   const q = (value) => JSON.stringify(String(value));
@@ -57,6 +57,8 @@ function launchArgs({ dataDir, port, password }) {
     p('debugLogsEnabled', 'false'), p('autoDownloadNewChapters', 'false'), p('globalUpdateInterval', '0'),
     // KCEF (متصفح Chromium داخل المحرك) يُنزّل ~100MB عند الإقلاع: معطّل؛ صفحات التحقق لها متصفح VANTARA المخفي
     p('kcefEnabled', 'false'),
+    // صفحات Cloudflare: جسر VANTARA المحلي بواجهة FlareSolverr (cf-bridge.cjs) يحلها بمتصفحها المخفي
+    ...(cloudflareUrl ? [p('flareSolverrEnabled', 'true'), p('flareSolverrUrl', q(cloudflareUrl)), p('flareSolverrTimeout', '60'), p('flareSolverrAsResponseFallback', 'true')] : []),
     '-jar', path.join('bin', 'Suwayomi-Server.jar'),
   ];
 }
@@ -65,7 +67,7 @@ function createSuwayomiRuntime({
   root, platform = process.platform, fetch = globalThis.fetch, spawn = childProcess.spawn,
   tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), onProgress = () => {}, now = Date.now,
   pinned = PINNED, healthIntervalMs = 500, startTimeoutMs = START_TIMEOUT_MS, idleStopMs = IDLE_STOP_MS,
-  toolJar = TOOL_JAR, convertTimeoutMs = CONVERT_TIMEOUT_MS,
+  toolJar = TOOL_JAR, convertTimeoutMs = CONVERT_TIMEOUT_MS, cloudflare = null,
 } = {}) {
   const engineDir = path.join(root, 'engine', pinned.version);
   const dataDir = path.join(root, 'data');
@@ -173,11 +175,13 @@ function createSuwayomiRuntime({
       await fsp.mkdir(dataDir, { recursive: true });
       const port = await freePort();
       const password = `v${crypto.randomBytes(24).toString('hex')}`;
+      // الجسر اختياري: فشله لا يمنع المحرك (المصادر بلا Cloudflare تعمل كما هي)
+      const cloudflareUrl = cloudflare ? await Promise.resolve(cloudflare()).catch(() => null) : null;
       const logFile = path.join(root, 'engine.log');
       const prior = await fsp.stat(logFile).catch(() => null);
       if (prior && prior.size > LOG_LIMIT) await fsp.rm(logFile, { force: true }).catch(() => {});
       const log = fs.createWriteStream(logFile, { flags: 'a' });
-      const child = spawn(path.join(engineDir, 'jre', 'bin', 'java.exe'), launchArgs({ dataDir, port, password }), { cwd: engineDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(path.join(engineDir, 'jre', 'bin', 'java.exe'), launchArgs({ dataDir, port, password, cloudflareUrl }), { cwd: engineDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let tail = '';
       const keep = (d) => { tail = (tail + d).slice(-4000); output = (output + String(d).replaceAll(password, '***')).slice(-16000); log.write(String(d).replaceAll(password, '***')); };
       child.stdout?.on('data', keep); child.stderr?.on('data', keep);

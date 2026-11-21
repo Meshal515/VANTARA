@@ -23,7 +23,10 @@ const arabic = (message, code) => Object.assign(new Error(message), code ? { cod
 /** خطأ مصدر بالعربية: كود الإضافة الذي لا يعمل في المحرك يُسمّى كذلك، وغيره بسببه. */
 const sourceFailure = (message) => (/VerifyError|IncompatibleClassChangeError|NoSuchMethodError|NoClassDefFoundError|AbstractMethodError/.test(String(message))
   ? arabic('هذا المصدر لا يعمل في محرك ويندوز بعد (كود إضافته لا يتوافق معه)؛ يعمل في تطبيق الجوال', 'ENGINE_VERIFY')
-  : arabic(cleanError(message) || 'تعذّر الطلب من المصدر', 'SOURCE_ERROR'));
+  // جسر Cloudflare (cf-bridge.cjs) يرد 409 حين يطلب الموقع إنسانًا؛ والمحرك يقول «bypass» حين لا يصل كوكي التحقق
+  : /HTTP error 409\b|CloudflareBypassException|Cloudflare bypass/.test(String(message))
+    ? arabic('المصدر يطلب تحققًا من المتصفح: افتح الإضافات واضغط «تحقق» ثم أعد المحاولة', 'challenge')
+    : arabic(cleanError(message) || 'تعذّر الطلب من المصدر', 'SOURCE_ERROR'));
 const gqlString = (value) => JSON.stringify(String(value ?? ''));
 const cleanError = (message) => String(message ?? '').replace(/(?:https?:\/\/)\S+/gi, '[رابط]').replace(/^(?:[\w.]+(?:Exception|Error):\s*)+/, '').slice(0, 220);
 

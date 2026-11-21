@@ -295,3 +295,14 @@ test('Windows layer: a conversion failure falls back to the APK (Suwayomi conver
   assert.equal(engine.conversion(PKG).ok, false);
   assert.match(engine.conversion(PKG).error, /تعذّر تحويل الإضافة/);
 });
+
+test('a site that needs a person (Cloudflare bridge 409, or no clearance) says how to verify', async () => {
+  const t = setup();
+  await t.engine.call('addRepo', { url: ROOT });
+  await t.engine.call('installExtension', { repo: ROOT, pkg: PKG });
+  const request = t.fake.runtime.request;
+  for (const said of ['java.io.IOException: eu.kanade.tachiyomi.network.HttpException: HTTP error 409', 'java.io.IOException: Cloudflare bypass currently disabled']) {
+    t.fake.runtime.request = async (p, o) => (typeof o?.body === 'string' && o.body.includes('fetchSourceManga') ? new Response(JSON.stringify({ data: { fetchSourceManga: null }, errors: [{ message: said }] })) : request(p, o));
+    await assert.rejects(t.engine.call('popular', { sourceId: `${PKG}#${SRC}`, page: 1 }), (e) => e.code === 'challenge' && /«تحقق»/.test(e.message));
+  }
+});

@@ -153,6 +153,8 @@ export function installDesktopBridges(g = globalThis) {
       else if (event.stage === 'running' && status) status.hidden = true;
     }
     if (event.type === 'manga-extensions/changed') g.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed'));
+    // إضافة Mihon طلب موقعها تحققًا بيد إنسان (جسر Cloudflare في المحرك): «تحتاج تحقق» وزر «تحقق» كالمصادر المدمجة
+    if (event.type === 'source-verification/required' && typeof event.host === 'string') desktopChallenges.report(event.host);
     if (event.type === 'addon/install') void (async () => {
       if (!g.document?.body) return;
       const addons = getRuntime().addons; await addons.ready;

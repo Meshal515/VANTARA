@@ -105,3 +105,15 @@ it('صفحة تحقق بقيت بعد المتصفح المخفي تُسجَّل
   await expect(fetcher.text('https://hizomanga.net/m/1')).rejects.toMatchObject({ code: 'challenge', host: 'hizomanga.net' });
   expect(desktopChallenges.pending().map((x) => x.host)).toContain('hizomanga.net');
 });
+it('إضافة Mihon طلب موقعها تحققًا (جسر Cloudflare في المحرك): تظهر في «تحتاج تحقق» بلا نافذة تُفتح وحدها', async () => {
+  const callbacks = [];
+  const verifySource = vi.fn();
+  const g = { VantaraDesktop: { platform: 'windows', verifySource, requestResource: async () => ({}), startPlayback: async () => ({}), onEvent: fn => { callbacks.push(fn); return () => {}; } } };
+  installDesktopBridges(g);
+  const { desktopChallenges } = await import('./source-fetcher.js');
+  for (const fn of callbacks) fn({ type: 'source-verification/required', host: 'Olympustaff.com' });
+  for (const fn of callbacks) fn({ type: 'source-verification/required', host: 42 });
+  expect(desktopChallenges.pending().map((x) => x.host)).toContain('olympustaff.com');
+  expect(verifySource).not.toHaveBeenCalled();
+  desktopChallenges.clear('olympustaff.com');
+});
