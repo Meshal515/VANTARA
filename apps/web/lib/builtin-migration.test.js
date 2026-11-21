@@ -98,3 +98,33 @@ it('installing, removing or rolling back an extension tells the work pages to re
   await expect(repos.install('https://repo', 'x.y.z')).rejects.toThrow('signature');
   expect(seen).toHaveBeenCalledTimes(3);
 });
+
+it('what you do by hand is reported to the account list; what the sync applies is not reported back', async () => {
+  await load({ createdAt: EXISTING });
+  await vi.waitFor(() => expect(plugin.migrateBuiltins).toHaveBeenCalled());
+  const changes = [];
+  engine.onLocalExtensionChange((c) => changes.push(c));
+  Object.assign(plugin, {
+    repos: vi.fn(async () => ({ repos: [], installed: [] })), removeRepo: vi.fn(async () => ({})), repoIndex: vi.fn(async () => ({ extensions: [] })),
+    addRepo: vi.fn(async ({ url, fingerprint }) => ({ repo: { url, name: 'Keiyoushi', fingerprint: fingerprint ?? 'abc' } })),
+    installExtension: vi.fn(async () => ({})), uninstallExtension: vi.fn(async () => ({})),
+  });
+  const repos = engine.repositories();
+  await repos.add('https://repo.example/r');
+  await repos.install('https://repo.example/r', 'eu.kanade.tachiyomi.extension.all.mangamillion');
+  await repos.uninstall('eu.kanade.tachiyomi.extension.all.mangamillion');
+  await repos.remove('https://repo.example/r');
+  expect(changes).toEqual([
+    { type: 'repo', on: true, url: 'https://repo.example/r', name: 'Keiyoushi', fingerprint: 'abc' },
+    { type: 'ext', on: true, pkg: 'eu.kanade.tachiyomi.extension.all.mangamillion', repo: 'https://repo.example/r' },
+    { type: 'ext', on: false, pkg: 'eu.kanade.tachiyomi.extension.all.mangamillion' },
+    { type: 'repo', on: false, url: 'https://repo.example/r' },
+  ]);
+  const target = engine.syncTarget();
+  await target.addRepo({ url: 'https://repo.example/r', fingerprint: 'KEY' });
+  await target.install({ pkg: 'eu.kanade.tachiyomi.extension.ar.teamx', repo: 'https://repo.example/r' });
+  await target.uninstall({ pkg: 'eu.kanade.tachiyomi.extension.ar.teamx' });
+  expect(changes).toHaveLength(4);
+  // المفتاح المحفوظ في الحساب يصل للمحرك ليرفض مستودعًا غيّر مفتاحه
+  expect(plugin.addRepo).toHaveBeenLastCalledWith({ url: 'https://repo.example/r', fingerprint: 'KEY' });
+});

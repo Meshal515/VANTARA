@@ -97,7 +97,7 @@ test('source ids are the APK ones (pkg#id) and only engine media paths are reach
 test('add repository, install a signed extension, then it is listed without starting the engine', async () => {
   const { engine, fake } = setup();
   const added = await engine.call('addRepo', { url: `${ROOT}/index.min.json` });
-  assert.deepEqual(added.repo, { url: ROOT, name: 'مستودع تجربة' });
+  assert.deepEqual(added.repo, { url: ROOT, name: 'مستودع تجربة', fingerprint: RSA_CERT });
   const index = await engine.call('repoIndex', { url: ROOT });
   assert.equal(index.extensions[0].installed, null);
   assert.deepEqual(index.extensions[0].sources, ['Team X']);
@@ -305,4 +305,12 @@ test('a site that needs a person (Cloudflare bridge 409, or no clearance) says h
     t.fake.runtime.request = async (p, o) => (typeof o?.body === 'string' && o.body.includes('fetchSourceManga') ? new Response(JSON.stringify({ data: { fetchSourceManga: null }, errors: [{ message: said }] })) : request(p, o));
     await assert.rejects(t.engine.call('popular', { sourceId: `${PKG}#${SRC}`, page: 1 }), (e) => e.code === 'challenge' && /«تحقق»/.test(e.message));
   }
+});
+
+test('account sync: the repository signing key is listed, and a repository whose key differs from the account is refused', async () => {
+  const { engine } = setup();
+  await assert.rejects(engine.call('addRepo', { url: ROOT, fingerprint: 'f'.repeat(64) }), (e) => e.code === 'MANGA_REPOSITORY_KEY_MISMATCH');
+  assert.deepEqual((await engine.call('repos')).repos, []);
+  await engine.call('addRepo', { url: ROOT, fingerprint: RSA_CERT.toUpperCase() });
+  assert.equal((await engine.call('repos')).repos[0].fingerprint, RSA_CERT);
 });

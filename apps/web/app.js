@@ -54,6 +54,7 @@ import {
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
 import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
+import { startExtensionSync } from './lib/extension-sync.js';
 import {
   NOTIFICATION_LABELS,
   popupPatch,
@@ -2388,8 +2389,18 @@ function toastNewNotifications() {
   }
 }
 
+// قائمة الإضافات في حسابك (المرحلة 3، قرار المالك: تلقائية): ما تثبّته أو تحذفه يُكتب لحسابك، وجهازك الآخر يطابقه.
+// الكود على الجهاز دائمًا؛ الحساب يحفظ القائمة فقط (lib/extension-sync.js). بلا حساب أو بلا محرك إضافات: لا شيء.
+const extensionSync = syncConfigured() ? startExtensionSync({ sync, target: () => engine.syncTarget?.() ?? null }) : null;
+if (extensionSync) {
+  engine.onLocalExtensionChange?.((change) => void extensionSync.onLocal(change));
+  // بعد أن تظهر الواجهة: لا يبطئ الإقلاع
+  setTimeout(() => void extensionSync.reconcile(), 8000);
+}
+
 // الفروقات في الخلفية. لا تلمس الشاشة إلا عبر الترقيع الجزئي.
 sync.onChange((tables) => {
+  if (tables.some((table) => table === 'settings' || table === 'session')) void extensionSync?.reconcile();
   if (tables.some((table) => table === 'accounts' || table === 'settings' || table === 'session')) refreshSourceEntitlement();
   // PIN أُضيف من جهاز آخر وانتهت الجلسة: قفل فوق الشاشة الحالية لا طرد منها
   if (tables.includes('session') && sync.locked && state.screen !== 'GATE') showLock();

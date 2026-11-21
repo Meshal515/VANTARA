@@ -363,7 +363,8 @@ class ExtensionEnginePlugin : Plugin() {
     // ───────────────────────── مستودعات المستخدم ─────────────────────────
 
     private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
-    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
+    // البصمة علنية (مفتاح توقيع المستودع): مزامنة الإضافات بين الأجهزة تثبّتها فلا يُقبل مستودع غيّر مفتاحه
+    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).put("fingerprint", repo.fingerprint).withIcon(repo.iconUrl)
 
     @PluginMethod
     fun repos(call: PluginCall) {
@@ -393,6 +394,10 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 val (meta, list) = repoClient.read(base)
+                // من مزامنة الحساب: المفتاح الذي عرفه جهازك الآخر شرط، فمستودع غيّر مفتاحه لا يُضاف هنا بصمت
+                call.getString("fingerprint")?.takeIf { it.isNotBlank() }?.let { expected ->
+                    if (!expected.equals(meta.fingerprint, ignoreCase = true)) return@launch call.reject("مفتاح توقيع المستودع لا يطابق ما في حسابك؛ لم يُضف.", "MANGA_REPOSITORY_KEY_MISMATCH")
+                }
                 val count = list.size
                 val repo = UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
                 userStore.registerRepository(repo)

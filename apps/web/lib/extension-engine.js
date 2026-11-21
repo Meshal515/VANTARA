@@ -28,6 +28,18 @@ function sourcesChanged() {
 	for (const fn of sourcesListeners) { try { fn(); } catch { /* مستمع معطوب لا يوقف الباقي */ } }
 	try { globalThis.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed')); } catch { /* بيئة بلا أحداث */ }
 }
+/**
+ * ما فعله المستخدم بيده على هذا الجهاز (تثبيت/حذف إضافة، إضافة/إزالة مستودع): مزامنة الحساب تكتبه
+ * (lib/extension-sync.js). ما تفعله المزامنة نفسها لا يمر من هنا، فلا يرتد.
+ */
+const localListeners = new Set();
+export function onLocalExtensionChange(fn) {
+	localListeners.add(fn);
+	return () => localListeners.delete(fn);
+}
+function localChange(change) {
+	for (const fn of localListeners) { try { fn(change); } catch { /* مستمع معطوب لا يوقف الباقي */ } }
+}
 /** نداء يغيّر المصادر: يُبلَّغ بعد نجاحه فقط. */
 const changing = (fn) => async (...args) => { const out = await fn(...args); sourcesChanged(); return out; };
 
@@ -266,8 +278,16 @@ export function repositories() {
 	const formerlyBundled = new Set();
 	return {
 		list: () => plugin.repos(),
-		add: (url) => plugin.addRepo({ url }),
-		remove: (url) => plugin.removeRepo({ url }),
+		add: async (url) => {
+			const out = await plugin.addRepo({ url });
+			if (out?.repo?.url) localChange({ type: 'repo', on: true, url: out.repo.url, name: out.repo.name, fingerprint: out.repo.fingerprint ?? null });
+			return out;
+		},
+		remove: async (url) => {
+			const out = await plugin.removeRepo({ url });
+			localChange({ type: 'repo', on: false, url });
+			return out;
+		},
 		extensions: async (url) => {
 			const extensions = (await plugin.repoIndex({ url })).extensions ?? [];
 			const list = extensions.some(ext => ext?.builtin) ? (await plugin.sources()).sources ?? [] : [];
@@ -278,8 +298,18 @@ export function repositories() {
 				return { ...ext, builtin: false, formerlyBundled: true, ...legacyInstallation(source, visible({ id: ext.pkg })), update: false };
 			});
 		},
-		install: changing((repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg })),
-		uninstall: changing((pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg })),
+		install: changing(async (repo, pkg) => {
+			if (formerlyBundled.has(pkg)) return installFormer(plugin, pkg);
+			const out = await plugin.installExtension({ repo, pkg });
+			localChange({ type: 'ext', on: true, pkg, repo });
+			return out;
+		}),
+		uninstall: changing(async (pkg) => {
+			if (formerlyBundled.has(pkg)) return removeFormer(plugin, pkg);
+			const out = await plugin.uninstallExtension({ pkg });
+			localChange({ type: 'ext', on: false, pkg });
+			return out;
+		}),
 		// التحديث الذاتي الآمن (قرار المالك 20 نوفمبر): حالة التحديث، والرجوع لآخر إصدار سليم محفوظ على الجهاز
 		updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null,
 		rollback: typeof plugin.rollbackExtension === 'function' ? changing((pkg) => plugin.rollbackExtension({ pkg })) : null,
@@ -310,6 +340,22 @@ async function installFormer(plugin, pkg) {
 async function removeFormer(plugin, pkg) {
 	await choosePackage(pkg, false);
 	if (typeof plugin.removeBuiltin === 'function') await plugin.removeBuiltin({ pkg });
+}
+
+/**
+ * منفّذ مزامنة قائمة الإضافات (lib/extension-sync.js): نداءات المحرك نفسها، تبلّغ صفحات الأعمال بتغيّر المصادر، ولا
+ * تمر بـonLocalExtensionChange (ما تطبّقه المزامنة لا يُكتب للحساب من جديد). `null` حيث لا مستودعات (الويب).
+ */
+export function syncTarget() {
+	const plugin = bridge();
+	if (typeof plugin?.addRepo !== 'function' || typeof plugin?.installExtension !== 'function' || typeof plugin?.repos !== 'function') return null;
+	return {
+		list: () => plugin.repos(),
+		addRepo: ({ url, fingerprint = null }) => plugin.addRepo({ url, ...(fingerprint ? { fingerprint } : {}) }),
+		removeRepo: ({ url }) => plugin.removeRepo({ url }),
+		install: changing(({ pkg, repo }) => plugin.installExtension({ repo, pkg })),
+		uninstall: changing(({ pkg }) => plugin.uninstallExtension({ pkg })),
+	};
 }
 
 export const READY_REPOSITORY = 'vantara:ready-sources';
@@ -372,6 +418,8 @@ export function sites() {
 
 export default {
 	onSourcesChanged,
+	onLocalExtensionChange,
+	syncTarget,
 	cover,
 	repositories,
 	readySources,
