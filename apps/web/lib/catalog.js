@@ -266,7 +266,10 @@ export function createWorkIndex() {
  * والطلبات: نسخة واحدة تُسأل، والبقية بدائل.
  */
 export const MIRROR_FAMILIES = Object.freeze([['mangalek', 'mangastarz', 'mangaspark', 'mangalink', 'mangalionz']]);
-const slugOfSource = (sourceId) => String(sourceId ?? '').split('@')[0].split('.').pop()?.toLowerCase() ?? '';
+// الحزمة من المعرّف بصيغه الثلاث: `pkg`، `pkg@lang` (التكملة)، `pkg#sourceId` (إضافة من مستودع). كان «#رقم» يبقى ملتصقًا
+// باسم الموقع («mangastarz#123»)، فمرايا مانجا ليك المثبّتة من المستودع لا تُعرف عائلة واحدة
+export const sourcePackage = (sourceId) => String(sourceId ?? '').split('#')[0].split('@')[0];
+const slugOfSource = (sourceId) => sourcePackage(sourceId).split('.').pop()?.toLowerCase() ?? '';
 export function mirrorFamily(sourceId) {
 	const slug = slugOfSource(sourceId);
 	return MIRROR_FAMILIES.find((f) => f.includes(slug))?.[0] ?? String(sourceId);

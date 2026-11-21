@@ -39,8 +39,15 @@ export function outcomeOf(error) {
  * حدث واحد: {section: manga|anime|cinema, sourceId, stage, outcome, reason?, ms?}.
  * المتشابهة تُجمع (عدد + مجموع الزمن + أقصاه) قبل الإرسال.
  */
+/**
+ * معرّف المصدر كما يقبله الخادم (`[a-z0-9._@-]`). إضافة مثبّتة من مستودع معرّفها `حزمة#رقم`، و«#» كان يُسقط تقاريرها
+ * كلها بصمت (Manga Million وأخواتها بلا أي تشخيص). تُرسل `حزمة.رقم`: مقطع حزمة Java لا يبدأ برقم، فلا التباس.
+ */
+export const reportedSourceId = (id) => String(id ?? '').replace('#', '.');
+
 export function reportSource(e) {
   if (!e?.section || !e.sourceId || !e.stage || !e.outcome) return;
+  e = { ...e, sourceId: reportedSourceId(e.sourceId) };
   const reason = e.outcome === 'ok' ? '' : String(e.reason ?? '').slice(0, 120);
   const key = `${e.section}|${e.sourceId}|${e.stage}|${e.outcome}|${reason}`;
   const ms = Math.max(0, Math.round(Number(e.ms) || 0));

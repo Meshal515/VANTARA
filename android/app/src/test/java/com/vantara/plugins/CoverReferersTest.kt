@@ -22,4 +22,11 @@ class CoverReferersTest {
         assertEquals(false, CoverReferers.worthNextAttempt(503, gotNonImage = false))
         assertEquals(true, CoverReferers.BUDGET_MS <= 6_000L)
     }
+    // المحاولة الصبورة تطلب مهلة أطول، محصورة: لا أقل من العادية ولا أكثر من عشرين ثانية، وبلا طلب = العادية
+    @Test fun aPatientRetryGetsALongerButBoundedBudget() {
+        assertEquals(CoverReferers.BUDGET_MS, CoverReferers.budget(null))
+        assertEquals(15_000L, CoverReferers.budget(15_000L))
+        assertEquals(CoverReferers.MAX_BUDGET_MS, CoverReferers.budget(600_000L))
+        assertEquals(CoverReferers.BUDGET_MS, CoverReferers.budget(10L))
+    }
 }

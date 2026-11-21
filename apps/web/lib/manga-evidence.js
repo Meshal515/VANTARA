@@ -40,7 +40,7 @@ const trim = (obj) => {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidOf = (url) => String(url ?? '').split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? '';
-export const isMangaDex = (sourceId) => /(?:^|\.)mangadex$/i.test(String(sourceId ?? '').split('@')[0]);
+export const isMangaDex = (sourceId) => /(?:^|\.)mangadex$/i.test(String(sourceId ?? '').split('#')[0].split('@')[0]);
 
 /** كل أسماء عمل MangaDex: عنوانه بكل لغاته وأسماؤه البديلة. */
 export function mangaDexNames(m) {
