@@ -78,3 +78,23 @@ it('the migration tells the interface to refresh only when something moved', asy
   expect(seen).toHaveBeenCalledTimes(1);
   expect(await engine.migrateBuiltins({ migrateBuiltins: vi.fn() }, e.entitlement(), [])).toBeNull();
 });
+
+it('installing, removing or rolling back an extension tells the work pages to refresh their sources at once', async () => {
+  await load({ createdAt: EXISTING });
+  // الترحيل التلقائي عند الإقلاع يبلّغ أيضًا (صحيح)؛ يكتمل أولًا ثم يُقاس النداء المباشر وحده
+  await vi.waitFor(() => expect(plugin.migrateBuiltins).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 10));
+  const seen = vi.fn();
+  engine.onSourcesChanged(seen);
+  Object.assign(plugin, { repos: vi.fn(async () => ({})), addRepo: vi.fn(), removeRepo: vi.fn(), repoIndex: vi.fn(async () => ({ extensions: [] })),
+    installExtension: vi.fn(async () => ({})), uninstallExtension: vi.fn(async () => ({})), rollbackExtension: vi.fn(async () => ({})) });
+  const repos = engine.repositories();
+  await repos.install('https://repo', 'eu.kanade.tachiyomi.extension.all.mangamillion');
+  await repos.uninstall('eu.kanade.tachiyomi.extension.all.mangamillion');
+  await repos.rollback('eu.kanade.tachiyomi.extension.all.mangamillion');
+  expect(seen).toHaveBeenCalledTimes(3);
+  // فشل التثبيت لا يبلّغ
+  plugin.installExtension.mockRejectedValueOnce(new Error('signature'));
+  await expect(repos.install('https://repo', 'x.y.z')).rejects.toThrow('signature');
+  expect(seen).toHaveBeenCalledTimes(3);
+});

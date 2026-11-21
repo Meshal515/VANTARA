@@ -168,8 +168,17 @@ export function detailFields(manga) {
 // ───────────────────────── المحرّك ─────────────────────────
 
 let sourcesPromise = null;
+let sourcesAt = 0;
+/**
+ * قائمة المصادر تُقرأ من المحرك وتُحفظ للحظات فقط: تثبيت إضافة أو حذفها أو تحديثها يمسحها فورًا (onSourcesChanged)،
+ * ومهلة قصيرة احتياطًا. كانت تُحفظ للجلسة كلها، فإضافة ثُبّتت والتطبيق مفتوح لا تُسأل عن أي عمل حتى إعادة التشغيل
+ * (بلاغ المالك 21 نوفمبر: Manga Million تعمل ولا تظهر في «المصادر»).
+ */
+const SOURCES_TTL_MS = 60_000;
 const fillerIds = new Set();
 function sources() {
+  if (sourcesPromise && Date.now() - sourcesAt > SOURCES_TTL_MS) sourcesPromise = null;
+  if (!sourcesPromise) sourcesAt = Date.now();
   // إضافة مستودع للكبار لا تُستعمل أبدًا، والإضافة غير العربية تكملة فصول فقط
   sourcesPromise ??= engine.sources().then((list) => {
     // المتخصص في الإباحية يختفي؛ العام «المختلط» يبقى وأعماله تُفلتر بـisAdult (قرار المالك، 16 نوفمبر). كان كل مصدر
@@ -205,6 +214,7 @@ export function resetSources() {
 
 // مصدر أُضيف أو أُزيل (أو وصل صف الحساب من المزامنة): القائمة تُقرأ من جديد
 onEntitlementChange(() => resetSources());
+engine.onSourcesChanged?.(() => resetSources());
 
 export const available = () => engine.isAvailable();
 
@@ -1038,6 +1048,8 @@ export function sourceRank(sourceId) {
 }
 
 const REDISCOVER_MS = 12 * 3600e3;
+/** مصدر لم يرد (مهلة أول تحميل لإضافة، موقع بطيء): يُسأل من جديد بعد هذه المدة لا بعد 12 ساعة. */
+const UNANSWERED_RETRY_MS = 10 * 60e3;
 const CHAPTERS_TIMEOUT_MS = 30_000;
 /** أول فتحٍ لعمل بنسخة واحدة: كم ننتظر بقية المصادر قبل أن نعرض ما عندنا. */
 const FIRST_OPEN_HOLD_MS = 3500;
@@ -1180,28 +1192,35 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
       emit();
     }, FIRST_OPEN_HOLD_MS);
   }
-  // مصدرٌ جديد (التكملة الإنجليزية بعد تحديث) يُسأل عن العمل فورًا لا بعد 12 ساعة
-  const sourceIds = available() ? (await sources().catch(() => [])).map((s) => s.id) : [];
+  // مصدرٌ جديد (إضافة ثُبّتت، تكملة بعد تحديث) أو لم يرد آخر مرة يُسأل عن العمل فورًا لا بعد 12 ساعة.
+  // من لم يرد يُعاد بعد UNANSWERED_RETRY_MS فقط، فموقع ساقط لا يُسأل في كل فتحة.
+  const sourceIds = available() ? (await sources().catch(() => [])).map((s) => String(s.id)) : [];
+  const knownIds = editions.map((e) => String(e.sourceId));
   // (نسخةٌ محفوظة قبل هذا الحقل تُعامل كأنها لم تُسأل عن أي مصدر: تُكتشف مرة)
-  const askedBefore = cached ? cached.discoveredSources ?? [] : sourceIds;
-  const newSource = sourceIds.some((sid) => !askedBefore.includes(sid));
-  const due = discover && available() && (newSource || Date.now() - (cached?.discoveredAt ?? 0) > REDISCOVER_MS);
+  const askedBefore = new Set(cached ? cached.discoveredSources ?? [] : []);
+  const retryAt = cached?.discoveryRetryAt ?? {};
+  const now = Date.now();
+  const interval = !cached || now - (cached?.discoveredAt ?? 0) > REDISCOVER_MS;
+  const pending = sourceIds.filter((sid) => !askedBefore.has(sid) && !knownIds.includes(sid) && (retryAt[sid] ?? 0) <= now);
+  const due = discover && available() && (interval || pending.length > 0);
   const target=Number.isFinite(requestedChapter)&&requestedChapter>=0?requestedChapter:null;
   const hasTarget=()=>target!==null&&editions.some(e=>(!arabicOnly||arabicSource(e.sourceId))&&(e.chapters??[]).some(c=>chapterNumberOf(c)===target));
   const discoverMore = async (options = {}) => {
         try {
-          const found = (await discoverEditions(assemble(v35work, editions, detail), options)).filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
+          const out = await discoverEditions(assemble(v35work, editions, detail), options);
+          const found = out.filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
           if (found.length) {
             editions = unionEditions(editions, found.map((e) => ({ ...e, chapters: null })));
             await refresh(found);
           }
-          return true;
+          return { answered: out.answered ?? [], unanswered: out.unanswered ?? [] };
         } catch {
           // الاكتشاف تكميلي: ما عندنا يبقى
-          return false;
+          return null;
         }
       };
-  const discovery = due ? discoverMore({refresh:target!==null&&!hasTarget()}) : Promise.resolve(false);
+  // موعد الإعادة الدورية: الكل. وإلا: الجديد ومن لم يرد فقط، لا كل المصادر مع كل إضافة تُثبَّت
+  const discovery = due ? discoverMore({ refresh: target!==null&&!hasTarget(), ...(interval ? {} : { only: new Set(pending) }) }) : Promise.resolve(null);
 
   await Promise.all([refresh(editions), discovery]);
   // An update names a particular chapter. A recent broad discovery must not
@@ -1210,12 +1229,21 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   held = false;
   const full = emit(true);
   const discoveredNow = await discovery;
+  // «سُئل» = من ردّ فعلًا (ومن عنده نسخة معروفة). من لم يرد يبقى مطلوبًا ويُعاد بعد مهلة قصيرة
+  const answeredNow = discoveredNow?.answered ?? [];
+  const unansweredNow = discoveredNow?.unanswered ?? [];
+  const asked = discoveredNow
+    ? [...new Set([...(interval ? [] : askedBefore), ...knownIds, ...answeredNow])].filter((sid) => !unansweredNow.includes(sid))
+    : cached?.discoveredSources ?? [];
+  const retries = Object.fromEntries(Object.entries(retryAt).filter(([sid, at]) => at > now && !answeredNow.includes(sid)));
+  for (const sid of unansweredNow) retries[sid] = now + UNANSWERED_RETRY_MS;
   await writeWork(id, {
     // المصدر المحدد يحدّث نسخته فقط، ولا يمحو نسخ المصادر الأخرى المحفوظة لنفس العمل
     editions: pinnedSource ? unionEditions(stored?.editions, editions) : editions,
     detail,
-    discoveredAt: discoveredNow ? Date.now() : cached?.discoveredAt ?? 0,
-    discoveredSources: discoveredNow ? sourceIds : cached?.discoveredSources ?? (cached ? [] : sourceIds),
+    discoveredAt: discoveredNow && interval ? now : cached?.discoveredAt ?? 0,
+    discoveredSources: asked,
+    discoveryRetryAt: retries,
   });
   return full;
 }
@@ -1300,8 +1328,8 @@ export function matchingWork(items, saved) {
  * يردّ خلال 15 ثانية يُتجاوز بلا أن يؤخّر غيره.
  * @returns {Promise<Array<{sourceId, label, manga}>>}
  */
-export function discoverEditions(v35work, { refresh = false, arabicOnly = false } = {}) {
-  const key = arabicOnly?`${v35work.id}|ar`:v35work.id;
+export function discoverEditions(v35work, { refresh = false, arabicOnly = false, only = null } = {}) {
+  const key = `${arabicOnly?`${v35work.id}|ar`:v35work.id}${only ? `|${[...only].sort().join(',')}` : ''}`;
   if(refresh)discovered.delete(key);
   if (discovered.has(key)) return discovered.get(key);
   const promise = (async () => {
@@ -1309,16 +1337,21 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false 
     const variants = titleVariants(v35work);
     if (!variants.length) return [];
     const known = new Set((v35work._work?.editions ?? []).map((e) => e.sourceId));
-    const others = (await sources()).filter((s) => !known.has(s.id)&&(!arabicOnly||arabicSource(s.id)));
+    const others = (await sources()).filter((s) => !known.has(s.id)&&(!arabicOnly||arabicSource(s.id))&&(!only||only.has(String(s.id))));
     // العنوان كما يُكتب أولًا (بعض المواقع تطابق النص حرفيًّا)، ثم بلا رموز،
     // ثم عنوان النسخة الثانية إن اختلف — ثلاثة أسئلة على الأكثر لكل مصدر
     const queries = [...new Set([variants[0].trim(), normalizeTitle(variants[0]), variants[1]?.trim()].filter(Boolean))].slice(0, 3);
-    const { ok } = await gather(others, async (source) => {
+    const ask = async (source) => {
       const candidates = new Map();
+      // «سُئل» = ردّ فعلًا على سؤال واحد على الأقل. مهلة أو خطأ في كل الأسئلة ليس جوابًا «ليس عندي»: كان يُحسب
+      // مسؤولًا فلا يُسأل 12 ساعة، فإضافة جديدة تفوت مهلة أول تحميل لها تغيب عن العمل (بلاغ المالك 21 نوفمبر)
+      let answered = false;
       for (const query of queries) {
         const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS).catch(() => null);
+        if (page) answered = true;
         for (const manga of page?.mangas ?? []) candidates.set(manga.url || normalizeTitle(manga.title), manga);
       }
+      if (!answered) throw new Error('unanswered');
       const index = canonicalIndex({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet() });
       const base = (v35work._work?.editions ?? []).map((e) => index.add(e)?.key).filter(Boolean);
       if (!base.length) base.push(index.add({ sourceId: 'known-work', manga: { title: variants[0], altNames: variants.slice(1) } }).key);
@@ -1335,10 +1368,22 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false 
       // silently select whichever result the source happened to return first.
       const hit = exact.length === 1 ? exact[0] : exact.length === 0 && matches.length === 1 && sameKey.length === 1 ? sameKey[0] : null;
       return hit ? { sourceId: source.id, label: source.label, manga: hit.manga } : null;
+    };
+    const first = await gather(others, ask);
+    // جولة ثانية فورًا لمن لم يرد: أول بحث في إضافة لم تُحمَّل بعد يفوت مهلته وهو يفك حزمتها، وبعدها صارت جاهزة
+    const second = first.failed.length ? await gather(first.failed.map((r) => r.source), ask) : { ok: [], failed: [] };
+    const ok = [...first.ok, ...second.ok];
+    const failed = second.failed;
+    const found = ok.map((r) => r.value).filter(Boolean);
+    // من ردّ ومن لم يرد: الأول لا يُسأل حتى موعد الإعادة، والثاني يُسأل في الفتحة التالية (loadWork)
+    // خاصيتان غير قابلتين للعدّ: النتيجة تبقى قائمة نسخ عادية لمن يقارنها أو يمرّ عليها
+    return Object.defineProperties(found, {
+      answered: { value: ok.map((r) => String(r.source.id)) },
+      unanswered: { value: failed.map((r) => String(r.source.id)) },
     });
-    return ok.map((r) => r.value).filter(Boolean);
   })();
-  promise.catch(() => discovered.delete(key));
+  // نتيجة فيها من لم يرد لا تُحفظ للجلسة: الفتحة التالية تسأله من جديد
+  promise.then((out) => { if (out?.unanswered?.length && discovered.get(key) === promise) discovered.delete(key); }, () => discovered.delete(key));
   discovered.set(key, promise);
   return promise;
 }
