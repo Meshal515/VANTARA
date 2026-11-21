@@ -236,6 +236,10 @@ const TAB_GROUPS = Object.freeze([
   { sel: '.mw-tabs', item: 'button', padX: 12, h: 34 },
   { sel: '.uv-tabs', item: 'button', padX: 12, h: 34 },
   { sel: '.sx-tabs', item: '.sx-tab', padX: 10, h: 32 },
+  { sel: '.ins-tabs', item: 'button', padX: 12, h: 34 },
+  { sel: '.us-seg', item: 'button', padX: 12, h: 34 },
+  { sel: '.ul-shelves', item: '.ul-shelf', padX: 12, h: 34 },
+  { sel: '.mw-ranges', item: 'button', fill: true },
   { sel: '.drawer-sections', item: '.drawer-section', fill: true, tone: true },
 ]);
 const TAB_SEL = TAB_GROUPS.map((g) => g.sel).join(',');

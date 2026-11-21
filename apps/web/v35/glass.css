@@ -294,11 +294,11 @@ html[data-material='glass'] .v35 .rf-dock {
 }
 
 /* ── عدسة الأقسام المجزأة (bindGlassTabs في glass.js): م1 تنزلق بنابض CSS، بلون القسم ── */
-html[data-material='glass'] .v35 :is(.library-tabs, .mw-tabs, .uv-tabs, .sx-tabs, .drawer-sections),
+html[data-material='glass'] .v35 :is(.library-tabs, .mw-tabs, .uv-tabs, .sx-tabs, .ul-shelves, .mw-ranges, .drawer-sections),
 html[data-material='glass'] .v35 .cn-kinds:not(.cn-hero-alt > .cn-kinds) {
   position: relative;
 }
-html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .drawer-sections) > :not(.g-seg) {
+html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .mw-ranges, .drawer-sections) > :not(.g-seg) {
   position: relative;
   z-index: 1;
 }
@@ -330,7 +330,7 @@ html[data-material='glass'] .v35 .drawer-sections .g-seg {
   border-radius: var(--r-md);
 }
 /* التحديد القديم يُخفى في Glass وحده: الخط تحت الكلمة، والتعبئة، وحلقة القسم في الدرج */
-html[data-material='glass'] .v35 :is(.library-tab, .cn-kind, .mw-tabs button, .uv-tabs button)::after {
+html[data-material='glass'] .v35 :is(.library-tab, .cn-kind, .mw-tabs button, .uv-tabs button, .ins-tabs button, .us-seg button)::after {
   display: none;
 }
 html[data-material='glass'] .v35 .social-tab.active {
@@ -471,3 +471,36 @@ html[data-material='glass'] .v35 :is(.header, .page-top) :is(.header-start, .hea
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
+
+/* ── إكمال التغطية (قياس glass-cover.mjs على بقية الصفحات) ── */
+/* نطاقات الفصول: العدسة خلف المختار، والمختار بلا تعبئته القديمة ونصه مقروء فوق الزجاج */
+html[data-material='glass'] .v35 .mw-ranges button.on {
+  background: transparent;
+  color: var(--text-1);
+}
+/* «المظهر الموحد» يزيل خلفية الأدوات وضبابها بقواعد بمعرّف (#detail) أقوى (unified-look.css)؛ في Glass تبقى زجاجًا */
+html[data-material='glass'] .v35 :is(.aw, .cn-detail, #detail)[data-unified] :is(.aw-bar, .cn-detail-bar) .aw-tools {
+  background: var(--g-tint) !important;
+  box-shadow: var(--g-rim), var(--g-lift) !important;
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+}
+html[data-material='glass'] .v35 :is(.aw, .cn-detail, #detail)[data-unified] :is(.aw-bar, .cn-detail-bar) > .icon-btn {
+  filter: none !important;
+  background: var(--g-tint) !important;
+  box-shadow: var(--g-rim), var(--g-lift) !important;
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
+}
+html[data-material='glass'] .v35 :is(.aw, .cn-detail, #detail)[data-unified] :is(.aw-bar, .cn-detail-bar) .aw-tool {
+  filter: none !important;
+}
+/* أزرار رأس الحلقات (البحث في الحلقات والترتيب) في «المسلسل أولًا»: دوائر م2 */
+html[data-material='glass'] .v35 .cn-eps-head .icon-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+
