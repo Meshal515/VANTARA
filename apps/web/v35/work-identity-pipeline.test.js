@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const store = vi.hoisted(() => ({ works: new Map(), kv: new Map() }));
-vi.mock('../lib/extension-engine.js', () => ({ default: { isAvailable: () => true, sources: vi.fn(), search: vi.fn(), chapters: vi.fn(), series: vi.fn(), catalogue: vi.fn(), onSourcesChanged: () => () => {} } }));
+vi.mock('../lib/extension-engine.js', () => ({ default: { isAvailable: () => true, sources: vi.fn(), search: vi.fn(), chapters: vi.fn(), series: vi.fn(), catalogue: vi.fn(), latest: vi.fn(), prepare: vi.fn(), onSourcesChanged: () => () => {} } }));
 vi.mock('../lib/chapter-store.js', () => ({
   readWork: vi.fn(async (id) => store.works.get(id) ?? null),
   writeWork: vi.fn(async (id, value) => { store.works.set(id, { ...value, at: Date.now() }); }),
@@ -26,7 +26,8 @@ import engine from '../lib/extension-engine.js';
 import { normalizeTitle } from '../lib/catalog.js';
 import { simulate, measure } from '../lib/fixtures/manga-identity-sim.js';
 import { learnAliases, noteOfficialIds } from '../lib/manga-alias-store.js';
-import { browse, loadWork, resetSources } from './works.js';
+import { browse, browseLive, loadWork, resetSources, setSharedLatest } from './works.js';
+import { createSourceLatest } from './source-latest.js';
 
 const { works } = JSON.parse(readFileSync(new URL('../lib/fixtures/manga-identity-bench.json', import.meta.url), 'utf8'));
 const byAl = new Map(works.map((w) => [w.al, w]));
@@ -55,6 +56,80 @@ function sourcesModel() {
 }
 
 const truthCard = (card) => ({ editions: card._work.editions.map((e) => ({ al: e.manga.al, manga: e.manga })) });
+
+describe('البطاقة العامة مع مصادر مثبّتة من مستودع', () => {
+  const mangalek = 'eu.kanade.tachiyomi.extension.ar.mangalek';
+  const million = 'eu.kanade.tachiyomi.extension.all.mangamillion#8929911308540155494';
+  const hizo = 'eu.kanade.tachiyomi.extension.ar.hizomanga#4177563748162518441';
+  const workTitle = 'Spy x Family';
+  const listing = (sourceId) => ({ mangas: [{ title: workTitle, url: { [mangalek]: '/manga/spy-x-family', [million]: '/title/8173', [hizo]: '/series/42' }[sourceId] }], hasNextPage: false, page: 1 });
+  const chapters = (manga) => [{ url: `${manga.url}/1`, chapterNumber: 1, name: '1' }];
+
+  function device({ coldMs = 21_000, snapshot = [mangalek] } = {}) {
+    resetSources();
+    store.works.clear();
+    engine.sources.mockResolvedValue([
+      { id: mangalek, lang: 'ar', label: 'مانجا ليك', ready: true },
+      { id: million, lang: 'all', label: 'Manga Million', ready: false, user: true, filler: true },
+      { id: hizo, lang: 'ar', label: 'Hizo Manga', ready: true, user: true },
+    ]);
+    // محرك أندرويد ينتظر فك الحزمة في أول طلب، أيًا كانت العملية التي طلبتها.
+    const ready = new Promise((resolve) => setTimeout(resolve, coldMs));
+    const cold = async (id) => { if (id === million) await ready; };
+    engine.prepare.mockImplementation(cold);
+    engine.latest.mockImplementation(async (id) => { await cold(id); return listing(id); });
+    engine.search.mockImplementation(async (id) => { await cold(id); return listing(id); });
+    engine.series.mockImplementation(async (id, manga) => { await cold(id); return { manga, chapters: chapters(manga) }; });
+    engine.chapters.mockImplementation(async (id, manga) => { await cold(id); return chapters(manga); });
+    setSharedLatest(createSourceLatest({
+      latestSnapshots: async () => ({ sources: snapshot.map((sourceId) => ({ sourceId, value: listing(sourceId), fetchedAt: Date.now() })) }),
+      claimLatest: async () => { throw new Error('http_400'); },
+    }));
+  }
+
+  async function runOnColdDevice(test, options) {
+    vi.useFakeTimers();
+    try {
+      device(options);
+      await test();
+    } finally {
+      setSharedLatest(null);
+      resetSources();
+      store.works.clear();
+      vi.useRealTimers();
+    }
+  }
+
+  it('يضم الإضافة الباردة إلى بطاقة آخر التحديثات نفسها حتى حين يرفض خادم اللقطة معرّفها', async () => {
+    await runOnColdDevice(async () => {
+      const latest = browseLive({ kind: 'latestListing' }, () => {}, { concurrency: 3 });
+      await vi.advanceTimersByTimeAsync(50_000);
+      const { items } = await latest;
+      expect(items.map((card) => card.title.english)).toEqual([workTitle]);
+      expect(items[0]._work.editions.map((edition) => edition.sourceId)).toEqual([mangalek, hizo, million]);
+      expect((await loadWork(items[0]))._sources.map((source) => source.sourceId)).toEqual([mangalek, hizo, million]);
+    });
+  });
+
+  it('تبحث البطاقة العامة عن الإضافة غير المدرجة في آخر التحديثات وتضم فصولها', async () => {
+    await runOnColdDevice(async () => {
+      const work = loadWork({ id: 'ext:spy x family', title: { english: workTitle }, _work: { key: 'spy x family', title: workTitle, editions: [{ sourceId: mangalek, label: 'مانجا ليك', manga: listing(mangalek).mangas[0] }] } });
+      await vi.advanceTimersByTimeAsync(50_000);
+      const full = await work;
+      expect(full._sources.map((source) => [source.sourceId, source.count])).toEqual([[mangalek, 1], [hizo, 1], [million, 1]]);
+    });
+  });
+
+  it('يقرأ فصول الإضافة التي جاءت نسختها من اللقطة قبل اكتمال تحميلها على الجهاز', async () => {
+    await runOnColdDevice(async () => {
+      const { items } = await browseLive({ kind: 'latestListing' });
+      expect(items[0]._work.editions.map((edition) => edition.sourceId)).toContain(million);
+      const work = loadWork(items[0]);
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect((await work)._sources.map((source) => [source.sourceId, source.count])).toEqual([[mangalek, 1], [hizo, 1], [million, 1]]);
+    }, { coldMs: 35_000, snapshot: [mangalek, million, hizo] });
+  });
+});
 
 describe('plan B, end to end on 1911 real works', () => {
   let model;
@@ -156,7 +231,7 @@ describe('plan B, end to end on 1911 real works', () => {
     expect(wrong).toBe(0);
     // المتجانسات (اسم واحد لعملين) لا تفرّقها الأسماء: تُعدّ ولا يُسمح بزيادتها
     expect(homonyms).toBeLessThanOrEqual(68);
-    expect(found / expected).toBeGreaterThanOrEqual(0.966);
+    expect(found).toBeGreaterThanOrEqual(3608);
   });
 
   it('verification costs little: about one detail request per opened work, not one per source', () => {

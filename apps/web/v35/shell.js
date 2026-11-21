@@ -1792,6 +1792,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
+  let mangaWorkOpen = 0;
   async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false, local = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
@@ -1802,6 +1803,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (isRemovedAny([String(work?.id ?? ''), work?._work?.key, ...(work?._work?.keys ?? [])].filter(Boolean))) return toast('هذا العمل غير متاح');
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
+    const opening = ++mangaWorkOpen;
+    const isCurrentWork = () => opening === mangaWorkOpen && state.current?.id === work.id;
     // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة، والفصول المحمّلة وحدها تُقرأ من الجهاز
     state.localManga = local;
@@ -1865,14 +1868,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
         toast(readLanguage==='ar'?`الفصل ${number} غير متاح في المصادر العربية حاليًا؛ قد يكون مقفلًا عند المصدر`:'هالفصل مو متوفر في مصادرنا الحين');
       }
     };
+    let deferredWork = null;
     const show = (full, { settled }) => {
-      if (state.current?.id !== work.id) return;
+      if (!isCurrentWork()) return;
       if (!full._chapters?.length && !settled) return;
       // والقارئ مفتوح: تُحفظ النسخة الأحدث (يقرؤها القارئ بـgetWork) بلا رسم الصفحة التي خلفه
       if (currentPage() === 'reader') { state.current = full; return; }
       // الصفحة تتحرك (تدخل أو تغادر): تُرسم الفصول حين تنتهي الحركة، لا في منتصفها (page-motion.js: afterMotion)
       const page = q('detail');
-      if (motionActive(page)) return void afterMotion(page, () => { if (state.current?.id === work.id && currentPage() === 'detail') show(state.current?._chapters ? state.current : full, { settled }); });
+      if (motionActive(page)) {
+        const alreadyQueued = deferredWork !== null;
+        deferredWork = { full, settled };
+        if (!alreadyQueued) afterMotion(page, () => {
+          const latest = deferredWork;
+          deferredWork = null;
+          if (currentPage() === 'detail') show(latest.full, { settled: latest.settled });
+        });
+        return;
+      }
       // غادرها المستخدم: تُحفظ النسخة الأحدث بلا رسم صفحة لا تُرى
       if (currentPage() !== 'detail') { state.current = full; return; }
       const first = !state.current?._chapters;
@@ -1890,7 +1903,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     try {
       const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null, fresh: true });
-      if (state.current?.id !== work.id) return;
+      if (!isCurrentWork()) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
       if (!full._chapters?.length) {
