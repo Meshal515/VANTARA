@@ -376,6 +376,71 @@ class PlayerActivity : Activity() {
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
             main.removeCallbacksAndMessages(embeddedCues)
             selectedAddonSubtitle = track.id
+            ownSidecar = null
+            ownCues = cues
+            main.removeCallbacks(subsTick); main.post(subsTick)
+            if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+        }
+    }
+
+    /** الملف الجانبي المرفق بالمصدر الذي نعرضه بأنفسنا الآن (بعد طلب «أبكر»)، أو null. */
+    private var ownSidecar: com.vantara.anime.stream.TrackRef? = null
+    private var sidecarLoading = false
+    private val sidecarClient by lazy { OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build() }
+
+    /** مسار Media3 المختار إن كان ملفًا جانبيًا مرفقًا بالمصدر (له رابط)، لا ترجمة مدمجة في الفيديو. */
+    private fun selectedSidecar(): com.vantara.anime.stream.TrackRef? {
+        val c = current ?: return null
+        if (ownCues != null || player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return null
+        for (g in player.currentTracks.groups) if (g.type == C.TRACK_TYPE_TEXT) for (i in 0 until g.length) {
+            if (!g.isTrackSelected(i)) continue
+            val f = g.getTrackFormat(i)
+            return SidecarSubtitle.of(c.subtitles, c.sourceName, f.label, f.language)
+        }
+        return null
+    }
+
+    /**
+     * «أبكر» على ترجمة مرفقة بالمصدر: يُحمَّل ملفها بترويسات المصدر ويُعرض بأنفسنا، فتتحرك بالاتجاهين. الفيديو لا
+     * يُعاد تحضيره. فشل التحميل يُقال ويبقى المسار كما كان (بموعده).
+     */
+    private fun takeOverSidecar() {
+        if (ownCues != null || sidecarLoading || subtitleDelayMs >= 0) return
+        val c = current ?: return
+        val track = selectedSidecar() ?: return
+        sidecarLoading = true
+        if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+        scope.launch {
+            val cues = withContext(Dispatchers.IO) {
+                runCatching {
+                    // تنزيل (فيلم محمّل مع ترجمته من SubSource وغيره): الترجمة ملف في مجلد التطبيق نفسه
+                    if (track.url.startsWith("file:")) {
+                        val file = File(checkNotNull(android.net.Uri.parse(track.url).path)).canonicalFile
+                        val own = listOfNotNull(filesDir, cacheDir, getExternalFilesDir(null)).map { it.canonicalPath }
+                        check(own.any { file.path.startsWith(it + File.separator) }) { "ملف ترجمة خارج مجلد التطبيق" }
+                        check(file.length() <= 4L * 1024 * 1024)
+                        return@runCatching SubtitleText.parse(SidecarSubtitle.decode(file.readBytes(), null, SidecarSubtitle.isArabic(track.lang)))
+                    }
+                    val request = okhttp3.Request.Builder().url(track.url).get().apply { c.headers.forEach { (k, v) -> header(k, v) } }.build()
+                    sidecarClient.newCall(request).execute().use { response ->
+                        check(response.isSuccessful) { "HTTP ${response.code}" }
+                        val body = checkNotNull(response.body)
+                        check(body.contentLength() <= 4L * 1024 * 1024)
+                        val bytes = body.source().let { src -> src.request(4L * 1024 * 1024 + 1); check(src.buffer.size <= 4L * 1024 * 1024); src.readByteArray() }
+                        SubtitleText.parse(SidecarSubtitle.decode(bytes, body.contentType()?.charset(null), SidecarSubtitle.isArabic(track.lang)))
+                    }
+                }.getOrNull()
+            }
+            sidecarLoading = false
+            if (current?.id != c.id || ownCues != null) return@launch
+            if (cues.isNullOrEmpty()) {
+                message("تعذّر تقديم هذه الترجمة؛ تبقى بموعدها")
+                if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+                return@launch
+            }
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+            main.removeCallbacksAndMessages(embeddedCues)
+            ownSidecar = track
             ownCues = cues
             main.removeCallbacks(subsTick); main.post(subsTick)
             if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
@@ -383,6 +448,9 @@ class PlayerActivity : Activity() {
     }
 
     private fun stopOwnSubtitles() {
+        // كنا نعرض ملفًا مرفقًا بدل مسار Media3 (عطّلناه): يعود المسار مفعّلًا، فالحلقة التالية لا تفقد ترجمتها
+        if (ownSidecar != null) player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
+        ownSidecar = null
         ownCues = null
         main.removeCallbacks(subsTick)
         if (::subsView.isInitialized) showSub("")
@@ -850,6 +918,8 @@ class PlayerActivity : Activity() {
             }
             updateQualityLabel()
             autoArabicSubtitle()
+            // التقديم المضبوط يبقى: مسار مرفق جديد (حلقة تالية أو تبديل مسار) يُعرض بأنفسنا كذلك
+            if (subtitleDelayMs < 0) takeOverSidecar()
             val selected = selectedAddonSubtitle ?: return
             if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return
             for (g in tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }) for (i in 0 until g.length) {
@@ -2171,7 +2241,8 @@ class PlayerActivity : Activity() {
         for (g in text) for (i in 0 until g.length) {
             val f = g.getTrackFormat(i)
             if (f.id?.startsWith("addon|") == true) continue
-            val on = ownCues == null && !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) && g.isTrackSelected(i)
+            val shownByUs = ownSidecar != null && ownSidecar == current?.let { SidecarSubtitle.of(it.subtitles, it.sourceName, f.label, f.language) }
+            val on = shownByUs || (ownCues == null && !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) && g.isTrackSelected(i))
             val name = f.label ?: f.language?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) } ?: "ترجمة ${i + 1}"
             body.addView(sheetRow(name, null, trailing = if (on) check() else null, selected = on) {
                 subtitleUserChoice = true
@@ -2199,11 +2270,16 @@ class PlayerActivity : Activity() {
         val shift = { d: Long ->
             subtitleDelayMs = (subtitleDelayMs + d).coerceIn(-30_000, 30_000)
             main.removeCallbacksAndMessages(embeddedCues)
+            // ترجمة مرفقة بالمصدر: «أبكر» يحمّل ملفها ويعرضها بأنفسنا فتتقدّم فعلًا
+            if (subtitleDelayMs < 0) takeOverSidecar()
             sheet.refresh()
         }
         body.addView(choiceRow(listOf("أبكر 0.5", "أبكر 0.1", "أتأخر 0.1", "أتأخر 0.5"), -1) { i -> shift(listOf(-500L, -100L, 100L, 500L)[i]) })
         body.addView(label("الترجمة تظهر بعد الكلام ← «أبكر». تسبقه ← «أتأخر».", 12f, Tone.TEXT_3).apply { setPadding(0, dp(8), 0, 0) })
-        if (ownCues == null && subtitleDelayMs < 0) body.addView(label("ترجمة الفيديو المدمجة لا تُقدَّم قبل موعدها؛ التقديم يعمل مع الترجمات الإضافية.", 12f, Tone.WARN).apply { setPadding(0, dp(6), 0, 0) })
+        if (ownCues == null && subtitleDelayMs < 0) {
+            val note = if (sidecarLoading) "نجهّز الترجمة لتقديمها…" else "ترجمة الفيديو المدمجة لا تُقدَّم قبل موعدها؛ التقديم يعمل مع الترجمات الإضافية."
+            body.addView(label(note, 12f, if (sidecarLoading) Tone.TEXT_3 else Tone.WARN).apply { setPadding(0, dp(6), 0, 0) })
+        }
         if (subtitleDelayMs != 0L) body.addView(pillButton("تصفير التوقيت", primary = false) { subtitleDelayMs = 0; main.removeCallbacksAndMessages(embeddedCues); sheet.refresh() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
 
         body.addView(sectionLabel("الحجم"))
