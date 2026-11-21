@@ -358,6 +358,11 @@ data class UserExtensionState(
     val extensions: List<UserExtension> = emptyList(),
     /** Hides only the old optional catalogue; installed packages and account choices are retained. */
     val readyCatalogDismissed: Boolean = false,
+    /**
+     * حزم كانت مدمجة ورُحّلت (BuiltinMigration) أو ثُبّتت/حُذفت كإضافة: لها حالة واحدة بعدها، مثبّتة أو لا، ومسار
+     * المدمجة لها مغلق فلا تعود وحدها بعد حذفها.
+     */
+    val formerBuiltins: List<String> = emptyList(),
 )
 
 /** الحالة في ملف خاص بالتطبيق؛ الكتابة ذرّية فلا يفسدها إغلاق مفاجئ. */

@@ -92,6 +92,9 @@ class ExtensionEnginePlugin : Plugin() {
     private val builtinSpecs by lazy { BuiltinSourceRefresh(java.io.File(context.filesDir, "extensions/builtin-refresh.json")) }
     private val builtinVisibility by lazy { BuiltinVisibility(java.io.File(context.filesDir, "extensions/builtin-visible.json")) }
 
+    /** حزمة مدمجة سابقًا صارت إضافة (رُحّلت أو ثُبّتت/حُذفت كإضافة): مسار المدمجة لها مغلق (BuiltinMigration). */
+    private fun builtinClosed(pkg: String): Boolean = runCatching { pkg in userStore.state.formerBuiltins }.getOrDefault(false)
+
     /** نسخة الحزمة موجودة على الجهاز (متحقَّق منها) أو داخل التطبيق: تحميلها لا يلمس الشبكة. */
     private fun hasLocalCopy(pkg: String): Boolean {
         val spec = packageSpec(pkg)?.let { builtinSpecs.current(it) } ?: return false
@@ -134,7 +137,7 @@ class ExtensionEnginePlugin : Plugin() {
             // المصادر المدمجة سابقًا: ما أضافه الحساب الحالي فقط (تبلّغه الواجهة بـsetVisibleBuiltins). قبل أول تبليغ
             // لا شيء (EE1): حساب جديد = صفر مصادر، والحساب الموجود تُجهَّز مصادره عند تبليغ اختياره (stageVisible).
             // يُقرأ الاختيار الحالي في كل نداء: التحديث اليومي بعد دقيقة يرى ما بلّغته الواجهة في الأثناء.
-            fun eager(pkg: String) = builtinVisibility.read()?.contains(pkg) ?: false
+            fun eager(pkg: String) = !builtinClosed(pkg) && (builtinVisibility.read()?.contains(pkg) ?: false)
             for (spec in SPIKE_SOURCES) {
                 if (spec.blockedReason != null || !eager(spec.pkg)) continue
                 launch { runCatching { obtain(spec.pkg) } }
@@ -183,7 +186,7 @@ class ExtensionEnginePlugin : Plugin() {
                 }
                 val takenByInstalled = st.extensions.flatMap { ext -> visibleIds(ext).map { it.second } }.filter { '#' !in it }.toSet()
                 for (spec in SPIKE_SOURCES) {
-                    if (spec.blockedReason != null || spec.pkg in takenByInstalled) continue
+                    if (spec.blockedReason != null || spec.pkg in takenByInstalled || spec.pkg in st.formerBuiltins) continue
                     val installed = artifact(spec)
                     list.put(
                         JSObject()
@@ -206,7 +209,7 @@ class ExtensionEnginePlugin : Plugin() {
                 for (filler in FILLER_SOURCES) {
                     val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
                     val id = "${filler.pkg}@${filler.lang}"
-                    if (id in takenByInstalled) continue
+                    if (id in takenByInstalled || filler.pkg in st.formerBuiltins) continue
                     val installed = artifact(spec)
                     list.put(
                         JSObject()
@@ -291,6 +294,47 @@ class ExtensionEnginePlugin : Plugin() {
                 loader.prune(pkg, emptySet())
                 call.resolve()
             } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+        }
+    }
+
+    /**
+     * المرحلة 2 من «صفر مصادر مدمجة» (BuiltinMigration): الحزم المدمجة الظاهرة لهذا الحساب (قرار الواجهة من المزامنة،
+     * lib/source-entitlement.js) تصير إضافات مثبّتة بالنسخة نفسها التي على الجهاز. لا شبكة ولا تحميل كود: السجل يشير
+     * إلى البصمة الحالية، والنسخة تُقرأ أو تُنزَّل موثّقة بها عند أول طلب كما كانت. `keepRepository`: الحساب القديم
+     * و«بلا حساب» يُحفظ لهما مستودع Keiyoushi (قرار المالك 21 نوفمبر). فشل حزمة لا يوقف غيرها ولا يخفيها: تبقى مدمجة
+     * وتُعاد في التبليغ التالي.
+     */
+    @PluginMethod
+    fun migrateBuiltins(call: PluginCall) {
+        val array = call.getArray("pkgs") ?: return call.reject("pkgs مطلوبة")
+        val keepRepository = call.getBoolean("keepRepository", false) == true
+        val pkgs = (0 until array.length()).mapNotNull { array.optString(it).takeIf { pkg -> packageSpec(pkg) != null && packageSpec(pkg)?.blockedReason == null } }.distinct()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val failed = JSArray()
+                val records = pkgs.mapNotNull { pkg ->
+                    runCatching {
+                        val base = packageSpec(pkg)!!
+                        val current = localArtifactSpec(base) ?: builtinSpecs.current(base)
+                        val previous = builtinSpecs.previousOf(base)?.takeIf { loader.readVerifiedCache(it) != null }
+                        val loadedSources = packages[pkg]?.map { UserSource(it.id.toString(), it.name, it.lang) }
+                        BuiltinMigration.record(base, current, previous, BuiltinMigration.sourcesOf(pkg, loadedSources))
+                            .takeIf { it.sources.isNotEmpty() } ?: error("no declared source")
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        failed.put(pkg)
+                        android.util.Log.w("ExtensionEngine", "BUILTIN_MIGRATION_DEFERRED:$pkg ${it.javaClass.simpleName}")
+                    }.getOrNull()
+                }
+                var outcome: BuiltinMigration.Outcome? = null
+                userStore.update { st -> BuiltinMigration.apply(st, records, keepRepository).also { outcome = it }.state }
+                val done = outcome!!
+                if (done.migrated.isNotEmpty()) android.util.Log.i("ExtensionEngine", "BUILTIN_MIGRATED:${done.migrated.joinToString(",")}")
+                call.resolve(JSObject().put("migrated", JSArray(done.migrated)).put("skipped", JSArray(done.skipped)).put("failed", failed))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                call.reject(t.message ?: t.readable())
+            }
         }
     }
 
@@ -400,7 +444,7 @@ class ExtensionEnginePlugin : Plugin() {
                             .put("nsfw", ext.nsfw)
                             .put("anime", ext.anime)
                             .put("arabic", ext.sources.any { it.lang.equals("ar", ignoreCase = true) })
-                            .put("builtin", packageSpec(ext.pkg) != null)
+                            .put("builtin", packageSpec(ext.pkg) != null && mine == null && !builtinClosed(ext.pkg))
                             .put("installed", mine?.versionName)
                             .put("update", mine != null && mine.versionName != ext.version)
                             .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name }))
@@ -432,7 +476,6 @@ class ExtensionEnginePlugin : Plugin() {
      * محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم).
      */
     private suspend fun stageInstall(base: String, pkg: String): StagedInstall {
-        require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
         val token = userStore.beginInstall(pkg, base)
         val repo = token.repository
         val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
@@ -614,8 +657,9 @@ class ExtensionEnginePlugin : Plugin() {
     @PluginMethod
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
-        if (packageSpec(pkg) != null) return call.reject("احذف هذه الإضافة من قائمة مصادرها السابقة")
         try {
+            // EE2: الحزمة المدمجة سابقًا تُحذف كأي إضافة، ولا تعود مدمجة بعدها (BuiltinMigration)
+            if (packageSpec(pkg) != null) userStore.update { st -> if (pkg in st.formerBuiltins) st else st.copy(formerBuiltins = st.formerBuiltins + pkg) }
             userStore.uninstall(pkg, this@ExtensionEnginePlugin, {
                 forget(pkg)
                 owners.values.removeAll { it == pkg }
@@ -1192,6 +1236,7 @@ class ExtensionEnginePlugin : Plugin() {
             val ext = userStore.extension(userPkg)
             if (ext == null) {
                 // قراءة الصيغتين (LegacySourceIds): pkg#id لحزمة مدمجة غير مثبّتة من مستودع يُحمَّل من المدمجة نفسها
+                if (builtinClosed(userPkg)) error(NOT_INSTALLED)
                 val base = packageSpec(userPkg) ?: error("unknown sourceId: $sourceId")
                 val spec = builtinSpecs.current(base)
                 spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
@@ -1222,6 +1267,8 @@ class ExtensionEnginePlugin : Plugin() {
             noteHost(source)
             return source
         }
+        // رُحّلت ثم حُذفت: لا تعود مدمجة
+        if (builtinClosed(pkg)) error(NOT_INSTALLED)
         // المواصفة المضمّنة، أو آخر إصدار رسمي نُزّل من مستودع Keiyoushi وتحقق توقيعه (معرّف المصدر نفسه)
         val spec = builtinSpecs.current(packageSpec(pkg) ?: error("unknown sourceId: $sourceId"))
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
@@ -1492,7 +1539,7 @@ class ExtensionEnginePlugin : Plugin() {
         kotlinx.coroutines.delay(60_000)
         val index = runCatching { repoClient.read(BuiltinSourceRefresh.KEIYOUSHI_BASE) }.getOrNull() ?: return
         for (base in SPIKE_SOURCES + FILLER_PACKAGES) {
-            if (base.blockedReason != null || !eager(base.pkg) || userStore.extension(base.pkg) != null) continue
+            if (base.blockedReason != null || !eager(base.pkg) || userStore.extension(base.pkg) != null || builtinClosed(base.pkg)) continue
             runCatching { updateBuiltin(base, index) }
         }
         runCatching { stamp.parentFile?.mkdirs(); stamp.writeText(System.currentTimeMillis().toString()) }
@@ -1534,6 +1581,8 @@ class ExtensionEnginePlugin : Plugin() {
 
     private companion object {
         const val MAX_COVERS = 2000
+        /** مصدر حزمة رُحّلت ثم حُذفت: الواجهة تقول «ثبّته» لا خطأ مصدر. */
+        const val NOT_INSTALLED = "هذا المصدر غير مثبّت؛ ثبّته من صفحة الإضافات"
         val CACHE_EXTENSIONS = listOf("jpg", "webp", "png", "gif", "avif")
     }
 }

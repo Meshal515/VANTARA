@@ -1246,7 +1246,9 @@ test('Debug is separated from the bundled manga sources while keeping their reco
     'the official release is accepted only under the pinned Keiyoushi key');
   // المصادر الظاهرة للحساب تُجهَّز في الخلفية عند الإقلاع (تُنزّل إلى المخزن مرة)، والتحديث اليومي والذاتي باقيان
   // EE1: قبل أول تبليغ من الواجهة لا تحميل مسبق (حساب جديد = صفر)، والاختيار يُقرأ حيًّا في كل نداء
-  assert.match(plugin, /fun eager\(pkg: String\) = builtinVisibility\.read\(\)\?\.contains\(pkg\) \?: false/);
+  // المرحلة 2 (صفر مصادر مدمجة): الحزمة المرحّلة أو المحذوفة كإضافة مسارها المدمج مغلق، فلا تُحمَّل مدمجة ولا تعود وحدها
+  assert.match(plugin, /fun eager\(pkg: String\) = !builtinClosed\(pkg\) && \(builtinVisibility\.read\(\)\?\.contains\(pkg\) \?: false\)/);
+  assert.match(plugin, /if \(builtinClosed\(pkg\)\) error\(NOT_INSTALLED\)/);
   assert.match(plugin, /refreshBuiltinsDaily\(::eager\)/);
   assert.match(plugin, /refreshBuiltin\(call\.getString\("sourceId"\)\)/);
 });

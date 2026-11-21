@@ -80,7 +80,7 @@ export function choicesOf(settings) {
 export function decide({ account = null, settings = null, standalone = false } = {}) {
   const { added, removed } = choicesOf(settings);
   const state = standalone ? 'unknown' : cohortOf(account) ?? 'unknown';
-  return { state, added, removed };
+  return { state, added, removed, standalone: Boolean(standalone) };
 }
 
 /** هل يظهر هذا المصدر لهذا الحساب؟ غير المدمج يظهر دائمًا. */
@@ -107,9 +107,9 @@ export function notAddedError(id) {
 
 // ───────────── الحالة الحالية للتطبيق (يضبطها app.js من المزامنة) ─────────────
 
-let current = { state: 'unknown', added: new Set(), removed: new Set() };
+let current = { state: 'unknown', added: new Set(), removed: new Set(), standalone: false };
 const listeners = new Set();
-const signature = (d) => `${d.state}|${[...d.added].sort()}|${[...d.removed].sort()}`;
+const signature = (d) => `${d.state}|${d.standalone ? 1 : 0}|${[...d.added].sort()}|${[...d.removed].sort()}`;
 
 export function entitlement() {
   return current;
@@ -117,7 +117,7 @@ export function entitlement() {
 
 /** يضبط القرار الحالي، ويُعلم المشتركين فقط إن تغيّر فعلًا. */
 export function setEntitlement(next) {
-  const value = { state: next?.state ?? 'unknown', added: new Set(next?.added ?? []), removed: new Set(next?.removed ?? []) };
+  const value = { state: next?.state ?? 'unknown', added: new Set(next?.added ?? []), removed: new Set(next?.removed ?? []), standalone: Boolean(next?.standalone) };
   if (signature(value) === signature(current)) return false;
   current = value;
   for (const fn of listeners) { try { fn(current); } catch { /* مشترك معطوب لا يوقف الباقي */ } }
@@ -191,5 +191,5 @@ export async function choosePackage(pkg, on, context = choiceContext()) {
   // الاختيار يُطبَّق هنا فورًا لا بعد رجوعه من المزامنة: كانت «تثبيت» تبقى ظاهرة بعد الضغط حتى تدور المزامنة
   const added = new Set(current.added), removed = new Set(current.removed);
   if (on) { added.add(String(pkg)); removed.delete(String(pkg)); } else { removed.add(String(pkg)); added.delete(String(pkg)); }
-  setEntitlement({ state: current.state, added, removed });
+  setEntitlement({ state: current.state, added, removed, standalone: current.standalone });
 }
