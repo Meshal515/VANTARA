@@ -310,7 +310,8 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
   }
 
   // ---------- المستودعات والإضافات ----------
-  const repoJson = (r) => ({ url: r.url, name: r.name, ...(r.iconUrl ? { iconUrl: r.iconUrl } : {}) });
+  // البصمة علنية (مفتاح توقيع المستودع): مزامنة الإضافات بين الأجهزة تثبّتها فلا يُقبل مستودع غيّر مفتاحه
+  const repoJson = (r) => ({ url: r.url, name: r.name, fingerprint: r.fingerprint, ...(r.iconUrl ? { iconUrl: r.iconUrl } : {}) });
   async function repos() {
     const st = await load();
     return {
@@ -318,9 +319,11 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
       installed: st.extensions.map((x) => ({ pkg: x.pkg, name: x.name, version: x.version, repo: x.repo, ...(x.iconUrl ? { iconUrl: x.iconUrl } : {}) })),
     };
   }
-  const addRepo = ({ url } = {}) => exclusive(async () => {
+  const addRepo = ({ url, fingerprint = null } = {}) => exclusive(async () => {
     const root = repoLib.base(url);
     const { meta, list } = await client.read(root);
+    // من مزامنة الحساب: المفتاح الذي عرفه جهازك الآخر شرط، فمستودع غيّر مفتاحه لا يُضاف هنا بصمت
+    if (fingerprint && String(fingerprint).toLowerCase() !== String(meta.fingerprint).toLowerCase()) throw arabic('مفتاح توقيع المستودع لا يطابق ما في حسابك؛ لم يُضف.', 'MANGA_REPOSITORY_KEY_MISMATCH');
     const st = await load();
     const existing = st.repos.find((r) => r.url === root);
     if (existing && existing.fingerprint !== meta.fingerprint) throw arabic('تغيّر مفتاح توقيع المستودع؛ احتُفظ بالمستودع وإضافاته الحالية ولم يُعتمد المفتاح الجديد.', 'MANGA_REPOSITORY_KEY_CHANGED');
