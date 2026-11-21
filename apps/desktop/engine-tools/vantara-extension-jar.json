@@ -1,0 +1,12 @@
+{
+  "source": "VantaraExtensionJar.java",
+  "sourceSha256": "a05a45aac27f1b3de5af8df0a39681c82486b3f66550d2405732c2548a9f4c1d",
+  "jar": "vantara-extension-jar.jar",
+  "jarSha256": "8a02800c68b09d88756b01299586838c809015b9bf5cbe16ef78f68073d13077",
+  "bytes": 15976,
+  "javaRelease": 17,
+  "suwayomi": {
+    "version": "v2.4.2490",
+    "jarSha256": "825e00219bbac816a2405bb5deaf9ab304b864b7fafd03b1fb62f7727ff9c35e"
+  }
+}

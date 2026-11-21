@@ -55,7 +55,7 @@ function toManga(m) {
 }
 const toChapter = (c) => ({ url: c.url, name: c.name ?? '', dateUpload: Number(c.uploadDate) || 0, chapterNumber: Number.isFinite(c.chapterNumber) ? c.chapterNumber : -1, scanlator: c.scanlator ?? null });
 
-function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, now = Date.now }) {
+function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEvent = () => {}, now = Date.now }) {
   const stateFile = path.join(root, 'extensions.json');
   const apkDir = path.join(root, 'apks');
   const client = repoLib.createRepoClient({ fetchBytes });
@@ -65,6 +65,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
   const loadedIn = new Map();     // pkg → endpoint.base الذي حُمِّلت فيه
   const listings = new Map();     // source → 'SEARCH' | 'POPULAR' (مسار الكتالوج الكامل)
   const locks = new Map();        // عمل واحد = نداء واحد في كل مرة (حارس lib 1.6)
+  const conversions = new Map();  // pkg → آخر نتيجة لطبقة التحويل (للتشخيص)
 
   // ---------- الحالة على القرص ----------
   const empty = () => ({ version: 1, repos: [], extensions: [], updates: {} });
@@ -124,7 +125,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
    * رفع APK موقّع عبر GraphQL (installExternalExtension، مواصفة رفع الملفات المعيارية: operations وmap والملف). مسار
    * REST القديم /api/v1/extension/install أُزيل من Suwayomi بعد v2.4.2366 (ويندوز حقيقي: Not Found).
    */
-  async function uploadOnce(pkg, bytes, version) {
+  async function uploadOnce(pkg, bytes, version, kind = 'apk') {
     const form = new FormData();
     form.append('operations', JSON.stringify({
       query: 'mutation ($file: Upload!) { installExternalExtension(input: { extensionFile: $file }) { extension { pkgName isInstalled } } }',
@@ -132,7 +133,8 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     }));
     form.append('map', JSON.stringify({ 0: ['variables.file'] }));
     // الاسم يحمل الإصدار: Suwayomi يشتق منه اسم ملف jar، فإصداران مختلفان لا يتصادمان عند التحديث والرجوع
-    form.append('0', new Blob([bytes], { type: 'application/vnd.android.package-archive' }), `${pkg}-v${String(version ?? '0').replace(/[^\w.-]/g, '')}.apk`);
+    const type = kind === 'jar' ? 'application/java-archive' : 'application/vnd.android.package-archive';
+    form.append('0', new Blob([bytes], { type }), `${pkg}-v${String(version ?? '0').replace(/[^\w.-]/g, '')}.${kind}`);
     const r = await runtime.request('/api/graphql', { method: 'POST', body: form, timeout: 180_000 });
     const body = await r.json().catch(() => null);
     const installed = body?.data?.installExternalExtension?.extension;
@@ -146,7 +148,19 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
    * المحرك كله على ويندوز حقيقي، فلا تُشغَّل.
    */
   async function upload(pkg, bytes, version) {
-    const out = await uploadOnce(pkg, bytes, version);
+    // طبقة ويندوز (engine-tools/VantaraExtensionJar): تحويل APK إلى jar يصلح ما يكسره dex2jar في كود R8، بعد
+    // التحقق من التوقيع على APK الأصلي. فشل التحويل نفسه لا يمنع شيئًا: يُرفع APK فيحوّله Suwayomi بطريقته.
+    let jar = null;
+    if (convert) {
+      try {
+        const out = await convert(bytes, { pkg, version });
+        jar = out?.jar ?? null;
+        conversions.set(pkg, { ok: Boolean(jar), report: out?.report ?? null });
+      } catch (error) {
+        conversions.set(pkg, { ok: false, error: String(error?.message ?? error).slice(0, 300) });
+      }
+    }
+    const out = jar ? await uploadOnce(pkg, jar, version, 'jar') : await uploadOnce(pkg, bytes, version);
     if (!out.ok) throw arabic(out.verify ? 'هذه الإضافة لا تعمل في محرك ويندوز بعد (كودها لا يتحوّل سليمًا)؛ تعمل في تطبيق الجوال' : `المحرك لم يقبل الإضافة: ${cleanError(out.text)}`.trim(), out.verify ? 'ENGINE_VERIFY' : 'ENGINE_INSTALL');
   }
   async function engineUninstall(pkg) {
@@ -540,31 +554,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, onEvent = () => {}, n
     return true;
   }
 
-  /**
-   * تشخيص لإثبات ويندوز وحده (ليس في METHODS فلا تصله الواجهة): تثبيت إضافة بمتجر Suwayomi نفسه ثم إزالتها ومتجره،
-   * لمقارنة طريقه بطريقنا (رفع APK موقّع) حين يرفض المحرك الإضافات.
-   */
-  async function diagnoseStoreInstall(indexUrl, pkg) {
-    const out = { indexUrl, pkg };
-    try {
-      const added = await gql(`mutation { addExtensionStore(input:{indexUrl:${gqlString(indexUrl)}}) { extensionStore { indexUrl } } }`);
-      out.store = added.data?.addExtensionStore?.extensionStore?.indexUrl ?? null;
-      if (added.errors.length) out.storeError = cleanError(added.errors[0]?.message);
-      const fetched = await gql('mutation { fetchExtensions(input:{}) { extensions { pkgName } } }');
-      out.listed = (fetched.data?.fetchExtensions?.extensions ?? []).some((x) => x.pkgName === pkg);
-      const done = await gql(`mutation { updateExtension(input:{id:${gqlString(pkg)}, patch:{install:true}}) { extension { pkgName isInstalled } } }`);
-      out.installed = done.data?.updateExtension?.extension?.isInstalled === true;
-      if (done.errors.length) out.installError = cleanError(done.errors[0]?.message);
-      out.sources = await engineSourceIds(pkg);
-      out.recent = String(runtime.recentOutput?.() ?? '').split(/\r?\n/).filter((l) => /VerifyError|Exception|Reason:|not assignable|IncompatibleClassChange/.test(l)).slice(-6);
-    } finally {
-      await engineUninstall(pkg).catch(() => {});
-      await gql(`mutation { removeExtensionStore(input:{indexUrl:${gqlString(out.store ?? indexUrl)}}) { extensionStore { indexUrl } } }`).catch(() => {});
-    }
-    return out;
-  }
-
-  return { call, media, autoUpdate, warmUp, diagnoseStoreInstall, isEngineSource, METHODS: Object.keys(METHODS) };
+  return { call, media, autoUpdate, warmUp, isEngineSource, conversion: (pkg) => conversions.get(pkg) ?? null, METHODS: Object.keys(METHODS) };
 }
 
 module.exports = { createSuwayomiEngine, splitSourceId, isEngineSource, mediaPath, toManga, MEDIA };

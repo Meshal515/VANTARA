@@ -25,6 +25,10 @@ const USER = 'vantara';
 const START_TIMEOUT_MS = 150_000;
 const IDLE_STOP_MS = 45 * 60_000;
 const LOG_LIMIT = 2 * 1024 * 1024;
+const CONVERT_TIMEOUT_MS = 180_000;
+const CONVERT_OUTPUT_LIMIT = 64 * 1024 * 1024;
+/** طبقة ويندوز فوق Suwayomi (engine-tools/VantaraExtensionJar.java، مبنية بـtools/build-engine-tool.mjs). */
+const TOOL_JAR = path.join(__dirname, 'engine-tools', 'vantara-extension-jar.jar');
 
 const arabic = (message, code) => Object.assign(new Error(message), { code });
 
@@ -61,6 +65,7 @@ function createSuwayomiRuntime({
   root, platform = process.platform, fetch = globalThis.fetch, spawn = childProcess.spawn,
   tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'), onProgress = () => {}, now = Date.now,
   pinned = PINNED, healthIntervalMs = 500, startTimeoutMs = START_TIMEOUT_MS, idleStopMs = IDLE_STOP_MS,
+  toolJar = TOOL_JAR, convertTimeoutMs = CONVERT_TIMEOUT_MS,
 } = {}) {
   const engineDir = path.join(root, 'engine', pinned.version);
   const dataDir = path.join(root, 'data');
@@ -246,8 +251,50 @@ function createSuwayomiRuntime({
     return send(pathname, { method, headers, body });
   }
 
+  /**
+   * APK موقّع ⇒ jar يعمل في JVM: أداة VANTARA الصغيرة تُشغَّل بـJRE المحرك نفسه ومكتباته (dex2jar وASM من
+   * Suwayomi-Server.jar)، في عملية منفصلة قصيرة بلا شبكة، داخل مجلد عمل مؤقت يُحذف بعدها. التوقيع يُتحقق منه قبلها
+   * (suwayomi-engine)، والأداة لا تغيّر إلا كود التحويل (انظر رأس ملفها).
+   */
+  async function convert(apkBytes) {
+    if (!supported()) throw arabic('محرك الإضافات متاح في ويندوز فقط', 'ENGINE_UNSUPPORTED');
+    if (!toolJar || !fs.existsSync(toolJar)) throw arabic('أداة تحويل الإضافات غير موجودة في التطبيق', 'ENGINE_CONVERT');
+    // الأداة كما بُنيت ووُثّقت (بيانها بجوارها): ملف ناقص أو معدّل لا يُشغَّل
+    const declared = JSON.parse(await fsp.readFile(toolJar.replace(/\.jar$/, '.json'), 'utf8').catch(() => 'null'));
+    const actual = crypto.createHash('sha256').update(await fsp.readFile(toolJar)).digest('hex');
+    if (!declared || declared.jarSha256 !== actual || declared.suwayomi?.version !== pinned.version) throw arabic('أداة تحويل الإضافات لا تطابق بيانها', 'ENGINE_CONVERT');
+    await install();
+    await fsp.mkdir(root, { recursive: true });
+    const work = await fsp.mkdtemp(path.join(root, 'convert-'));
+    try {
+      const input = path.join(work, 'in.apk'), output = path.join(work, 'out.jar');
+      await fsp.writeFile(input, apkBytes);
+      const classpath = [path.join(engineDir, 'bin', 'Suwayomi-Server.jar'), toolJar].join(path.delimiter);
+      const args = ['-Xmx512m', '-Djava.awt.headless=true', '-Dfile.encoding=UTF-8', `-Djava.io.tmpdir=${work}`, '-cp', classpath, 'VantaraExtensionJar', input, output];
+      const said = await new Promise((resolve, reject) => {
+        const child = spawn(path.join(engineDir, 'jre', 'bin', 'java.exe'), args, { cwd: work, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        const keep = (d) => { out = (out + d).slice(-16000); };
+        child.stdout?.on('data', keep); child.stderr?.on('data', keep);
+        const timer = setTimeout(() => { try { child.kill(); } catch { /* */ } reject(arabic('تحويل الإضافة تجاوز الوقت', 'ENGINE_CONVERT')); }, convertTimeoutMs);
+        timer.unref?.();
+        child.once('error', (error) => { clearTimeout(timer); reject(arabic(`تعذّر تشغيل أداة التحويل: ${error?.message ?? error}`, 'ENGINE_CONVERT')); });
+        child.once('exit', () => { clearTimeout(timer); resolve(out); });
+      });
+      const line = String(said).split(/\r?\n/).filter((l) => l.startsWith('{')).pop();
+      let report = null;
+      try { report = JSON.parse(line); } catch { /* */ }
+      if (!report?.ok) throw arabic(`تعذّر تحويل الإضافة: ${String(report?.error ?? said.split(/\r?\n/).filter(Boolean).pop() ?? 'بلا رد').slice(0, 300)}`, 'ENGINE_CONVERT');
+      const stat = await fsp.stat(output);
+      if (stat.size > CONVERT_OUTPUT_LIMIT) throw arabic('ناتج التحويل أكبر من المعقول', 'ENGINE_CONVERT');
+      return { jar: await fsp.readFile(output), report };
+    } finally {
+      await fsp.rm(work, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
   return {
-    pinned, supported, installed, install, start, stop, request, logFile: path.join(root, 'engine.log'),
+    pinned, supported, installed, install, start, stop, request, convert, logFile: path.join(root, 'engine.log'),
     /** آخر ما كتبه المحرك (لتشخيص رفض إضافة؛ السر محجوب فيه). */
     recentOutput: () => output,
     state: () => ({ supported: supported(), installed: installed(), running: Boolean(live), starting: Boolean(starting), downloading, version: pinned.version }),
@@ -255,4 +302,4 @@ function createSuwayomiRuntime({
   };
 }
 
-module.exports = { createSuwayomiRuntime, launchArgs, PINNED };
+module.exports = { createSuwayomiRuntime, launchArgs, PINNED, TOOL_JAR };

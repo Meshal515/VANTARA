@@ -129,3 +129,62 @@ test('file uploads carry the engine session and CSRF cookies (new Suwayomi answe
   assert.doesNotMatch(upload.cookie, /Path|HttpOnly/);
   await h.runtime.close();
 });
+
+// ---------- طبقة التحويل (engine-tools/VantaraExtensionJar) ----------
+function convertHarness({ said = '{"ok":true,"classes":55,"retargeted":14,"addedCtors":11,"unresolved":0}', writes = true, toolJar } = {}) {
+  const root = tmp();
+  const runs = [];
+  const spawn = (file, args, options) => {
+    assert.ok(args.includes('VantaraExtensionJar'), 'only the converter runs here');
+    runs.push({ file, args, options, input: fs.readFileSync(args.at(-2)) });
+    return fakeChild((child) => {
+      if (writes) fs.writeFileSync(args.at(-1), 'converted-jar');
+      child.stdout.emit('data', 'kotlin-logging: initializing...\n');
+      child.stdout.emit('data', `${said}\n`);
+      child.emit('exit', 0);
+    });
+  };
+  const runtime = createSuwayomiRuntime({ root, platform: 'win32', fetch: async () => new Response(zipBytes), spawn: (file, args, options) => {
+    if (String(file).endsWith('tar.exe')) return fakeChild((child) => {
+      const dir = path.join(args[args.indexOf('-C') + 1], pinned.folder);
+      fs.mkdirSync(path.join(dir, 'jre', 'bin'), { recursive: true }); fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'jre', 'bin', 'java.exe'), 'java'); fs.writeFileSync(path.join(dir, 'bin', 'Suwayomi-Server.jar'), 'jar');
+      child.emit('exit', 0);
+    });
+    return spawn(file, args, options);
+  }, tar: 'C:\\Windows\\System32\\tar.exe', pinned, ...(toolJar ? { toolJar } : {}) });
+  return { root, runtime, runs };
+}
+
+test('convert: the engine JRE runs the shipped tool with the engine jar, inside a work folder removed afterwards', async () => {
+  const h = convertHarness();
+  const out = await h.runtime.convert(Buffer.from('signed-apk'));
+  assert.equal(String(out.jar), 'converted-jar');
+  assert.deepEqual(out.report, { ok: true, classes: 55, retargeted: 14, addedCtors: 11, unresolved: 0 });
+  const [run] = h.runs;
+  assert.ok(run.file.endsWith(path.join('jre', 'bin', 'java.exe')));
+  assert.equal(String(run.input), 'signed-apk');
+  const cp = run.args[run.args.indexOf('-cp') + 1].split(path.delimiter);
+  assert.ok(cp[0].endsWith(path.join('bin', 'Suwayomi-Server.jar')));
+  assert.equal(cp[1], require('./suwayomi-runtime.cjs').TOOL_JAR);
+  assert.ok(run.args.some((a) => a.startsWith('-Djava.io.tmpdir=') && a.includes(`${path.sep}convert-`)));
+  assert.equal(run.options.windowsHide, true);
+  assert.ok(!run.args.some((a) => /Xverify|BytecodeVerification|noverify/i.test(a)), 'the converter runs with the JVM verifier on');
+  assert.deepEqual(fs.readdirSync(h.root).filter((n) => n.startsWith('convert-')), []);
+});
+
+test('convert: a refusal from the tool is an Arabic error with its reason, and nothing is left behind', async () => {
+  const h = convertHarness({ said: '{"ok":false,"error":"IllegalStateException: APK بلا classes.dex"}', writes: false });
+  await assert.rejects(h.runtime.convert(Buffer.from('x')), (e) => e.code === 'ENGINE_CONVERT' && /classes\.dex/.test(e.message));
+  assert.deepEqual(fs.readdirSync(h.root).filter((n) => n.startsWith('convert-')), []);
+});
+
+test('convert: a tool jar that does not match its manifest is never run', async () => {
+  const dir = tmp();
+  const toolJar = path.join(dir, 'vantara-extension-jar.jar');
+  fs.writeFileSync(toolJar, 'tampered');
+  fs.copyFileSync(require('./suwayomi-runtime.cjs').TOOL_JAR.replace(/\.jar$/, '.json'), path.join(dir, 'vantara-extension-jar.json'));
+  const h = convertHarness({ toolJar });
+  await assert.rejects(h.runtime.convert(Buffer.from('x')), (e) => e.code === 'ENGINE_CONVERT');
+  assert.equal(h.runs.length, 0);
+});

@@ -81,7 +81,7 @@ function setup(options = {}) {
   const fake = fakeSuwayomi(options.fake);
   const events = [];
   const fetchBytes = async (url) => { const b = files.get(url) ?? blobs.get(url); if (!b) throw new Error(`404 ${url}`); return b; };
-  const make = () => createSuwayomiEngine({ root: dir, runtime: fake.runtime, fetchBytes, onEvent: (e) => events.push(e) });
+  const make = () => createSuwayomiEngine({ root: dir, runtime: fake.runtime, fetchBytes, convert: options.convert ?? null, onEvent: (e) => events.push(e) });
   return { dir, fake, events, make, engine: make(), setRepo: (o) => { files = repoFiles(o); } };
 }
 
@@ -261,4 +261,37 @@ test('a source failure is an error with its reason, never a silent empty list (V
     return base(p, o);
   };
   await assert.rejects(t.engine.call('popular', { sourceId: `${PKG}#${SRC}`, page: 1 }), (e) => e.code === 'SOURCE_ERROR' && /503/.test(e.message));
+});
+
+test('Windows layer: the verified APK is converted and the jar is what reaches the engine; the result is kept for diagnosis', async () => {
+  const seen = [];
+  const convert = async (bytes, info) => { seen.push({ bytes, info }); return { jar: Buffer.from('JAR-BYTES'), report: { ok: true, retargeted: 3 } }; };
+  const { engine, fake } = setup({ convert });
+  await engine.call('addRepo', { url: ROOT });
+  const out = await engine.call('installExtension', { repo: ROOT, pkg: PKG });
+  assert.deepEqual(out.sources, [`${PKG}#${SRC}`]);
+  assert.ok(seen[0].bytes.equals(APK), 'the signed original is what gets converted');
+  assert.deepEqual(seen[0].info, { pkg: PKG, version: '1.4.12' });
+  assert.equal(String(fake.engine.uploads[0]), 'JAR-BYTES');
+  assert.deepEqual(fake.engine.names, [`${PKG}-v1.4.12.jar`]);
+  assert.deepEqual(engine.conversion(PKG), { ok: true, report: { ok: true, retargeted: 3 } });
+});
+
+test('Windows layer: an unsigned APK is refused before any conversion', async () => {
+  let called = 0;
+  const { engine, fake } = setup({ apk: APK_OTHER_KEY, convert: async () => { called++; return { jar: Buffer.from('J') }; } });
+  await engine.call('addRepo', { url: ROOT });
+  await assert.rejects(engine.call('installExtension', { repo: ROOT, pkg: PKG }), /توقيع الإضافة لا يطابق مفتاح المستودع/);
+  assert.equal(called, 0);
+  assert.equal(fake.engine.uploads.length, 0);
+});
+
+test('Windows layer: a conversion failure falls back to the APK (Suwayomi converts it its own way) and is recorded', async () => {
+  const { engine, fake } = setup({ convert: async () => { throw Object.assign(new Error('تعذّر تحويل الإضافة: x'), { code: 'ENGINE_CONVERT' }); } });
+  await engine.call('addRepo', { url: ROOT });
+  await engine.call('installExtension', { repo: ROOT, pkg: PKG });
+  assert.ok(fake.engine.uploads[0].equals(APK));
+  assert.deepEqual(fake.engine.names, [`${PKG}-v1.4.12.apk`]);
+  assert.equal(engine.conversion(PKG).ok, false);
+  assert.match(engine.conversion(PKG).error, /تعذّر تحويل الإضافة/);
 });
