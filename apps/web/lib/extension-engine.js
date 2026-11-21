@@ -15,21 +15,46 @@
 import { webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
 
+/** حزم مثبّتة كإضافات على هذا الجهاز (`user` في بيان المحرك)، من آخر قراءة للبيان. */
+const installedPackages = new Set();
+function noteInstalled(list) {
+	installedPackages.clear();
+	for (const source of list ?? []) if (source?.user) installedPackages.add(packageOf(source.id));
+}
+
 /**
  * المحرك الأصلي يحمّل عند الإقلاع حزم المصادر الظاهرة لهذا الحساب فقط، فلا يُنزّل حساب جديد
  * حزمًا لم يضفها. تلميح أداء لا قرار ملكية: القرار يبقى هنا (`forSource`).
  */
 onEntitlementChange(async (decision) => {
 	const plugin = globalThis.Capacitor?.Plugins?.ExtensionEngine;
-	if (decision.state === 'unknown' || typeof plugin?.setVisibleBuiltins !== 'function') return;
+	if (!plugin) return;
 	try {
 		const { sources: list } = await plugin.sources();
+		noteInstalled(list);
 		if (entitlement() !== decision) return;
-		await plugin.setVisibleBuiltins({ pkgs: visiblePackages(list ?? [], decision) });
+		const pkgs = visiblePackages(list ?? [], decision);
+		if (decision.state !== 'unknown' && typeof plugin.setVisibleBuiltins === 'function') await plugin.setVisibleBuiltins({ pkgs });
+		await migrateBuiltins(plugin, decision, pkgs);
 	} catch {
-		// التلميح يُعاد عند التغيير التالي؛ غيابه يعني تحميلًا عند أول طلب فقط
+		// التلميح والترحيل يُعادان عند التغيير التالي؛ غيابهما يعني تحميلًا عند أول طلب فقط
 	}
 });
+
+/**
+ * المرحلة 2 من «صفر مصادر مدمجة» (docs/audits/ZERO_BUILTIN_MIGRATION_PLAN.md): ما يراه الحساب من المدمجة يصير
+ * إضافات مثبّتة على الجهاز (BuiltinMigration.kt)، مرة واحدة وبالمعرّفات نفسها. فقط لفوج معروف: الحساب القديم
+ * والجديد و«بلا حساب». حساب لم يصل صفه بعد لا يُرحَّل (يبقى كما هو حتى يصل)، فتأخر المزامنة لا يخفي شيئًا.
+ * الحساب القديم و«بلا حساب» يُحفظ لهما مستودع Keiyoushi فيستمر التحديث؛ الجديد لا (قرار المالك 21 نوفمبر).
+ */
+export async function migrateBuiltins(plugin, decision, pkgs) {
+	if (typeof plugin?.migrateBuiltins !== 'function' || !pkgs.length) return null;
+	if (decision.state === 'unknown' && !decision.standalone) return null;
+	const out = await plugin.migrateBuiltins({ pkgs, keepRepository: decision.state === 'legacy' || decision.standalone === true });
+	for (const pkg of out?.migrated ?? []) installedPackages.add(String(pkg));
+	if (out?.migrated?.length) globalThis.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed'));
+	return out;
+}
 
 /** الجسر الأصلي، أو جسر الـPWA في المتصفح، أو `null`. يُقرأ عند كل نداء. */
 function bridge() {
@@ -46,9 +71,11 @@ export function isAvailable() {
  * يُرمى خطأ «أضف مصدرًا» (`SOURCE_NOT_ADDED`) قبل أي شبكة أو تنزيل حزمة.
  */
 function forSource(sourceId) {
-	assertVisible({ id: sourceId });
+	// مصدر حزمة مثبّتة كإضافة (رُحّلت أو ثُبّتت من مستودع) يظهر بمعرّفه القديم: التثبيت نفسه هو الإذن
+	if (!installedPackages.has(packageOf(sourceId))) assertVisible({ id: sourceId });
 	return required();
 }
+
 
 function required() {
 	const plugin = bridge();
@@ -68,6 +95,7 @@ function required() {
 let recoveredSaid = false;
 export async function sources() {
 	const { sources: list, stateRecovered } = await required().sources();
+	noteInstalled(list);
 	// ES1: ملف الإضافات كان تالفًا فنُقل جانبًا والتطبيق أقلع بحالة فارغة: يُقال مرة في الجلسة
 	if (stateRecovered && !recoveredSaid) {
 		recoveredSaid = true;
