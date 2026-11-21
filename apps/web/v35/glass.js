@@ -266,11 +266,25 @@ function placeTab(group, box) {
     if (prev) for (const [k, v] of Object.entries(prev)) ind.style.setProperty(k, v);
     tabsResize?.observe(box);
   }
-  const w = g.fill ? active.offsetWidth : active.offsetWidth + 2 * g.padX;
+  // العدسة تتمركز على محتوى المحدد (نصه وأيقونته)، لا على صندوق الزر: بعض الأزرار أعرض من نصها (حد أدنى للمس)
+  // أو نصها في أعلاها، فكانت العدسة تنزاح عن الكلمة (قياس المحاذاة: «الكل» في العرض الموحد 28px يسارًا و12 يمينًا).
+  let cx = active.offsetLeft + active.offsetWidth / 2, cy = active.offsetTop + active.offsetHeight / 2, cw = active.offsetWidth;
+  if (!g.fill) {
+    const range = box.ownerDocument.createRange?.();
+    range?.selectNodeContents(active);
+    const r = range?.getBoundingClientRect?.(), a = active.getBoundingClientRect?.();
+    if (r && a && r.width > 0 && r.height > 0 && a.width > 0) {
+      const k = active.offsetWidth / a.width || 1; // التحجيم (compact) يغيّر المستطيلات لا الإزاحات
+      cx = active.offsetLeft + (r.left - a.left + r.width / 2) * k;
+      cy = active.offsetTop + (r.top - a.top + r.height / 2) * k;
+      cw = r.width * k;
+    }
+  }
+  const w = g.fill ? active.offsetWidth : cw + 2 * g.padX;
   const h = g.fill ? active.offsetHeight : g.h;
   const spot = {
-    '--sx': `${active.offsetLeft + (active.offsetWidth - w) / 2}px`,
-    '--sy': `${active.offsetTop + (active.offsetHeight - h) / 2}px`,
+    '--sx': `${cx - w / 2}px`,
+    '--sy': `${cy - h / 2}px`,
     '--sw': `${w}px`,
     '--sh': `${h}px`,
   };
@@ -278,7 +292,13 @@ function placeTab(group, box) {
   delete ind.dataset.off;
   const apply = () => { for (const [k, v] of Object.entries(spot)) ind.style.setProperty(k, v); lastSpot.set(key, spot); };
   if ('init' in ind.dataset && !lastSpot.has(key)) { apply(); (box.ownerDocument.defaultView?.requestAnimationFrame ?? globalThis.requestAnimationFrame)?.(() => delete ind.dataset.init); }
-  else { delete ind.dataset.init; apply(); }
+  else {
+    // عدسة جديدة لألسنة أُعيد بناؤها (الإحصاءات والعرض الموحد يبنيانها من جديد مع كل ضغطة): الموضع السابق يُرسم أولًا
+    // (قراءة تفرض حساب الأنماط)، ثم يُرفع منع الانتقال وتُكتب الوجهة. بلا هذا كانت تقفز (قياس: إطار وسطي واحد بدل 15).
+    if ('init' in ind.dataset) void ind.getBoundingClientRect();
+    delete ind.dataset.init;
+    apply();
+  }
 }
 function placeAll(doc) {
   tabsQueued = false;

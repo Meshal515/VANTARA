@@ -266,7 +266,10 @@ export function openPlayer(args) {
   titles.append(titleEl, subEl);
   const fitBtn = iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => toggleFill());
   const fullBtn = iconButton('full', 'ملء الشاشة (F)', () => toggleFullscreen(), 'pp-desk');
-  top.append(iconButton('back', 'رجوع', () => closePlayer()), titles, fitBtn, fullBtn, iconButton('more', 'المزيد', () => showMore()));
+  // أدوات الترويسة في حاوية واحدة: في Glass تصير كبسولة زجاج واحدة لا دوائر متلاصقة (نفس التخطيط في المظهر الحالي)
+  const topTools = el('div', 'pp-tools');
+  topTools.append(fitBtn, fullBtn, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => closePlayer()), titles, topTools);
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');

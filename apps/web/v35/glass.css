@@ -231,9 +231,14 @@ html[data-material='glass'] .v35 .cn-eps-head .cn-season-btn {
   backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
   -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
 }
+/* كبسولة الموسم: خريطة الكبسولة لا الدائرة (!important لأن القاعدة أعلاه !important)، وحشوة ومسافة عن العنوان.
+ * الأنماط غير «الحالي» تجعله نصًا بلا حشوة (cinema.css:2156)، فصار الزجاج يلصق النص بحافته ويدخل في «الحلقات» (صورة المالك). */
 html[data-material='glass'] .v35 .cn-eps-head .cn-season-btn {
-  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
-  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  min-height: 36px;
+  padding: 0 14px !important;
+  margin-inline-start: 12px;
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
 }
 /* أزرار الرجوع وأدوات صفحة العمل فوق البنر (أفضل مكان للزجاج في التطبيق) */
 html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar) > .icon-btn {
@@ -568,4 +573,34 @@ html[data-material='glass'] .v35 .search-bar .icon {
 /* ألسنة «أفلام/مسلسلات» في اكتشف السينما: العدسة تحيط بالكلمة 12px، فتُزاح الألسنة بقدرها لتبقى العدسة داخل حافة الصفحة */
 html[data-material='glass'] .v35 .cn-kinds--inline {
   padding-inline: calc(var(--cn-gutter, 16px) + 12px);
+}
+/* أداتا «ابحث في الحلقات» و«الترتيب والتصفية» متجاورتان: كبسولة زجاج واحدة، لا دائرتان (أنمي، ورأس حلقات السينما) */
+html[data-material='glass'] .v35 :is(.aw-eps-tools, .cn-sf-tools):has(> .icon-btn:not([hidden]) ~ .icon-btn:not([hidden])) {
+  margin-inline-end: 0;
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.aw-eps-tools, .cn-sf-tools):has(> .icon-btn:not([hidden]) ~ .icon-btn:not([hidden])) > .icon-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-material='glass'] .v35 :is(.aw-eps-tools, .cn-sf-tools):not(:has(> .icon-btn:not([hidden]) ~ .icon-btn:not([hidden]))) > .icon-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+/* العدسة تحيط بالكلمة 12px، والألسنة تبدأ عند حافة الصفحة (16px)، فكانت العدسة على بعد 4px من حافة الشاشة
+ * (قياس glass-align: 9 أماكن). أول لسان وآخره يُزاحان بقدر حشوة العدسة في Glass وحده. */
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .cn-kinds:not(.cn-kinds--inline)) > .g-seg + * {
+  margin-inline-start: 12px;
+}
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .cn-kinds:not(.cn-kinds--inline)) > :last-child:not(.g-seg) {
+  margin-inline-end: 12px;
 }

@@ -119,6 +119,12 @@ html.pwa-playing body {
   gap: 2px;
   padding: calc(env(safe-area-inset-top, 0px) + 14px) max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
 }
+.pwa-player .pp-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
 .pwa-player .pp-titles {
   flex: 1;
   min-width: 0;
@@ -1296,4 +1302,25 @@ html.desktop-overlay[data-material='glass'] .pwa-player .pp-skip {
 }
 html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-pill, .pp-next, .pp-sheet) {
   background: color-mix(in srgb, var(--surface, #15141b) 84%, transparent);
+}
+
+/* أزرار متجاورة = كبسولة زجاج واحدة (كمجموعات أزرار iOS)، لا دوائر متلاصقة (ملاحظة المالك على الجرس والبحث).
+ * أدوات الترويسة (.pp-tools) ومجموعتا الشريط السفلي. أزرار الوسط (رجوع 10، تشغيل، تقديم 10) تبقى دوائر متباعدة. */
+html[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)):has(> :is(.pp-icon, .pp-volume, .pp-quality):not([hidden]) ~ :is(.pp-icon, .pp-quality):not([hidden])) {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)):has(> :is(.pp-icon, .pp-volume, .pp-quality):not([hidden]) ~ :is(.pp-icon, .pp-quality):not([hidden])) .pp-icon {
+  background: transparent !important;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(20, 18, 28, 0.42);
 }

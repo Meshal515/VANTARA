@@ -103,7 +103,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   peopleButton.onclick = () => openRoom();
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
   const hideBtn = iconButton('hide', 'إخفاء الأدوات (H)', () => hideControls()); hideBtn.hidden = true;
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  const topTools = el('div', 'pp-tools');
+  topTools.append(hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, topTools);
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
