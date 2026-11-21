@@ -1,0 +1,474 @@
+<title>شريط VANTARA الزجاجي</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* لوحة داكنة مقصودة (مثل التطبيق): الشريط الحقيقي فوق محتوى حقيقي، الحالي مقابل Glass */
+:root {
+  --bg: #050507; --panel: #0d0d12; --fg: #eef0f4; --muted: #8b8f9c; --line: rgba(255,255,255,.08);
+  --c-manga: #8f5cff; --c-anime: #c1121f; --c-cinema: #c2552d; /* ألوان الأقسام من ACCENTS في appearance.js */
+  --accent: var(--c-cinema); /* لون القسم الحالي */
+  --cap: #111015;
+  --nav-h: 58px; --dock-gap: 20px; --dock-side: 12px;
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--fg); }
+body { font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 32px; }
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 390px; align-items: start; }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); justify-items: center; } .side { order: 2; } }
+.side { display: grid; gap: 14px; min-width: 0; }
+h1 { margin: 0; font-size: 22px; font-weight: 800; text-wrap: balance; }
+.side p { margin: 0; color: var(--muted); line-height: 1.7; font-size: 14px; }
+.ctl { display: grid; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; }
+.ctl > b { font-size: 13px; color: var(--muted); font-weight: 600; }
+.seg { display: grid; grid-template-columns: repeat(var(--n, 2), 1fr); gap: 6px; }
+.seg button { font: inherit; font-size: 14px; font-weight: 700; color: var(--fg); background: #17171e; border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #022218; border-color: transparent; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-inline-end: 6px; vertical-align: -1px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; }
+.row input[type=range] { flex: 1; accent-color: var(--accent); }
+.row output { font-variant-numeric: tabular-nums; min-width: 3.5ch; text-align: end; color: var(--muted); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+
+.phone { position: relative; width: 100%; max-width: 390px; height: min(780px, 82vh); border-radius: 36px; overflow: hidden; background: #000; border: 1px solid var(--line); box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.feed { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.feed::-webkit-scrollbar { display: none; }
+.feed img { display: block; width: 100%; height: auto; max-width: 100%; }
+.feed .pad { height: 110px; }
+.topbar { position: absolute; inset: 0 0 auto; height: 64px; z-index: 3; display: flex; align-items: center; justify-content: center; background: linear-gradient(#000 60%, transparent); pointer-events: none; }
+.topbar { flex-direction: column; gap: 2px; }
+.topbar span { letter-spacing: .32em; font-weight: 800; font-size: 15px; }
+.topbar small { font-size: 11px; color: var(--muted); font-weight: 600; }
+
+/* ── الشريط: نفس core.css في Debug ── */
+.dock { position: absolute; z-index: 5; left: 50%; bottom: calc(var(--dock-gap) + env(safe-area-inset-bottom, 0px)); width: calc(100% - 2 * var(--dock-side)); max-width: 420px; height: var(--nav-h); display: flex; gap: 8px; user-select: none; -webkit-tap-highlight-color: transparent; touch-action: none;
+  transform: translateX(-50%) scale(var(--s, 1)); transform-origin: 50% 100%; opacity: var(--o, 1);
+  transition: transform .42s cubic-bezier(.3,1.2,.5,1), opacity .3s ease; }
+.dock.compact { --s: var(--compact-scale); }
+.mode-solid .dock.compact { --o: .5; }
+.dock-cap { position: relative; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 28px; background: var(--cap); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05), 0 6px 18px rgba(0,0,0,.28);
+  transition: background .3s ease; }
+.cap-body { position: absolute; inset: 0; display: flex; align-items: stretch; justify-content: space-evenly; }
+.nav { position: relative; z-index: 1; flex: 1 1 0; min-width: 48px; padding: 0; border: 0; background: none; cursor: pointer; }
+.nav svg { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; visibility: hidden; }
+.dock-switch { position: absolute; inset: 0; z-index: 1; padding: 0; border: 0; background: none; cursor: pointer; }
+.dock-switch > * { visibility: hidden; }
+
+/* الأيقونات فوق الزجاج: طبقة واحدة فوق العدسة فتبقى حادة دائمًا. تكبر حين تمر العدسة فوقها (تكبير قرب، لا قفزة) */
+.glyphs { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+.glyph { position: absolute; left: 0; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; color: rgba(255,255,255,.55);
+  transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(calc(var(--gs, 1) * var(--gk))); transition: color .28s ease; }
+/* تصغير الفتح والضغط يُضرب في مقياس القرب بعد الموضع (خاصية scale المستقلة كانت تضرب الموضع فتزيح الأيقونة) */
+@property --gk { syntax: '<number>'; inherits: false; initial-value: 1; }
+.glyph svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.85; stroke-linecap: round; stroke-linejoin: round; shape-rendering: geometricPrecision; }
+.glyph.active, .glyph.near { color: #fff; }
+.glyph.active svg { stroke-width: 2; }
+.glyph[data-page='home'] { --gy: .5px; } .glyph[data-page='discover'] svg { transform: scale(.93); } .glyph[data-page='majlis'] svg { transform: scale(.95); }
+/* فتح المبدّل: الأيقونات تخفت وتصغر كما في التطبيق (cap-body ‏0.94، والمربعات 0.8) */
+.glyph { --gk: 1; transition: color .28s ease, opacity .26s cubic-bezier(.4,0,.2,1), --gk .26s cubic-bezier(.4,0,.2,1); }
+.dock.open .glyph { opacity: 0; --gk: .94; transition-duration: .28s, .34s, .34s; transition-timing-function: ease, cubic-bezier(.22,1,.36,1), cubic-bezier(.22,1,.36,1); }
+.dock.open .glyph.sw { --gk: .8; }
+.glyph.sw.press { --gk: .9; transition-duration: .28s, .26s, .16s; }
+.glyph.sw { width: 62px; margin-left: -31px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.dock-sq { box-sizing: border-box; width: 12px; height: 12px; border-radius: 4px; border: 2px solid rgba(255,255,255,.3); transition: width .3s cubic-bezier(.2,.8,.2,1), background-color .3s ease, border-color .3s ease; }
+.dock-sq.current { width: 20px; background: #fff; border-color: #fff; }
+.mode-glass .glyph { color: rgba(255,255,255,.82); filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.55)); }
+.mode-glass .glyph.active, .mode-glass .glyph.near { color: color-mix(in srgb, var(--accent) 32%, #fff); }
+.mode-glass .dock-sq { border-color: rgba(255,255,255,.62); }
+
+/* ── العدسة: عنصر واحد للشريط كله. الزجاج يرى ما تحته فقط (الحافة تنحني للداخل كعدسة محدّبة) فلا تسودّ ولا يتسرب انكسار خارج شكلها ── */
+/* لون العدسة ينساب بين ألوان الأقسام وهي تمر عليها (خاصية مسجلة لتتدرج بدل أن تقفز) */
+@property --tint { syntax: '<color>'; inherits: true; initial-value: #c2552d; }
+/* متغيرات العدسة على العدسة وحدها: لو وُضعت على الشريط لأعاد المتصفح حساب كل عناصره في كل إطار (السبب المقيس للتقطّع) */
+.lens { --tint: var(--accent); transition: --tint .35s ease; --lx: 0px; --lw: 40px; --lh: 40px; --lift: 0; --spec: -45deg; position: absolute; z-index: 5; left: 0; top: 50%; width: var(--lw); height: var(--lh); border-radius: 999px; pointer-events: none;
+  transform: translate3d(calc(var(--lx) - 50%), -50%, 0); }
+/* الحالي: حلقة بلون الثيم كما في التطبيق */
+.mode-solid .lens { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff); }
+/* المادة تثقل حين تكبر: ظل أعمق، لمعة أقوى، وصبغة أخف (الزجاج المرفوع صافٍ والساكن بلون الثيم) */
+.mode-glass .lens {
+  --hi: rgba(255,255,255,calc(.62 + .3 * var(--lift)));
+  box-shadow: 0 calc(5px + 13px * var(--lift)) calc(14px + 22px * var(--lift)) rgba(0,0,0,calc(.3 + .2 * var(--lift))),
+    inset 0 0 calc(10px + 8px * var(--lift)) color-mix(in srgb, var(--tint) 24%, transparent);
+  backdrop-filter: var(--lens-f, blur(4px) saturate(1.6) brightness(1.1)); -webkit-backdrop-filter: var(--lens-f, blur(4px) saturate(1.6) brightness(1.1)); }
+.mode-glass .lens::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: color-mix(in srgb, var(--tint) 17%, transparent); opacity: calc(1 - .7 * var(--lift)); }
+
+/* ── Glass للكبسولات: الزجاج في ::before تحت كل الكبسولات (لا يرى ظلالها)، واللمعة في ::after ── */
+.mode-glass .dock-cap { --hi: rgba(255,255,255,.5); background: rgba(255,255,255,.045); box-shadow: 0 10px 30px rgba(0,0,0,.32); }
+.mode-glass .dock-cap::before { content: ''; position: absolute; z-index: -1; inset: 0; border-radius: inherit; pointer-events: none;
+  backdrop-filter: var(--glass, blur(12px) saturate(1.6)); -webkit-backdrop-filter: var(--glass, blur(12px) saturate(1.6)); }
+/* اللمعة: ضوء من أعلى اليسار، حافة رفيعة تلمع في زاويتين متقابلتين وتخفت على الجانبين (كما في زجاج iOS) */
+.mode-glass .dock-cap::after, .mode-glass .lens::after { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--spec), var(--hi) 0deg, rgba(255,255,255,.13) 62deg, rgba(255,255,255,.05) 105deg, rgba(255,255,255,calc(.3 + .2 * var(--lift, 0))) 180deg, rgba(255,255,255,.05) 255deg, rgba(255,255,255,.13) 298deg, var(--hi) 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.mode-glass .dock-cap::after { --spec: -45deg; }
+/* ── المبدّل: الكبسولات تتحول إلى الأقسام، من المنتصف للخارج (نفس توقيت التطبيق: فتح 340ms وإغلاق 260ms) ── */
+/* الستارة: لمسها يغلق، أما التعتيم نفسه فطبقة داخل الشريط فوق زجاج الكبسولات وتحت حوافها.
+   لو كان التعتيم تحت الزجاج لأعاد الزجاج حساب انكساره في كل إطار من التلاشي (سبب اللاج). والنتيجة نفسها بصريًا:
+   التعتيم ضرب في اللون، فتعتيم ناتج الزجاج = زجاج فوق محتوى معتّم */
+.scrim { position: absolute; inset: 0; z-index: 4; pointer-events: none; -webkit-tap-highlight-color: transparent; }
+.phone.open .scrim { pointer-events: auto; }
+.dock-dim { position: absolute; z-index: -1; left: -60px; right: -60px; top: -1200px; bottom: -80px; background: rgba(4,3,8,.45); opacity: 0; pointer-events: none; transition: opacity .26s cubic-bezier(.4,0,.2,1); }
+.dock.open .dock-dim { opacity: 1; transition: opacity .34s cubic-bezier(.22,1,.36,1); }
+/* قص الطبقات المنزلقة بحد كبسولتها (في غلاف خاص: قص الكبسولة نفسها كان يعزل زجاجها) */
+.opt-clip { position: absolute; inset: 0; z-index: 8; border-radius: inherit; overflow: hidden; pointer-events: none; }
+.dock-opt { position: absolute; inset: 0; padding: 0; margin: 0; border: 0; border-radius: inherit; background: transparent; color: #fff; display: grid; place-items: center; font: inherit; cursor: pointer;
+  opacity: 0; pointer-events: none; transform: var(--from); transition: opacity .2s cubic-bezier(.4,0,.2,1), transform .26s cubic-bezier(.4,0,.2,1), background-color .3s ease; -webkit-tap-highlight-color: transparent; }
+.dock-opt[data-arg='manga'] { --from: translate3d(-100%,0,0); } .dock-opt[data-arg='cinema'] { --from: translate3d(100%,0,0); } .dock-opt[data-arg='anime'] { --from: scale(.92); }
+.dock.open .dock-opt { opacity: 1; transform: none; pointer-events: auto; transition: opacity .22s cubic-bezier(.22,1,.36,1), transform .34s cubic-bezier(.22,1,.36,1), background-color .3s ease; }
+.dock-opt-label { display: grid; justify-items: center; gap: 4px; line-height: 1; white-space: nowrap; pointer-events: none; transition: scale .3s cubic-bezier(.3,1.4,.5,1); }
+.dock-opt-label b { font-size: 11.5px; font-weight: 760; letter-spacing: 2.4px; margin-right: -2.4px; }
+.dock-opt-label small { font-size: 10.5px; font-weight: 600; color: rgba(255,255,255,.55); transition: color .3s ease; }
+.dock-opt.current .dock-opt-label small, .dock-opt.near .dock-opt-label small { color: rgba(255,255,255,.85); }
+/* الحالي: طبقة صلبة وحلقة القسم كما في التطبيق */
+.mode-solid .dock-opt { background: #18171d; }
+.mode-solid .dock-opt.current { background: #17161c; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 80%, #fff); }
+.mode-solid .dock.open .lens { opacity: 0; }
+.mode-solid .lens { transition: opacity .2s ease; }
+/* Glass: الأقسام نصوص فوق الزجاج، والعدسة نفسها هي التحديد (تتشكل كبسولة فوق القسم الحالي) */
+.mode-glass .dock-opt-label { filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.6)); }
+.dock-opt[data-arg='manga'] { --sec: var(--c-manga); } .dock-opt[data-arg='anime'] { --sec: var(--c-anime); } .dock-opt[data-arg='cinema'] { --sec: var(--c-cinema); }
+/* Glass: كل قسم باسمه بلونه (فاتح قليلًا ليُقرأ فوق الزجاج الداكن) */
+.mode-glass .dock-opt-label b { color: color-mix(in oklab, var(--sec) 78%, #fff); }
+.mode-glass .dock.dragging-sec .dock-opt.near .dock-opt-label { scale: 1.08; }
+/* الضغط على زجاج: الكبسولة تنتفخ (طبقة الزجاج وحافتها تكبر 3px، لا تحويل على الكبسولة يعزل زجاجها) وتضيء من نقطة اللمس */
+.mode-glass .dock-cap::before, .mode-glass .dock-cap::after { transition: inset .5s cubic-bezier(.3,1.6,.5,1), border-radius .5s cubic-bezier(.3,1.6,.5,1); }
+.mode-glass .dock-cap.press::before, .mode-glass .dock-cap.press::after { inset: -3px; border-radius: 31px; transition-duration: .2s; transition-timing-function: cubic-bezier(.3,1.3,.5,1); }
+.mode-glass .dock-cap.press { background: radial-gradient(circle at var(--px, 50%) var(--py, 50%), rgba(255,255,255,.24), rgba(255,255,255,.07) 40%, transparent 72%), rgba(255,255,255,.05); --hi: rgba(255,255,255,.9); }
+.mode-solid .dock-cap.press { background: #1a1920; }
+@media (prefers-reduced-motion: reduce) { .dock, .dock-cap, .dock-opt, .glyph, .scrim { transition: none !important; } }
+@media (prefers-reduced-transparency: reduce) { .mode-glass .dock-cap::before { display: none; } .mode-glass .lens { backdrop-filter: none; -webkit-backdrop-filter: none; } .mode-glass .dock-cap { background: var(--cap); } }
+</style>
+
+<div class="wrap">
+  <section class="side" aria-label="التحكم">
+    <h1>شريط التنقل: الحالي مقابل Glass</h1>
+    <p>الشريط بنفس مقاسات وترتيب VANTARA في Debug. مرّر داخل الجوال، واضغط مطولًا على أي زر واسحب العدسة بين الكبسولات.</p>
+    <div class="ctl">
+      <b>المادة</b>
+      <div class="seg" role="group" aria-label="المادة">
+        <button type="button" id="m-solid" aria-pressed="false">الحالي (داكن)</button>
+        <button type="button" id="m-glass" aria-pressed="true">Glass</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <b>ألوان الأقسام</b>
+      <p class="note"><span class="swatch" style="--c:var(--c-manga)"></span>مانجا بنفسجي · <span class="swatch" style="--c:var(--c-anime)"></span>أنمي أحمر · <span class="swatch" style="--c:var(--c-cinema)"></span>سينما برتقالي. لون الشريط لون القسم الحالي، وفي المبدّل كل قسم باسمه بلونه والعدسة تتلون بالقسم اللي تمر عليه.</p>
+    </div>
+    <div class="ctl">
+      <b>أثناء السكرول</b>
+      <div class="row"><label for="scale">حجم الشريط المصغّر</label><input id="scale" type="range" min="70" max="95" step="5" value="85"><output id="scaleOut">85%</output></div>
+      <p class="note">السكرول لتحت يصغّره ويبقى صغير لين تطلع فوق أو تلمسه. Glass ما يصير شفاف، يصغر بس.</p>
+    </div>
+    <div class="ctl">
+      <b>العدسة</b>
+      <div class="row"><label for="disp">تشتت الألوان على الحافة</label><input id="disp" type="range" min="0" max="30" step="2" value="26"><output id="dispOut">26%</output></div>
+      <p class="note">الحافة تنكسر مثل زجاج محدّب حقيقي، وألوانها تتفرق على الحافة وحدها والوسط صافي. صفر يلغي التشتت.</p>
+      <p class="note"><b>الزر اللي في النص:</b> يضيء من مكان إصبعك وينتفخ، والترك يفتح الأقسام. العدسة تطير وتتشكل كبسولة فوق القسم الحالي، وتقدر تسحبها بين مانجا وأنمي وسينما وتتركها على اللي تبغاه.</p>
+      <p class="note">الضغط يرفع العدسة فورًا. النقرة: ترتفع وتطير للزر وتهبط عليه بارتجاجة خفيفة. السحب: تتمطط مع السرعة، والأيقونة تكبر حين تمر عليها، ولمعة الحافة تميل مع الحركة.</p>
+    </div>
+  </section>
+
+  <div class="phone mode-glass" id="phone">
+    <div class="feed" id="feed">
+      <img src="feed.jpg" alt="محتوى قسم السينما" width="780" height="1285">
+      <img src="feed.jpg" alt="" width="780" height="1285">
+      <div class="pad"></div>
+    </div>
+    <div class="scrim" id="scrim"></div>
+    <div class="topbar"><span>VANTARA</span><small id="secName">سينما</small></div>
+    <nav class="dock" id="dock" dir="rtl" aria-label="التنقّل الرئيسي">
+      <div class="dock-cap" data-cap>
+        <div class="cap-body">
+          <button class="nav active" type="button" data-page="home" aria-label="الرئيسية"><svg viewBox="0 0 24 24"><path d="M4 10.4 12 4l8 6.4V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1Z"/></svg></button>
+          <button class="nav" type="button" data-page="discover" aria-label="اكتشف"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m15.3 8.7-2.1 4.5-4.5 2.1 2.1-4.5Z"/></svg></button>
+        </div>
+        <span class="opt-clip"><button class="dock-opt" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" data-arg="manga" aria-label="مانجا"><span class="dock-opt-label"><b dir="ltr">MANGA</b><small>مانجا</small></span></button></span>
+      </div>
+      <div class="dock-cap" data-cap>
+        <button class="dock-switch" type="button" aria-expanded="false" aria-label="القسم الحالي: سينما. بدّل القسم"><span class="dock-sq" data-arg="manga"></span><span class="dock-sq" data-arg="anime"></span><span class="dock-sq current" data-arg="cinema"></span></button>
+        <span class="opt-clip"><button class="dock-opt" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" data-arg="anime" aria-label="أنمي"><span class="dock-opt-label"><b dir="ltr">ANIME</b><small>أنمي</small></span></button></span>
+      </div>
+      <div class="dock-cap" data-cap>
+        <div class="cap-body">
+          <button class="nav" type="button" data-page="library" aria-label="مكتبتي"><svg viewBox="0 0 24 24"><path d="M7 3.8h10a1 1 0 0 1 1 1v15.4l-6-3.9-6 3.9V4.8a1 1 0 0 1 1-1Z"/></svg></button>
+          <button class="nav" type="button" data-page="majlis" aria-label="الأصدقاء"><svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.5-3.4 2.4-5.2 5.5-5.2s5 1.8 5.5 5.2"/><path d="M15.5 5.6a3.2 3.2 0 0 1 0 5.8M17 14.5c2 .5 3.2 2.1 3.5 5"/></svg></button>
+        </div>
+        <span class="opt-clip"><button class="dock-opt" type="button" role="radio" aria-checked="false" aria-hidden="true" tabindex="-1" data-arg="cinema" aria-label="سينما"><span class="dock-opt-label"><b dir="ltr">CINEMA</b><small>سينما</small></span></button></span>
+      </div>
+      <span class="dock-dim" aria-hidden="true"></span>
+      <span class="lens" aria-hidden="true"></span>
+      <div class="glyphs" id="glyphs" aria-hidden="true"></div>
+    </nav>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const phone = $('phone'), dock = $('dock'), feed = $('feed');
+  const navs = [...dock.querySelectorAll('.nav')], sw = dock.querySelector('.dock-switch'), lens = dock.querySelector('.lens');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+  let mode = 'glass';
+  const glassy = () => mode === 'glass';
+  const setMode = (m) => {
+    mode = m; setOpen(false, true);
+    phone.classList.toggle('mode-glass', m === 'glass'); phone.classList.toggle('mode-solid', m === 'solid');
+    $('m-glass').setAttribute('aria-pressed', String(m === 'glass')); $('m-solid').setAttribute('aria-pressed', String(m === 'solid'));
+    if (m === 'glass') buildGlass();
+    requestAnimationFrame(() => snap(dock.querySelector('.nav.active'), true));
+  };
+  $('m-glass').onclick = () => setMode('glass');
+  $('m-solid').onclick = () => setMode('solid');
+  const scale = $('scale');
+  const applyScale = () => { dock.style.setProperty('--compact-scale', String(scale.value / 100)); $('scaleOut').textContent = scale.value + '%'; };
+  scale.oninput = applyScale; applyScale();
+
+  // هندسة الشريط بإحداثياته هو (لا تتأثر بتصغيره)
+  const center = (n) => { const cap = n.closest('.dock-cap'); return n === sw ? cap.offsetLeft + cap.offsetWidth / 2 : cap.offsetLeft + n.offsetLeft + n.offsetWidth / 2; };
+  const localX = (e) => { const r = dock.getBoundingClientRect(); return (e.clientX - r.left) * (dock.offsetWidth / r.width); };
+  const nearest = (x) => navs.reduce((a, n) => Math.abs(center(n) - x) < Math.abs(center(a) - x) ? n : a);
+  const clampX = (x) => clamp(x, 30, dock.offsetWidth - 30);
+  // الأقسام: كبسولة لكل قسم بترتيب التطبيق (اليمنى مانجا، الوسطى أنمي، اليسرى سينما)
+  const caps = [...dock.querySelectorAll('[data-cap]')], opts = [...dock.querySelectorAll('.dock-opt')];
+  const SECS = ['manga', 'anime', 'cinema'], AR = { manga: 'مانجا', anime: 'أنمي', cinema: 'سينما' };
+  const secCenter = (i) => caps[i].offsetLeft + caps[i].offsetWidth / 2;
+  const nearestSec = (x) => [0, 1, 2].reduce((a, i) => Math.abs(secCenter(i) - x) < Math.abs(secCenter(a) - x) ? i : a);
+  const secRange = (x) => { const c = [0, 1, 2].map(secCenter); return clamp(x, Math.min(...c), Math.max(...c)); };
+  let section = 'cinema', isOpen = false, nearOpt = -1, pendingClose = 0, geo = { ow: 100, oh: 48 };
+
+  // طبقة الأيقونات فوق الزجاج (والمربعات الثلاثة معها)، كل واحدة في موضع زرها
+  const host = $('glyphs');
+  const items = [...navs, sw].map((n) => {
+    const g = document.createElement('span'); g.className = n === sw ? 'glyph sw' : 'glyph';
+    if (n === sw) g.innerHTML = sw.innerHTML; else { g.dataset.page = n.dataset.page; g.innerHTML = n.querySelector('svg').outerHTML; }
+    host.append(g); return { n, g, gx: 0, gs: 1, amp: n === sw ? 0.1 : 0.2 };
+  });
+  const layoutGlyphs = () => { items.forEach((it) => { it.gx = center(it.n); it.g.style.setProperty('--gx', it.gx + 'px'); }); geo = { ow: caps[1].offsetWidth - 10, oh: dock.offsetHeight - 10 }; };
+  const swGlyph = items[items.length - 1].g;
+  const syncGlyphs = () => items.forEach(({ n, g }) => { g.classList.toggle('active', n.classList.contains('active')); g.classList.toggle('near', n.classList.contains('near')); });
+  let nearNow = null;
+  const setNear = (n) => { nearNow = n; navs.forEach((m) => m.classList.toggle('near', m === n)); syncGlyphs(); };
+  const buzz = (ms) => { try { navigator.vibrate?.(ms); } catch {} };
+
+  // ثلاثة نوابض حقيقية تعمل معًا في إطار واحد (لا CSS ينافسها على الخاصية نفسها):
+  //  الموضع: كتلة ونابض ومخمّد. الارتفاع: العدسة ترتفع فورًا عند اللمس وتبقى مرفوعة وهي تطير، وتهبط على الهدف بارتجاجة.
+  //  التمطط: يتبع السرعة بنابض أرخى، فيتأخر قليلًا ويهتز بعد التوقف مثل قطرة.
+  //  الشكل: نابض رابع يحوّل الدائرة إلى كبسولة القسم حين يُفتح المبدّل، ويعيدها.
+  const POS = { travel: { k: 190, c: 21 }, follow: { k: 420, c: 38 } }, LIFT = { up: { k: 700, c: 42 }, down: { k: 300, c: 24 } }, WOB = { k: 520, c: 24 }, FORM = { k: 300, c: 30 };
+  let x = 0, v = 0, target = 0, pos = POS.travel, lift = 0, lv = 0, st = 0, sv = 0, form = 0, fv = 0, raf = 0, lastT = 0, press = null;
+  const formTarget = () => (isOpen && glassy() ? 1 : 0);
+  const step = (h) => {
+    v += (pos.k * (target - x) - pos.c * v) * h; x += v * h;
+    // الضغط والسحب: الحجم الكبير كاملًا. النقرة: تطير قطرة متوسطة وتهبط (الحجم الكبير للسحب وحده)
+    const lt = press ? 1 : Math.abs(target - x) > 14 ? 0.6 : 0, ls = lt > lift ? LIFT.up : LIFT.down;
+    lv += (ls.k * (lt - lift) - ls.c * lv) * h; lift += lv * h;
+    sv += (WOB.k * (Math.min(0.24, Math.abs(v) / 1500) - st) - WOB.c * sv) * h; st += sv * h;
+    fv += (FORM.k * (formTarget() - form) - FORM.c * fv) * h; form += fv * h;
+  };
+  const render = () => {
+    const L = clamp(lift, -0.1, 1.08), l01 = clamp(L, 0, 1), s = clamp(st, -0.08, 0.26);
+    // الدائرة (40) ترتفع إلى 78×60، وكبسولة القسم تنتفخ قليلًا حين تُضغط. الشكل يمزج بينهما بنابضه
+    const f = clamp(form, -0.05, 1.05), nw = (40 + 38 * L) * (1 + s), nh = (40 + 20 * L) * (1 - s * 0.5);
+    const ow = (geo.ow + 8 * L) * (1 + s * 0.35), oh = (geo.oh + 4 * L) * (1 - s * 0.2);
+    const w = nw + (ow - nw) * f, h = nh + (oh - nh) * f, ds = lens.style;
+    ds.setProperty('--lx', x.toFixed(2) + 'px'); ds.setProperty('--lw', w.toFixed(2) + 'px'); ds.setProperty('--lh', h.toFixed(2) + 'px');
+    ds.setProperty('--lift', l01.toFixed(3)); ds.setProperty('--spec', (-45 + clamp(v / 45, -40, 40)).toFixed(1) + 'deg');
+    for (const it of items) {
+      const p = Math.max(0, 1 - Math.abs(it.gx - x) / (w / 2 + 8)), gs = 1 + it.amp * l01 * (1 - clamp(f, 0, 1)) * p * p * (3 - 2 * p);
+      if (Math.abs(gs - it.gs) > 0.002 || (gs === 1 && it.gs !== 1)) { it.gs = gs; it.g.style.setProperty('--gs', gs.toFixed(3)); }
+    }
+  };
+  const settled = () => !press && Math.abs(target - x) < 0.3 && Math.abs(v) < 4 && Math.abs(lift) < 0.003 && Math.abs(lv) < 0.03 && Math.abs(st) < 0.002 && Math.abs(sv) < 0.03 && Math.abs(form - formTarget()) < 0.002 && Math.abs(fv) < 0.02;
+  const tick = (t) => {
+    const dt = Math.min(1 / 30, lastT ? (t - lastT) / 1000 : 1 / 60); lastT = t;
+    if (reduce) { x = target; v = 0; lift = press ? 1 : 0; lv = 0; st = 0; sv = 0; }
+    else for (let r = dt; r > 1e-6; r -= 1 / 240) step(Math.min(r, 1 / 240));
+    if (reduce) form = formTarget();
+    // بعد اختيار قسم: العدسة تهبط عليه أولًا ثم ينغلق المبدّل وترجع دائرة لزرها
+    if (pendingClose && t - pendingClose > 140 && Math.abs(target - x) < 6) { pendingClose = 0; setOpen(false); }
+    if (settled()) { x = target; v = lift = lv = st = sv = fv = 0; form = formTarget(); render(); raf = 0; lastT = 0; return; }
+    render(); raf = requestAnimationFrame(tick);
+  };
+  const kick = () => { if (!raf) { lastT = 0; raf = requestAnimationFrame(tick); } };
+  const activate = (n) => { navs.forEach((m) => { m.classList.toggle('active', m === n); m.classList.remove('near'); }); nearNow = null; syncGlyphs(); };
+  const snap = (n, instant = false) => {
+    if (!n) return;
+    activate(n); target = center(n);
+    if (instant) { x = target; v = lift = lv = st = sv = 0; render(); } else kick();
+  };
+
+  // الضغط: ترتفع فورًا وتنساب للزر الملموس. السحب: تتبع الإصبع بنابض أشد، ونقرة خفيفة عند كل زر.
+  // الترك: تكمل بنفس سرعتها إلى الهدف. الهدف = حيث الإصبع، والنقرة = الزر نفسه.
+  // ── المبدّل ──
+  const markSection = () => {
+    for (const o of opts) { const on = o.dataset.arg === section; o.classList.toggle('current', on); o.setAttribute('aria-checked', String(on)); }
+    for (const q of dock.querySelectorAll('.dock-sq')) q.classList.toggle('current', q.dataset.arg === section);
+    sw.setAttribute('aria-label', `القسم الحالي: ${AR[section]}. بدّل القسم`); $('secName').textContent = AR[section];
+    phone.style.setProperty('--accent', `var(--c-${section})`); tintLens();
+  };
+  const tintLens = () => lens.style.setProperty('--tint', `var(--c-${isOpen && glassy() && nearOpt >= 0 ? SECS[nearOpt] : section})`);
+  const setNearOpt = (i) => { nearOpt = i; opts.forEach((o, k) => o.classList.toggle('near', k === i)); tintLens(); };
+  function setOpen(next, instant = false) {
+    if (next === isOpen) return;
+    isOpen = next; pendingClose = 0;
+    dock.classList.toggle('open', next); phone.classList.toggle('open', next);
+    sw.setAttribute('aria-expanded', String(next));
+    for (const o of opts) { o.inert = !next; o.setAttribute('aria-hidden', String(!next)); o.tabIndex = next && o.dataset.arg === section ? 0 : -1; }
+    dock.querySelectorAll('.cap-body').forEach((b) => (b.inert = next)); setNearOpt(-1);
+    if (next) { dock.classList.remove('compact'); buzz(8); }
+    if (instant) return;
+    // Glass: العدسة تطير من زرها وتتشكل كبسولة فوق القسم الحالي، والإغلاق يعيدها دائرة لزرها
+    pos = POS.travel; target = next && glassy() ? secCenter(SECS.indexOf(section)) : center(dock.querySelector('.nav.active')); kick();
+  }
+  const pick = (i, t) => { section = SECS[i]; markSection(); setNearOpt(-1); buzz(10); if (glassy()) pendingClose = t || performance.now(); else setTimeout(() => setOpen(false), 120); };
+  $('scrim').addEventListener('click', () => setOpen(false));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+  // لوحة المفاتيح: Enter/Space على المبدّل أو القسم (detail = 0)
+  sw.addEventListener('click', (e) => { if (e.detail === 0) setOpen(!isOpen); });
+  opts.forEach((o, i) => o.addEventListener('click', (e) => { if (e.detail === 0) { target = secCenter(i); kick(); pick(i); } }));
+  let swPress = null;
+  const swCap = sw.closest('.dock-cap');
+  const releaseSw = () => { swCap.classList.remove('press'); swGlyph.classList.remove('press'); };
+
+  dock.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    if (isOpen) {
+      const o = e.target.closest('.dock-opt'); if (!o) return;
+      press = { kind: 'opt', sx: e.clientX, id: e.pointerId, idx: opts.indexOf(o), moved: false };
+      try { dock.setPointerCapture(e.pointerId); } catch {}
+      if (glassy()) { pos = POS.travel; target = secCenter(press.idx); kick(); }
+      setNearOpt(press.idx); return;
+    }
+    if (e.target.closest('.dock-switch')) {
+      // زر زجاجي: ينتفخ ويضيء من نقطة اللمس، ومربعاته تنضغط. يفتح عند الترك
+      const r = swCap.getBoundingClientRect();
+      swCap.style.setProperty('--px', ((e.clientX - r.left) / r.width * 100).toFixed(1) + '%'); swCap.style.setProperty('--py', ((e.clientY - r.top) / r.height * 100).toFixed(1) + '%');
+      swCap.classList.add('press'); swGlyph.classList.add('press');
+      swPress = { id: e.pointerId, sx: e.clientX, sy: e.clientY }; return;
+    }
+    const navBtn = e.target.closest('.nav');
+    if (!navBtn) return;
+    dock.classList.remove('compact');
+    press = { kind: 'nav', sx: e.clientX, id: e.pointerId, btn: navBtn, moved: false };
+    try { dock.setPointerCapture(e.pointerId); } catch {}
+    pos = POS.travel; target = center(navBtn); setNear(navBtn); kick();
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (swPress && e.pointerId === swPress.id && Math.hypot(e.clientX - swPress.sx, e.clientY - swPress.sy) > 14) { swPress = null; releaseSw(); }
+    if (!press || e.pointerId !== press.id) return;
+    if (!press.moved && Math.abs(e.clientX - press.sx) > 8) { press.moved = true; pos = POS.follow; if (press.kind === 'opt') dock.classList.add('dragging-sec'); }
+    if (!press.moved) return;
+    if (press.kind === 'opt') {
+      const lx = secRange(localX(e)), i = nearestSec(lx);
+      if (glassy()) { target = lx; kick(); }
+      if (i !== nearOpt) { setNearOpt(i); buzz(6); }
+      return;
+    }
+    target = clampX(localX(e)); const n = nearest(target);
+    if (n !== nearNow) { setNear(n); buzz(6); }
+    kick();
+  }, { passive: true });
+  const finish = (e, cancel = false) => {
+    if (swPress && e.pointerId === swPress.id) { swPress = null; releaseSw(); if (!cancel) setOpen(true); return; }
+    if (!press || e.pointerId !== press.id) return;
+    const p = press; press = null; pos = POS.travel; lv = Math.min(lv, 0); // لا يكمل الصعود بعد الترك
+    if (p.kind === 'opt') {
+      dock.classList.remove('dragging-sec');
+      const i = cancel ? SECS.indexOf(section) : p.moved ? nearestSec(secRange(localX(e))) : p.idx;
+      if (glassy()) { target = secCenter(i); kick(); }
+      if (cancel) setNearOpt(-1); else pick(i);
+      return;
+    }
+    const dest = cancel ? dock.querySelector('.nav.active') : p.moved ? nearest(clampX(localX(e))) : p.btn;
+    if (p.moved && !cancel) buzz(10);
+    snap(dest);
+  };
+  window.addEventListener('pointerup', (e) => finish(e));
+  window.addEventListener('pointercancel', (e) => finish(e, true));
+
+  // السكرول: لتحت يصغّر، لفوق يكبّر، ولمسة على المصغّر تكبّره
+  let last = feed.scrollTop;
+  feed.addEventListener('scroll', () => {
+    const y = feed.scrollTop, d = y - last; last = y;
+    if (isOpen) return;
+    if (y < 24 || d < -6) dock.classList.remove('compact');
+    else if (d > 4) dock.classList.add('compact');
+  }, { passive: true });
+
+  // ── الزجاج ──
+  // خريطة الانكسار تتمدد مع العنصر (وحدات الصندوق)، فلا تتبدل خريطة أثناء التكبير: التكبير والتصغير بلا قفزة انكسار.
+  // سطح محدّب: الحافة تنحني للداخل بقوة فتنضغط فيها الصورة وتنقلب قليلًا (هذا ما يجعل الحافة تبدو سميكة)، والوسط يكبّر.
+  // التشتت: الأحمر والأخضر والأزرق ينكسر كل منها بقدر مختلف قليلًا، فالألوان تفترق حيث الانكسار قوي (الحافة) ولا شيء في الوسط.
+  const enc = (n) => 128 + clamp(n, -1, 1) * 127;
+  const toURL = (data, W, H) => { const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d').putImageData(new ImageData(data, W, H), 0, 0); return c.toDataURL('image/png'); };
+  function lensMap(N, { bevel, magnify }) {
+    const data = new Uint8ClampedArray(N * N * 4), R = N / 2;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const u = (i + 0.5 - R) / R, w = (j + 0.5 - R) / R, rho = Math.hypot(u, w), k = (j * N + i) * 4;
+      data[k + 2] = 128; data[k + 3] = 255;
+      if (!rho) { data[k] = data[k + 1] = 128; continue; }
+      const r = Math.min(rho, 1), t = Math.min(1, (1 - r) / bevel), m = (1 - t) ** 3;
+      data[k] = enc(-(u / rho) * (m * (1 - magnify) + r * magnify)); data[k + 1] = enc(-(w / rho) * (m * (1 - magnify) + r * magnify));
+    }
+    return toURL(data, N, N);
+  }
+  const sd = (px, py, hw, hh, r) => { const qx = Math.abs(px) - hw + r, qy = Math.abs(py) - hh + r; return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r; };
+  function capMap(w, h, r, bevel) {
+    const q = 2, W = Math.round(w * q), H = Math.round(h * q), hw = W / 2, hh = H / 2, R = r * q, B = bevel * q;
+    const data = new Uint8ClampedArray(W * H * 4);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const px = i + 0.5 - hw, py = j + 0.5 - hh, k = (j * W + i) * 4, d = Math.min(0, sd(px, py, hw, hh, R));
+      data[k + 2] = 128; data[k + 3] = 255;
+      const t = Math.min(1, -d / B), m = (1 - t) ** 3;
+      const gx = sd(px + 1, py, hw, hh, R) - sd(px - 1, py, hw, hh, R), gy = sd(px, py + 1, hw, hh, R) - sd(px, py - 1, hw, hh, R), len = Math.hypot(gx, gy) || 1;
+      data[k] = enc(-gx / len * m); data[k + 1] = enc(-gy / len * m);
+    }
+    return toURL(data, W, H);
+  }
+  const refracts = /Chrome|Chromium|Edg|OPR/.test(navigator.userAgent);
+  const SVGNS = 'http://www.w3.org/2000/svg', CH = { r: '1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0', g: '0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0', b: '0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0' };
+  let svg = null, D = 0.26; const passes = [];
+  function glassFilter(id, href, S, spread = 1) {
+    document.getElementById(id)?.remove();
+    const f = document.createElementNS(SVGNS, 'filter');
+    for (const [a, val] of Object.entries({ id, x: 0, y: 0, width: 1, height: 1, primitiveUnits: 'objectBoundingBox', 'color-interpolation-filters': 'sRGB' })) f.setAttribute(a, val);
+    const pass = (ch) => `<feDisplacementMap in="SourceGraphic" in2="map" scale="0" xChannelSelector="R" yChannelSelector="G" result="d${ch}"/><feColorMatrix in="d${ch}" type="matrix" values="${CH[ch]}" result="${ch}"/>`;
+    f.innerHTML = `<feImage href="${href}" x="0" y="0" width="1" height="1" preserveAspectRatio="none" result="map"/>${pass('r')}${pass('g')}${pass('b')}<feBlend in="r" in2="g" mode="screen" result="rg"/><feBlend in="rg" in2="b" mode="screen"/>`;
+    svg.append(f);
+    const [r, g, b] = f.querySelectorAll('feDisplacementMap');
+    for (let i = passes.length - 1; i >= 0; i--) if (!passes[i].r.isConnected) passes.splice(i, 1);
+    passes.push({ S, r, g, b, f: spread }); applyDispersion();
+  }
+  // الأزرق ينكسر أكثر من الأحمر (كما في الزجاج الحقيقي)
+  function applyDispersion() { for (const p of passes) { const d = D * p.f; p.r.setAttribute('scale', (p.S * (1 - d)).toFixed(4)); p.g.setAttribute('scale', p.S.toFixed(4)); p.b.setAttribute('scale', (p.S * (1 + d)).toFixed(4)); } }
+  $('disp').oninput = (e) => { D = e.target.value / 100; $('dispOut').textContent = e.target.value + '%'; applyDispersion(); };
+  function buildCaps() {
+    dock.querySelectorAll('[data-cap]').forEach((cap, k) => {
+      const w = cap.offsetWidth, h = cap.offsetHeight;
+      // الكبسولة أهدأ من العدسة: انحناء ~6px في حافة 12px، ونصف التشتت، والضبابية الخفيفة نفسها التي اعتُمدت في v6
+      glassFilter('cap' + k, capMap(w, h, 28, 12), (6 * 2) / w, 0.5);
+      cap.style.setProperty('--glass', `url(#cap${k}) blur(1.5px) saturate(1.7) brightness(1.05)`);
+    });
+  }
+  function buildGlass() {
+    if (svg || !refracts) return;
+    svg = document.createElementNS(SVGNS, 'svg'); svg.setAttribute('width', '0'); svg.setAttribute('height', '0'); svg.style.position = 'absolute';
+    document.body.append(svg);
+    buildCaps();
+    // عدسة واحدة لكل الأحجام: الدائرة 40 الساكنة والكبسولة 78×60 المرفوعة. الانحناء ~7px ساكنة ويثخن مع الحجم (~14px مرفوعة)
+    glassFilter('lens', lensMap(160, { bevel: 0.5, magnify: 0.25 }), 14 / 40);
+    lens.style.setProperty('--lens-f', 'url(#lens) saturate(1.6) brightness(1.1)');
+  }
+  let rT = 0;
+  new ResizeObserver(() => {
+    layoutGlyphs();
+    if (isOpen && glassy()) { x = target = secCenter(SECS.indexOf(section)); render(); } else if (!press) snap(dock.querySelector('.nav.active'), true);
+    clearTimeout(rT); rT = setTimeout(() => { if (svg) buildCaps(); }, 160);
+  }).observe(dock);
+  layoutGlyphs();
+  for (const o of opts) o.inert = true;
+  markSection();
+  setMode('glass');
+})();
+</script>
