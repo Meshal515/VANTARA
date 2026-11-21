@@ -559,3 +559,72 @@ class SeedMeter(context: Context, private val bars: Int, private val color: Int)
         fun color(s: Int) = when { s >= 20 -> Tone.OK; s >= 5 -> Tone.WARN; else -> Tone.BAD }
     }
 }
+
+/**
+ * Glass في المشغّل الأصلي (قرار المالك، 21 نوفمبر: «شكل زجاجي على أزرار المشغّل الأصلي»).
+ * الفيديو في سطح مستقل لا يقرؤه أي View، فلا ضباب ولا انكسار حقيقي فوقه: «مظهر زجاجي» كطبقة ويندوز
+ * (player.css: html.desktop-overlay) — صبغة شفافة، وحافة لامعة من أعلى، وظل ناعم. لا يلمس التشغيل ولا يكلّف إطارًا.
+ * يُفعَّل من إعداد «التأثير الزجاجي» في الويب (Launch.material)، والمظهر الحالي لا يتغير بكسلًا.
+ */
+object Glass {
+    var on = false
+        private set
+    fun use(material: String?) { on = material == "glass" }
+}
+
+/** كبسولة أو دائرة زجاجية (نصف قطرها نصف الارتفاع). الظل داخل الحدود: الشكل يتقلص بقدره. */
+class GlassDrawable(ctx: Context) : Drawable() {
+    private val shadow = ctx.dp(4).toFloat()
+    private val px = ctx.resources.displayMetrics.density
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x6B14121C }
+    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px; color = 0x1FFFFFFF }
+    private val shine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px }
+    private val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+    private val shape = RectF()
+    private val layer = RectF()
+
+    override fun onBoundsChange(bounds: android.graphics.Rect) {
+        shape.set(bounds.left + shadow, bounds.top + shadow * 0.6f, bounds.right - shadow, bounds.bottom - shadow * 1.4f)
+        // الحافة اللامعة: بيضاء من أعلى الشكل وتذوب قبل منتصفه، كإضاءة iOS
+        shine.shader = android.graphics.LinearGradient(0f, shape.top, 0f, shape.top + shape.height() * 0.55f, 0x57FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP)
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (shape.isEmpty) return
+        val r = shape.height() / 2f
+        // ظل ناعم بطبقات (BlurMaskFilter لا يعمل مع تسريع العتاد قبل API 28)
+        for (i in 4 downTo 1) {
+            val g = shadow * i / 4f
+            layer.set(shape.left - g, shape.top - g * 0.5f, shape.right + g, shape.bottom + g * 1.5f)
+            soft.alpha = 14 - i * 2
+            canvas.drawRoundRect(layer, r + g, r + g, soft)
+        }
+        canvas.drawRoundRect(shape, r, r, fill)
+        val h = px / 2f
+        layer.set(shape.left + h, shape.top + h, shape.right - h, shape.bottom - h)
+        canvas.drawRoundRect(layer, r - h, r - h, rim)
+        canvas.drawRoundRect(layer, r - h, r - h, shine)
+    }
+
+    override fun setAlpha(alpha: Int) { fill.alpha = alpha * 0x6B / 255 }
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** زر وحيد في Glass: دائرة زجاجية تحت موجة الضغط. لا يفعل شيئًا في المظهر الحالي. */
+fun View.glassCircle() {
+    if (!Glass.on) return
+    background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), GlassDrawable(context), null)
+}
+
+/**
+ * أزرار متجاورة في Glass = كبسولة واحدة (كمجموعات أزرار iOS، وملاحظة المالك على الجرس والبحث)، لا دوائر متلاصقة.
+ * الحشوة تحفظ مكان الظل وتبعد الأزرار عن حافة الكبسولة.
+ */
+fun LinearLayout.glassGroup() {
+    if (!Glass.on) return
+    background = GlassDrawable(context)
+    val s = dp(4); val e = dp(2)
+    setPadding(s + e, (s * 0.6f).toInt(), s + e, (s * 1.4f).toInt())
+}
