@@ -176,8 +176,14 @@ class ExtensionEnginePlugin : Plugin() {
                     if (!artifacts.containsKey(base.pkg)) artifacts[base.pkg] = localArtifactSpec(base)
                     return artifacts[base.pkg]
                 }
+                // قراءة الصيغتين (LegacySourceIds): مصدر حزمة مدمجة سابقًا مثبّتة من مستودع يظهر بمعرّفه القديم، مرة واحدة
+                fun visibleIds(ext: UserExtension): List<Pair<UserSource, String>> {
+                    val entries = ext.sources.map { LegacySourceIds.Entry(it.id, it.lang) }
+                    return ext.sources.map { it to LegacySourceIds.visibleId(ext.pkg, LegacySourceIds.Entry(it.id, it.lang), entries) }
+                }
+                val takenByInstalled = st.extensions.flatMap { ext -> visibleIds(ext).map { it.second } }.filter { '#' !in it }.toSet()
                 for (spec in SPIKE_SOURCES) {
-                    if (spec.blockedReason != null) continue
+                    if (spec.blockedReason != null || spec.pkg in takenByInstalled) continue
                     val installed = artifact(spec)
                     list.put(
                         JSObject()
@@ -200,6 +206,7 @@ class ExtensionEnginePlugin : Plugin() {
                 for (filler in FILLER_SOURCES) {
                     val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
                     val id = "${filler.pkg}@${filler.lang}"
+                    if (id in takenByInstalled) continue
                     val installed = artifact(spec)
                     list.put(
                         JSObject()
@@ -223,8 +230,7 @@ class ExtensionEnginePlugin : Plugin() {
                 for (ext in st.extensions) {
                     val icon = NativeExtensionIcons.iconUrl(context, "extensions", ext.pkg, ext.sha256)
                         ?: RepoIndex.iconUrl(ext.iconUrl, ext.repoUrl) ?: RepoIndex.legacyIconUrl(ext.repoUrl, ext.pkg)
-                    for (src in ext.sources) {
-                        val id = "${ext.pkg}#${src.id}"
+                    for ((src, id) in visibleIds(ext)) {
                         list.put(
                             JSObject()
                                 .put("id", id)
@@ -551,8 +557,9 @@ class ExtensionEnginePlugin : Plugin() {
 
     /** EF1: فشل يعني أن الموقع تغيّر ⇒ فحص تحديث فوري لتلك الإضافة (مرة كل 6 ساعات على الأكثر). */
     private fun checkUpdateAfterFailure(sourceId: String?, code: String) {
-        if (sourceId.isNullOrBlank() || '#' !in sourceId || !MangaSelfUpdate.suggestsUpdate(code)) return
-        val pkg = sourceId.substringBefore('#')
+        if (sourceId.isNullOrBlank() || !MangaSelfUpdate.suggestsUpdate(code)) return
+        // المعرّف القديم لحزمة مثبّتة من مستودع يُفحص أيضًا (بلا إضافة مثبّتة يعود أدناه كما كان)
+        val pkg = if ('#' in sourceId) sourceId.substringBefore('#') else splitSourceId(sourceId).first
         val now = System.currentTimeMillis()
         if (now - (failureChecks[pkg] ?: 0L) < MangaSelfUpdate.FAILURE_CHECK_GAP_MS) return
         failureChecks[pkg] = now
@@ -1182,7 +1189,18 @@ class ExtensionEnginePlugin : Plugin() {
         if ('#' in sourceId) {
             val userPkg = sourceId.substringBefore('#')
             val sid = sourceId.substringAfter('#')
-            val ext = userStore.extension(userPkg) ?: error("unknown sourceId: $sourceId")
+            val ext = userStore.extension(userPkg)
+            if (ext == null) {
+                // قراءة الصيغتين (LegacySourceIds): pkg#id لحزمة مدمجة غير مثبّتة من مستودع يُحمَّل من المدمجة نفسها
+                val base = packageSpec(userPkg) ?: error("unknown sourceId: $sourceId")
+                val spec = builtinSpecs.current(base)
+                spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
+                val all = packages[userPkg] ?: loadPackage(spec).also { packages[userPkg] = it }
+                val source = all.firstOrNull { it.id.toString() == sid } ?: error("${spec.label}: المصدر غير موجود في الحزمة")
+                loaded[sourceId] = source
+                noteHost(source)
+                return source
+            }
             val all = packages[userPkg] ?: loadPackage(ext.spec()).also { packages[userPkg] = it }
             // المعرّف المحفوظ في المكتبة قد يكون قديمًا: يُتبع جدول الترحيل إلى المصدر الحالي
             val current = userStore.extension(userPkg) ?: ext
@@ -1194,6 +1212,16 @@ class ExtensionEnginePlugin : Plugin() {
             return source
         }
         val (pkg, lang) = splitSourceId(sourceId)
+        // قراءة الصيغتين (LegacySourceIds): الحزمة مثبّتة من مستودع ⇒ المعرّف القديم يعني مصدرها نفسه في الإضافة المثبّتة
+        userStore.extension(pkg)?.let { ext ->
+            val all = packages[pkg] ?: loadPackage(ext.spec()).also { packages[pkg] = it }
+            val sid = LegacySourceIds.sourceIdFor(sourceId, all.map { LegacySourceIds.Entry(it.id.toString(), it.lang) })
+                ?: error("${ext.name}: لا مصدر يطابق $sourceId في الحزمة")
+            val source = all.first { it.id.toString() == sid }
+            loaded[sourceId] = source
+            noteHost(source)
+            return source
+        }
         // المواصفة المضمّنة، أو آخر إصدار رسمي نُزّل من مستودع Keiyoushi وتحقق توقيعه (معرّف المصدر نفسه)
         val spec = builtinSpecs.current(packageSpec(pkg) ?: error("unknown sourceId: $sourceId"))
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
