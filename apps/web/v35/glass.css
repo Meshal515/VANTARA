@@ -294,11 +294,11 @@ html[data-material='glass'] .v35 .rf-dock {
 }
 
 /* ── عدسة الأقسام المجزأة (bindGlassTabs في glass.js): م1 تنزلق بنابض CSS، بلون القسم ── */
-html[data-material='glass'] .v35 :is(.library-tabs, .mw-tabs, .uv-tabs, .sx-tabs, .ul-shelves, .mw-ranges, .drawer-sections),
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ul-shelves, .mw-ranges, .drawer-sections),
 html[data-material='glass'] .v35 .cn-kinds:not(.cn-hero-alt > .cn-kinds) {
   position: relative;
 }
-html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .mw-ranges, .drawer-sections) > :not(.g-seg) {
+html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .mj-filters, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .mw-ranges, .drawer-sections) > :not(.g-seg) {
   position: relative;
   z-index: 1;
 }
@@ -504,3 +504,68 @@ html[data-material='glass'] .v35 .cn-eps-head .icon-btn {
   -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
 }
 
+
+/* ── غرفة المجلس (الشات، majlis-chat.js): كرسائل iOS. الرجوع والأعضاء و«رشّح» والصوت دوائر م2،
+ * حقل الكتابة كبسولة م2، وزر الإرسال يبقى بلون القسم (الإجراء الرئيسي). خطوط الفصل تختفي كأشرطة iOS 26.
+ * الرأس وشريط الكتابة في مكانهما (لا تتغير التخطيطات ولا تثبيت المحادثة في أسفلها).
+ * «انزل لآخر رسالة» يطفو فوق الرسائل: كبسولة م2 حقيقية. ── */
+html[data-material='glass'] .v35 .mc-head,
+html[data-material='glass'] .v35 .mc-compose {
+  border-color: transparent;
+}
+html[data-material='glass'] .v35 :is(.mc-head .mc-icon, .mc-bar .mc-icon, .mc-act:not(.is-send)) {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .mc-field {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .mc-field:focus-within {
+  box-shadow: var(--g-rim), inset 0 0 0 1px var(--line-strong), 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+html[data-material='glass'] .v35 .mc-jump {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+}
+/* فلاتر «آخر ما صار» (الكل، فريمات، ترشيحات، قراءة): ألسنة ملتصقة بلا فراغ، فالعدسة تحتاج مسافة تتنفس فيها */
+html[data-material='glass'] .v35 .mj-filters {
+  gap: 18px;
+}
+
+/* ── حقول البحث وزر الفلترة (البحث في الأقسام الثلاثة، واكتشف الأنمي والسينما): كحقل بحث iOS 26،
+ * كبسولة زجاج م2 بخريطة الشريط العريض. يُعدّل قرار 8.4 («حقل البحث ❌») بطلب المالك. ── */
+html[data-material='glass'] .v35 :is(.search-input, .ad-search, .cn-search),
+html[data-material='glass'] .v35[data-section='manga'] :is(#discover, #search, #collection) .search-input {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: var(--g-m2b-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2b-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.search-input, .cn-search):is(:focus, :focus-visible, :focus-within),
+html[data-material='glass'] .v35 .ad-search:focus-within {
+  box-shadow: var(--g-rim), inset 0 0 0 1px var(--line-strong), 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+html[data-material='glass'] .v35 .cn-filter-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+/* أيقونة العدسة فوق الحقل: الزجاج (backdrop-filter) يجعل الحقل طبقة مستقلة تُرسم فوق أخيه السابق */
+html[data-material='glass'] .v35 .search-bar .icon {
+  z-index: 1;
+}
+/* ألسنة «أفلام/مسلسلات» في اكتشف السينما: العدسة تحيط بالكلمة 12px، فتُزاح الألسنة بقدرها لتبقى العدسة داخل حافة الصفحة */
+html[data-material='glass'] .v35 .cn-kinds--inline {
+  padding-inline: calc(var(--cn-gutter, 16px) + 12px);
+}

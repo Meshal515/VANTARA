@@ -232,6 +232,7 @@ function ensureFamilyFilters(doc, tier) {
 const TAB_GROUPS = Object.freeze([
   { sel: '.social-tabs', item: '.social-tab', fill: true },
   { sel: '.library-tabs', item: '.library-tab', padX: 12, h: 34 },
+  { sel: '.mj-filters', item: '.library-tab', padX: 12, h: 34 },
   { sel: '.cn-kinds', item: '.cn-kind', padX: 12, h: 32 },
   { sel: '.mw-tabs', item: 'button', padX: 12, h: 34 },
   { sel: '.uv-tabs', item: 'button', padX: 12, h: 34 },
