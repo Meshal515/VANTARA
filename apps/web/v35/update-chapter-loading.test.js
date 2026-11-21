@@ -33,7 +33,8 @@ it('does not let saved editions overwrite the updated source URL from the releas
 it('does not substitute an English-only edition for the requested Arabic chapter',async()=>{
   const en='eu.kanade.tachiyomi.extension.all.weebcentral@en';
   engine.sources.mockResolvedValue([{id:A,label:'Team X'},{id:en,label:'English',filler:true}]);
-  readWork.mockResolvedValue({at:Date.now(),discoveredAt:Date.now(),discoveredSources:[A,en],detail:{title},editions:[{...edition(A,'/series/LWW'),chapters:[chapter(218)]}]});
+  // سجل بالصيغة الحالية (discoveryRetryAt): سؤال حديث موثوق، فلا إعادة كاملة
+  readWork.mockResolvedValue({at:Date.now(),discoveredAt:Date.now(),discoveredSources:[A,en],discoveryRetryAt:{},detail:{title},editions:[{...edition(A,'/series/LWW'),chapters:[chapter(218)]}]});
   await loadWork(work(),{requestedChapter:251,arabicOnly:true});
   expect(engine.search).not.toHaveBeenCalledWith(en,expect.anything(),expect.anything());
 });
