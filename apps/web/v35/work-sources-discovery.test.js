@@ -98,3 +98,16 @@ it('never lists a source that did not return the work',async()=>{
   const full=await loadWork(work());
   expect(ids(full)).not.toContain(M);
 });
+
+it('a work opened before the fix (old record that counted a timed-out source as asked) is asked again once, not trusted for 12 hours', async () => {
+  slowFirst=false;
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user:true}]);
+  // سجل الإصدار السابق: كل المصادر «سُئلت» قبل دقيقة، بلا حقل discoveryRetryAt
+  stored={at:Date.now(),discoveredAt:Date.now()-60_000,discoveredSources:[A,M],detail:{title},editions:[{sourceId:A,label:'Team X',manga:{title,url:'/a'},chapters:[chapter(1),chapter(2)]}]};
+  const full=await loadWork(work());
+  expect(ids(full)).toContain(M);
+  // وبعد إعادة السؤال صار السجل بالصيغة الجديدة: لا يُعاد كل مرة
+  engine.search.mockClear();
+  await loadWork(work());
+  expect(engine.search).not.toHaveBeenCalled();
+});

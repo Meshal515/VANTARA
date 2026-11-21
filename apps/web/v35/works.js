@@ -1200,7 +1200,10 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   const askedBefore = new Set(cached ? cached.discoveredSources ?? [] : []);
   const retryAt = cached?.discoveryRetryAt ?? {};
   const now = Date.now();
-  const interval = !cached || now - (cached?.discoveredAt ?? 0) > REDISCOVER_MS;
+  // سجل الإصدار السابق (بلا discoveryRetryAt) كان يحسب من فاتته المهلة «مسؤولًا»: لا يُوثق به، فيُعاد السؤال مرة كاملة
+  // (بلاغ المالك 21 نوفمبر: عمل فُتح قبل الإصلاح بقي بلا مصدره العربي)
+  const legacyRecord = Boolean(cached) && !('discoveryRetryAt' in cached);
+  const interval = !cached || legacyRecord || now - (cached?.discoveredAt ?? 0) > REDISCOVER_MS;
   const pending = sourceIds.filter((sid) => !askedBefore.has(sid) && !knownIds.includes(sid) && (retryAt[sid] ?? 0) <= now);
   const due = discover && available() && (interval || pending.length > 0);
   const target=Number.isFinite(requestedChapter)&&requestedChapter>=0?requestedChapter:null;
