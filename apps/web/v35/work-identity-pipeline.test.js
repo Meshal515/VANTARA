@@ -142,6 +142,8 @@ describe('plan B, end to end on 1911 real works', () => {
   let detailCalls = 0;
   const pages = [];
   beforeAll(async () => {
+    // بلا شبكة حقيقية في المقياس: أسئلة MangaDex (الأسماء العربية) تردّ «لا شيء» فورًا
+    vi.stubGlobal('fetch', async () => ({ ok: false, json: async () => ({}) }));
     model = sourcesModel();
     const ids = [...model.catalog.keys()];
     // المحاكاة تعامل كل مصادرها (ومنها MangaDex) مصادر عربية آمنة: المقياس للهوية وحدها، لا لسياسة المصادر

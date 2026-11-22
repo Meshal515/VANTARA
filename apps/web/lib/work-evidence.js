@@ -12,7 +12,7 @@
  * وأسماؤه الرسمية، لا ما تعلّمه الجهاز من نصوص. وفوقها حارس المعرّف الرسمي: معرّفان مختلفان ليسا عملًا واحدًا أبدًا.
  */
 
-import { looseKey, normalizeTitle, slugName, titleTwins } from './catalog.js';
+import { looseKey, normalizeTitle, slugName, titleForms, titleTwins } from './catalog.js';
 import { aliasesFromText } from './manga-aliases.js';
 
 const words = (key) => new Set(String(key).split(' ').filter(Boolean));
@@ -38,9 +38,12 @@ export const isPartName = (a, b) => parentName(a, b) || parentName(b, a);
 export function ownNames(v35work, { workOfficial = null, officialOf = () => null, more = [] } = {}) {
   const main = new Set();
   const extra = new Set();
+  // كل اسم بصيغه المكافئة («SPY×FAMILY» و«SPY x FAMILY»، titleForms)
   const add = (set, raw) => {
-    const key = typeof raw === 'string' ? normalizeTitle(raw) : '';
-    if (key && key.replace(/\s/g, '').length >= 2) set.add(key);
+    for (const form of typeof raw === 'string' ? titleForms(raw) : []) {
+      const key = normalizeTitle(form);
+      if (key && key.replace(/\s/g, '').length >= 2) set.add(key);
+    }
   };
   const id = String(v35work?.id ?? '');
   if (id.startsWith('ext:') && id.length > 4) main.add(id.slice(4));
@@ -96,7 +99,7 @@ export function namesPointElsewhere(names, workOfficial, officialOf = () => null
 export function listingEvidence(manga, own, { workOfficial = null, officialOf = () => null } = {}) {
   const key = normalizeTitle(manga?.title);
   if (!key || !own?.size) return null;
-  if (own.has(key)) return 'exact';
+  if (titleForms(manga?.title).some((t) => own.has(normalizeTitle(t)))) return 'exact';
   for (const name of own) if (titleTwins(key, name)) return 'twin';
   const alt = Array.isArray(manga?.altNames) ? manga.altNames : [];
   if (alt.some((n) => own.has(normalizeTitle(n))) && !namesPointElsewhere(alt, workOfficial, officialOf)) return 'alt';

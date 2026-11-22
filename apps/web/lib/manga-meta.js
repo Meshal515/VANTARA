@@ -238,3 +238,39 @@ export async function fetchMangaDexIdentity(title, { fetchImpl = globalThis.fetc
     clearTimeout(timer);
   }
 }
+
+/**
+ * الأسماء العربية لعمل نعرفه بالإنجليزي (مهمة الإضافات في البطاقة العامة، 22 نوفمبر): المصدر العربي يُسأل بالإنجليزي
+ * فقط إن لم نعرف للعمل اسمًا عربيًا، وكثير منها يسمّيه بالعربي. MangaDex يعرف الاسم العربي، والحارس رقم AniList للعمل
+ * (`links.al` = رقمه) أو، بلا رقم، عمل واحد بالضبط بهذا الاسم. للكبار لا شيء.
+ * @returns {Promise<string[]>}
+ */
+export async function fetchMangaDexArabicNames(title, { officialId = null, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
+  const key = normalizeTitle(title);
+  if (!key || typeof fetchImpl !== 'function') return [];
+  const url = new URL('https://api.mangadex.org/manga');
+  url.searchParams.set('title', String(title).trim());
+  url.searchParams.set('limit', '10');
+  for (const r of ['safe', 'suggestive']) url.searchParams.append('contentRating[]', r);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => controller?.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url.toString(), { signal: controller?.signal, headers: { Accept: 'application/json' } });
+    if (!res?.ok) return [];
+    const all = ((await res.json())?.data ?? []).map((m) => {
+      const a = m?.attributes ?? {};
+      const names = [...Object.values(a.title ?? {}), ...(a.altTitles ?? []).flatMap((t) => Object.values(t ?? {}))].filter((n) => typeof n === 'string' && n.trim());
+      const tags = (a.tags ?? []).map((t) => t?.attributes?.name?.en ?? '');
+      return { names, al: Number(a.links?.al) || null, adult: adultGenre(tags) || dirtyEcchiGenre(tags) };
+    });
+    const pick = Number.isSafeInteger(officialId)
+      ? all.filter((m) => m.al === officialId)
+      : all.filter((m) => m.names.some((n) => normalizeTitle(n) === key));
+    if (pick.length !== 1 || pick[0].adult) return [];
+    return [...new Set(pick[0].names.filter((n) => /[؀-ۿ]/.test(n)).map((n) => n.trim()))];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}

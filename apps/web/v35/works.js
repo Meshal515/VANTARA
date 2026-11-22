@@ -12,7 +12,7 @@
 import engine from '../lib/extension-engine.js';
 import { saveWithRelief } from '../lib/storage-relief.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
-import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, sourcePackage, titleTwins } from '../lib/catalog.js';
+import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, sourcePackage, titleForms, titleTwins } from '../lib/catalog.js';
 import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt, ambiguousNames } from '../lib/manga-alias-store.js';
 import { RANK, editionKey } from '../lib/work-identity.js';
 import { detailEvidence, detailNames, isPartName, listingEvidence, namesPointElsewhere, officialConflict, ownNames, pickEdition } from '../lib/work-evidence.js';
@@ -26,7 +26,7 @@ import { noteListed, topChapters } from '../lib/update-engine.js';
 import { adultManga, adultSource, blockKey, ecchiManga, isBlockedKey } from '../lib/adult-filter.js';
 import { buildsLibrary, enrichOnly, noteSourceTiers, searchable, tierOf } from '../lib/source-policy.js';
 import { needsVerdict, noteVerdicts, workVerdict } from '../lib/manga-verdict.js';
-import { fetchMangaMatches } from '../lib/manga-meta.js';
+import { fetchMangaDexArabicNames, fetchMangaMatches } from '../lib/manga-meta.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -250,7 +250,8 @@ export function searchVariants(query) {
   const q = String(query ?? '').trim().replace(/\s+/g, ' ');
   const straight = q.replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"');
   const bare = straight.replace(/['"]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
-  return [...new Set([q, straight, bare].filter(Boolean))];
+  // «SPY×FAMILY» يكتبه الموقع «Spy x Family» (titleForms)
+  return [...new Set([q, straight, ...titleForms(straight).slice(1), bare].filter(Boolean))];
 }
 
 /**
@@ -1600,7 +1601,9 @@ async function requestSource(source, fetch, timeout) {
 /** عناوين العمل كما تسمّيه نسخه المعروفة: كل واحد منها سؤال ومفتاح مطابقة. */
 function titleVariants(v35work) {
   // أسماؤه البديلة أيضًا: مصدر يسمّيه «Demonic Emperor» يُسأل بهذا الاسم لا بـ«Magic emperor»
-  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).flatMap((e) => [e.manga?.title, ...(e.manga?.altNames ?? [])]), ...(v35work.synonyms ?? []), ...(aliasMap().get(v35work._work?.key) ?? [])];
+  // وصيغها المكافئة («SPY×FAMILY» ← «SPY x FAMILY»): موقع يكتب العمل بحرف x لا يجده سؤال «spy family»
+  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).flatMap((e) => [e.manga?.title, ...(e.manga?.altNames ?? [])]), ...(v35work.synonyms ?? []), ...(aliasMap().get(v35work._work?.key) ?? [])]
+    .flatMap((t) => (typeof t === 'string' ? titleForms(t) : []));
   const seen = new Set();
   return raw.filter((t) => {
     if (typeof t !== 'string' || !t.trim() || t.startsWith('ext:')) return false;
@@ -1623,6 +1626,24 @@ export function matchingWork(items, saved) {
   const candidates = items.map((item) => ({ item, keys: (item._work?.editions ?? []).map((edition) => index.add(edition)?.key).filter(Boolean) }));
   const matches = candidates.filter(({ keys }) => keys.some((key) => index.keyOf(key) === index.keyOf(own)));
   return matches.length === 1 ? matches[0].item : null;
+}
+
+/** الأسماء العربية لعمل من MangaDex، محفوظة للعمل (مرة كل أسبوعين للعمل الواحد، ولو لم تُوجد). */
+const ARABIC_NAMES_KEY = 'vantara.mangadex.arabicNames.v1';
+const ARABIC_NAMES_TTL = 14 * 86_400_000;
+let arabicNamesCache = null;
+async function arabicNamesOf(workKey, title, officialId, { fetchNames = fetchMangaDexArabicNames } = {}) {
+  arabicNamesCache ??= (() => { try { return JSON.parse(localStorage.getItem(ARABIC_NAMES_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+  const key = String(workKey ?? '');
+  const hit = arabicNamesCache[key];
+  if (hit && Date.now() - (hit.at ?? 0) < ARABIC_NAMES_TTL) return hit.names ?? [];
+  const names = key && title ? await fetchNames(title, { officialId: Number.isSafeInteger(officialId) ? officialId : null, timeoutMs: 3000 }).catch(() => []) : [];
+  arabicNamesCache[key] = { names, at: Date.now() };
+  try {
+    const entries = Object.entries(arabicNamesCache);
+    localStorage.setItem(ARABIC_NAMES_KEY, JSON.stringify(Object.fromEntries(entries.slice(-3000))));
+  } catch { /* تخزين ممتلئ: للجلسة */ }
+  return names;
 }
 
 /**
@@ -1667,8 +1688,16 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
     const workRef = String(v35work.id);
     const workOfficial = workOfficialOf(v35work);
     const officialOf = (key) => officialIdMap().get(key) ?? null;
+    // المصدر العربي يُسأل بالاسم العربي إن عرفناه (تقارير الأجهزة: مصادر عربية ردّت «فارغ» على كل أسئلة الاكتشاف
+    // الإنجليزية). من MangaDex مرة للعمل؛ وما طابق رقم العمل الرسمي اسمٌ موثوق له، يقبل نسخة بعنوانها العربي
+    const officialArabic = [];
+    if (Number.isSafeInteger(workOfficial) && !variants.some(arabic) && others.some((s) => arabicSource(s.id))) {
+      const names = await arabicNamesOf(v35work._work?.key ?? v35work.id, variants[0], workOfficial);
+      variants.push(...names);
+      officialArabic.push(...names);
+    }
     // `moreNames`: أسماء العمل في صفحة تفاصيل نسخته (loadWork)، تُقرأ عند كل مصدر لأن التفاصيل قد تصل أثناء البحث
-    const ownNow = () => ownNames(v35work, { workOfficial, officialOf, more: moreNames?.() ?? [] });
+    const ownNow = () => ownNames(v35work, { workOfficial, officialOf, more: [...(moreNames?.() ?? []), ...officialArabic] });
     const graph = identityGraph();
     const ownedElsewhere = (manga, sourceId) => {
       const linked = editionRef(editionKeyOf({ sourceId, manga }));

@@ -101,6 +101,17 @@ export function decodeEntities(raw) {
  */
 const GROUP_TAG = /^\s*[([]\s*[A-Z]{2,6}\s*[)\]]\s*|\s*[([]\s*[A-Z]{2,6}\s*[)\]]\s*$/g;
 
+/**
+ * صيغ العنوان المكافئة التي يكتبها البشر والمواقع (بلاغ المالك 22 نوفمبر، «Spy x Family»): علامة الضرب «×» يكتبها موقع
+ * «x» ويحذفها التطبيع، فكان «SPY×FAMILY» = «spy family» و«Spy x Family» = «spy x family»: لا يتطابقان، ولا يجد
+ * المصدر العمل بسؤال «spy family». التطبيع نفسه لا يتغير (مفاتيح المكتبة والخادم مبنية عليه)؛ الصيغة الأخرى اسم بديل.
+ */
+export function titleForms(title) {
+	if (typeof title !== 'string' || !title.trim()) return [];
+	const withX = title.replace(/\s*[×✕✖⨯]\s*/g, ' x ').replace(/\s+/g, ' ').trim();
+	return withX !== title.trim() ? [title, withX] : [title];
+}
+
 export function normalizeTitle(raw) {
 	if (typeof raw !== 'string') return '';
 	const folded = fold(decodeEntities(raw).replace(LANGUAGE_TAG, ' ').replace(GROUP_TAG, ' '));
@@ -755,7 +766,7 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 			const byNumber = editionOfficial != null && (sharedNames.has(title) || (Number.isSafeInteger(titleOfficial) && titleOfficial !== editionOfficial));
 			const own = byNumber ? `${title} ~al${editionOfficial}` : shared(title) ? editionScopedKey(title, mirrorFamily(entry.sourceId), manga?.url) : title;
 			if (editionOfficial != null && !Number.isSafeInteger(editionOfficials.get(own) ?? officialIds.get(own))) editionOfficials.set(own, editionOfficial);
-			const names = prepareNames([...(Array.isArray(manga.altNames) ? manga.altNames : [])].filter((n) => { const k = normalizeTitle(n); return k !== title && !shared(k); }));
+			const names = prepareNames([...(Array.isArray(manga.altNames) ? manga.altNames : []), ...titleForms(manga.title).slice(1)].filter((n) => { const k = normalizeTitle(n); return k !== title && !shared(k); }));
 			const slug = slugName(manga);
 			if (slug) names.push(...prepareNames([slug], true));
 			entries.push({ entry, own, family: mirrorFamily(entry.sourceId), names });
