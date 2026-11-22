@@ -143,9 +143,12 @@ export function pickEdition(accepted) {
   return STRENGTH[list[0].ev] > STRENGTH[list[1].ev] ? list[0] : null;
 }
 
-/** معرّفان رسميان معروفان ومختلفان: ليسا عملًا واحدًا. */
+/**
+ * معرّفان رسميان معروفان ومختلفان: ليسا عملًا واحدًا. معرّف النسخة نفسها (MangaDex `links.al`) يسبق معرّف اسمها: اسم
+ * واحد قد يحمله عملان، والنسخة لا تكذب عن نفسها.
+ */
 export function officialConflict(manga, workOfficial, officialOf) {
   if (!Number.isSafeInteger(workOfficial)) return false;
-  const id = officialOf(normalizeTitle(manga?.title));
+  const id = Number.isSafeInteger(manga?.officialId) ? manga.officialId : officialOf(normalizeTitle(manga?.title));
   return Number.isSafeInteger(id) && id !== workOfficial;
 }

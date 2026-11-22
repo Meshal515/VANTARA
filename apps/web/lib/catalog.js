@@ -469,6 +469,8 @@ export function editionScopedKey(title, family, url) {
 export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set(), editionRefOf = null, ambiguous: sharedNames = new Set() } = {}) {
 	const entries = [];
 	const rejected = [];
+	// مفتاح ← رقم AniList تحمله نسخة بنفسها (MangaDex links.al)، يكمّل officialIds (أرقام الأسماء)
+	const editionOfficials = new Map();
 	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
 	// يشاركه كلماته (آلاف الأعمال بلا كلفة تربيعية)
 	const { prepared, byWord } = preparedAliases(aliases);
@@ -497,7 +499,7 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 				nodes.add(k);
 				parent.set(k, k);
 				families.set(k, new Map());
-				const id = officialIds.get(k);
+				const id = officialIds.get(k) ?? editionOfficials.get(k);
 				officials.set(k, Number.isSafeInteger(id) ? new Set([id]) : new Set());
 			}
 		};
@@ -669,7 +671,7 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		// matchMangaIdentity) عمل واحد. حارس «مصدر يعرضهما عملين» داخل union نفسه: يرفض ويُسجَّل في rejected
 		const byOfficial = new Map();
 		for (const k of entryKeys) {
-			const id = officialIds.get(k);
+			const id = officialIds.get(k) ?? editionOfficials.get(k);
 			if (!Number.isSafeInteger(id)) continue;
 			if (!byOfficial.has(id)) byOfficial.set(id, []);
 			byOfficial.get(id).push(k);
@@ -746,7 +748,13 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 			// نسخة مصدر آخر بالاسم وحده. الأسماء البديلة والأدلة الأخرى تبقى تجمعها. مقياس الهوية: 63 دمجًا خاطئًا ← صفر
 			// اسم يحمله أكثر من عمل رسمي ولا رقم له: لا يدمج نسخة بأخرى وحده (التكرار أهون من الدمج الخاطئ)
 			const shared = (n) => sharedNames.has(n) && !officialIds.has(n);
-			const own = shared(title) ? editionScopedKey(title, mirrorFamily(entry.sourceId), manga?.url) : title;
+			// رقم النسخة نفسها (MangaDex links.al): اسمها مشترك، أو رقم اسمها رقم عمل آخر («Shoukoku no Altair» قصة جانبية
+			// برقم غير رقم الأصل) ← مفتاح الرقم نفسه، فتجتمع النسخ برقم واحد ولا تندمج المخالفة بالاسم
+			const editionOfficial = Number.isSafeInteger(manga?.officialId) && manga.officialId > 0 ? manga.officialId : null;
+			const titleOfficial = editionOfficials.get(title) ?? officialIds.get(title);
+			const byNumber = editionOfficial != null && (sharedNames.has(title) || (Number.isSafeInteger(titleOfficial) && titleOfficial !== editionOfficial));
+			const own = byNumber ? `${title} ~al${editionOfficial}` : shared(title) ? editionScopedKey(title, mirrorFamily(entry.sourceId), manga?.url) : title;
+			if (editionOfficial != null && !Number.isSafeInteger(editionOfficials.get(own) ?? officialIds.get(own))) editionOfficials.set(own, editionOfficial);
 			const names = prepareNames([...(Array.isArray(manga.altNames) ? manga.altNames : [])].filter((n) => { const k = normalizeTitle(n); return k !== title && !shared(k); }));
 			const slug = slugName(manga);
 			if (slug) names.push(...prepareNames([slug], true));

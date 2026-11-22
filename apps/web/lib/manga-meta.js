@@ -203,3 +203,38 @@ export async function fetchMangaRatings(titles, options = {}) {
   const found = await fetchMangaMatches(titles, options);
   return new Map([...found].map(([title, m]) => [title, m.rating]));
 }
+
+/**
+ * هوية عمل باسمه العربي من MangaDex (مهمة التكرار، 22 نوفمبر): AniList لا يعرف الأسماء العربية، وMangaDex يعرفها
+ * (altTitles بالعربي) ويربط عمله برقم AniList (`links.al`). الحارس كحارس AniList: عمل واحد بالضبط يحمل هذا الاسم بعد
+ * التطبيع، وله رقم، وليس للكبار. وإلا لا دليل.
+ * @returns {Promise<{ id: number, names: string[] }|null>}
+ */
+export async function fetchMangaDexIdentity(title, { fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
+  const key = normalizeTitle(title);
+  if (!key || typeof fetchImpl !== 'function') return null;
+  const url = new URL('https://api.mangadex.org/manga');
+  url.searchParams.set('title', String(title).trim());
+  url.searchParams.set('limit', '10');
+  for (const r of ['safe', 'suggestive']) url.searchParams.append('contentRating[]', r);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => controller?.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url.toString(), { signal: controller?.signal, headers: { Accept: 'application/json' } });
+    if (!res?.ok) return null;
+    const data = await res.json();
+    const named = (data?.data ?? []).map((m) => {
+      const a = m?.attributes ?? {};
+      const names = [...Object.values(a.title ?? {}), ...(a.altTitles ?? []).flatMap((t) => Object.values(t ?? {}))].filter((n) => typeof n === 'string' && n.trim());
+      const al = Number(a.links?.al);
+      const tags = (a.tags ?? []).map((t) => t?.attributes?.name?.en ?? '');
+      return { names, al: Number.isSafeInteger(al) && al > 0 ? al : null, adult: adultGenre(tags) || dirtyEcchiGenre(tags) };
+    }).filter((m) => m.names.some((n) => normalizeTitle(n) === key));
+    if (named.length !== 1 || !named[0].al || named[0].adult) return null;
+    return { id: named[0].al, names: [...new Set(named[0].names)] };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

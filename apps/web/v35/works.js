@@ -1699,7 +1699,8 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
         const sent = Date.now();
         let mangas;
         try {
-          const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS);
+          // نتائج MangaDex بأسمائها ومعرّف AniList لكل نسخة (links.al): نسخة برقم عمل آخر تُرفض ولو طابق اسمها
+          const page = await withMangaDexNames(source.id, await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS));
           if (!Array.isArray(page?.mangas)) throw new Error('invalid_search_response');
           mangas = page.mangas;
           answered = true;

@@ -32,7 +32,8 @@ const FLOOR = {
   mangadex: { oneCardWorks: 1114, homonymPairs: 65, duplicates: 876 },
   details: { oneCardWorks: 1769, homonymPairs: 63, duplicates: 144 },
   full: { oneCardWorks: 1821, homonymPairs: 65, duplicates: 100 },
-  ids: { oneCardWorks: 1822, homonymPairs: 65, duplicates: 99 },
+  // 22 نوفمبر: رقم AniList لنسخ MangaDex (links.al) يفرّق الاسم المشترك ويجمع النسخ برقم واحد: 99 ← 74
+  ids: { oneCardWorks: 1840, homonymPairs: 63, duplicates: 74 },
 };
 
 describe('manga identity benchmark (real AniList + MangaDex titles)', () => {

@@ -38,7 +38,8 @@ export function simulate(works, scenario = 'full') {
     if (arabic) entries.push(edition('ar.mangatime', w.al, { title: arabic, url: w.al % 2 ? `/manhwa/${slug(main)}` : `/p/${w.al}` }));
     if (withDex && w.d) {
       const names = [...new Set(Object.values(w.d.a).flat())];
-      entries.push(edition('all.mangadex', w.al, { title: w.d.t, url: `/manga/dex-${w.al}`, altNames: names }));
+      // officialId: رقم AniList الذي يربطه MangaDex بالعمل (attributes.links.al)، تجلبه withMangaDexNames مع الأسماء
+      entries.push(edition('all.mangadex', w.al, { title: w.d.t, url: `/manga/dex-${w.al}`, altNames: names, officialId: w.al }));
     }
     if (withDetails) {
       const key = normalizeTitle(main);
