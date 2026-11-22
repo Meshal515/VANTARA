@@ -577,7 +577,7 @@ object Glass {
  * - صبغة بيضاء 4.5% (rgba(255,255,255,.045))، وتحتها ستارة خفيفة جدًا تعوّض غياب الضباب فوق الفيديو فتبقى الرموز مقروءة.
  * - حافة لامعة مخروطية (conic-gradient من -45°): ضوء من أعلى اليسار 0.5، يخفت إلى 0.05، ويعود 0.3 في الزاوية المقابلة.
  * - ظل الشريط (0 10px 30px rgba(0,0,0,.32)) بطبقات داخل الحدود.
- * [ring]: حلقة بيضاء 2dp فوق الزجاج (هوية زر التشغيل في المشغّل الحالي).
+ * [ring]: حلقة 2dp فوق الزجاج (هوية زر التشغيل في المشغّل الحالي)، زجاجية بتدرج الضوء نفسه لا بيضاء صلبة.
  */
 class GlassDrawable(ctx: Context, private val ring: Boolean = false) : Drawable() {
     private val shadow = ctx.dp(5).toFloat()
@@ -598,8 +598,13 @@ class GlassDrawable(ctx: Context, private val ring: Boolean = false) : Drawable(
         val sweep = android.graphics.SweepGradient(shape.centerX(), shape.centerY(),
             intArrayOf(w(0.5f), w(0.13f), w(0.05f), w(0.3f), w(0.05f), w(0.13f), w(0.5f)),
             floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f))
-        sweep.setLocalMatrix(android.graphics.Matrix().apply { setRotate(-135f, shape.centerX(), shape.centerY()) })
+        val turn = android.graphics.Matrix().apply { setRotate(-135f, shape.centerX(), shape.centerY()) }
+        sweep.setLocalMatrix(turn)
         spec.shader = sweep
+        // حلقة زر التشغيل زجاجية (طلب المالك: «الخط الأبيض لو تخليه زجاجي»): نفس توزيع الضوء أقوى، لا أبيض صلب
+        if (ring) white.shader = android.graphics.SweepGradient(shape.centerX(), shape.centerY(),
+            intArrayOf(w(0.95f), w(0.5f), w(0.28f), w(0.75f), w(0.28f), w(0.5f), w(0.95f)),
+            floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f)).apply { setLocalMatrix(turn) }
     }
 
     override fun draw(canvas: Canvas) {
