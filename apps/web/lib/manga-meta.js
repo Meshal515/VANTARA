@@ -139,6 +139,18 @@ export function matchMangaIdentity(title, candidates) {
 }
 
 /**
+ * اسمٌ يحمله أكثر من عمل في AniList (غير الروايات): «Naruto» السلسلة والفصل التجريبي، «Monster» لمؤلفين. الاسم وحده
+ * لا يفرّقها، فلا يُدمج به بين مصدرين (بلاغ المالك: «0% دمج خاطئ»). المقياس: 63 دمجًا خاطئًا من هذا وحده.
+ */
+export function mangaNameAmbiguous(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return false;
+  const ids = new Set((candidates ?? []).filter((m) => m?.format !== 'NOVEL' && Number.isFinite(m?.id) &&
+    [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key)).map((m) => m.id));
+  return ids.size > 1;
+}
+
+/**
  * حكم المحتوى الرسمي لعنوان (قرار المالك، 22 نوفمبر: «ما لا يُعرف حاله لا يُعرض حتى يُتحقق منه»):
  * `adult` عمل واحد بهذا الاسم وهو للكبار أو إيتشي بتصنيف يوحي بوساخة، `ecchi` إيتشي نظيف البقية (للبحث المقصود)،
  * `clean` نظيف، `unknown` لا عمل بهذا الاسم أو اسم مشترك بين أعمال أحدها للكبار (لا يُحكم له).
@@ -178,7 +190,7 @@ export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, time
     if (!body?.data) throw new Error('anilist_no_data');
     names.forEach((title, i) => {
       const media = body.data[`p${i}`]?.media;
-      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media), identity: matchMangaIdentity(title, media), verdict: mangaContentVerdict(title, media) });
+      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media), identity: matchMangaIdentity(title, media), ambiguous: mangaNameAmbiguous(title, media), verdict: mangaContentVerdict(title, media) });
     });
     return output;
   } finally {

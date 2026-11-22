@@ -21,8 +21,12 @@ const edition = (source, al, manga) => ({ sourceId: `${P}.${source}`, label: sou
 export function simulate(works, scenario = 'full') {
   const entries = [];
   const aliases = new Map();
-  const withDex = scenario === 'mangadex' || scenario === 'full' || scenario === 'ids';
-  const withDetails = scenario === 'details' || scenario === 'full' || scenario === 'ids';
+  // anchor / anchor-full: محرك المرساة (بلاغ المالك 22 نوفمبر: «0% دمج خاطئ، أقل من 5% تكرار»): قاموس أسماء AniList
+  // وMangaDex كلها (ومنها العربي) يعطي كل عنوان رقمه إن كان لعمل واحد، والاسم المشترك لا يدمج وحده.
+  // anchor = ما تعطيه إضافات Mihon في القوائم (عنوان ورابط فقط)، anchor-full = مع MangaDex وصفحات التفاصيل.
+  const anchor = scenario === 'anchor' || scenario === 'anchor-full';
+  const withDex = scenario === 'mangadex' || scenario === 'full' || scenario === 'ids' || scenario === 'anchor-full';
+  const withDetails = scenario === 'details' || scenario === 'full' || scenario === 'ids' || scenario === 'anchor-full';
   const withIds = scenario === 'ids';
   for (const w of works) {
     const [en, romaji, native] = w.t;
@@ -57,7 +61,25 @@ export function simulate(works, scenario = 'full') {
       if (ids?.size === 1) officialIds.set(own, [...ids][0]);
     }
   }
-  return { entries, aliases, officialIds };
+  const ambiguous = new Set();
+  if (anchor) {
+    const owners = new Map();
+    for (const w of works) for (const n of new Set([...w.t, ...(w.s ?? []), w.d?.t, ...(w.d ? Object.values(w.d.a).flat() : [])].map(normalizeTitle).filter(Boolean))) {
+      if (!owners.has(n)) owners.set(n, new Set());
+      owners.get(n).add(w.al);
+    }
+    for (const [n, ids] of owners) if (ids.size > 1) ambiguous.add(n);
+    for (const e of entries) {
+      const own = normalizeTitle(e.manga.title);
+      const ids = owners.get(own);
+      if (ids?.size === 1) officialIds.set(own, [...ids][0]);
+    }
+    // موقع حقيقي لا يعطي عملين الرابط نفسه (المحاكاة تبني الرابط من العنوان فيتطابق للمتجانسين)
+    const seen = new Map();
+    for (const e of entries) seen.set(e.sourceId + e.manga.url, (seen.get(e.sourceId + e.manga.url) ?? 0) + 1);
+    for (const e of entries) if (seen.get(e.sourceId + e.manga.url) > 1) e.manga = { ...e.manga, url: `${e.manga.url}~${e.al}` };
+  }
+  return { entries, aliases, officialIds, ambiguous };
 }
 
 /**

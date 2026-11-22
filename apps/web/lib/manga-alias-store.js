@@ -125,6 +125,31 @@ export function officialIdMap() {
   return officialMap ??= new Map(Object.entries(official));
 }
 
+// ───────── الأسماء المشتركة: اسم يحمله أكثر من عمل في AniList (mangaNameAmbiguous) ─────────
+// لا يُدمج به بين مصدرين بلا معرّف رسمي (canonicalIndex: ambiguous). يُتعلَّم من استعلام AniList نفسه الذي يجري لكل بطاقة.
+const AMBIGUOUS_KEY = 'vantara.manga.ambiguousNames.v1';
+const MAX_AMBIGUOUS = 6000;
+let ambiguous = read(AMBIGUOUS_KEY);
+let ambiguousCache = null;
+/** مفاتيح عناوين مطبَّعة ثبت أنها لأكثر من عمل. */
+export function noteAmbiguousNames(keys) {
+  let changed = false;
+  for (const key of keys ?? []) {
+    if (!key || ambiguous[key]) continue;
+    ambiguous[key] = 1;
+    changed = true;
+  }
+  if (!changed) return false;
+  const all = Object.keys(ambiguous);
+  for (const k of all.slice(0, Math.max(0, all.length - MAX_AMBIGUOUS))) delete ambiguous[k];
+  ambiguousCache = null;
+  write(AMBIGUOUS_KEY, ambiguous);
+  return true;
+}
+export function ambiguousNames() {
+  return ambiguousCache ??= new Set(Object.keys(ambiguous));
+}
+
 // ───────── رسم الهوية (الخطة ب، lib/work-identity.js) ─────────
 // المراجع: عمل كان بطاقة باسمه ثم صار جزءًا من عمل قانوني. تقدّم القراءة والمكتبة محفوظة بمرجع الاسم القديم؛ لا
 // تُنقل ولا تُحذف، بل تُقرأ مع العمل كله (`refsOf`). كل دمج حافة بدليلها ورتبتها، والدمج الخاطئ يُقطع حين يظهر
@@ -258,6 +283,8 @@ export function _reset() {
   splits = read(SPLITS_KEY);
   official = read(OFFICIAL_KEY);
   officialMap = null;
+  ambiguous = read(AMBIGUOUS_KEY);
+  ambiguousCache = null;
   shipped = {};
   learned = read(KEY);
   twins = read(TWINS_KEY);
