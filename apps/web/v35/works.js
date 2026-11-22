@@ -241,10 +241,56 @@ export const available = () => engine.isAvailable();
 let sharedLatest = null;
 export function setSharedLatest(fetchShared) { sharedLatest = fetchShared; }
 
+/**
+ * صيغ البحث بالترتيب (بلاغ المالك 22 نوفمبر: «The Savior’s Bucket List» لا نتائج): كما كُتب، ثم بفواصل
+ * مستقيمة (’ ← ')، ثم بلا علامات. بحث أغلب المواقع حرفي، فالفاصلة المنحنية أو النقطتان تُفوّت العمل.
+ * الصيغة التالية تُجرَّب على المصدر فقط إن لم تجد السابقة شيئًا: لا كلفة على البحث العادي.
+ */
+export function searchVariants(query) {
+  const q = String(query ?? '').trim().replace(/\s+/g, ' ');
+  const straight = q.replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"');
+  const bare = straight.replace(/['"]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  return [...new Set([q, straight, bare].filter(Boolean))];
+}
+
+/**
+ * قرب العمل مما كُتب في البحث (بلاغ المالك: «بطاقة وحدة من العمل، وممكن تطلع 50 عمل غيره عادي، الأقرب أول»).
+ * على كل أسماء العمل (عنوان كل نسخة وأسماؤها البديلة) بعد الطيّ نفسه: 4 مطابق تمامًا، 3 مطابق بلا مسافات،
+ * 2 يبدأ به، 1 فيه كل كلماته، وإلا نسبة الكلمات المشتركة.
+ */
+export function searchScore(work, query) {
+  const q = normalizeTitle(query);
+  if (!q) return 0;
+  const qWords = q.split(' ');
+  const names = new Set((work?.editions ?? []).flatMap((e) => [e?.manga?.title, ...(e?.manga?.altNames ?? [])]).concat(work?.title).map((t) => normalizeTitle(t)).filter(Boolean));
+  let best = 0;
+  for (const n of names) {
+    let s;
+    if (n === q) s = 4;
+    else if (n.replace(/ /g, '') === q.replace(/ /g, '')) s = 3;
+    else if (n.startsWith(q)) s = 2;
+    else {
+      const words = new Set(n.split(' '));
+      const shared = qWords.filter((w) => words.has(w)).length;
+      s = shared === qWords.length ? 1 : shared / (qWords.length + 1);
+    }
+    if (s > best) best = s;
+    if (best === 4) break;
+  }
+  return best;
+}
+
 function listingPage(source, { kind = 'catalogue', page, query, genre }) {
-  const request = () => requestSource(source, () => {
+  const request = () => requestSource(source, async () => {
     if (genre) return engine.genre(source.id, genre, page);
-    if (query) return engine.search(source.id, query, page);
+    if (query) {
+      let last = null;
+      for (const variant of searchVariants(query)) {
+        last = await engine.search(source.id, variant, page);
+        if (last?.mangas?.length) return last;
+      }
+      return last;
+    }
     if (kind === 'popular') return engine.popular(source.id, page);
     if (kind === 'latest' || kind === 'latestListing') return engine.latest(source.id, page);
     return engine.catalogue(source.id, page);
@@ -759,7 +805,11 @@ function ranked(index, positions, kind, { keepWestern = false, query = '' } = {}
     w.title = w.editions[0]?.manga?.title ?? w.title;
     w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
   }
-  return rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
+  const order = rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
+  if (!query) return order;
+  // البحث: الأقرب لما كُتب أولًا، والتعادل بترتيب المصادر نفسه (ترتيب ثابت)
+  const score = new Map(order.map((w) => [w, searchScore(w, query)]));
+  return order.map((w, i) => ({ w, i })).sort((a, b) => score.get(b.w) - score.get(a.w) || a.i - b.i).map((x) => x.w);
 }
 
 
