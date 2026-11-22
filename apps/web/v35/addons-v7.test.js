@@ -1,3 +1,4 @@
+import { readFileSync as readSourceForRollback } from 'node:fs';
 import { beforeEach } from 'vitest';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -789,4 +790,92 @@ it('الويب: مصدر مانجا مدمج سابقًا يُحذف من الص
  [...d.querySelectorAll('.v7-btn.danger')].find(b=>b.textContent==='حذف').click();await tick();
  expect(entitlement.choosePackage).toHaveBeenCalledWith(pkg,false);
  view.close();
+});
+
+it('audit §14 AV7 + owner rule: a 1000-extension repository paints with one registry snapshot, Arabic first, specialized adult sources gone', async () => {
+  setup();
+  const items = Array.from({ length: 1000 }, (_, i) => ({ name: `Source ${i}`, pkg: `eu.kanade.tachiyomi.extension.en.s${i}`, lang: 'en', version: '1.0' }));
+  items.splice(500, 0, { name: 'Team X', pkg: 'eu.kanade.tachiyomi.extension.ar.teamx', lang: 'ar', version: '1.0' });
+  items.splice(10, 0, { name: 'NHentai', pkg: 'eu.kanade.tachiyomi.extension.all.nhentai', lang: 'all', nsfw: 1 });
+  items.splice(20, 0, { name: 'MangaDex', pkg: 'eu.kanade.tachiyomi.extension.all.mangadex', lang: 'all', nsfw: 1 });
+  const installed = Array.from({ length: 47 }, (_, i) => ({ key: `k${i}`, pkg: `p${i}`, name: `I${i}` }));
+  let calls = 0;
+  const reg = { runtimeName: 'apk', list: () => { calls++; return installed; } };
+  const api = { list: async () => ({ repos: [{ name: 'Keiyoushi', url: 'https://repo.example/index.min.json' }] }), extensions: async () => items };
+  const view = renderV7Addons({ registry: reg, repositories: api }); await tick(); browse(view); await tick();
+  const names = [...view.querySelectorAll('.v7-body .v7-row')].map((r) => r.textContent);
+  expect(names[0]).toContain('Team X');
+  expect(names[1]).toContain('MangaDex');
+  expect(names.some((t) => t.includes('NHentai'))).toBe(false);
+  calls = 0;
+  view.querySelector('.v7-search, input[type="search"], input')?.dispatchEvent(new window.Event('input'));
+  await tick();
+  // كان: نداءان لكل صف (أكثر من 2000)؛ الآن لقطة واحدة لكل رسمة
+  expect(calls).toBeLessThan(10);
+  view.close();
+});
+
+it('audit §13 RS1: «استعادة» on a formerly bundled source restores it instead of opening a missing package', async () => {
+  setup();
+  const install = vi.fn(async () => {}); const open = vi.fn();
+  const item = { pkg: 'eu.kanade.tachiyomi.extension.all.mangafire', name: 'MangaFire', lang: 'all', version: '1.4', builtin: true, formerlyBundled: true, selected: true, pendingRestore: true, installed: null };
+  const api = { list: async () => ({ repos: [{ name: 'مصادر جاهزة', url: 'vantara:ready-sources' }], installed: [], pending: [item] }), extensions: async () => [item], install };
+  const view = renderV7Addons({ registry: registry(), repositories: api, onOpenNativeSource: open }); await tick(); browse(view); await tick();
+  const flip = [...view.querySelectorAll('.v7-body .v7-flip')].find((b) => (b.getAttribute('aria-label') || '').includes('MangaFire'));
+  expect(flip.getAttribute('aria-label')).toContain('استعادة');
+  flip.click(); await tick();
+  expect(open).not.toHaveBeenCalled();
+  expect(install).toHaveBeenCalled();
+  view.close();
+});
+
+// قرار المالك (20 نوفمبر): رجوع للإصدار السابق، وسطر يقول ما فعله التحديث التلقائي
+it('safe self-update: rollback only when a previous version is kept, and the last automatic check is explained', () => {
+  const ui = readSourceForRollback(new URL('./addons-v7.js', import.meta.url), 'utf8');
+  const engine = readSourceForRollback(new URL('../lib/extension-engine.js', import.meta.url), 'utf8');
+    // الرجوع يبلّغ صفحات الأعمال بتغيّر المصادر بعد نجاحه (changing)
+    expect(engine).toContain("rollback: typeof plugin.rollbackExtension === 'function' ? changing((pkg) => plugin.rollbackExtension({ pkg })) : null");
+    expect(engine).toContain("updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null");
+    const part = ui.slice(ui.indexOf('async function renderUpdateState'), ui.indexOf('function canOpenRemote'));
+    expect(part).toContain('if(!st.previous)return;');
+    expect(part).toContain('ارجع للإصدار السابق');
+    expect(part).toMatch(/SKIP_REJECTED:`الإصدار \$\{st\.lastVersion\} لم يعمل في الفحص، فبقي الحالي`/);
+});
+
+// طلب المالك (20 نوفمبر): «إضافاتي» — تصدير، ثم لصق على جهاز آخر، فقائمة بحالة كل إضافة وزر تثبيت
+it('exports my extensions and imports them on another device: list, one trust confirmation, install all', async () => {
+  const d = setup();
+  const repo = { url: 'https://repo.example/index.min.json', name: 'Repo' };
+  const source = { list: vi.fn(async () => ({ repos: [repo], installed: [{ pkg: 'eu.kanade.tachiyomi.extension.ar.one', name: 'One', version: '1.4', repo: repo.url }, { pkg: 'eu.kanade.tachiyomi.extension.ar.two', name: 'Two', version: '2.0', repo: repo.url }] })), extensions: vi.fn(async () => []) };
+  const view = renderV7Addons({ registry: registry(), repositories: source });
+  d.body.append(view); await tick();
+  view.querySelector('.v7-tabs .v7-plus').click(); await tick();
+  view.querySelector('.v7-export').click(); await tick();
+  expect(view.querySelector('.v7-dialog').textContent).toContain('2 إضافتان جاهزة');
+  let copied = '';
+  vi.stubGlobal('navigator', { clipboard: { writeText: async (t) => { copied = t; } } });
+  [...view.querySelectorAll('.v7-dialog button')].find((b) => b.textContent === 'انسخ النص').click(); await tick();
+  expect(JSON.parse(copied)).toMatchObject({ format: 'vantara.extensions', native: { manga: { extensions: [{ pkg: 'eu.kanade.tachiyomi.extension.ar.one' }, { pkg: 'eu.kanade.tachiyomi.extension.ar.two' }] } } });
+  view.close();
+
+  // جهاز آخر: لا مستودع ولا إضافة
+  const state = { repos: [], installed: [] };
+  const target = { list: vi.fn(async () => structuredClone(state)), extensions: vi.fn(async () => []), add: vi.fn(async (url) => { state.repos.push({ url }); }), install: vi.fn(async (r, pkg) => { state.installed.push({ pkg, repo: r }); }) };
+  const other = renderV7Addons({ registry: registry(), repositories: target });
+  d.body.append(other); await tick();
+  other.querySelector('.v7-tabs .v7-plus').click(); await tick();
+  const input = other.querySelector('.v7-add-input'); input.value = copied;
+  [...other.querySelectorAll('.v7-dialog button')].find((b) => b.textContent === 'أضف').click(); await tick();
+  expect(other.querySelector('.v7-dialog h3').textContent).toBe('استيراد إضافاتي');
+  expect(other.querySelectorAll('.v7-transfer-row')).toHaveLength(2);
+  const all = [...other.querySelectorAll('.v7-dialog button')].find((b) => b.textContent === 'ثبّت الكل');
+  all.click(); await tick();
+  expect(target.install).not.toHaveBeenCalled(); // موافقة الثقة أولًا
+  expect(all.textContent).toContain('أثق');
+  all.click(); await tick(); await tick();
+  expect(target.add).toHaveBeenCalledTimes(1);
+  expect(target.install).toHaveBeenCalledTimes(2);
+  expect([...other.querySelectorAll('.v7-transfer-row')].every((r) => r.dataset.status === 'installed')).toBe(true);
+  expect(other.querySelector('.v7-dialog .v7-notice').textContent).toContain('2 مثبّتة');
+  other.close();
 });

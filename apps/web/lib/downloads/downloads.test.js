@@ -2,11 +2,11 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { createDownloadManager } from './manager.js';
 import { createMangaDriver, sniffImageType } from './manga-driver.js';
-import { countText, createItem, defaultUnitKey, localWork, mangaUnitNumber, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel, ERROR_LABEL } from './model.js';
+import { countText, createItem, defaultUnitKey, localCinemaResume, localCinemaSeasons, localWork, mangaUnitNumber, matchesNumberList, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel, ERROR_LABEL } from './model.js';
 import { rankRoutes, unsupportedReason } from './smart.js';
 import { memoryStore, openStore } from './store.js';
 import { createRateMeter, etaSeconds, formatBytes, formatEta, formatSpeed, progressRatio } from './units.js';
-import { resolveRoutes, sameRoute } from './video-driver.js';
+import { batchVideoSource, resolveRoutes, sameRoute } from './video-driver.js';
 
 /** JPEG كامل البنية (SOI … EOI): فحص السلامة يرفض المبتور، فالعيّنة تنتهي بـFFD9 كالملف الحقيقي. */
 const JPEG = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...Array.from({ length: 76 }, (_, i) => (i * 7) & 0x7f), 0xff, 0xd9]).buffer;
@@ -88,6 +88,18 @@ describe('model', () => {
     expect(works.map((w) => [w.ref, w.count])).toEqual([['anime:1', 1], ['ext:solo', 6]]);
     expect(countText('manga', 6)).toBe('6 فصول');
     expect(onDeviceWorks(items, { section: 'anime' })).toHaveLength(1);
+  });
+
+  it('DLX1: two references of one merged work are one on-device card, and opening it shows both', async () => {
+    const { setWorkGroup } = await import('./model.js');
+    const old = { ...createItem({ ...mangaSpec(1), work: { ref: 'ext:solo old name', title: 'Solo' } }), state: 'ready' };
+    const now = { ...createItem(mangaSpec(2)), state: 'ready' };
+    setWorkGroup((ref) => (ref === 'ext:solo old name' ? 'ext:solo' : ref));
+    try {
+      expect(onDeviceWorks([old, now])).toHaveLength(1);
+      expect(localWork([old, now], 'ext:solo').ready).toHaveLength(2);
+    } finally { setWorkGroup(null); }
+    expect(onDeviceWorks([old, now])).toHaveLength(2);
   });
 
   it('shows only the downloaded chapters of a 150-chapter work, keeping 1, 4, 7 as 1, 4, 7', () => {
@@ -525,6 +537,26 @@ describe('video driver: the server the user chose is the one downloaded', () => 
   };
   const nativeReady = () => fakeDevice(() => ({ state: 'ready', bytes: 7, path: '/v.mkv' }));
 
+  it('resolves separate episode hashes in a manually selected source and keeps the anchor exact', async () => {
+    const a = torrent('ep-9', `btih:${'a'.repeat(40)}:0`, 'release 1');
+    const b = torrent('ep-10', `btih:${'b'.repeat(40)}:0`, 'release 2');
+    const other = { ...b, id: 'other', sourceId: 'addon|different', quality: 2160 };
+    const engine = engineWith([]);
+    engine.prepare.mockImplementation(async ({ session, episode }) => ({
+      session, done: true, routes: episode === 9 ? [a] : [b, other],
+    }));
+    const device = nativeReady();
+    const { createVideoDriver } = await import('./video-driver.js');
+    const driver = createVideoDriver({ engine: () => engine, native: () => device, platform: () => ({ torrent: true }) });
+    for (const episode of [9, 10]) {
+      const unitKey = `s2e${episode}`;
+      const source = batchVideoSource(a, { unitKey, anchorKey: 's2e9', sourceName: 'Torrentio' });
+      await driver.run({ id: `dl_${episode}`, request: { episode }, source, unit: { key: unitKey, number: episode }, work: { title: 'fixture' } }, ctlOf());
+    }
+    expect(device.start.mock.calls.map(([x]) => [x.candidate, x.episode])).toEqual([['cand-ep-9', 9], ['cand-ep-10', 10]]);
+    expect(sameRoute({ ...a, fingerprint: `btih:${'a'.repeat(40)}:1` }, { sourceId: a.sourceId, fingerprint: a.fingerprint, locked: true })).toBe(false);
+  });
+
   it('manual: the 200 MB release the user picked, not the 1.1 GB best of the same addon', async () => {
     const { createVideoDriver } = await import('./video-driver.js');
     const routes = [
@@ -628,6 +660,27 @@ describe('video driver: the server the user chose is the one downloaded', () => 
 });
 
 describe('work art on the device', () => {
+  it('يحفظ غلافًا وصور حلقات جديدة تصل بينما يجري حفظ صور العمل نفسه', async () => {
+    const { saveWorkArt } = await import('./art.js');
+    const store = memoryStore();
+    const work = { ref: 'cinema:series:test-art', banner: 'https://images.test/banner.jpg' };
+    let release;
+    const pendingBanner = new Promise((resolve) => { release = resolve; });
+    const image = () => ({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+    const fetchImpl = vi.fn(async (url) => url === work.banner ? pendingBanner : image());
+
+    const first = saveWorkArt(store, work, { fetchImpl });
+    const second = saveWorkArt(store, { ...work, cover: 'https://images.test/cover.jpg' }, {
+      fetchImpl, extras: { 'still-s2e3': 'https://images.test/s2e3.jpg' },
+    });
+    release(image());
+    await Promise.all([first, second]);
+
+    expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
+    expect(await store.getArt(`${work.ref}|still-s2e3`)).toMatchObject({ type: 'image/jpeg' });
+    expect(fetchImpl.mock.calls.filter(([url]) => url === work.banner)).toHaveLength(1);
+  });
+
   it('a manga cover the WebView cannot fetch (no CORS, needs Referer) is saved through the source engine', async () => {
     const { saveWorkArt, artUrl } = await import('./art.js');
     const store = memoryStore();
@@ -660,4 +713,111 @@ describe('manga: the chapter the sheet starts on, and a source that returns no p
     expect(defaultUnitKey([{ key: 'a', number: null }])).toBe('a');
   });
 
+});
+
+describe('cinema on device', () => {
+  it('uses the downloaded second season and ignores first-season watch history', () => {
+    const items = [{ unit: { key: 's2e3', title: 'Third' } }, { unit: { key: 's2e9' } }];
+    const saved = [{ n: 1, episodes: [{ n: 1 }] }, { n: 2, episodes: [{ n: 3, name: 'Metadata' }, { n: 4 }] }];
+    const seasons = localCinemaSeasons(items, saved);
+    expect(seasons.map((s) => [s.n, s.episodes.map((e) => e.n)])).toEqual([[2, [3, 9]]]);
+    expect(seasons[0].episodes[0].name).toBe('Metadata');
+    expect(localCinemaResume(seasons, 1, { season: 1, episode: 1, episodes: { '1:1': { position: 9000 } } })).toMatchObject({ season: 2, episode: 3, position: 0 });
+    expect(localCinemaResume(seasons, 2, { season: 2, episode: 9, episodes: { '2:9': { position: 21000 } } })).toMatchObject({ season: 2, episode: 9, position: 21000 });
+  });
+});
+
+
+it('retries a missing saved cover automatically and cancels pending retries when the work is removed', async () => {
+  const { saveWorkArt, dropWorkArt } = await import('./art.js');
+  const store = memoryStore();
+  const work = { ref: 'anime:auto-retry-art', cover: 'https://images.test/cover.jpg' };
+  let callback;
+  let delay;
+  const timers = {
+    setTimeout(fn, ms) { callback = fn; delay = ms; return 1; },
+    clearTimeout: vi.fn(),
+  };
+  const fetchImpl = vi.fn(async () => ({ ok: false, status: 503 }));
+  expect(await saveWorkArt(store, work, { fetchImpl, timers })).toBe(0);
+  expect(delay).toBeGreaterThan(0);
+  expect(delay).toBeLessThanOrEqual(15_000);
+  const failed = await store.getArt(`${work.ref}|cover`);
+  fetchImpl.mockResolvedValue({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+  const now = vi.spyOn(Date, 'now').mockReturnValue(failed.retryAt + 1);
+  try {
+    await callback();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(await store.getArt(`${work.ref}|cover`)).toMatchObject({ type: 'image/jpeg' });
+    await dropWorkArt(store, work.ref);
+    const removed = { ref: 'anime:remove-pending-art', cover: 'https://images.test/unavailable.jpg' };
+    fetchImpl.mockRejectedValue(new Error('offline'));
+    await saveWorkArt(store, removed, { fetchImpl, timers });
+    await dropWorkArt(store, removed.ref);
+    expect(timers.clearTimeout).toHaveBeenCalled();
+  } finally {
+    now.mockRestore();
+  }
+});
+
+it('records a failed artwork request and recovers it after the backoff without touching downloaded media', async () => {
+  const { saveWorkArt, artUrl, dropWorkArt } = await import('./art.js');
+  const store = memoryStore();
+  const work = { ref: 'cinema:offline-art-test', cover: 'https://images.test/poster.png' };
+  const key = `${work.ref}|cover`;
+  const input = { fetchImpl: vi.fn(async () => ({ ok: false, status: 503 })) };
+  expect(await saveWorkArt(store, work, input)).toBe(0);
+  const failed = await store.getArt(key);
+  expect(failed).toMatchObject({ attempts: 1, error: 'HTTP 503' });
+  expect(await artUrl(store, work.ref, 'cover')).toBeNull();
+  await saveWorkArt(store, work, input);
+  expect(input.fetchImpl).toHaveBeenCalledTimes(1);
+  await store.putArt(key, { ...failed, retryAt: 0 });
+  input.fetchImpl.mockResolvedValue({ ok: true, blob: async () => new Blob([JPEG()], { type: 'image/jpeg' }) });
+  expect(await saveWorkArt(store, work, input)).toBe(1);
+  expect(await artUrl(store, work.ref, 'cover')).toMatch(/^blob:/);
+  await dropWorkArt(store, work.ref);
+  expect(await artUrl(store, work.ref, 'cover')).toBeNull();
+});
+
+// بلاغ المالك (20 نوفمبر): بنرات ومعلومات العمل المحمّل خربت، ومع رجوع الإنترنت لم يرجع البنر
+import { durableUrl as dlDurableUrl, withoutLocalUrls as dlWithoutLocalUrls } from './art.js';
+import { createItem as dlCreateItem } from './model.js';
+describe('downloaded work art never keeps temporary urls', () => {
+  it('drops blob/local urls from saved details and queue items, keeping real links', () => {
+    const snap = { poster: 'blob:https://app/1', background: 'https://images.metahub.space/background/medium/tt1/img',
+      seasons: [{ n: 1, poster: 'http://localhost/_capacitor_file_/x.webp', episodes: [{ n: 1, thumb: 'blob:x', thumbHd: 'https://img/1.jpg' }] }] };
+    const clean = dlWithoutLocalUrls(snap);
+    expect(clean.poster).toBeNull();
+    expect(clean.background).toBe(snap.background);
+    expect(clean.seasons[0].poster).toBeNull();
+    expect(clean.seasons[0].episodes[0]).toEqual({ n: 1, thumb: null, thumbHd: 'https://img/1.jpg' });
+    const item = dlCreateItem({ section: 'cinema', kind: 'movie', work: { ref: 'cinema:tt1', title: 'X', cover: 'blob:a', banner: 'https://b/1.jpg', logo: 'file:///l.png' } });
+    expect(item.work).toMatchObject({ cover: null, banner: 'https://b/1.jpg', logo: null });
+    expect(dlDurableUrl('https://x/y.jpg')).toBe(true);
+    expect(dlDurableUrl('blob:https://x/1')).toBe(false);
+  });
+});
+
+// بلاغ المالك (20 نوفمبر): مشغّل التحميلات يعرض اسم العمل بدل شعاره
+import { artDataUrl as dlArtDataUrl } from './art.js';
+import { readFileSync as dlReadSource } from 'node:fs';
+describe('the downloads player gets the saved logo', () => {
+  it('turns the saved logo into a data url the native player can draw offline', async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const store = { getArt: async (key) => (key === 'anime:1|logo' ? { type: 'image/png', data: bytes.buffer } : null) };
+    expect(await dlArtDataUrl(store, 'anime:1', 'logo')).toBe(`data:image/png;base64,${Buffer.from(bytes).toString('base64')}`);
+    expect(await dlArtDataUrl(store, 'anime:1', 'banner')).toBeNull();
+  });
+  it('playItem passes logo, banner and cover to the native player', () => {
+    const src = dlReadSource(new URL('../../v35/downloads.js', import.meta.url), 'utf8');
+    const play = src.slice(src.indexOf('async function playItem'), src.indexOf('function confirmDelete'));
+    expect(play).toContain("saved('logo', item.work.logo)");
+    expect(play).toContain('...(logo ? { logo } : {})');
+    expect(play).toContain('...(backdrop ? { backdrop } : {})');
+    const kt = dlReadSource(new URL('../../../../android/app/src/main/kotlin/com/vantara/downloads/DownloadsPlugin.kt', import.meta.url), 'utf8');
+    // يُحفظ ملفًا بجانب الحلقة ويُمرَّر مساره، لا محتواه (Intent بحد ~1MB)
+    expect(kt).toContain('logo = stageArt("logo")');
+    expect(kt).toContain('val file = File(dir, "art-$kind")');
+  });
 });

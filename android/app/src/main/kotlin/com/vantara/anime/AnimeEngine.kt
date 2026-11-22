@@ -115,9 +115,8 @@ class AnimeEngine(context: Context) {
         apply()
     }
 
-    /** Experimental Debug supplies real adapters; the default/Release map stays empty. */
+    /** محرك CloudStream يمدّ المحوّلات الحقيقية في Debug وStable (CS1)؛ بلا المحرك تبقى الخريطة فارغة. */
     @Synchronized fun setRuntimeSources(list: List<RuntimeSourceBinding>) {
-        check(com.vantara.app.BuildConfig.DEBUG) { "RUNTIME_DEBUG_ONLY" }
         require(list.size <= 128 && list.all { it.entry.id.startsWith("addon|cs3|") && it.adapter.id == it.entry.id })
         require(list.map { it.entry.id }.distinct().size == list.size)
         runtimeSources = list.associateBy { it.entry.id }
@@ -190,7 +189,8 @@ class AnimeEngine(context: Context) {
                 publications.publish(id, generation) {
                     ExtensionAdapter(id, source, pageEmbeds = { entry(id)?.embeds },
                         resolver = embeds, pageEpisodes = { entry(id)?.episodes }).also { a ->
-                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl))
+                        // DM1: الدومين المعتمد سابقًا (المحفوظ في الصحة) يبقى بعد إعادة التشغيل
+                        AnimeHostRouter.register(id, e.domains.plan(a.extensionBaseUrl).adopt(AnimeHostRouter.health?.get(com.vantara.anime.health.HealthStore.sourceKey(id))?.domain))
                         adapters[id] = a
                         loadErrors.remove(id)
                         loadDiagnostics.remove(id)

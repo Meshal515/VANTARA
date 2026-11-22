@@ -267,6 +267,11 @@ export function joinRoom({
     /** المضيف يُخرج شخصًا؛ لا يعود إلا بدعوة جديدة. */
     kick(userId) { return send({ t: 'kick', userId }); },
     invite(userIds) { return send({ t: 'invite', ...(userIds === '*' ? { all: true } : { userIds }) }); },
+    /** «اطلع من الغرفة» صريحًا: يخبر الغرفة قبل الإغلاق، فإن كنت المضيف تنتقل الاستضافة لأقدم حاضر فورًا. */
+    leave() {
+      send({ t: 'bye' });
+      this.close();
+    },
     close() {
       closed = true;
       clearPending();

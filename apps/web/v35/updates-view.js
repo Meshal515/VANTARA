@@ -9,7 +9,12 @@
 import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
 import { loadAliases } from '../lib/manga-alias-store.js';
-import { adultTitle, isBlockedKey } from '../lib/adult-filter.js';
+import { adultSource, adultTitle, isBlockedKey } from '../lib/adult-filter.js';
+import { ARABIC, tierFromId, tierOf } from '../lib/source-policy.js';
+
+/** مصدر يبني «آخر التحديثات» العامة: عربي آمن بحكم الخادم (المعرّف) وبحكم هذا الجهاز إن عرفه. */
+const publicMangaSource = (id) => tierFromId(id) === ARABIC && tierOf(id) === ARABIC && !adultSource({ id });
+import { tagWork } from '../lib/removed-works.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -129,13 +134,21 @@ export function groupEvents(events, canonical = null) {
     let e = canonicalEvent(raw);
     // محتوى للكبار (بعنوانه، أو بما كشفته صفحته سابقًا) لا يظهر في آخر التحديثات
     if (e.section === 'manga' && (adultTitle(e.title) || isBlockedKey(e.work))) continue;
+    // قرار المالك (22 نوفمبر): نسخ الإنجليزي والمختلط لا تبني الخط العام، وحدث بلا مصدر عربي آمن لا يظهر (حماية ثانية
+    // فوق الخادم، ولأحداث خادم أقدم من القاعدة)
+    if (e.section === 'manga') {
+      const sources = (e.sources ?? []).filter((x) => publicMangaSource(x?.s));
+      if (!sources.length) continue;
+      if (sources.length !== (e.sources ?? []).length) e = { ...e, sources };
+    }
     // نفس العمل بأسماء مختلفة («Magic Emperor» و«Demonic Emperor»): مفتاح الهوية الواحدة
     const same = canonical?.get(e.work);
     if (same && same !== e.work) e = { ...e, work: same };
     const key = `${e.section ?? ''}|${e.work}`;
     const g = byWork.get(key);
     if (!g) {
-      const group = { ...e, events: [e], high: e.number ?? 0, low: e.number ?? 0, sources: e.sources ?? [], units: new Set([`${e.season ?? ''}:${e.number}`]) };
+      // coverSource: المصدر الذي نشر الغلاف؛ يُطلب الغلاف بمحرّكه وترويساته، لا بمحرّك نسخة أخرى (أغلفة حروف)
+      const group = { ...e, coverSource: e.cover ? e.sources?.[0]?.s ?? null : null, events: [e], high: e.number ?? 0, low: e.number ?? 0, sources: e.sources ?? [], units: new Set([`${e.season ?? ''}:${e.number}`]) };
       byWork.set(key, group);
       out.push(group);
       continue;
@@ -143,7 +156,7 @@ export function groupEvents(events, canonical = null) {
     const sources=new Map(g.sources.map(s=>[s.s,s]));
     for(const s of e.sources??[])sources.set(s.s,{...s,...sources.get(s.s)});
     g.sources=[...sources.values()];
-    g.cover ??= e.cover;
+    if (!g.cover && e.cover) { g.cover = e.cover; g.coverSource = e.sources?.[0]?.s ?? null; }
     // نفس الفصل من مفتاحين قديمين (قبل التصحيح) لا يُعدّ مرتين
     const unit = `${e.season ?? ''}:${e.number}`;
     if (g.units.has(unit)) continue;
@@ -180,6 +193,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
   mounted.get(host)?.dispose();
   const state = { events: [], next: null, bridgeNext: null, bridgeKnown: null, loading: false, refreshing: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token, active = () => token === state.token;
+  const FIRST_RETRY_MS = 15_000;
+  let firstRetryAt = 0;
   host.replaceChildren();
   host.classList.add('up-feed');
   const list = el('div', 'up-list'), more = el('div', 'up-more');
@@ -210,6 +225,8 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     noteTimer = setTimeout(() => { if (status.textContent === text) status.textContent = ''; }, 4000);
   }
   function error() {
+    // المحاولة التلقائية التالية بعد مهلة من الفشل، لا في الاستطلاع التالي مباشرة (retryFirst)
+    if (!state.polled) firstRetryAt = Date.now() + FIRST_RETRY_MS;
     status.textContent = 'تعذّر جلب التحديثات. أعد المحاولة.';
     if (!state.events.length) list.replaceChildren(el('div', 'up-error', 'تعذّر جلب آخر التحديثات. اضغط تحديث لإعادة المحاولة.'));
   }
@@ -235,6 +252,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     b._group = g;
     b.dataset.eventId = g.id;
     b.dataset.workKey = groupKey(g);
+    tagWork(b, g.work, groupKey(g));
   }
   function row(g) {
     const b = el('button', 'up-card'); b.type = 'button';
@@ -303,9 +321,24 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     if (inView) void load();
   }, { root: scrollRoot, rootMargin: '600px' });
   io?.observe(more);
+  /**
+   * أول تحميل فشل (طلب قُطع والتطبيق في الخلفية، أو شبكة عائدة للتو): كان الخطأ يبقى حتى «تحديث» باليد، لأن
+   * الاستطلاع الدوري لا يعمل قبل أول نجاح والمراقب لا يُطلق من جديد (بلاغ المالك بالصورة، 16 نوفمبر). الآن يُعاد
+   * وحده: عند الرجوع للتطبيق، وعند عودة الاتصال، وكل FIRST_RETRY_MS ما دامت الصفحة ظاهرة.
+   */
+  const retryFirst = (force = false) => {
+    if (!active() || state.polled || state.loading || state.refreshing || !visible() || document.hidden) return;
+    if (!force && Date.now() < firstRetryAt) return;
+    firstRetryAt = Date.now() + FIRST_RETRY_MS;
+    void load();
+  };
+  const onWake = () => { if (!document.hidden) retryFirst(true); };
+  document.addEventListener?.('visibilitychange', onWake);
+  view?.addEventListener?.('online', onWake);
   const timer = setInterval(async () => {
     if (!host.isConnected || !host.classList.contains('up-feed')) { api.dispose(); return; }
-    if (!state.polled || polling || state.loading || state.refreshing || !visible() || document.hidden) return;
+    if (!state.polled) { retryFirst(); return; }
+    if (polling || state.loading || state.refreshing || !visible() || document.hidden) return;
     polling = true;
     const revision=++headRevision;
     try {
@@ -328,7 +361,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     finally { polling = false; }
   }, 5000);
   const api = {
-    dispose() { state.token = {}; clearInterval(timer); clearTimeout(autoTimer); clearTimeout(noteTimer); io?.disconnect(); },
+    dispose() { state.token = {}; clearInterval(timer); clearTimeout(autoTimer); clearTimeout(noteTimer); io?.disconnect(); document.removeEventListener?.('visibilitychange', onWake); view?.removeEventListener?.('online', onWake); },
     loadMore: () => load({ asked: true }),
     async refresh() {
       if (!active() || state.loading || state.refreshing) return false;

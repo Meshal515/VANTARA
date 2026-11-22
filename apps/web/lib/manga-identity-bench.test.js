@@ -16,20 +16,24 @@ import { measure, simulate } from './fixtures/manga-identity-sim.js';
 const { works } = JSON.parse(readFileSync(new URL('./fixtures/manga-identity-bench.json', import.meta.url), 'utf8'));
 
 const run = (scenario) => {
-  const { entries, aliases } = simulate(works, scenario);
+  const { entries, aliases, officialIds, ambiguous } = simulate(works, scenario);
   const t0 = performance.now();
-  const index = canonicalIndex({ aliases });
+  const index = canonicalIndex({ aliases, officialIds, ambiguous });
   for (const e of entries) index.add(e);
   const cards = index.list();
   return { entries: entries.length, ms: performance.now() - t0, ...measure(cards, works) };
 };
 
 // الحدود = القياس عند تثبيت المقياس (2026-11-08). تحسين يرفعها؛ تراجع يكسر الاختبار.
+// duplicates (ID5): البطاقات الزائدة للعمل الواحد سقف لا يُتجاوز للأعلى (كان المقياس «ينجح» وفيه 939 مكررة). و«ids»:
+// المعرّف الرسمي المؤكد دليلًا (ID1) فوق «full»، بحارسيه: صفر دمج خاطئ.
 const FLOOR = {
-  titles: { oneCardWorks: 1024, homonymPairs: 63 },
-  mangadex: { oneCardWorks: 1114, homonymPairs: 65 },
-  details: { oneCardWorks: 1769, homonymPairs: 63 },
-  full: { oneCardWorks: 1821, homonymPairs: 65 },
+  titles: { oneCardWorks: 1024, homonymPairs: 63, duplicates: 939 },
+  mangadex: { oneCardWorks: 1114, homonymPairs: 65, duplicates: 876 },
+  details: { oneCardWorks: 1769, homonymPairs: 63, duplicates: 144 },
+  full: { oneCardWorks: 1821, homonymPairs: 65, duplicates: 100 },
+  // 22 نوفمبر: رقم AniList لنسخ MangaDex (links.al) يفرّق الاسم المشترك ويجمع النسخ برقم واحد: 99 ← 74
+  ids: { oneCardWorks: 1840, homonymPairs: 63, duplicates: 74 },
 };
 
 describe('manga identity benchmark (real AniList + MangaDex titles)', () => {
@@ -47,6 +51,7 @@ describe('manga identity benchmark (real AniList + MangaDex titles)', () => {
       expect(evidenceWrong).toEqual([]);
       expect(m.homonymPairs).toBeLessThanOrEqual(FLOOR[scenario].homonymPairs);
       expect(m.oneCardWorks).toBeGreaterThanOrEqual(FLOOR[scenario].oneCardWorks);
+      expect(m.duplicates).toBeLessThanOrEqual(FLOOR[scenario].duplicates);
       // آلاف النسخ على الخيط الرئيسي: لا كلفة تربيعية
       expect(m.ms).toBeLessThan(3000);
     });
@@ -72,4 +77,17 @@ describe('manga identity benchmark (real AniList + MangaDex titles)', () => {
     expect(checked).toBeGreaterThan(800);
     expect(merged).toEqual([]);
   });
+
+  // محرك المرساة (بلاغ المالك 22 نوفمبر): الهدف المعلن صفر دمج خاطئ (ومنه المتجانسات) وأقل من 5% تكرار.
+  // anchor = قوائم إضافات Mihon وحدها (عنوان ورابط): كانت 49% تكرارًا و63 دمجًا خاطئًا قبل المرساة.
+  for (const scenario of ['anchor', 'anchor-full']) {
+    it(`${scenario}: zero wrong merges of any kind and under 5% duplicate cards`, () => {
+      const m = run(scenario);
+      console.log(`[identity-bench] ${scenario}: works=${m.works} cards=${m.cards} duplicates=${m.duplicates} (${((100 * m.duplicates) / m.works).toFixed(1)}%) wrong=${m.wrongPairCount} homonyms=${m.homonymPairs} ${Math.round(m.ms)}ms`);
+      expect(m.wrongPairs).toEqual([]);
+      expect(m.homonymPairs).toBe(0);
+      expect(m.duplicates / m.works).toBeLessThan(0.05);
+      expect(m.ms).toBeLessThan(3000);
+    });
+  }
 });

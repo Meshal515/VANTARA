@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.SurfaceTexture
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.SystemClock
 import android.view.Gravity
@@ -24,6 +25,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.MediaSource
 import java.util.TreeMap
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -96,6 +98,11 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
     // ───── مشغّل المعاينة ─────
     private var source: (() -> MediaSource)? = null
     private var torrent = false
+    private var localFile: String? = null
+    private val localDecoder = Executors.newSingleThreadExecutor()
+    private var localBusy = false
+    private var generation = 0L
+    private var released = false
     private var preview: ExoPlayer? = null
     private var seekingTo = -1L
     private var seekStartedAt = 0L
@@ -107,7 +114,11 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
     private val giveUp = Runnable { if (seekingTo >= 0) { failed(seekingTo); seekingTo = -1; pump() } }
 
     /** سيرفر جديد: إطارات ولوحة قصة جديدة. `torrent`: القفزات أبطأ (قطع تُنزَّل)، فالمهلة أطول والراحة بينها أطول. */
-    fun bind(source: (() -> MediaSource)?, torrent: Boolean) {
+    fun bind(source: (() -> MediaSource)?, torrent: Boolean, localFile: String? = null) {
+        generation++
+        wantedMs = -1L
+        restUntil = 0L
+        this.localFile = localFile
         releasePlayer()
         still.setImageDrawable(null)
         frames.values.forEach { it.recycle() }
@@ -139,7 +150,7 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
             storyboard = ArrayDeque((0 until (duration / step).toInt().coerceAtLeast(1)).map { step / 2 + it * step }.filter { it < duration })
         }
         if (playing) capture(surface, positionMs)
-        if (healthy && !dragging && seekingTo < 0 && SystemClock.uptimeMillis() >= restUntil) nextStory(positionMs)
+        if (localFile == null && healthy && !dragging && seekingTo < 0 && SystemClock.uptimeMillis() >= restUntil) nextStory(positionMs)
     }
 
     private fun nextStory(positionMs: Long) {
@@ -165,16 +176,21 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
         val bmp = Bitmap.createBitmap(frameW, frameH, Bitmap.Config.ARGB_8888)
         copying = true
         lastCaptureAt = bucket
+        val captureGeneration = generation
         runCatching {
             PixelCopy.request(sv, bmp, { result ->
                 copying = false
-                if (result == PixelCopy.SUCCESS && !blank(bmp)) store(bucket, bmp) else bmp.recycle()
+                if (captureGeneration == generation && result == PixelCopy.SUCCESS && !blank(bmp)) store(bucket, bmp) else bmp.recycle()
             }, main)
         }.onFailure { copying = false; bmp.recycle() }
     }
 
     private fun store(at: Long, bmp: Bitmap) {
         frames.put(at, bmp)?.let { old -> if (old !== bmp) { if (isShowing(old)) still.setImageBitmap(bmp); old.recycle() } }
+        if (frames.size > 120) {
+            val oldest = frames.entries.firstOrNull { it.key != at && !isShowing(it.value) }
+            oldest?.let { frames.remove(it.key)?.recycle() }
+        }
     }
     private fun isShowing(b: Bitmap) = (still.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap === b
 
@@ -247,7 +263,12 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
 
     /** قفزة واحدة في الطريق دائمًا: لا طابور خلف الإصبع، والسحب يسبق لوحة القصة. */
     private fun pump() {
-        if (seekingTo >= 0 || wantedMs < 0) return
+        if (released || localBusy || seekingTo >= 0 || wantedMs < 0) return
+        val path = localFile
+        if (path != null) {
+            decodeLocal(path)
+            return
+        }
         val p = player() ?: return
         val target = wantedMs
         wantedMs = -1L
@@ -256,6 +277,40 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
         p.seekTo(target)
         main.removeCallbacks(giveUp)
         main.postDelayed(giveUp, if (torrent) 30_000L else 8_000L)
+    }
+
+    /** ملف MP4/MKV ونحوه: استخراج إطار عند الطلب من القرص، من دون سطح أو جلسة شبكة. */
+    private fun decodeLocal(path: String) {
+        val requestGeneration = generation
+        val at = wantedMs
+        val height = frameH
+        wantedMs = -1L
+        localBusy = true
+        localDecoder.execute {
+            val bitmap = runCatching {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(path)
+                    retriever.getScaledFrameAtTime(at * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, frameW, height)
+                } finally {
+                    retriever.release()
+                }
+            }.getOrNull()
+            main.post {
+                localBusy = false
+                if (requestGeneration != generation) {
+                    bitmap?.recycle()
+                } else if (bitmap != null) {
+                    store(at, bitmap)
+                    if (dragging) nearest(currentShownMs())?.let { if (!isShowing(it)) still.setImageBitmap(it) }
+                } else {
+                    // حاوية يشغّلها Media3 ولا يستخرج إطارها نظام Android.
+                    localFile = null
+                    if (dragging && wantedMs < 0) wantedMs = at
+                }
+                pump()
+            }
+        }
     }
 
     /** إطار جديد في سطح المعاينة: يُحفظ عند موضعه ويُعرض إن كان الإصبع قريبًا منه. */
@@ -289,6 +344,9 @@ class SeekPreview(private val ctx: Context, private val main: Handler) {
     }
 
     fun release() {
+        released = true
+        generation++
+        localDecoder.shutdown()
         hide()
         releasePlayer()
         still.setImageDrawable(null)

@@ -35,6 +35,7 @@ class DownloadRunnerTest {
     private val served = AtomicInteger(0)
     @Volatile private var ignoreRange = false
     @Volatile private var expired = false
+    @Volatile private var sidecarUnavailable = false
     @Volatile private var cutAfter = -1
 
     @Before fun setUp() {
@@ -43,6 +44,7 @@ class DownloadRunnerTest {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path ?: ""
                 if (expired) return MockResponse().setResponseCode(403)
+                if (sidecarUnavailable && path.endsWith(".vtt")) return MockResponse().setResponseCode(503)
                 return when {
                     path.startsWith("/video.mkv") -> rangeResponse(video, request.getHeader("Range"))
                     path.startsWith("/page") -> MockResponse().setHeader("Content-Type", "text/html").setBody("<!DOCTYPE html><html>nope</html>")
@@ -101,6 +103,31 @@ class DownloadRunnerTest {
         assertArrayEquals(video, File(store.dir("dl_test1"), "video.mkv").readBytes())
         assertTrue(events.contains("verifying"))
         assertEquals("ready", store.read("dl_test1")?.state)
+    }
+
+    @Test fun `restart during verification uses the committed media without requesting it again`() {
+        val store = store()
+        val original = job("/video.mkv")
+        File(store.dir(original.id).apply { mkdirs() }, "video.mkv").writeBytes(video)
+        val saved = original.copy(state = "verifying", main = "video.mkv", mainBytes = video.size.toLong(), total = video.size.toLong())
+        store.write(saved)
+        expired = true
+        val done = DownloadRunner(store, transfers()).run(requireNotNull(store.read(original.id))) {}
+        assertEquals("ready", done.state)
+        assertTrue(done.verified)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun `HLS byte range rejects a 200 response that contains the entire resource`() {
+        ignoreRange = true
+        val dest = File(tmp.root, "segment")
+        try {
+            transfers().whole(server.url("/video.mkv").toString(), emptyMap(), dest, 4L..11L)
+            fail("expected the mismatched response to fail validation")
+        } catch (e: DownloadFailure) {
+            assertEquals("VERIFY", e.code)
+        }
+        assertFalse(dest.exists())
     }
 
     @Test fun `resumes an interrupted download from the last valid byte without re-downloading`() {
@@ -195,6 +222,42 @@ class DownloadRunnerTest {
         val done = DownloadRunner(store, transfers()).run(job("/video.mkv", subs = listOf(Sidecar(server.url("/subs/ar.vtt").toString(), "ar")))) {}
         assertEquals("sub-0.vtt", done.subtitles.single().file)
         assertTrue(File(store.dir("dl_test1"), "sub-0.vtt").length() > 0)
+    }
+
+    @Test fun `failed external subtitle preserves playable video and resumes only missing resource`() {
+        val store = store()
+        val subtitle = Sidecar(server.url("/subs/ar.vtt").toString(), "ar")
+        sidecarUnavailable = true
+        val first = DownloadRunner(store, transfers()).run(job("/video.mkv", subs = listOf(subtitle))) {}
+        assertEquals("ready", first.state)
+        assertTrue(first.verified)
+        assertFalse(first.resourcesComplete)
+        assertTrue(first.resourcesRetryAt > 0L)
+        assertEquals(null, first.subtitles.single().file)
+        assertTrue(File(store.dir(first.id), "video.mkv").isFile)
+
+        sidecarUnavailable = false
+        val final = DownloadRunner(store, transfers()).retrySidecars(requireNotNull(store.read(first.id))) {}
+        assertEquals("ready", final.state)
+        assertTrue(final.resourcesComplete)
+        assertEquals("sub-0.vtt", final.subtitles.single().file)
+        assertEquals(0L, final.resourcesRetryAt)
+        assertTrue(File(store.dir(first.id), "sub-0.vtt").length() > 0)
+        val paths = (0 until server.requestCount).map { server.takeRequest().path.orEmpty() }
+        assertEquals(1, paths.count { it.startsWith("/video.mkv") })
+        assertTrue(paths.count { it.startsWith("/subs/ar.vtt") } >= 2)
+    }
+
+    @Test fun `addon subtitle discovery exception is retryable and never marks package complete`() {
+        val store = store()
+        val original = job("/video.mkv").copy(subtitleProviders = "[]")
+        val first = DownloadRunner(store, transfers(), addonSubtitles = { error("provider network failure") }).run(original) {}
+        assertEquals("ready", first.state)
+        assertFalse(first.resourcesComplete)
+        assertFalse(first.addonSubtitlesDone)
+        val done = DownloadRunner(store, transfers(), addonSubtitles = { emptyList() }).retrySidecars(first) {}
+        assertTrue(done.resourcesComplete)
+        assertTrue(done.addonSubtitlesDone)
     }
 
     @Test fun `ids cannot escape the downloads folder`() {

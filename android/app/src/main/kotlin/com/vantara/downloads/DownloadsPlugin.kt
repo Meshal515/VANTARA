@@ -68,6 +68,7 @@ class DownloadsPlugin : Plugin() {
         .put("id", job.id).put("state", job.state).put("bytes", job.bytes).put("total", job.total)
         .put("segmentsDone", job.segmentsDone).put("segmentsTotal", job.segmentsTotal)
         .put("code", job.error).put("message", job.message).put("verified", job.verified).put("peers", job.peers)
+        .put("packageComplete", job.resourcesComplete).put("resourcesRetryAt", job.resourcesRetryAt)
         .apply {
             if (job.state == "ready") {
                 val dir = DownloadService.store(context).dir(job.id)
@@ -75,6 +76,7 @@ class DownloadsPlugin : Plugin() {
                 put("location", "Android/data/${context.packageName}/files/VANTARA/Downloads")
                 put("media", JSObject()
                     .put("container", job.container)
+                    .put("packageComplete", job.resourcesComplete)
                     .put("subtitles", JSArray(job.subtitles.map { JSObject().put("lang", it.lang).put("label", it.label).put("saved", it.file != null) }))
                     .put("audio", JSArray(job.audio.map { JSObject().put("lang", it.lang).put("label", it.label).put("saved", it.file != null) })))
             }
@@ -201,6 +203,7 @@ class DownloadsPlugin : Plugin() {
             fresh = fresh.copy(kind = "TORRENT", url = request.magnetUri(), headers = emptyMap(), torrentHash = request.infoHash,
                 torrentFile = request.fileIdx, torrentMagnet = request.magnetUri())
         }
+        if (DownloadService.isRunning(id) || DownloadService.isQueued(id)) return call.resolve(JSObject().put("started", false).put("running", true))
         val previous = runCatching { store.read(id) }.getOrNull()
         val next = when {
             previous == null -> fresh
@@ -214,7 +217,6 @@ class DownloadsPlugin : Plugin() {
                 audio = previous.audio.ifEmpty { fresh.audio }, state = "queued", error = null, message = null)
         }
         DownloadService.configure(call.getInt("parallel"), call.getBoolean("wifiOnly"))
-        if (DownloadService.isRunning(id) || DownloadService.isQueued(id)) return call.resolve(JSObject().put("started", false).put("running", true))
         DownloadService.start(context, next)
         call.resolve(JSObject().put("started", true).put("resumedFrom", next.bytes))
     }
@@ -294,6 +296,23 @@ class DownloadsPlugin : Plugin() {
         )
         val session = "local-$id-$now"
         engine.openLocal(session, candidate)
+        // الشعار والبنر ملفان بجانب الحلقة (مرة، ثم يُعاد استعمالهما): يُمرَّر مسارهما لا محتواهما، فلا يقترب
+        // Intent من حده (~1MB) ولا ينهار التشغيل، ويبقيان مع التحميل نفسه بلا إنترنت (بلاغ المالك، 20 نوفمبر)
+        fun stageArt(kind: String): String? {
+            val given = call.getString(kind)?.takeIf { it.isNotBlank() } ?: return null
+            if (!given.startsWith("data:")) return given.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+            val file = File(dir, "art-$kind")
+            return runCatching {
+                val bytes = android.util.Base64.decode(given.substringAfter(','), android.util.Base64.DEFAULT)
+                if (bytes.isEmpty() || bytes.size > 4 * 1024 * 1024) return null
+                if (!file.isFile || file.length() != bytes.size.toLong()) {
+                    val tmp = File(dir, "art-$kind.tmp")
+                    tmp.writeBytes(bytes)
+                    if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+                }
+                android.net.Uri.fromFile(file).toString()
+            }.getOrNull()
+        }
         val launch = com.vantara.anime.player.PlayerActivity.Launch(
             session = session,
             title = call.getString("title") ?: job.title,
@@ -305,7 +324,11 @@ class DownloadsPlugin : Plugin() {
             positionMs = (call.getDouble("position") ?: 0.0).toLong(),
             candidate = candidate.id,
             poster = call.getString("poster"),
+            // شعار العمل وبنره لشاشة التشغيل من نسخة التحميل نفسها (data:)، فيظهر الشعار لا اسم العمل ولو بلا إنترنت
+            backdrop = stageArt("backdrop"),
+            logo = stageArt("logo"),
             usageUserId = call.getString("usageUserId"),
+            material = call.getString("material")?.takeIf { it == "glass" },
         )
         activity.startActivity(com.vantara.anime.player.PlayerActivity.intent(context, launch))
         call.resolve(JSObject().put("session", session))

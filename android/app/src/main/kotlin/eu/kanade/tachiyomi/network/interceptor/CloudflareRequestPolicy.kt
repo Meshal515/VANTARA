@@ -18,6 +18,28 @@ internal fun classifyCloudflareRequest(
     return if (isImage && status in listOf(403, 503) && fromCloudflare) CloudflareRequestKind.IMAGE_FINGERPRINT else CloudflareRequestKind.NONE
 }
 
+/**
+ * تحدٍّ يطلب إنسانًا: هل يُجرَّب الحل الصامت؟ لا لصورة (غلاف أو صفحة: تُطلب بالعشرات، وWebView مخفي لكل واحدة
+ * يجمّد السكرول)، ولا لمضيف فشل حله الصامت قبل أقل من SILENT_RETRY_MS.
+ */
+internal fun silentSolveAllowed(isImage: Boolean, lastFailedAt: Long?, now: Long): Boolean =
+    !isImage && (lastFailedAt == null || now - lastFailedAt >= SILENT_RETRY_MS)
+
+internal const val SILENT_RETRY_MS = 10 * 60_000L
+
+internal enum class HumanChallengeStep { RETRY_WITH_CLEARANCE, SILENT_SOLVE, NEEDS_HUMAN }
+
+/**
+ * أول ما يُجرَّب أمام تحدٍّ يطلب إنسانًا (حلقة «تحتاج تحقق» بعد النجاح، بلاغ المالك 22 نوفمبر): كوكي المضيف (تحقق ناجح)
+ * أولًا دائمًا، ولو فشل حل صامت قبل التحقق بأقل من SILENT_RETRY_MS. كان الرفض بمهلة الحل الصامت يسبقه فيُطلب التحقق
+ * مرة ثانية وثالثة عشر دقائق.
+ */
+internal fun humanChallengeFirstStep(hasClearance: Boolean, isImage: Boolean, lastFailedAt: Long?, now: Long): HumanChallengeStep = when {
+    hasClearance -> HumanChallengeStep.RETRY_WITH_CLEARANCE
+    silentSolveAllowed(isImage, lastFailedAt, now) -> HumanChallengeStep.SILENT_SOLVE
+    else -> HumanChallengeStep.NEEDS_HUMAN
+}
+
 /** Optional app-owned event sink. Shared probe code never launches an Activity. */
 object SourceVerificationRequests {
     @Volatile var reporter: ((HttpUrl, String) -> Unit)? = null

@@ -11,6 +11,7 @@
  */
 
 import { anilistFetch } from '../lib/anilist.js';
+import { tagWork } from '../lib/removed-works.js';
 import { glyph } from './icons.js';
 
 const STATUS_AR = { FINISHED: 'مكتمل', RELEASING: 'مستمر', NOT_YET_RELEASED: 'لم يبدأ', CANCELLED: 'ملغي', HIATUS: 'متوقف' };
@@ -430,7 +431,8 @@ export function createRafiq(deps) {
   }
 
   function cardNode(card) {
-    const box = el('article', `rf-card${card.exploration ? ' rf-card--explore' : ''}`);
+    // DL5: ترشيح لعمل محذوف لا يظهر (data-work لحارس الحذف)
+    const box = tagWork(el('article', `rf-card${card.exploration ? ' rf-card--explore' : ''}`), card.ref, card.kind === 'anime' && card.workId ? `anime:${card.workId}` : null);
     if (card.color) box.style.setProperty('--rf-tint', card.color);
     const media = el('div', 'rf-cover');
     if (card.cover) {

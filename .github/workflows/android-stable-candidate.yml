@@ -14,6 +14,9 @@ concurrency:
 env:
   CF_PAGES_PROJECT: vantara
   WORKER_NAME: vantara-sync
+  # محرك CloudStream في Stable (قرار المالك، 16 نوفمبر 2026: CS1)، وبصمة Native تشمله كما في Debug
+  ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+  VANTARA_RUNTIME_DEBUG: 'true'
 jobs:
   apk:
     runs-on: ubuntu-latest

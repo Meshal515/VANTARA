@@ -2,20 +2,26 @@
  * قرار فن العمل الواحد في VANTARA: غلافه وبنره، يُحسم مرة لكل عمل ويُقرأ من كل الشاشات (البطاقة، صفحة العمل،
  * المكتبة، الرائج، آخر التحديثات، البحث، الموحد). لا تحسم شاشة غلافها بنفسها.
  *
- * القواعد (قرار المالك) من lib/manga-art.js كما هي، دوال نقية:
- *   - الرسمي (AniList) أولًا، والمصدر لا يتقدم إلا إن زادت بكسلاته SOURCE_MARGIN (30%).
- *   - GIF بعرض GIF_MIN_WIDTH فأكثر يتقدم على ثابت مقارب، ورديئه لا أولوية له.
- *   - البنر عريض حقيقي (≥1200px و≥1.6:1)، وإلا أعلى الأغلفة جودة يُعرض بطريقة الغلاف (wide=false).
+ * قاعدة الغلاف (قرار المالك، 16 نوفمبر 2026): **أول غلاف مقبول يصل يفوز ولا يتبدل**، رسميًا كان أو من مصدر،
+ * إلا إن حُذف المصدر الذي جاء منه (forgetSources). «مقبول» = عرضه MIN_COVER_WIDTH فأكثر بنسبة غلاف معقولة. كان
+ * الحسم ينتظر AniList حتى 6 ثوانٍ وKitsu وقياس كل المرشحين ثم يختار «الأفضل»، فتبقى بطاقة المانجا هيكلًا فارغًا
+ * بينما الأنمي يعرض ملصقه فورًا. لا مقبول حتى المهلة: الأفضل مما وصل (chooseCover) كما كان.
+ *   - البنر عريض حقيقي (≥1200px و≥1.6:1)، وإلا الغلاف بطريقة الغلاف (wide=false). يُكمَّل البنر بعد الحسم
+ *     من الرسمي إن وصل في المهلة؛ الغلاف لا يتغير.
  *
  * وما يضيفه هذا الملف: ذاكرة واحدة بهوية العمل، ومعها أبعاد الصورة الحقيقية (فيحجز كل نمط مكانها بنسبتها:
  * لا فراغ ولا قص ولا قفزة)، وحسم واحد في آنٍ لكل عمل، وقياس واحد لكل رابط مهما طلبته الشاشات.
  * الترحيل: قرار محفوظ بالصيغة السابقة (vantara.manga.art.v2) يُقرأ ولا يُمسح.
  */
 import { chooseBanner, chooseCover, probe as probeImage } from './manga-art.js';
+import { saveWithRelief } from './storage-relief.js';
 
 const KEY = 'vantara.art.v1';
 const LEGACY = 'vantara.manga.art.v2';
 const MAX = 3000;
+/** أقل عرض لغلاف يفوز بالوصول أولًا: مصغّرات المصادر (100×130) لا تُثبَّت مكان غلاف حقيقي. */
+export const MIN_COVER_WIDTH = 200;
+const acceptable = (m) => m && m.width >= MIN_COVER_WIDTH && m.height > 0 && m.width / m.height >= 0.4 && m.width / m.height <= 1.1;
 
 /** رابط غلاف رسمي (AniList) بشكله: يُعامل رسميًا ولو جاء من الخادم أو بطاقة. */
 export const isOfficialArt = (url) => /\/\/s\d+\.anilist\.co\/|\/\/img\.anili\.st\//.test(String(url ?? ''));
@@ -23,7 +29,7 @@ export const isOfficialArt = (url) => /\/\/s\d+\.anilist\.co\/|\/\/img\.anili\.s
 /**
  * @param {{ storage?: Storage|null, probe?: (url: string, ms?: number) => Promise<{url:string,width:number,height:number}|null> }} [o]
  */
-export function createArtStore({ storage = globalThis.localStorage ?? null, probe = probeImage } = {}) {
+export function createArtStore({ storage = globalThis.localStorage ?? null, probe = probeImage, refsOf = (id) => [id] } = {}) {
   let all = null;
   let legacy = undefined;
   const read = () => {
@@ -37,7 +43,8 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     timer = setTimeout(() => {
       const keys = Object.keys(all);
       for (const k of keys.slice(0, Math.max(0, keys.length - MAX))) delete all[k];
-      try { storage?.setItem(KEY, JSON.stringify(all)); } catch { /* تسريع لا حقيقة: يُحسم من جديد */ }
+      // فشل الحفظ (تخزين ممتلئ) يُعلن (SY2): القرار يبقى للجلسة، لكن ضياعه يعني غلافًا آخر بعد إعادة الفتح
+      saveWithRelief(storage, KEY, JSON.stringify(all));
     }, 300);
   };
   const legacyOf = (id) => {
@@ -61,8 +68,15 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     const hit = read()[id];
     if (hit) return hit;
     const old = legacyOf(id);
-    if (old) { all[id] = old; persist(); }
-    return old;
+    if (old) { all[id] = old; persist(); return old; }
+    // المرحلة 1 من خطة المانجا (CV4): العمل نفسه بمرجع آخر (قبل الدمج أو بعده) حُسم غلافه: يُنسخ القرار
+    // كما هو إلى المرجع الحالي فلا يُحسم غلاف ثانٍ بعد العرض، والأصل يبقى. انتقالي حتى الهوية الداخلية الثابتة.
+    for (const ref of refsOf(id)) {
+      if (ref === id) continue;
+      const other = all[ref] ?? legacyOf(ref);
+      if (other) { all[id] = other; persist(); return other; }
+    }
+    return null;
   }
 
   /**
@@ -75,48 +89,130 @@ export function createArtStore({ storage = globalThis.localStorage ?? null, prob
     const known = get(id);
     if (known && !refresh && known.w) return Promise.resolve(known);
     if (inflight.has(id)) return inflight.get(id);
-    const job = (async () => {
+    const job = new Promise((resolveJob) => {
       const start = Date.now();
       const left = () => Math.max(500, deadlineMs - (Date.now() - start));
-      // كل المرشحين معًا (لا ينتظر أحدهم الآخر): الرسمي من المصدر الرئيسي، وأغلفة المصادر، والبنر
-      const uniq = [...new Set(sources.filter(Boolean))].slice(0, 4);
-      const srcProbes = uniq.map((u) => measure(u, left()).then((m) => m && { ...m, official: isOfficialArt(u) }));
-      const off = official ? await Promise.race([Promise.resolve(official).catch(() => null), new Promise((r) => setTimeout(() => r(null), left()))]) : null;
-      // المصادر الرسمية: AniList، ومعه ما يضيفه `off.more` بالهوية نفسها (Kitsu برقم AniList). كلها رسمية تتنافس
-      // بالجودة، والبنرات كلها تُقاس ويُختار أكبرها مما يحقق قاعدة البنر
-      const officialCovers = [off?.cover, ...(off?.more ?? []).map((m) => m?.cover)].filter(Boolean);
-      const bannerUrls = [...new Set([off?.banner, ...(off?.more ?? []).map((m) => m?.banner), wideHint].filter(Boolean))];
-      const offProbes = [...new Set(officialCovers)].map((u) => measure(u, left()).then((m) => m && { ...m, official: true }));
-      const [offMeasured, banners, src] = await Promise.all([
-        Promise.all(offProbes), Promise.all(bannerUrls.map((u) => measure(u, left()))), Promise.all(srcProbes),
-      ]);
-      const covers = [...offMeasured, ...src].filter(Boolean);
-      const cover = chooseCover(covers);
-      if (!cover) return known ?? null;
-      const b = banners.filter(Boolean).filter((m) => chooseBanner(m, [])?.wide).sort((x, y) => x.width * x.height - y.width * y.height).at(-1) ?? null;
-      const banner = chooseBanner(b, covers);
-      const bannerDims = banner?.wide ? b : cover;
-      const decision = { cover: cover.url, w: cover.width, h: cover.height, banner: banner?.url ?? cover.url, wide: Boolean(banner?.wide), bw: bannerDims?.width ?? null, bh: bannerDims?.height ?? null };
-      read();
-      delete all[id];
-      all[id] = decision;
-      persist();
-      for (const fn of listeners) fn(id, decision);
-      return decision;
-    })().finally(() => inflight.delete(id));
+      // مرشح المصدر: رابط، أو { url, sid } ليُعرف مصدره فيُعاد الحسم إن حُذف
+      const seen = new Set();
+      // url قد يكون وعدًا (غلاف المحرّك المحفوظ ثم الرابط): يدخل السباق لحظة وصوله، لا ينتظر غيره
+      // origin (CV1): الرابط الأصلي حين يكون url ملفًا محليًا محفوظًا (غلاف المحرّك). القرار يُحفظ بالأصل، والملف كاش
+      // فقط (covers.js): كان المسار المحلي هو القرار، فإذا قلّمه المحرّك (MAX_COVERS) ضاع الغلاف وحُسم غيره
+      const cands = sources.map((c) => (typeof c === 'string' || typeof c?.then === 'function' ? { url: c, sid: null, origin: null } : { url: c?.url, sid: c?.sid ?? null, origin: c?.origin ?? null }))
+        .filter((c) => c.url && (typeof c.url !== 'string' || (!seen.has(c.url) && seen.add(c.url)))).slice(0, 4);
+      const measured = [];
+      let winner = null;
+      const save = (decision) => {
+        read();
+        delete all[id];
+        all[id] = decision;
+        persist();
+        for (const fn of listeners) fn(id, decision);
+        return decision;
+      };
+      const settle = (m) => {
+        if (winner) return;
+        winner = m;
+        // البنر لا ينتظر: الغلاف بطريقة الغلاف الآن، والبنر العريض يُكمَّل إن وصل (الغلاف ثابت)
+        resolveJob(save({ cover: m.url, w: m.width, h: m.height, banner: m.url, wide: false, bw: m.width, bh: m.height, sid: m.sid ?? null }));
+      };
+      const consider = (m) => {
+        if (!m) return;
+        measured.push(m);
+        if (acceptable(m)) settle(m);
+      };
+      const srcDone = cands.map((c) => Promise.resolve(c.url).catch(() => null).then((url) => url && measure(url, left()).then((m) => consider(m && { ...m, url: c.origin || m.url, official: isOfficialArt(url), sid: isOfficialArt(url) ? null : c.sid }))));
+      const offDone = (async () => {
+        const off = official ? await Promise.race([Promise.resolve(official).catch(() => null), new Promise((r) => setTimeout(() => r(null), left()))]) : null;
+        const covers = [...new Set([off?.cover, ...(off?.more ?? []).map((x) => x?.cover)].filter(Boolean))];
+        const bannerUrls = [...new Set([off?.banner, ...(off?.more ?? []).map((x) => x?.banner), wideHint].filter(Boolean))];
+        const [, banners] = await Promise.all([
+          Promise.all(covers.map((u) => measure(u, left()).then((m) => consider(m && { ...m, official: true, sid: null })))),
+          Promise.all(bannerUrls.map((u) => measure(u, left()))),
+        ]);
+        return banners.filter(Boolean).filter((b) => chooseBanner(b, [])?.wide).sort((x, y) => x.width * x.height - y.width * y.height).at(-1) ?? null;
+      })().catch(() => null);
+      void (async () => {
+        await Promise.all(srcDone);
+        const wideBanner = await offDone;
+        if (!winner) {
+          // لا غلاف مقبول في المهلة: الأفضل مما وصل (قاعدة الجودة القديمة) أو القرار السابق
+          const cover = chooseCover(measured);
+          if (!cover) return resolveJob(known ?? null);
+          settle(cover);
+        }
+        const d = get(id);
+        if (wideBanner && d && d.cover === winner.url && !d.wide) save({ ...d, banner: wideBanner.url, wide: true, bw: wideBanner.width, bh: wideBanner.height });
+      })().catch(() => { if (!winner) resolveJob(known ?? null); });
+    }).finally(() => inflight.delete(id));
     inflight.set(id, job);
     return job;
+  }
+
+  /** حُذف مصدر: قرارات أغلفته تُنسى فتُحسم من جديد (الرسمية بلا مصدر تبقى). `installed` معرّفات المصادر المثبتة. */
+  function forgetSources(installed) {
+    read();
+    let changed = false;
+    for (const [id, d] of Object.entries(all)) {
+      if (d?.sid && !installed.has(d.sid)) { delete all[id]; changed = true; }
+    }
+    if (changed) persist();
+    return changed;
   }
 
   return {
     get,
     decide,
+    forgetSources,
     /** يُنادى حين يُحسم فن عمل: الشاشات الظاهرة التي تنتظره ترسمه (مرة، بلا تبديل لما ظهر). */
     onDecided(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    /** غلاف فشل تحميله (رابط مات): يُنسى قراره فيُحسم من جديد في الفتحة التالية. */
-    forget(id) { read(); if (id in all) { delete all[id]; persist(); } },
+    /**
+     * فشل عرض الغلاف المحسوم بعد تجربة الكاش والرابط الأصلي (CV3). فشل لحظي (شبكة، 403 مرة) لا يمحو القرار:
+     * يُعدّ فقط، والفتحة التالية تعيد المحاولة بالغلاف نفسه. يُنسى فقط إن مات الرابط فعلًا: STRIKES فشلًا تمتد
+     * يومًا على الأقل. قرار قديم مساره ملف محلي بلا أصل (قبل CV1) لا يُستعاد، فيُنسى فورًا كما كان.
+     * يعيد true إن نُسي القرار.
+     */
+    failed(id, now = Date.now()) {
+      const d = read()[id];
+      if (!d) return false;
+      if (isLocalArt(d.cover)) { this.forget(id); return true; }
+      const fail = { n: (d.fail?.n ?? 0) + 1, at: d.fail?.at ?? now };
+      if (fail.n >= STRIKES && now - fail.at >= STRIKE_SPAN_MS) { this.forget(id); return true; }
+      all[id] = { ...d, fail };
+      persist();
+      return false;
+    },
+    /** ظهر الغلاف المحسوم: تُصفّر محاولات الفشل. */
+    shown(id) {
+      const d = read()[id];
+      if (!d?.fail) return;
+      const { fail: _, ...rest } = d;
+      all[id] = rest;
+      persist();
+    },
+    /** يُنسى القرار فيُحسم من جديد في الفتحة التالية (رابط مات فعلًا، أو قرار قديم بلا أصل). */
+    forget(id) {
+      read();
+      const dead = all[id]?.cover ?? null;
+      let changed = false;
+      if (id in all) { delete all[id]; changed = true; }
+      // والقرار نفسه في مراجع العمل الأخرى (المرحلة 1): لا يُنسخ رابط ميت من جديد إلى البطاقة
+      if (dead) for (const ref of refsOf(id)) if (ref !== id && all[ref]?.cover === dead) { delete all[ref]; changed = true; }
+      if (changed) persist();
+    },
   };
 }
+
+/** CV3: فشل الرابط الأصلي ثلاث مرات على امتداد يوم = رابط ميت فعلًا؛ أقل من ذلك فشل لحظي لا يمحو القرار. */
+const STRIKES = 3;
+const STRIKE_SPAN_MS = 24 * 60 * 60_000;
+/** مسار ملف محلي (غلاف محفوظ على الجهاز) لا رابط أصلي: لا يُستعاد إن حُذف الملف. */
+export const isLocalArt = (url) => /_capacitor_file_|^file:|^blob:|^data:|^content:/.test(String(url ?? ''));
+/**
+ * رابط يصلح أن يُحفظ لما بعد الجلسة: رابط ويب حقيقي، لا رابط ذاكرة مؤقت (blob: يموت بإغلاق التطبيق) ولا ملف محلي
+ * قد يُحذف. بلاغ المالك (20 نوفمبر): بنر عمل محمّل فُتح من «على الجهاز» حُفظ رابطه المؤقت «بنرًا ظهر»، فظهرت
+ * صورة مكسورة في الفتح التالي حتى مع الإنترنت.
+ */
+export const isDurableArtUrl = (url) => /^https?:\/\//i.test(String(url ?? '')) && !isLocalArt(url) && !/^https?:\/\/(localhost|127\.0\.0\.1)[:/]/i.test(String(url));
 
 /** حدود نسبة الغلاف المحجوزة: غلاف شاذ (شريط طويل جدًا أو صورة عريضة) لا يكسر تخطيط النمط؛ يُقص قليلًا. */
 export const COVER_RATIO = Object.freeze({ min: 0.55, max: 0.85 });

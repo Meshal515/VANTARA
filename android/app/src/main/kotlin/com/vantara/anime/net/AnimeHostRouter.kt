@@ -133,7 +133,7 @@ object AnimeHostRouter : Interceptor {
     }
 
     /** DNS يسأل: هل نفضّل DoH لهذا المضيف قبل DNS مزوّد الإنترنت؟ */
-    fun prefersDoh(host: String): Boolean = host.lowercase() in dohFirst
+    fun prefersDoh(host: String): Boolean = host.lowercase() in dohFirst || eu.kanade.tachiyomi.network.HostRouting.isSourceHost(host)
 
     /**
      * سيرفر فيديو اكتشفناه من صفحة حلقة. نحتاج تجاوزه من حجب DNS مثل المصدر،

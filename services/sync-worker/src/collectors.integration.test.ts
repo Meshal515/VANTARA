@@ -11,7 +11,9 @@ const reply = (data: unknown) => Response.json(data);
 describe('server collectors', () => {
   it('preserves a matching source-less historical event that TeamX never contributed',async()=>{
     const {env}=setup();
-    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{work:'ext:work',section:'manga',kind:'chapter',title:'Work',source:null,units:[{number:251,publishedAt:NOW-H}]}]})}),env,NOW);
+    // حدث تاريخي بلا مصدر (من قبل سياسة المصادر: التبليغ بلا مصدر يُرفض الآن، 22 نوفمبر): الإصلاح لا يمسّه
+    await env.DB.prepare('INSERT INTO update_events (id,work,section,kind,season,number,title,cover,at,published_at,first_seen_at,sources,updated_at,observed_advance) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .bind('ext:work|c:251','ext:work','manga','chapter',null,251,'Work',null,NOW-H,NOW-H,NOW,'[]',NOW,0).run();
     await collectTimelines(env,{now:NOW,scheduled:true,fetchImpl:(async input=>String(input).includes('/series/')?new Response(chapter(251,true)+chapter(218)):String(input).includes('olympus')?new Response('<div class="last-chapter"><div class="box"><a href="/series/LWW"><h3>Work</h3></a></div></div>'):Response.json({data:[]}))as typeof fetch});
     expect(await env.DB.prepare('SELECT number,sources FROM update_events WHERE work=? AND number=251').bind('ext:work').first()).toMatchObject({number:251,sources:'[]'});
   });
@@ -21,9 +23,9 @@ describe('server collectors', () => {
     expect(teamxChapters(html,NOW).map(c=>c.number)).toEqual([218]);
   });
   it('repairs old blocked-only events but preserves the same chapter from another Arabic source and its dates', async () => {
-    const {env}=setup();const sid='eu.kanade.tachiyomi.extension.ar.teamx';
+    const {env}=setup();const sid='eu.kanade.tachiyomi.extension.ar.teamx';const OTHER='eu.kanade.tachiyomi.extension.ar.other';
     const report=(title:string,s:string,number:number)=>({work:`ext:${title.toLowerCase()}`,section:'manga',kind:'chapter',title,source:{s,u:'/series/LWW'},units:[{number,publishedAt:NOW-H}]});
-    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[report('The Long Way Of The Warrior',sid,251),report('The Long Way Of The Warrior','ar.other',251),report('Rise Of The Northern Shadow',sid,34),{...report('The Long Way Of The Warrior',sid,200),source:null}]})}),env,NOW);
+    await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[report('The Long Way Of The Warrior',sid,251),report('The Long Way Of The Warrior',OTHER,251),report('Rise Of The Northern Shadow',sid,34),report('The Long Way Of The Warrior',OTHER,200)]})}),env,NOW);
     await handleUpdatesObserve(new Request('https://x/v1/updates/observe',{method:'POST',body:JSON.stringify({works:[{...report('The Long Way Of The Warrior',sid,251),units:[{number:251}]}]})}),env,NOW);
     const fetcher=(async(input:RequestInfo|URL)=>{
       const url=String(input);
@@ -35,7 +37,7 @@ describe('server collectors', () => {
     await collectTimelines(env,{now:NOW,fetchImpl:fetcher,scheduled:true});
     const body=await(await handleUpdatesList(new URL('https://x/v1/updates?section=manga'),env)).json()as{events:Array<{number:number;sources:Array<{s:string}>;at:number;firstSeenAt:number}>};
     expect(body.events.some(e=>e.number===34)).toBe(false);
-    expect(body.events.find(e=>e.number===251)).toMatchObject({sources:[{s:'ar.other'}],at:NOW-H,firstSeenAt:NOW});
+    expect(body.events.find(e=>e.number===251)).toMatchObject({sources:[{s:OTHER}],at:NOW-H,firstSeenAt:NOW});
     expect(body.events.map(e=>e.number)).toEqual(expect.arrayContaining([218,31,200]));
     expect(await env.DB.prepare('SELECT max_number FROM update_watermarks WHERE work=?').bind('ext:rise of the northern shadow').first()).toMatchObject({max_number:31});
     expect(await env.DB.prepare('SELECT max_number FROM update_watermarks WHERE work=?').bind('ext:the long way of the warrior').first()).toMatchObject({max_number:251});
@@ -89,11 +91,13 @@ describe('server collectors', () => {
       return new Response('');
     }) as typeof fetch });
     expect(requests).toHaveLength(2);
-    expect(requests.every((h) => h.get('User-Agent')?.includes('https://github.com/Meshal515/VANTARA'))).toBe(true);
+    // CL3: هوية عامة تعرّف التطبيق بلا رابط مستودع ولا بيانات شخصية
+    expect(requests.every((h) => h.get('User-Agent') === 'VANTARA/1.0 (release timeline collector)')).toBe(true);
     const status = await env.DB.prepare('SELECT last_success_at,last_error FROM collector_state WHERE source=?').bind('mangadex-ar').first<{ last_success_at: number; last_error: string | null }>();
     expect(status).toEqual({ last_success_at: now, last_error: null });
     const response = await handleUpdatesList(new URL('https://x/v1/updates?section=manga'), env);
-    expect((await response.json() as { events: unknown[] }).events).toEqual([expect.objectContaining({ work: 'ext:lookism', number: 627, at: now-H, cover: 'https://uploads.mangadex.org/covers/m1/c0ver.jpg.512.jpg' })]);
+    // سياسة المصادر (قرار المالك، 22 نوفمبر): MangaDex مختلط، فلا يبني «آخر التحديثات» العامة ولو كان عربيًا
+    expect((await response.json() as { events: unknown[] }).events).toEqual([]);
   });
   it('falls back to exact AniList mappings and absolute episode numbers during an AniList outage', async () => {
     const { env } = setup();

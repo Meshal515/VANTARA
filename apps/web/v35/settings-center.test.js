@@ -53,7 +53,7 @@ describe('مركز الإعدادات', () => {
 
   it('المظهر بالترتيب: البطاقات ثم الألوان ثم الخلفية ثم أنماط العرض، وكلها بلقطات حقيقية', () => {
     const { body } = mount(memory());
-    expect([...body.querySelectorAll('.settings-title')].map((n) => n.textContent)).toEqual(['بطاقات الأعمال', 'ألوان الأقسام', 'الخلفية', 'أنماط العرض والتكامل']);
+    expect([...body.querySelectorAll('.settings-title')].map((n) => n.textContent)).toEqual(['بطاقات الأعمال', 'ألوان الأقسام', 'الخلفية', 'المادة', 'أنماط العرض والتكامل']);
     const tiles = [...body.querySelectorAll('.look-tiles')];
     // المانجا ثم الأنمي ثم السينما
     expect([...tiles[0].querySelectorAll('.look-tile-text strong')].map((n) => n.textContent)).toEqual(['المانجا', 'الأنمي', 'السينما']);
@@ -78,15 +78,31 @@ describe('مركز الإعدادات', () => {
     const storage = memory();
     const { body } = mount(storage);
     const switches = () => [...body.querySelectorAll('input[role="switch"]')];
-    expect(switches()).toHaveLength(3); // الخلفية، المحتوى، النمط الموحد
+    expect(switches()).toHaveLength(4); // الخلفية، التأثير الزجاجي، المحتوى، النمط الموحد
     expect(body.textContent).not.toContain('توحيد الشاشات');
-    expect(switches()[1].disabled).toBe(false);
+    const content = () => switches().find((s) => s.closest('.setting, label, div')?.textContent.includes('توحيد المحتوى'));
+    expect(content().disabled).toBe(false);
     expect(body.querySelector('.look-tiles--static')).toBeTruthy();
-    switches()[1].checked = true;
-    switches()[1].onchange();
+    content().checked = true;
+    content().onchange();
     expect(readStructure(storage).unifyContent).toBe(true);
     expect(body.querySelector('.look-tiles--static')).toBeFalsy();
     expect([...body.querySelectorAll('.look-caption')].at(-1).textContent).toContain('الموحّد');
+  });
+
+  it('«التأثير الزجاجي» خيار مستقل: الحالي افتراضيًا، وتفعيله يحفظ Glass وإطفاؤه يرجع الحالي', () => {
+    const storage = memory();
+    const { body } = mount(storage);
+    const glass = () => [...body.querySelectorAll('input[role="switch"]')].find((s) => s.closest('.setting, label, div')?.textContent.includes('التأثير الزجاجي'));
+    expect(readAppearance(storage).material).toBe('current');
+    expect(glass().checked).toBe(false);
+    glass().checked = true;
+    glass().onchange();
+    expect(readAppearance(storage).material).toBe('glass');
+    expect(readAppearance(storage).pureBlack).toBe(false); // لا يمس إعدادًا آخر
+    glass().checked = false;
+    glass().onchange();
+    expect(readAppearance(storage).material).toBe('current');
   });
 
   it('«النمط الموحد» متاح دائمًا ومستقل: تفعيله لا يفعّل توحيد المحتوى', () => {

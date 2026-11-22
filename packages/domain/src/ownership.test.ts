@@ -115,6 +115,7 @@ describe('ownership matrix', () => {
   it('maps a physical table back to the domain that owns it', () => {
     expect(ownerOfTable('D1', 'chapter_reads')?.key).toBe('stats.reading');
     expect(ownerOfTable('D1', 'progress')?.key).toBe('reading.progress');
+    expect(ownerOfTable('D1', 'playback_positions')?.key).toBe('watch.position');
     expect(ownerOfTable('POSTGRES', 'vantara_reports')?.key).toBe('ops.reports');
     expect(ownerOfTable('POSTGRES', 'vantara_comments')).toBeNull();
   });

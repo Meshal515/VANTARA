@@ -147,3 +147,20 @@ describe('الصوت والوقت', () => {
     expect(shortAgo(now - 30 * 3_600_000, now)).toBe('أمس');
   });
 });
+
+// CH1/CH2: أي مشاهدة لصديق (جدول works) كانت تبني المحادثة كلها وتغلق قائمة أفعال الرسالة تحت الإصبع
+describe('majlis chat repaint keeps what did not change', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./majlis-chat.js', import.meta.url), 'utf8');
+  const render = src.slice(src.indexOf('function renderList() {'), src.indexOf('function refreshReaders() {'));
+  it('reuses each message node by its signature instead of replacing the whole list', () => {
+    expect(render).not.toContain('list.replaceChildren');
+    expect(render).toContain("const node = cached?.sig === sig ? cached.node : itemNode(it, readState);");
+    expect(src).toMatch(/function itemSig\(it\) \{/);
+  });
+  it('closes the action menu only when its own message disappears or the user scrolls', () => {
+    expect(render).not.toMatch(/if \(actionsLayer\) closeActions\(\);/);
+    expect(render).toContain('if (actionsLayer && actionsKey && !live.has(actionsKey)) closeActions();');
+    expect(src).toContain('if (actionsLayer && Date.now() - ownScrollAt > 150) closeActions();');
+  });
+});

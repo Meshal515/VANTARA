@@ -1,4 +1,12 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { syncGlass } from '../v35/glass.js';
+
+// Glass (خيار المظهر): نافذة الأدوات صفحة مستقلة، فتقرأ الاختيار نفسه وتتبعه إن تغيّر من النافذة الرئيسية.
+// لا قراءة لخلفية هنا (الفيديو في نافذة mpv)، فالقواعد في player.css «مظهر زجاجي» بلا backdrop-filter.
+if (globalThis.document) {
+  syncGlass({ doc: globalThis.document });
+  globalThis.addEventListener?.('storage', (e) => { if (!e.key || e.key === 'vantara.appearance.v1') syncGlass({ doc: globalThis.document }); });
+}
 /**
  * طبقة أدوات مشغل ويندوز — نفس تصميم مشغل الـAPK (PlayerActivity.kt) ونفس عناصر مشغل الويب
  * (pwa/player/player.js): تدرّج أعلى بالرجوع والعنوان والحلقة وملء الصورة وملء الشاشة والمزيد،
@@ -95,7 +103,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   peopleButton.onclick = () => openRoom();
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
   const hideBtn = iconButton('hide', 'إخفاء الأدوات (H)', () => hideControls()); hideBtn.hidden = true;
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  const topTools = el('div', 'pp-tools');
+  topTools.append(hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, topTools);
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');
@@ -207,13 +217,20 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       previewTimer = timers.setTimeout(() => cmd('thumb', bucket), 120);
     }
   }
-  const hidePreview = () => { preview.classList.remove('is-on'); timers.clearTimeout(previewTimer); };
+  const hidePreview = () => { preview.classList.remove('is-on'); timers.clearTimeout(previewTimer); previewWant = null; };
   bar.addEventListener('pointermove', (e) => {
     if (dragging) { dragMs = msAt(e.clientX); paintTime(); }
     if (!state.duration) return;
     showPreview(dragging && dragMs != null ? dragMs : msAt(e.clientX));
   });
-  const endDrag = () => { if (!dragging) return; dragging = false; bar.classList.remove('pp-bar--drag'); if (dragMs != null) cmd('seek', dragMs); hidePreview(); showControls(); };
+  const endDrag = () => {
+    if (!dragging) return; dragging = false; bar.classList.remove('pp-bar--drag');
+    if (dragMs != null) {
+      if (Math.abs(dragMs - (state.position ?? 0)) >= FAR_SEEK_MS) { farSeek = { at: Date.now(), done: state.seekDone ?? 0 }; paintStage(); }
+      cmd('seek', dragMs);
+    }
+    hidePreview(); showControls();
+  };
   bar.addEventListener('pointerup', endDrag);
   bar.addEventListener('pointercancel', endDrag);
   bar.addEventListener('pointerleave', () => { hoverTip.hidden = true; if (!dragging) hidePreview(); });
@@ -645,14 +662,14 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   nextRow.append(nextNow, nextCancel);
   nextCard.append(nextKicker, nextTitle, nextCount, nextRow);
   root.append(nextCard);
-  let nextTimer = 0;
+  let nextTimer = 0, knownDuration = 0, nextEligible = false;
   const stopNext = () => { timers.clearInterval?.(nextTimer); nextTimer = 0; nextCard.hidden = true; };
   const playNext = (n) => { stopNext(); cmd('episode', n); };
   nextNow.onclick = (e) => { e.stopPropagation(); playNext(Number(state.episode) + 1); };
   nextCancel.onclick = (e) => { e.stopPropagation(); stopNext(); };
   function startNext() {
     showControls(true);
-    const seconds = autoNextSeconds(), n = Number(state.episode) + 1;
+    const seconds = Math.min(10, autoNextSeconds()), n = Number(state.episode) + 1;
     // الغرفة يتحكم بها المضيف، والفيلم والحلقة الأخيرة بلا تالية
     if (seconds <= 0 || state.together || state.movie || !(Number(state.total) >= n) || state.canChangeEpisode === false) return;
     let left = seconds;
@@ -694,6 +711,11 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const safeArt = (url) => (typeof url === 'string' && /^https:\/\//i.test(url) ? url : null);
   let stageMode = null, stageStart = 0, stageProgress = 0, stageEpoch = null, stageLogo = null, stageBgSrc = null;
   let stageTick = 0, stageNameTimer = 0, stageShowTimer = 0, stageHideTimer = 0;
+  // WS1 (طلب المالك، 19 نوفمبر): قفزة كبيرة (دقيقة فأكثر) تُظهر شاشة الإطار والشعار فورًا كما عند فتح الفيديو، بدل بقاء
+  // الإطار القديم ثوانيَ بلا علامة حتى ينفد كاش mpv. تختفي حين يعلن المشغّل وصول الموضع الجديد (seekDone).
+  const FAR_SEEK_MS = 60000;
+  let farSeek = null;
+  const farSeekActive = () => farSeek != null && Date.now() - farSeek.at < 120000;
   const paintFill = () => {
     const p = stageMode === 'startup' ? stageProgress : 1;
     logoFill.style.clipPath = `inset(0 ${Math.round((1 - p) * 1000) / 10}% 0 0)`;
@@ -749,7 +771,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     paintArt();
     const failed = !!state.status?.error;
     const startup = !state.ready && !failed;
-    const stalled = !!state.ready && !!state.buffering && !state.paused && !failed;
+    const far = farSeekActive();
+    const stalled = !!state.ready && ((!!state.buffering && !state.paused) || far) && !failed;
     if (startup) {
       timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
       if (stageEpoch !== state.loadEpoch && stageMode === 'startup') { stageStart = Date.now(); stageProgress = 0; }
@@ -757,7 +780,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
       showStage('startup'); advanceStage();
     } else if (stalled) {
       // أثناء المشاهدة بعد مهلة قصيرة فقط، فلا يومض الشعار مع كل توقف لحظي
-      if (stageMode !== 'stalled' && !stageShowTimer) stageShowTimer = timers.setTimeout(() => { stageShowTimer = 0; if (state.ready && state.buffering && !state.paused) showStage('stalled'); }, 450);
+      // القفزة البعيدة بعد 200ms (قفزة داخل المحمَّل تنتهي قبلها فلا تومض الشاشة)، والتوقف العادي بعد 450ms
+      if (stageMode !== 'stalled' && !stageShowTimer) stageShowTimer = timers.setTimeout(() => { stageShowTimer = 0; if (state.ready && ((state.buffering && !state.paused) || farSeekActive())) showStage('stalled'); }, far ? 200 : 450);
       else if (stageMode === 'startup') finishStage();
     } else {
       timers.clearTimeout(stageShowTimer); stageShowTimer = 0;
@@ -775,7 +799,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     titleEl.textContent = state.title ?? '';
     subEl.textContent = state.subtitle ?? '';
     playBtn.innerHTML = state.paused || !state.ready ? ICON.play : ICON.pause;
-    playBtn.setAttribute('aria-label', state.paused ? 'تشغيل' : 'إيقاف مؤقت');
+    playBtn.setAttribute('aria-label', state.paused || !state.ready ? 'تشغيل' : 'إيقاف مؤقت');
     spinner.hidden = !(state.buffering || !state.ready) || !!state.status?.error;
     root.classList.toggle('pp--loading', !state.ready);
     status.textContent = state.status?.text ?? '';
@@ -807,14 +831,30 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     volBtn.innerHTML = (state.volume ?? 100) > 0 ? ICON.volume : ICON.mute;
     fullTop.innerHTML = fullBottom.innerHTML = state.fullscreen ? ICON.fullExit : ICON.full;
     if (state.skip) { skipBtn.hidden = false; skipBtn.textContent = state.skip; } else skipBtn.hidden = true;
+    if (farSeek && (state.seekDone ?? 0) !== farSeek.done) farSeek = null;
     paintTime();
     paintStage();
     if (offsetOut && openKind === 'more') { const v = state.videoOffsetMs ?? 0; offsetOut.textContent = `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v / 1000).toFixed(1)} ث`; }
     if (openKind === 'servers' && JSON.stringify([previous.routes,previous.routesDone,previous.candidate,previous.ready]) !== JSON.stringify([state.routes,state.routesDone,state.candidate,state.ready])) paintServers();
     paintChip();
+    if (state.loadEpoch !== previous.loadEpoch) hidePreview();
     if (preview.classList.contains('is-on') && state.thumb !== previous.thumb && state.thumb?.ms === previewWant && state.thumb?.src) { previewImg.src = state.thumb.src; preview.classList.add('has-img'); }
-    if (state.ended && !previous.ended) startNext();
-    else if (!state.ended && previous.ended) stopNext();
+    if (state.loadEpoch !== previous.loadEpoch || state.episode !== previous.episode) {
+      knownDuration = 0;
+      nextEligible = false;
+      stopNext();
+    }
+    if (state.ready && !state.ended && !state.status?.error && Number.isFinite(state.duration)) {
+      knownDuration = Math.max(knownDuration, state.duration);
+    }
+    // قد يبلغ mpv عن EOF بعد انقطاع المصدر. قارنه بمدة رُصدت قبل النهاية.
+    const remaining = knownDuration - state.position;
+    const confirmedEnd = state.ready && state.ended && !state.buffering && !state.status?.error
+      && knownDuration > 0 && remaining >= -1000 && remaining <= 2000
+      && Math.abs(state.duration - knownDuration) <= 2000;
+    if (confirmedEnd && !nextEligible) startNext();
+    else if (!confirmedEnd && nextEligible) stopNext();
+    nextEligible = confirmedEnd;
     if (openKind === 'room' && roomBody) {
       // الموضع والفرق يتغيران مع كل تقرير: يُحدَّثان في مكانهما، ولا يُعاد بناء اللوحة (والزر تحت الفأرة) إلا إن تغيّر ما فيها
       const shape = (s) => JSON.stringify([s.room && { ...s.room, members: s.room.members.map(({ posMs, driftMs, ...m }) => ({ ...m, drift: driftMs != null })) }, s.videoOffsetMs]);

@@ -68,6 +68,8 @@ export function getRuntime() {
    */
   async function ensureMedia() {
     const g = await fetcher.ensureGrant();
+    // مباشر (بلا جسر): لا إذن ولا جالب يُعلَن للـservice worker؛ الصور مباشرة من مصادرها
+    if (!g) return null;
     if (published?.grant !== g || Date.now() - published.at > 60 * 60 * 1000) {
       published = { grant: g, at: Date.now(), promise: publishConfig({ fetchBase: fetchBase(), grant: g }) };
     }

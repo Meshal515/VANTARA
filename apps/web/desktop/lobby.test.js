@@ -77,3 +77,31 @@ it('«الحلقات» للمضيف: لوحة جانبية، الحالية مم
   lobby.destroy();
   delete globalThis.document; delete globalThis.Image;
 });
+
+// CW1 (بلاغ المالك، 19 نوفمبر): سيرفرات السينما لا تظهر داخل غرفة ويندوز. العلامة التي ترفع ورقة السيرفرات فوق
+// شاشة الغرفة كانت تُزال بعد 8 ث إن لم تُفتح الورقة، والسينما تحسم نوع العمل قبلها، فتُفتح الورقة تحت الغرفة ولا تُرى.
+it('the servers sheet stays above the room however late it opens, and the mark ends with the room screen', async () => {
+  const { markRoomServers } = await import('./lobby.js');
+  const { document } = parseHTML('<html><body></body></html>');
+  const timers = [];
+  const view = { setInterval: (fn) => { timers.push(fn); return timers.length; }, clearInterval() {}, setTimeout: (fn, ms) => { timers.push({ fn, ms }); return 99; }, clearTimeout() {} };
+  Object.defineProperty(document, 'defaultView', { value: view, configurable: true });
+  const done = markRoomServers(document);
+  expect(document.documentElement.classList.contains('room-servers')).toBe(true);
+  const limit = timers.find((t) => typeof t === 'object');
+  expect(limit.ms).toBeGreaterThanOrEqual(60000);
+  // بعد 20 ث بلا ورقة: العلامة باقية
+  const check = timers.find((t) => typeof t === 'function');
+  for (let i = 0; i < 133; i++) check();
+  expect(document.documentElement.classList.contains('room-servers')).toBe(true);
+  // الورقة فُتحت متأخرة ثم أُغلقت: العلامة تُزال
+  const sheet = document.createElement('div'); sheet.className = 'sheet-backdrop show'; document.body.append(sheet);
+  check(); sheet.remove(); check();
+  expect(document.documentElement.classList.contains('room-servers')).toBe(false);
+  // شاشة الغرفة أُغلقت قبل أي ورقة: done يزيلها
+  const again = markRoomServers(document);
+  again();
+  expect(document.documentElement.classList.contains('room-servers')).toBe(false);
+  expect(typeof done).toBe('function');
+});
+

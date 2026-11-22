@@ -35,7 +35,7 @@ def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
 def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
 
 /**
- * Debug runtime only: every OkHttpClient.Builder.build() first calls NetworkBridge.adopt (extensions/runtime-android).
+ * CloudStream runtime (Debug and Stable): every OkHttpClient.Builder.build() first calls NetworkBridge.adopt (extensions/runtime-android).
  * Inside an isolated CloudStream worker that ends a provider's own client in VANTARA's broker; elsewhere it is a no-op.
  */
 abstract class VantaraBrokerHook implements com.android.build.api.instrumentation.AsmClassVisitorFactory<com.android.build.api.instrumentation.InstrumentationParameters.None> {
@@ -188,9 +188,10 @@ repositories {
 }
 
 dependencies {
+    // محرك CloudStream في القناتين (قرار المالك، 16 نوفمبر 2026: CS1). كان debugImplementation فلا يصل Stable أبدًا.
     if (runtimeDebug) {
-        debugImplementation 'dev.vantara.runtime:executor:1'
-        debugImplementation 'dev.vantara.runtime:bootstrap:1'
+        implementation 'dev.vantara.runtime:executor:1'
+        implementation 'dev.vantara.runtime:bootstrap:1'
     }
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
@@ -274,15 +275,15 @@ apply from: 'capacitor.build.gradle'
 
 if (runtimeDebug) {
     androidComponents {
-        onVariants(selector().withBuildType('debug')) { variant ->
+        onVariants(selector().all()) { variant ->
             variant.instrumentation.transformClassesWith(VantaraBrokerHook, com.android.build.api.instrumentation.InstrumentationScope.ALL) { }
             variant.instrumentation.setAsmFramesComputationMode(com.android.build.api.instrumentation.FramesComputationMode.COPY_FRAMES)
         }
     }
-    // The app-specific bridge sees existing adapters/Capacitor, but is absent from Release.
-    android.sourceSets.debug.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
-    android.sourceSets.testDebug.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')
-    android.sourceSets.testDebug.resources.srcDir('../../extensions/runtime-android/integration/src/test/resources')
+    // The app-specific bridge sees existing adapters/Capacitor, in Debug and Stable alike (CS1).
+    android.sourceSets.main.java.srcDir('../../extensions/runtime-android/integration/src/main/kotlin')
+    android.sourceSets.test.java.srcDir('../../extensions/runtime-android/integration/src/test/kotlin')
+    android.sourceSets.test.resources.srcDir('../../extensions/runtime-android/integration/src/test/resources')
     android.sourceSets.androidTest.java.srcDir('../../extensions/runtime-android/integration/src/androidTest/kotlin')
     android.sourceSets.androidTest.assets.srcDir('../../extensions/runtime-android/harness/build/pinnedPackages')
 }

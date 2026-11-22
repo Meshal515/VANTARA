@@ -73,6 +73,8 @@ const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const DEFAULT_ORIGINS = [
   'https://localhost',
   'capacitor://localhost',
+  // ويندوز (Electron): أصل الواجهة. بدونه لا يعمل ويندوز على خادم بديل يشغّله المستخدم (خطة Cloudflare الاختيارية)
+  'vantara://app',
   'http://localhost:4173',
   'http://localhost:5173',
 ];
@@ -301,6 +303,12 @@ const MAJLIS_OWNER: Record<'frame' | 'rec' | 'activity', string> = {
 const majlisViewerValues = (kind: 'frame' | 'rec' | 'activity', userId: string) =>
   kind === 'activity' ? [userId, userId] : [userId, userId, hiddenToken(userId)];
 
+/**
+ * ما يدعمه هذا الخادم من عمليات أُضيفت بعد عملاء قائمين. العميل لا يرسل عملية جديدة حتى يراها هنا: خادم أقدم
+ * كان سيعزلها («not_settled») فتضيع، والعميل يبقى على سلوكه المحلي حتى يُحدَّث الخادم.
+ */
+const SYNC_FEATURES = ['position.set'] as const;
+
 /** جداول سجل الفروقات وأعمدتها. الحضور غائب بقصد: لا يلمس rev. */
 const DELTA_TABLES = [
   ['accounts', 'user_id, username, created_at, rev, badge, lifecycle, purge_after'],
@@ -314,6 +322,8 @@ const DELTA_TABLES = [
   // مالك التقدم بعد، فيصالحها بدل أن يعرضها كحقيقة نهائية
   ['progress', 'user_id, chapter_key, series_ref, page, ratio, updated_at, rev, owner_synced'],
   ['chapter_marks', 'user_id, chapter_key, series_ref, read, updated_at, rev'],
+  // موضع التوقف داخل الحلقة/الفيلم (ANX1): جدول مستقل عن تقدم المانجا، والأحدث يفوز
+  ['playback_positions', 'user_id, media_key, series_ref, position_ms, duration_ms, watched_at, rev'],
   ['chapter_reads', 'user_id, chapter_key, series_ref, chapter_number, read_count, first_read_at, last_read_at, rev'],
   ['usage_daily', 'user_id, day, active_ms, rev'],
   ['collections', 'user_id, kind, series_ref, member, position, updated_at, rev'],
@@ -442,7 +452,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
 
   // D1 مُستعادة من نسخة احتياطية: بلا هذا الفحص لا يرى العميل جديدًا أبدًا
   if (needsFullResync(cursor, serverRev)) {
-    return json({ protocol: SYNC_PROTOCOL, reset: true, cursor: 0, serverRev, changes: {} });
+    return json({ protocol: SYNC_PROTOCOL, features: SYNC_FEATURES, reset: true, cursor: 0, serverRev, changes: {} });
   }
 
   // الفروقات نفسها حدّ أمان، لا مجرد transport. الصف الذي لا يحتاجه
@@ -454,6 +464,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
       // `chapter_reads` لصاحبه: لا واجهة تعرضه لغيره (أُلغي سجل القراءة)، وكان
       // يكشف العمل الحالي لحظيًّا لمن أخفاه. الأرقام للأصدقاء من /v1/stats
       case 'progress':
+      case 'playback_positions':
       case 'chapter_marks':
       case 'chapter_reads':
       case 'usage_daily':
@@ -625,6 +636,7 @@ async function handleSync(url: URL, env: Env, userId: string, now = Date.now()):
 
   return json({
     protocol: SYNC_PROTOCOL,
+    features: SYNC_FEATURES,
     reset: false,
     cursor: next.cursor,
     serverRev,
@@ -641,17 +653,20 @@ async function handleSourceLatest(request: Request, env: Env, path: string, now:
   }
   if (request.method !== 'POST') return json({ error: 'method' }, { status: 405 });
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  const sourceId = asString(body?.['sourceId'], 120);
-  if (!sourceId || !/^[\w.:-]+$/.test(sourceId)) return json({ error: 'source' }, { status: 400 });
+  const sourceId = typeof body?.['sourceId'] === 'string' ? body['sourceId'].trim() : '';
+  // هذا مفتاح اللقطة، لذلك يبقى المعرّف كاملًا كما أعطاه المحرك (حزمة، حزمة@لغة، حزمة#رقم).
+  if (sourceId.length > 120 || !/^[\w.:-]+(?:@[a-z0-9-]+|#-?\d+)?$/i.test(sourceId)) return json({ error: 'source' }, { status: 400 });
   if (path === '/v1/source-latest/claim') {
     const leaseToken = crypto.randomUUID();
+    // 45 ثانية لتحميل المحرك و20 ثانية لرد الموقع، مع مهلة قصيرة لإرسال اللقطة.
+    const leaseUntil = now + 75_000;
     const out = await env.DB.prepare(
       `INSERT INTO source_latest (source_id, lease_until, lease_token) VALUES (?, ?, ?)
        ON CONFLICT (source_id) DO UPDATE SET lease_until = excluded.lease_until, lease_token = excluded.lease_token
        WHERE source_latest.fetched_at < ? AND source_latest.lease_until < ?`,
-    ).bind(sourceId, now + 45_000, leaseToken, now - 60_000, now).run();
+    ).bind(sourceId, leaseUntil, leaseToken, now - 60_000, now).run();
     const claimed = Number(out.meta?.changes ?? 0) > 0;
-    return json({ claimed, leaseUntil: now + 45_000, ...(claimed ? { leaseToken } : {}) });
+    return json({ claimed, leaseUntil, ...(claimed ? { leaseToken } : {}) });
   }
   if (path !== '/v1/source-latest') return json({ error: 'not_found' }, { status: 404 });
   const value = body?.['value'] as { mangas?: unknown[]; hasNextPage?: unknown } | null;
@@ -1122,6 +1137,38 @@ export function statementsFor(
      * الصفحة وحدها في الشرط: المالك يحفظ الصفحة و`completed` ولا يعرف نسبة
      * داخل الصفحة، فمطالبته بإقرار نسبة لا يملكها تعني صندوقًا لا يُصرَّف أبدًا.
      */
+    /**
+     * موضع التوقف داخل حلقة أو فيلم (ANX1). «الأحدث يفوز» بوقت القياس `at` لا «الأكبر»: من أعاد الحلقة من بدايتها
+     * على جهاز يجد البداية على أجهزته الأخرى، ولا يرجع إليه موضع قديم. `at` من الجهاز مقيّد بوقت الخادم (لا مستقبل)،
+     * وعملية متأخرة (طابور بلا شبكة) أقدم مما حُفظ لا تغلبه. مفاتيح الفيديو وحدها: لا تمس تقدم المانجا.
+     */
+    case 'position.set': {
+      const mediaKey = asString(p['mediaKey'], 200);
+      const seriesRef = asString(p['seriesRef'], 160);
+      const position = asNumber(p['positionMs']);
+      const duration = asNumber(p['durationMs']);
+      const at = Math.min(asNumber(p['at']) ?? now, now);
+      if (!mediaKey || !seriesRef || !/^(anime|cinema):[^#\s]{1,120}#(ep:\d{1,5}(\.\d{1,2})?|s:\d{1,3}#e:\d{1,5})$/.test(mediaKey)) return null;
+      if (mediaKey.slice(0, mediaKey.indexOf('#')) !== seriesRef) return null;
+      const DAY = 24 * 3_600_000;
+      if (position === null || duration === null || position < 0 || duration <= 0 || duration > DAY || position > duration + 60_000) return null;
+      if (!Number.isFinite(at) || at <= 0) return null;
+      return [
+        db
+          .prepare(
+            `INSERT INTO playback_positions (user_id, media_key, series_ref, position_ms, duration_ms, watched_at, rev)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, media_key) DO UPDATE SET
+               position_ms = excluded.position_ms,
+               duration_ms = excluded.duration_ms,
+               watched_at = excluded.watched_at,
+               rev = excluded.rev
+             WHERE excluded.watched_at > playback_positions.watched_at`,
+          )
+          .bind(userId, mediaKey, seriesRef, Math.round(position), Math.round(duration), Math.round(at), rev),
+      ];
+    }
+
     case 'progress.confirm': {
       const chapterKey = asString(p['chapterKey'], 200);
       const page = asNumber(p['page']);

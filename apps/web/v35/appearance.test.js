@@ -103,7 +103,7 @@ describe('المظهر', () => {
     expect(accentOf('anime', a)).toBe('#c9a227');
     expect(workStyleOf('anime', { style: { anime: 'nope' } })).toBe('core');
     s.setItem('vantara.appearance.v1', '{bad');
-    expect(readAppearance(s)).toEqual({ style: {}, accent: {}, pureBlack: false, unifiedLook: false });
+    expect(readAppearance(s)).toEqual({ style: {}, accent: {}, pureBlack: false, unifiedLook: false, material: 'current' });
   });
 
   it('اللون يصل لجذر التطبيق و<html> معًا، ويُمسح كله عند الرجوع للون المصمّم', () => {
@@ -193,5 +193,20 @@ describe('«النمط الموحد» إعداد مستقل عن توحيد ال
     expect(a.style).toEqual({});
     patchAppearance(() => ({ unifiedLook: false }), storage);
     expect(unifiedLookOn(readAppearance(storage))).toBe(false);
+  });
+});
+
+describe('Glass in Stable (owner, 22 November): locked "under development"; Debug and local development only', async () => {
+  const { glassAvailable, glassChosen } = await import('./appearance.js');
+  it('a shipped Stable build (version baked, no debug channel) never applies Glass, even if chosen before', () => {
+    expect(glassAvailable({ channel: null, development: false })).toBe(false);
+    expect(glassChosen({ material: 'glass' }, false)).toBe(false);
+  });
+  it('Debug builds and local development keep it, and the normal look is untouched everywhere', () => {
+    expect(glassAvailable({ channel: 'debug', development: false })).toBe(true);
+    expect(glassAvailable({ channel: null, development: true })).toBe(true);
+    expect(glassChosen({ material: 'glass' }, true)).toBe(true);
+    expect(glassChosen({ material: 'current' }, true)).toBe(false);
+    expect(glassChosen({ material: 'current' }, false)).toBe(false);
   });
 });

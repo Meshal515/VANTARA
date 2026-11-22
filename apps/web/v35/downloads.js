@@ -10,9 +10,12 @@
  */
 
 import { downloads } from '../lib/downloads/index.js';
-import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localWork, matchesNumberList, numberLabel, onDeviceWorks, parseNumberList, pickUnits, queueSummary, unitLabel } from '../lib/downloads/model.js';
+import { ACTIVE_STATES, ERROR_LABEL, STATES, STATE_LABEL, countText, localCinemaSeasons, localWork, matchesNumberList, numberLabel, onDeviceWorks, parseNumberList, pickUnits, queueSummary, sameWork, setWorkGroup, unitLabel } from '../lib/downloads/model.js';
+import { canonicalRefOf } from '../lib/manga-alias-store.js';
+// مرجعا العمل الواحد بعد الدمج بطاقة واحدة في «على الجهاز» (DLX1)
+setWorkGroup((ref) => (String(ref).startsWith('ext:') ? canonicalRefOf(ref) : ref));
 import { PARALLEL_CHOICES } from '../lib/downloads/manager.js';
-import { artUrl, dropWorkArt, saveWorkArt } from '../lib/downloads/art.js';
+import { artDataUrl, artUrl, dropWorkArt, durableUrl, saveWorkArt, withoutLocalUrls } from '../lib/downloads/art.js';
 import { createLocalMangaEngine, localRows } from '../lib/downloads/local-reader.js';
 import { isFiller } from './works.js';
 import { createStorageView } from './storage-view.js';
@@ -20,6 +23,7 @@ import { etaSeconds, formatBytes, formatEta, formatProgressBytes, formatSpeed, p
 import { glyph } from './icons.js';
 import { parseRelease } from '../addons/release-info.js';
 import { isTorrentRoute } from '../lib/route-family.js';
+import { tagWork } from '../lib/removed-works.js';
 
 const SECTION_LABEL = { all: 'الكل', anime: 'أنمي', manga: 'مانجا', cinema: 'سينما' };
 const SORTS = ['recent', 'size', 'name'];
@@ -460,15 +464,52 @@ export function createDownloadsUI(deps) {
     return wrap;
   }
 
-  /** نسخة محلية من فن العمل بمحرّك مصدره (المانجا)؛ الأنمي والسينما يُجلبان مباشرة. */
-  const healedArt = new Set();
+  /** مسار الجلب الأصلي للصور التي يرفض WebView قراءتها مباشرة. */
   function localArt(work) {
-    if (!String(work?.ref ?? '').length || /^(anime|cinema):/.test(work.ref)) return null;
-    return async (src, kind) => (kind === 'logo' ? null : (await import('./covers.js')).nativeCover(src, work.coverSource ?? null));
+    return async (src) => (await import('./covers.js')).nativeCover(src, work.coverSource ?? null);
+  }
+
+  function cinemaArt(seasons, keys) {
+    const images = {};
+    for (const s of seasons ?? []) {
+      const episodes = (s.episodes ?? []).filter((e) => keys.has(`s${s.n}e${e.n}`));
+      if (!episodes.length) continue;
+      if (s.poster) images[`season-s${s.n}`] = s.poster;
+      for (const e of episodes) if (e.thumb ?? e.thumbHd) images[`still-s${s.n}e${e.n}`] = e.thumb ?? e.thumbHd;
+    }
+    return images;
+  }
+
+  /**
+   * لقطات حلقات الأنمي المحمّلة (طلب المالك 20 نوفمبر: «يحمل ما يحتاج مثل صورة الحلقة مع كل تحميل»): كالسينما،
+   * فتظهر صفوف الحلقات بصورها بلا إنترنت. المصدر بترتيب صفحة الأنمي نفسها (metahub ثم AniList ثم ani.zip).
+   */
+  async function animeArt(work, snapshot, numbers) {
+    const images = {};
+    const nums = [...numbers].map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    if (!nums.length) return images;
+    const { loadAnimeArt, loadHdStills } = await import('../lib/anime-art.js');
+    const id = String(work?.ref ?? '').replace(/^anime:/, '');
+    const art = await loadAnimeArt(id).catch(() => null);
+    const hd = art ? await loadHdStills(art).catch(() => ({})) : {};
+    for (const n of nums) {
+      const src = hd?.[String(n)]?.mid ?? snapshot?.thumbs?.[n]?.thumbnail ?? art?.episodes?.[String(n)]?.image ?? null;
+      if (src) images[`still-e${n}`] = src;
+    }
+    return images;
+  }
+  /** فن العمل وصور وحداته معًا، بلا انتظار من الواجهة (الشبكة قد تأخذ ثوانٍ). */
+  function saveDownloadArt(store, work, section, snapshot, items) {
+    void (async () => {
+      const extras = section === 'cinema' ? cinemaArt(snapshot?.seasons, new Set(items.map((i) => i.unit.key)))
+        : section === 'anime' ? await animeArt(work, snapshot, new Set(items.map((i) => i.unit.number ?? 1))).catch(() => ({}))
+          : {};
+      await saveWorkArt(store, work, { local: localArt(work), extras });
+    })().catch(() => {});
   }
 
   function workCard(w) {
-    const a = el('article', 'work-card dl-card');
+    const a = tagWork(el('article', 'work-card dl-card'), w.ref, w.work?.ref, w.work?.id);
     a.tabIndex = 0;
     a.setAttribute('role', 'link');
     a.setAttribute('aria-label', `${w.work.title} — ${countText(w.kind, w.count)} على الجهاز`);
@@ -481,9 +522,9 @@ export function createDownloadsUI(deps) {
     img.decoding = 'async';
     void artUrl(ctx.store, w.ref, 'cover').then(async (u) => {
       // تنزيل حُفظ بلا غلاف (أغلفة المانجا قبل الإصلاح): يُستكمل مرة بمحرّك المصدر ثم يُعرض من الجهاز
-      if (!u && navigator.onLine !== false && w.work.cover && !healedArt.has(w.ref)) {
-        healedArt.add(w.ref);
-        if (await saveWorkArt(ctx.store, w.work, { local: localArt(w.work) })) u = await artUrl(ctx.store, w.ref, 'cover');
+      if (!u && navigator.onLine !== false && w.work.cover) {
+        await saveWorkArt(ctx.store, w.work, { local: localArt(w.work) });
+        u = await artUrl(ctx.store, w.ref, 'cover');
       }
       const src = u ?? (navigator.onLine !== false ? w.work.cover : null);
       if (!src) return;
@@ -529,9 +570,14 @@ export function createDownloadsUI(deps) {
       artUrl(c.store, ref, 'cover'), artUrl(c.store, ref, 'banner'), artUrl(c.store, ref, 'logo'),
     ]);
     let base = null;
-    try { base = saved?.json ? JSON.parse(saved.json) : null; } catch { base = null; }
+    // تفاصيل حُفظت قبل الإصلاح قد تحمل روابط مؤقتة ميتة: تُتجاهل فيظهر البديل الحقيقي (الإنترنت أو صورة محفوظة)
+    try { base = saved?.json ? withoutLocalUrls(JSON.parse(saved.json)) : null; } catch { base = null; }
     const w = data.work;
-    const art = { cover: cover ?? w.cover ?? null, banner: banner ?? w.banner ?? null, logo: logo ?? w.logo ?? null };
+    if (navigator.onLine !== false) {
+      saveDownloadArt(c.store, w, data.section, base, data.ready);
+    }
+    const online = navigator.onLine !== false;
+    const art = { cover: cover ?? (online ? w.cover : null), banner: banner ?? (online ? w.banner : null), logo: logo ?? (online ? w.logo : null) };
     const id = String(ref).slice(String(ref).indexOf(':') + 1);
     const itemOf = new Map(data.ready.map((i) => [String(i.unit.key), i]));
     let snapshot;
@@ -540,32 +586,32 @@ export function createDownloadsUI(deps) {
       const numbers = new Set(data.ready.map((i) => i.unit.number ?? 1));
       const max = Math.max(...numbers);
       snapshot = { ...(base ?? { id: /^\d+$/.test(id) ? Number(id) : id, title: w.title, format: w.format, color: w.color }),
-        poster: art.cover, posterSmall: art.cover, banner: art.banner ?? (base?.banner ?? null) };
+        poster: art.cover, posterSmall: art.cover, banner: art.banner ?? null };
       if (!(snapshot.aired >= max)) snapshot.aired = Math.max(Number(snapshot.aired) || 0, max);
+      // صور الحلقات المحفوظة مع التنزيل: أولًا في السلسلة (بلا إنترنت لا تُجرَّب روابط الشبكة قبلها)
+      const stills = {};
+      await Promise.all([...numbers].map(async (n) => { const u = await artUrl(c.store, ref, `still-e${n}`); if (u) stills[String(n)] = u; }));
+      if (Object.keys(stills).length) snapshot.thumbs = { ...(snapshot.thumbs ?? {}), ...Object.fromEntries(Object.entries(stills).map(([n, u]) => [n, { ...(snapshot.thumbs?.[n] ?? {}), thumbnail: u }])) };
       local = {
         ref, numbers,
-        art: { ...(art.logo ? { logo: art.logo } : {}), ...(art.banner ? { fanart: art.banner } : {}) },
-        play: (n) => playItem(data.ready.find((i) => (i.unit.number ?? 1) === n)),
+        art: { ...(art.logo ? { logo: art.logo } : {}), ...(art.banner ? { fanart: art.banner } : {}), ...(Object.keys(stills).length ? { episodes: Object.fromEntries(Object.entries(stills).map(([n, u]) => [n, { image: u }])) } : {}) },
+        play: (n, options) => playItem(data.ready.find((i) => (i.unit.number ?? 1) === n), options),
       };
     } else if (data.section === 'cinema') {
       const keys = new Set(itemOf.keys());
       const movie = data.kind === 'movie';
-      const seasons = movie ? [] : (base?.seasons ?? [])
-        .map((s) => ({ ...s, episodes: (s.episodes ?? []).filter((e) => keys.has(`s${s.n}e${e.n}`)) }))
-        .filter((s) => s.episodes.length);
-      // بيانات محفوظة ناقصة (تنزيل قديم): المواسم تُبنى من المحمّل نفسه
-      if (!movie && !seasons.length) {
-        const bySeason = new Map();
-        for (const i of data.ready) {
-          const sn = i.unit.season ?? 1;
-          if (!bySeason.has(sn)) bySeason.set(sn, []);
-          bySeason.get(sn).push({ n: i.unit.number, name: i.unit.title ?? null });
-        }
-        for (const [n, episodes] of [...bySeason].sort((a, b) => a[0] - b[0])) seasons.push({ n, episodes: episodes.sort((a, b) => a.n - b.n) });
-      }
+      const seasons = movie ? [] : localCinemaSeasons(data.ready, base?.seasons ?? []);
+      await Promise.all(seasons.map(async (s) => {
+        s.poster = await artUrl(c.store, ref, `season-s${s.n}`) ?? (online ? s.poster : null);
+        await Promise.all(s.episodes.map(async (e) => {
+          const thumb = await artUrl(c.store, ref, `still-s${s.n}e${e.n}`);
+          e.thumb = thumb ?? (online ? e.thumb : null);
+          e.thumbHd = thumb ?? (online ? e.thumbHd : null);
+        }));
+      }));
       snapshot = { ...(base ?? { id, type: movie ? 'movie' : 'series', title: w.title, name: w.title, year: w.year }),
         poster: art.cover, background: art.banner ?? art.cover, logo: art.logo, ...(movie ? {} : { seasons }) };
-      local = { ref, keys, play: (key) => playItem(itemOf.get(String(key))) };
+      local = { ref, keys, play: (key, options) => playItem(itemOf.get(String(key)), options) };
     } else {
       const items = data.ready.filter((i) => i.kind === 'manga');
       snapshot = { ...(base ?? { id: ref, title: { english: w.title }, genres: [], staff: { edges: [] } }), id: ref,
@@ -588,6 +634,15 @@ export function createDownloadsUI(deps) {
       h.dir = 'auto';
       const facts = el('p', 'dl-hint');
       facts.append(el('span', null, `${countText(data.kind, data.ready.length)} على الجهاز`));
+      const artStatus = el('p', 'dl-hint');
+      body.append(artStatus);
+      const expected = ['cover', 'banner', 'logo'].filter((kind) => data.work[kind]);
+      void Promise.all(expected.map(async (kind) => [kind, await c.store.getArt(`${ref}|${kind}`).catch(() => null)]))
+        .then((entries) => {
+          const labels = { cover: 'الغلاف', banner: 'البنر', logo: 'الشعار' };
+          const missing = entries.filter(([, value]) => !value?.data).map(([kind]) => labels[kind]);
+          if (missing.length) artStatus.textContent = `الوسائط محفوظة. صور لم تُحفظ بعد: ${missing.join('، ')}.`;
+        });
       if (data.bytes > 0) facts.append(el('span', 'dl-dot', '·'), ltr(el, formatBytes(data.bytes)));
       body.append(h, facts);
       for (const item of data.ready) {
@@ -612,18 +667,28 @@ export function createDownloadsUI(deps) {
   }
 
   /** تشغيل الحلقة/الفيلم المحفوظ: الملف المحلي وحده، بلا طلب سيرفر. */
-  async function playItem(item) {
+  async function playItem(item, { position } = {}) {
     if (!item) return toast('هذه الحلقة لم تعد على الجهاز');
     const native = ctx.caps.video ? (await import('../lib/downloads/index.js')).nativeDownloads() : null;
     if (!native?.play) return toast('التشغيل من الجهاز يعمل في تطبيق Android وويندوز');
+    // شعار العمل وبنره وغلافه من نسخة التحميل نفسها، ثم الرابط الحقيقي إن وُجد إنترنت: المشغّل يعرض الشعار لا اسم العمل
+    const online = navigator.onLine !== false;
+    const saved = async (kind, fallback) => (await artDataUrl(ctx.store, item.work.ref, kind).catch(() => null)) ?? (online && durableUrl(fallback) ? fallback : null);
+    const [logo, backdrop, poster] = await Promise.all([saved('logo', item.work.logo), saved('banner', item.work.banner), saved('cover', item.work.cover)]);
     try {
       await native.play({
         id: item.id,
         title: item.work.title,
+        ...(logo ? { logo } : {}),
+        ...(backdrop ? { backdrop } : {}),
+        ...(poster ? { poster } : {}),
         section: item.section,
         animeId: String(item.work.ref).split(':').slice(1).join(':'),
         episode: item.unit.number ?? 1,
-        format: item.kind === 'movie' ? 'MOVIE' : null,
+        position: position ?? 0,
+        format: item.kind === 'movie' ? 'MOVIE' : 'SERIES',
+        // التأثير الزجاجي كما يطبّقه الويب: المشغّل الأصلي يلبسه لأزراره
+        ...(globalThis.document?.documentElement?.dataset?.material === 'glass' ? { material: 'glass' } : {}),
       });
     } catch (e) {
       toast(`تعذّر التشغيل: ${e?.message ?? e}`);
@@ -731,6 +796,7 @@ export function createDownloadsUI(deps) {
           ['الترميز', media.codec ?? null, true],
           ['مسارات الصوت', trackList(media.audio, 'لم يُحفظ')],
           ['الترجمات', trackList(media.subtitles, 'لم تُحفظ')],
+          ['الموارد المساعدة', item.state === STATES.ready && [...(media.subtitles ?? []), ...(media.audio ?? [])].some((t) => t?.saved === false) ? 'بعض المسارات غير محفوظة' : null],
         ]],
         ['التورنت', item.transport !== 'torrent' ? [] : [
           ['المشاركون المتصلون', item.torrent ? String(item.torrent.peers) : null, true],
@@ -741,7 +807,7 @@ export function createDownloadsUI(deps) {
         ['التخزين', [
           ['المكان', item.storage?.location ?? (item.kind === 'manga' ? 'مخزن التطبيق على هذا الجهاز' : null)],
           ['الحجم على الجهاز', item.storage?.bytes ? formatBytes(item.storage.bytes) : null, true],
-          ['التحقق من السلامة', item.state === STATES.ready ? (item.storage?.verified ? 'سليم ومكتمل' : 'لم يُتحقق') : item.state === STATES.verifying ? 'جارٍ' : null],
+          ['التحقق من السلامة', item.state === STATES.ready ? (item.storage?.verified ? 'تم فحص الملف الأساسي' : 'لم يُتحقق') : item.state === STATES.verifying ? 'جارٍ' : null],
           ['بدأ', item.startedAt ? dateText(item.startedAt) : null],
           ['اكتمل', item.finishedAt && item.state === STATES.ready ? dateText(item.finishedAt) : null],
         ]],
@@ -846,7 +912,7 @@ export function createDownloadsUI(deps) {
     if (!view.select || !ctx) return [];
     const list = ctx.manager.list();
     if (view.select.scope === 'queue') return list.filter((i) => view.select.ids.has(i.id) && i.state !== STATES.ready);
-    return list.filter((i) => i.state === STATES.ready && view.select.ids.has(i.work.ref));
+    return list.filter((i) => i.state === STATES.ready && [...view.select.ids].some((ref) => sameWork(i.work.ref, ref)));
   }
 
   /** شريط التحديد: العدد، الكل/لا شيء، والأوامر على المحدد. */
@@ -1087,7 +1153,7 @@ export function createDownloadsUI(deps) {
     const units = spec.season != null && spec.kind !== 'manga' ? all.filter((u) => u.season == null || Number(u.season) === Number(spec.season)) : all;
     const mine = c.manager.list().filter((i) => i.work.ref === spec.work.ref);
     const onDevice = new Set(mine.filter((i) => i.state === STATES.ready).map((i) => String(i.unit.key)));
-    const queued = new Set(mine.filter((i) => i.state !== STATES.ready).map((i) => String(i.unit.key)));
+    const queued = new Set(mine.filter((i) => ![STATES.ready, STATES.failed, STATES.noSpace].includes(i.state)).map((i) => String(i.unit.key)));
     const taken = (u) => onDevice.has(String(u.key)) || queued.has(String(u.key));
     const currentUnit = units.find((u) => String(u.key) === String(spec.current)) ?? units.find((u) => !taken(u)) ?? units[0];
     const pick = { scope: spec.kind === 'movie' ? 'season' : 'one', keys: new Set(currentUnit && !taken(currentUnit) ? [String(currentUnit.key)] : []), mode: 'smart', route: null, sourceId: null, sourceName: null };
@@ -1186,9 +1252,13 @@ export function createDownloadsUI(deps) {
       }
       sourceBox.hidden = true;
       body.append(modeRow, modeHint, sourceBox);
+      const manualHint = el('p', 'dl-hint');
+      manualHint.hidden = true;
+      body.append(manualHint);
 
       const selectRow = (b, data) => {
         pick.route = data.route ?? null;
+        pick.routeUnit = data.unitKey ?? null;
         pick.sourceId = data.sourceId;
         pick.sourceName = data.name;
         for (const x of sourceBox.querySelectorAll('.dl-source')) x.classList.toggle('is-on', x === b);
@@ -1233,7 +1303,7 @@ export function createDownloadsUI(deps) {
           if (video && spec.build) {
             // سيرفرات الحلقة الحقيقية من محرك التشغيل نفسه. كل سيرفر يظهر لحظة جاهزيته في آخر القائمة
             // (ما ظهر لا يتحرك)، وسطر «نبحث عن المزيد» تحتها حتى تستقر المصادر.
-            const unit = chosen()[0] ?? currentUnit;
+            const unit = chosen().find((u) => !taken(u)) ?? currentUnit;
             const [first] = await spec.build([unit], { mode: 'smart', sourceId: null, quality: null });
             const { resolveRoutes } = await import('../lib/downloads/video-driver.js');
             const eng = globalThis.__VANTARA_QA_DOWNLOADS__?.engine ?? (await import('../lib/anime-engine.js'));
@@ -1296,7 +1366,7 @@ export function createDownloadsUI(deps) {
               const fresh = routes.filter((r) => r.state === 'READY' && !shown.has(r.id)).map((r) => ({ r, row: routeRow(r) }))
                 .sort((x, y) => (y.r.quality ?? 0) - (x.r.quality ?? 0) || (y.row.seeds ?? 0) - (x.row.seeds ?? 0));
               for (const { r, row } of fresh) {
-                const b = sourceRow(row);
+                const b = sourceRow({ ...row, unitKey: unit.key });
                 shown.set(r.id, b);
                 meta.set(b, { q: row.quality, qn: Number(r.quality) || 0, kind: isTorrentRoute(r) ? 'torrent' : 'direct', src: row.name, seeds: row.seeds ?? 0, bytes: sizeOf(row.size) });
                 list.append(b);
@@ -1334,6 +1404,13 @@ export function createDownloadsUI(deps) {
         go.disabled = !list.length || (pick.mode === 'manual' && !pick.sourceId);
         const need = pick.mode === 'manual' && !pick.sourceId ? (video ? 'اختر سيرفرًا' : 'اختر مصدرًا') : null;
         // الحجم معزول الاتجاه: كان يظهر «GB 43.8 المتاح على الجهاز» داخل سطر عربي
+        const anchor = units.find((u) => String(u.key) === String(pick.routeUnit));
+        manualHint.hidden = pick.mode !== 'manual' || !pick.route || !anchor || (list.length === 1 && list[0] === anchor);
+        if (!manualHint.hidden) {
+          manualHint.textContent = list.includes(anchor)
+            ? `السيرفر المختار للحلقة ${anchor.number}. بقية الحلقات تُجهَّز من المصدر نفسه.`
+            : 'تُجهَّز الحلقات المحددة من المصدر نفسه.';
+        }
         status.textContent = need ?? (status.dataset.free ? `المتاح على الجهاز \u2066${status.dataset.free}\u2069` : '');
       }
       go.onclick = async () => {
@@ -1343,20 +1420,21 @@ export function createDownloadsUI(deps) {
         go.classList.add('is-busy');
         try {
           const specs = await spec.build(list, { mode: pick.mode, sourceId: pick.sourceId, sourceName: pick.sourceName, quality: pick.route?.quality ?? null });
-          // سيرفر اختاره المستخدم: يُلتزم به (المصدر والرمز)، لا بديل صامت
-          // البصمة هوية الإصدار نفسه (التورنت بـinfoHash): الرمز يتغيّر بين الجلسات فلا يثبّت الاختيار
-          if (pick.route) {
-            const { routeIdentity } = await import('../lib/downloads/video-driver.js');
-            for (const sp of specs) sp.source = { ...sp.source, mode: 'manual', sourceId: pick.route.sourceId, sourceName: pick.sourceName, server: pick.route.server, routeCode: pick.route.code ?? null, fingerprint: routeIdentity(pick.route), label: pick.route.label ?? null, quality: pick.route.quality ?? null };
+          if (pick.mode === 'manual' && pick.route) {
+            const { batchVideoSource } = await import('../lib/downloads/video-driver.js');
+            for (const sp of specs) sp.source = batchVideoSource(pick.route, {
+              unitKey: sp.unit.key, anchorKey: pick.routeUnit, sourceName: pick.sourceName,
+            });
           }
-          const { added } = await c.manager.enqueue(specs);
-          void saveWorkArt(c.store, spec.work, { local: localArt(spec.work) });
+          const { added, skipped } = await c.manager.enqueue(specs);
+          saveDownloadArt(c.store, spec.work, spec.section, spec.snapshot, added);
           if (spec.snapshot) {
-            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(spec.snapshot, (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
+            // بلا روابط مؤقتة: تنزيل إضافي من صفحة فُتحت من «على الجهاز» كان يحفظ روابط blob: تموت بعد الإغلاق
+            try { await c.store.putArt(`${spec.work.ref}|detail`, { json: JSON.stringify(withoutLocalUrls(spec.snapshot), (k, v) => (k === '_chapters' || k === '_editions' || k === '_sources' || k === '_failedSources' ? undefined : v)), at: Date.now() }); } catch { /* الصفحة تُبنى من الأساسيات */ }
           }
           closeSheet();
           paintEntry();
-          toast(added.length ? (added.length === 1 ? 'بدأ التنزيل — تابعه في «التحميلات»' : `${added.length} في طابور التحميل`) : 'موجود مسبقًا');
+          toast(added.length ? (added.length === 1 ? 'بدأ التنزيل — تابعه في «التحميلات»' : `${added.length} في طابور التحميل`) : (skipped.find((entry) => !entry.item)?.reason ?? 'موجود مسبقًا'));
         } catch (e) {
           go.disabled = false;
           go.classList.remove('is-busy');

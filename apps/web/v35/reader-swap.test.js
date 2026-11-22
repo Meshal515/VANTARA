@@ -30,6 +30,17 @@ describe('a saved translation smaller than its page is redone at full size', () 
     expect(img.src).toBe('file:///tr.webp');
   });
 
+  // RT2: صفحة ويبتون أطول من 4096 تُرسم مصغّرة أولًا والكاملة في الخلفية؛ عدّها معطوبة كان يعيدها بلا نهاية
+  it('a refining (downscaled-on-purpose) translation is shown, not treated as broken', () => {
+    const img = fakeImg('file:///page.jpg', 9000);
+    let broken = 0;
+    swapPageImage(img, { image: 'file:///preview.webp', refining: true }, true, () => (broken += 1));
+    img.naturalHeight = 4096;
+    img.onload();
+    expect(broken).toBe(0);
+    expect(img.src).toBe('file:///preview.webp');
+  });
+
   it('the size check needs both sizes', () => {
     expect(smallerThanOriginal({ dataset: {}, naturalHeight: 100 })).toBe(false);
     expect(smallerThanOriginal({ dataset: { originalHeight: '6000' }, naturalHeight: 5990 })).toBe(false);

@@ -1,9 +1,22 @@
+import { outcomeOf, reportSource } from '../lib/source-report.js';
+
 /** لقطة Latest مشتركة: الجهاز الذي أخذ lease فقط يسأل إضافة المصدر. */
+async function snapshotRequest(request) {
+  let timer;
+  try {
+    return await Promise.race([request(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('snapshot_timeout')), 5000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createSourceLatest(sync, { now = () => Date.now(), wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
   const snapshots = new Map();
   let initial = null;
   const refresh = async () => {
-    const data = await sync.latestSnapshots();
+    const data = await snapshotRequest(() => sync.latestSnapshots());
     for (const row of data?.sources ?? []) snapshots.set(row.sourceId, row);
   };
   const prime = () => (initial ??= refresh().then(() => true, () => { initial = null; return false; }));
@@ -13,8 +26,11 @@ export function createSourceLatest(sync, { now = () => Date.now(), wait = (ms) =
     const cached = snapshots.get(sourceId);
     if (cached && now() - cached.fetchedAt < 60_000) return cached.value;
     let claim;
-    try { claim = await sync.claimLatest(sourceId); }
-    catch { return fetchSource(); }
+    try { claim = await snapshotRequest(() => sync.claimLatest(sourceId)); }
+    catch (error) {
+      reportSource({ section: 'manga', sourceId, stage: 'snapshot_claim', outcome: outcomeOf(error), reason: error?.translationError === 'source' ? 'source_id_rejected' : 'claim_failed' });
+      return fetchSource();
+    }
     if (claim?.claimed) {
       const value = await fetchSource();
       snapshots.set(sourceId, { sourceId, value, fetchedAt: now() });
@@ -29,7 +45,8 @@ export function createSourceLatest(sync, { now = () => Date.now(), wait = (ms) =
       if (refreshed && now() - refreshed.fetchedAt < 60_000) return refreshed.value;
       return fetchSource();
     }
-    for (let i = 0; i < 10; i += 1) {
+    const until = now() + 20_000;
+    for (let i = 0; i < 10 && now() < until; i += 1) {
       await wait(2000);
       try { await refresh(); } catch { break; }
       if (snapshots.has(sourceId) && now() - snapshots.get(sourceId).fetchedAt < 60_000) return snapshots.get(sourceId).value;

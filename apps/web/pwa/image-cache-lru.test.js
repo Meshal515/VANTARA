@@ -23,7 +23,7 @@ function worker({ now }) {
     self: { location: { origin: ORIGIN, hostname: 'pwa.test', protocol: 'https:' }, addEventListener: (e, fn) => handlers.set(e, fn), navigator: {} },
     caches: { open: async (name) => (name === 'vantara-img-v1' ? imageCache : configCache), keys: async () => [] },
     fetch: async () => new Response(new Blob(['img'], { type: 'image/jpeg' }), { headers: { 'content-type': 'image/jpeg' } }),
-    URL, Request: R, Response, Blob, setTimeout, clearTimeout, Date: { now: () => clock.now },
+    URL, Request: R, Response, Blob, AbortController, setTimeout, clearTimeout, Date: { now: () => clock.now },
   });
   const get = async (u) => {
     let out;

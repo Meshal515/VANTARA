@@ -26,6 +26,21 @@ public final class FileCookieVaults implements HttpBroker.Vaults {
     @Override public synchronized HttpBroker.CookieVault forScope(HttpBroker.Scope scope) {
         return handles.computeIfAbsent(key(scope),id->new DiskVault(directory.resolve(id+".cookies")));
     }
+    /** فهرس أقدم كوكي من مضيف آخر غير مضيف الطلب، وإلا الأقدم مطلقًا (الترتيب على القرص ترتيب الإضافة). */
+    private static int evictable(List<Cookie> cookies,HttpUrl current) {
+        for(int i=0;i<cookies.size();i++)if(!cookies.get(i).matches(current))return i;
+        return 0;
+    }
+    private static byte[] encode(List<Cookie> cookies) {
+        try {
+            ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+            try(DataOutputStream output=new DataOutputStream(bytes)) {
+                output.writeInt(MAGIC);output.writeInt(cookies.size());
+                for(Cookie c:cookies){output.writeUTF("https://"+c.domain()+c.path());output.writeUTF(c.toString());}
+            }
+            return bytes.toByteArray();
+        }catch(IOException impossible){throw new IllegalStateException("COOKIE_STORAGE_FAILED");}
+    }
     private static final class DiskVault implements HttpBroker.CookieVault {
         private final Path path;
         DiskVault(Path path){this.path=path;}
@@ -58,17 +73,15 @@ public final class FileCookieVaults implements HttpBroker.Vaults {
                 merged.removeIf(old->old.name().equals(cookie.name())&&old.domain().equals(cookie.domain())&&old.path().equals(cookie.path()));
                 if(cookie.expiresAt()>System.currentTimeMillis())merged.add(cookie);
             }
-            if(merged.size()>MAX_COOKIES)throw new IllegalStateException("COOKIE_STORAGE_LIMIT");
+            // FCV1: مخزن المصدر يجمع كوكيز كل مضيفاته (CDN وصور وتحقق)، وكوكيز الجلسة لا تنتهي. كان تجاوز الحد يرمي
+            // فيفشل كل طلب للأبد. الأقدم يُخلى أولًا، ومن مضيف غير مضيف الطلب الحالي قبل مضيفه، فلا يضيع تحقق الآن.
+            while(merged.size()>MAX_COOKIES)merged.remove(evictable(merged,url));
+            byte[] encoded;
+            while((encoded=encode(merged)).length>MAX_FILE&&!merged.isEmpty())merged.remove(evictable(merged,url));
             Path temporary=null;
             try {
-                ByteArrayOutputStream bytes=new ByteArrayOutputStream();
-                try(DataOutputStream output=new DataOutputStream(bytes)) {
-                    output.writeInt(MAGIC);output.writeInt(merged.size());
-                    for(Cookie c:merged){output.writeUTF("https://"+c.domain()+c.path());output.writeUTF(c.toString());}
-                }
-                if(bytes.size()>MAX_FILE)throw new IllegalStateException("COOKIE_STORAGE_LIMIT");
                 Files.createDirectories(path.getParent());temporary=Files.createTempFile(path.getParent(),".vrt-cookie-",".tmp");
-                try(FileOutputStream output=new FileOutputStream(temporary.toFile())){output.write(bytes.toByteArray());output.getFD().sync();}
+                try(FileOutputStream output=new FileOutputStream(temporary.toFile())){output.write(encoded);output.getFD().sync();}
                 Files.move(temporary,path,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);temporary=null;
             }catch(IOException e){throw new IllegalStateException("COOKIE_STORAGE_FAILED");}
             finally {if(temporary!=null)try{Files.deleteIfExists(temporary);}catch(IOException ignored){}}

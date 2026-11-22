@@ -103,6 +103,20 @@ class RepoIndexTest {
         assertEquals(listOf("9"), RepoIndex.visibleSources(list[2]).map { it.id })
     }
 
+    /** UE1: حزمة متعددة اللغات بلا عربي: اختيار ثابت (الإنجليزية، وإلا أصغر رمز لغة)، لا أول ما في الفهرس. */
+    @Test fun aMultiLanguagePackageWithoutArabicPicksADeterministicSource() {
+        val fp = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+        val raw = field(1, "R") + field(2, "R") + field(3, fp) + field(
+            101,
+            ext("Multi", "eu.kanade.tachiyomi.extension.all.multi", 1, source(7, "Multi", "fr"), source(8, "Multi", "en"), source(9, "Multi", "de")) +
+                ext("NoEn", "eu.kanade.tachiyomi.extension.all.noen", 2, source(11, "N", "pt"), source(12, "N", "es")),
+        )
+        val gz = java.io.ByteArrayOutputStream().also { java.util.zip.GZIPOutputStream(it).use { z -> z.write(raw) } }.toByteArray()
+        val (_, list) = RepoIndex.parseIndexV2(gz)
+        assertEquals(listOf("8"), RepoIndex.visibleSources(list[0]).map { it.id })
+        assertEquals(listOf("12"), RepoIndex.visibleSources(list[1]).map { it.id })
+    }
+
     @Test fun readsTheGzippedProtobufIndexKeiyoushiPublishesToday() {
         val fp = "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
         val raw = field(1, "Keiyoushi") + field(2, "KEI") + field(3, fp) + field(

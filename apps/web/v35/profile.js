@@ -28,6 +28,7 @@ import { displayTitle, refForTitle } from './work-ref.js';
 import { applyProfileTheme } from './profile-theme.js';
 import { profileTopSlots } from './profile-top.js';
 import { observeProfileContrast } from './profile-contrast.js';
+import { tagWork } from '../lib/removed-works.js';
 
 const el = (tag, cls, text) => {
   const n = document.createElement(tag);
@@ -265,7 +266,7 @@ export function createProfile(ctx) {
 
   function nowCard(p, own) {
     const work = workOf(p.seriesRef ?? refForTitle(p.seriesTitle) ?? 'ext:عمل', p.seriesTitle);
-    const card = el('button', 'pf-now');
+    const card = tagWork(el('button', 'pf-now'), work?.id, p.seriesRef);
     card.type = 'button';
     const cover = el('span', 'pf-now-cover');
     void ctx.mountImage(cover, work);

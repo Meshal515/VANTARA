@@ -109,6 +109,8 @@ class PlayerActivity : Activity() {
         val section: String = "anime",
         /** لون القسم الذي اختاره المستخدم (#RRGGBB)، أو null = لون القسم المصمّم. */
         val accent: String? = null,
+        /** «glass» حين فعّل المستخدم التأثير الزجاجي في المظهر، وإلا المظهر الحالي كما هو. */
+        val material: String? = null,
         val usageUserId: String? = null,
         val malId: Int? = null,
         val episode: Float = 1f,
@@ -376,6 +378,71 @@ class PlayerActivity : Activity() {
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
             main.removeCallbacksAndMessages(embeddedCues)
             selectedAddonSubtitle = track.id
+            ownSidecar = null
+            ownCues = cues
+            main.removeCallbacks(subsTick); main.post(subsTick)
+            if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+        }
+    }
+
+    /** الملف الجانبي المرفق بالمصدر الذي نعرضه بأنفسنا الآن (بعد طلب «أبكر»)، أو null. */
+    private var ownSidecar: com.vantara.anime.stream.TrackRef? = null
+    private var sidecarLoading = false
+    private val sidecarClient by lazy { OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build() }
+
+    /** مسار Media3 المختار إن كان ملفًا جانبيًا مرفقًا بالمصدر (له رابط)، لا ترجمة مدمجة في الفيديو. */
+    private fun selectedSidecar(): com.vantara.anime.stream.TrackRef? {
+        val c = current ?: return null
+        if (ownCues != null || player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return null
+        for (g in player.currentTracks.groups) if (g.type == C.TRACK_TYPE_TEXT) for (i in 0 until g.length) {
+            if (!g.isTrackSelected(i)) continue
+            val f = g.getTrackFormat(i)
+            return SidecarSubtitle.of(c.subtitles, c.sourceName, f.label, f.language)
+        }
+        return null
+    }
+
+    /**
+     * «أبكر» على ترجمة مرفقة بالمصدر: يُحمَّل ملفها بترويسات المصدر ويُعرض بأنفسنا، فتتحرك بالاتجاهين. الفيديو لا
+     * يُعاد تحضيره. فشل التحميل يُقال ويبقى المسار كما كان (بموعده).
+     */
+    private fun takeOverSidecar() {
+        if (ownCues != null || sidecarLoading || subtitleDelayMs >= 0) return
+        val c = current ?: return
+        val track = selectedSidecar() ?: return
+        sidecarLoading = true
+        if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+        scope.launch {
+            val cues = withContext(Dispatchers.IO) {
+                runCatching {
+                    // تنزيل (فيلم محمّل مع ترجمته من SubSource وغيره): الترجمة ملف في مجلد التطبيق نفسه
+                    if (track.url.startsWith("file:")) {
+                        val file = File(checkNotNull(android.net.Uri.parse(track.url).path)).canonicalFile
+                        val own = listOfNotNull(filesDir, cacheDir, getExternalFilesDir(null)).map { it.canonicalPath }
+                        check(own.any { file.path.startsWith(it + File.separator) }) { "ملف ترجمة خارج مجلد التطبيق" }
+                        check(file.length() <= 4L * 1024 * 1024)
+                        return@runCatching SubtitleText.parse(SidecarSubtitle.decode(file.readBytes(), null, SidecarSubtitle.isArabic(track.lang)))
+                    }
+                    val request = okhttp3.Request.Builder().url(track.url).get().apply { c.headers.forEach { (k, v) -> header(k, v) } }.build()
+                    sidecarClient.newCall(request).execute().use { response ->
+                        check(response.isSuccessful) { "HTTP ${response.code}" }
+                        val body = checkNotNull(response.body)
+                        check(body.contentLength() <= 4L * 1024 * 1024)
+                        val bytes = body.source().let { src -> src.request(4L * 1024 * 1024 + 1); check(src.buffer.size <= 4L * 1024 * 1024); src.readByteArray() }
+                        SubtitleText.parse(SidecarSubtitle.decode(bytes, body.contentType()?.charset(null), SidecarSubtitle.isArabic(track.lang)))
+                    }
+                }.getOrNull()
+            }
+            sidecarLoading = false
+            if (current?.id != c.id || ownCues != null) return@launch
+            if (cues.isNullOrEmpty()) {
+                message("تعذّر تقديم هذه الترجمة؛ تبقى بموعدها")
+                if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
+                return@launch
+            }
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+            main.removeCallbacksAndMessages(embeddedCues)
+            ownSidecar = track
             ownCues = cues
             main.removeCallbacks(subsTick); main.post(subsTick)
             if (openSheet == SheetKind.SUBTITLES) sheet.refresh()
@@ -383,6 +450,9 @@ class PlayerActivity : Activity() {
     }
 
     private fun stopOwnSubtitles() {
+        // كنا نعرض ملفًا مرفقًا بدل مسار Media3 (عطّلناه): يعود المسار مفعّلًا، فالحلقة التالية لا تفقد ترجمتها
+        if (ownSidecar != null) player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
+        ownSidecar = null
         ownCues = null
         main.removeCallbacks(subsTick)
         if (::subsView.isInitialized) showSub("")
@@ -465,6 +535,7 @@ class PlayerActivity : Activity() {
         }
     }
     private val seekBudget = PlaybackSeekBudget()
+    private val seekRecovery = SeekRecovery()
 
     /** بدأ ثم علق التحميل: ExoPlayer لا يعدّه خطأ، فالمراقبة هنا. */
     private val stallWatchdog = Runnable {
@@ -554,6 +625,7 @@ class PlayerActivity : Activity() {
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
         Tone.use(launch.section, launch.accent)
+        Glass.use(launch.material)
         sessionId = launch.session
         presenceAuthorization = launch.presenceAuthorization
         episode = launch.episode
@@ -639,6 +711,26 @@ class PlayerActivity : Activity() {
         startTogether()
     }
 
+    /** الخروج من الغرفة لا يغلق المشغّل: الفيديو يكمل عندك من نفس اللحظة، بلا غرفة (قرار المالك، 19 نوفمبر). */
+    private fun leaveTogether() {
+        val t = together ?: return
+        if (openSheet == SheetKind.TOGETHER || openSheet == SheetKind.LEAVE) sheet.close()
+        together = null
+        t.leave()
+        message("طلعت من الغرفة · تكمل لحالك")
+        if (current == null) showServers()
+    }
+
+    /** زر الرجوع وأنت في غرفة: سؤال واحد بدل خروج صامت من الغرفة (TG16). */
+    private fun confirmExitRoom() {
+        open(SheetKind.LEAVE, "تطلع من الغرفة؟", "أصدقاؤك يكملون المشاهدة بدونك") { body ->
+            body.addView(pillButton("كمّل الفيديو بدون الغرفة", primary = true) { leaveTogether() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+            body.addView(pillButton("اطلع من المشغّل", primary = false) { sheet.close(); finish() },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+    }
+
     /** غرفة Together: الاتصال والأفاتارات في الشريط العلوي، والمزامنة تعمل مع المشغّل. */
     private fun startTogether() {
         val raw = launch.together ?: return
@@ -648,6 +740,10 @@ class PlayerActivity : Activity() {
             override fun message(text: String) = this@PlayerActivity.message(text)
             override fun episode() = episodeInt()
             override fun sourceName() = current?.let { codeOf(it) ?: it.server }
+            // هوية السيرفر بصيغة الويب وويندوز («معرّف المصدر|رمز السيرفر» بحروف صغيرة): لاقتراح سيرفر المضيف
+            override fun serverKey() = current?.let { c -> prep?.routeOf(c.id)?.let { "${it.sourceId}|${it.code.lowercase()}" } ?: "${c.sourceId}|${c.server.lowercase()}" }
+            override fun readyServers() = prep?.routes().orEmpty().filter { it.state == RouteState.READY }.map { Triple("${it.sourceId}|${it.code.lowercase()}", it.id, it.code) }
+            override fun useServer(candidateId: String) { prep?.routes()?.firstOrNull { it.id == candidateId }?.let { switchTo(it) } }
             // حلقة أخرى في الغرفة: تُجهّز سيرفراتها ولا يبدأ شيء حتى يختار كل واحد سيرفره
             override fun switchToEpisode(n: Int) = switchEpisode(n, roomPick = true)
             override fun hasNextEpisode() = hasNext()
@@ -655,7 +751,7 @@ class PlayerActivity : Activity() {
             override fun refreshPanel() { if (openSheet == SheetKind.TOGETHER) sheet.refresh() }
             override fun overlayHost() = root
             override fun freshToken() = launch.presenceEndpoint?.trimEnd('/')?.let { runCatching { refreshPresenceToken(it) }.getOrNull() }
-            override fun leaveRoom() = finish()
+            override fun leaveRoom() = leaveTogether()
             override fun openServers() = showServers()
             override fun openEpisodes() = showEpisodes()
             override fun hasEpisodes() = !isMovie() && launch.total > 1 && copies.isNotEmpty()
@@ -766,6 +862,7 @@ class PlayerActivity : Activity() {
             main.removeCallbacksAndMessages(embeddedCues)
             if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                seekRecovery.seeked(SystemClock.elapsedRealtime())
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
                 watchStall()
             }
@@ -824,6 +921,8 @@ class PlayerActivity : Activity() {
             }
             updateQualityLabel()
             autoArabicSubtitle()
+            // التقديم المضبوط يبقى: مسار مرفق جديد (حلقة تالية أو تبديل مسار) يُعرض بأنفسنا كذلك
+            if (subtitleDelayMs < 0) takeOverSidecar()
             val selected = selectedAddonSubtitle ?: return
             if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return
             for (g in tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }) for (i in 0 until g.length) {
@@ -890,11 +989,16 @@ class PlayerActivity : Activity() {
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
         val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
-        // المعاينة: مصدر مستقل بلا قياس شبكة (لا تُحسب حركتها على سرعة المشاهدة)، والتورنت بإطارات المشاهدة وحدها
-        // المعاينة: مصدر مستقل بلا قياس شبكة؛ التورنت بقارئ معاينة لا يحرّك نافذة المشاهدة
-        if (::seekPreview.isInitialized) seekPreview.bind({
-            CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false, preview = true), false, "${c.id}|preview").mediaSource
-        }, torrent = c.url.startsWith("vantara-torrent:"))
+        // HLS المحلي يبقى على Media3. الملف المباشر يُقرأ من القرص لاستخراج إطار عند الطلب.
+        if (::seekPreview.isInitialized) {
+            val file = android.net.Uri.parse(c.url).takeIf { android.os.Build.VERSION.SDK_INT >= 27 && it.scheme == "file" }?.path
+                ?.takeUnless { it.endsWith(".m3u8", ignoreCase = true) }
+            seekPreview.bind(
+                source = { CandidateMediaSources.create(c, playbackDataSourceFactory(c, measured = false, preview = true), false, "${c.id}|preview").mediaSource },
+                torrent = c.url.startsWith("vantara-torrent:"),
+                localFile = file,
+            )
+        }
         externalAudioUrls = media.externalAudioUrls
         if (BuildConfig.DEBUG) {
             if (withoutExternalAudio) diag.error("engine recovery: optional external audio disabled for this retry")
@@ -959,6 +1063,17 @@ class PlayerActivity : Activity() {
 
     /** عطل السيرفر الحالي ← التالي من نفس الموضع، أو انتظار ما يجهز. */
     private fun fail(reason: String) {
+        // TS1: عطل بعد تشغيل ناجح وبعد قفزة قريبة = الموضع الجديد لم يجهز بعد، لا سيرفر ميت. يُعاد فتح المصدر نفسه عند
+        // الموضع (مرتين على الأكثر)، ولا يُعلَّم فاشلًا ولا يُبدَّل بمصدر يبدأ من الصفر عند الدقيقة 20
+        val retry = current?.takeIf { seekRecovery.shouldRetry(it.id, reportedStart, SystemClock.elapsedRealtime()) }
+        if (retry != null) {
+            main.removeCallbacks(stallWatchdog)
+            main.removeCallbacks(startupWatchdog)
+            if (BuildConfig.DEBUG) diag.error("seek recovery: reopen same candidate at the new position after $reason")
+            message("نجهّز هذا الموضع…")
+            start(retry, position())
+            return
+        }
         clearSkipTimings()
         startup.cancel()
         usageStarted = false
@@ -1016,7 +1131,7 @@ class PlayerActivity : Activity() {
     private fun switchTo(route: Route) {
         val p = prep ?: return
         val s = session ?: return
-        val c = p.rank(p.candidatesOf(route.id)).firstOrNull()?.let { s.take(it.id) }
+        val c = p.rank(p.candidatesOf(route.id)).firstOrNull()?.let { s.take(it.id, manual = true) }
         if (c == null) {
             message("هذا السيرفر لم يعد متاحًا")
             return
@@ -1061,7 +1176,7 @@ class PlayerActivity : Activity() {
     /** روابط الفيديو تعيش عشر دقائق فقط: جهّز التالية قرب النهاية، وبمصدر نجح فعلًا. */
     private fun maybePrepareNext() {
         if (!reportedStart || !hasNext() || warmedSessionId != null || player.playbackState != Player.STATE_READY) return
-        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position())) return
+        if (!NextEpisodeWarmup.shouldPrepare(player.duration, position(), if (together != null) NextEpisodeWarmup.ROOM_WINDOW_MS else 4 * 60_000L)) return
         val source = current?.sourceId ?: return
         val next = episodeInt() + 1
         val id = "warm-${System.nanoTime()}"
@@ -1129,11 +1244,9 @@ class PlayerActivity : Activity() {
         loading(true)
         if (warmed == null && !roomPick) message("نجهّز الحلقة $n…", long = true)
         PlaybackEvents.emit("episode", JSONObject().put("animeId", launch.animeId).put("episode", n).put("session", id))
-        if (roomPick && together != null) {
-            loading(false)
-            together?.awaitPick()
-            return
-        }
+        // الغرفة نقلتنا لحلقة أخرى من العمل نفسه (قرار المالك، 19 نوفمبر): تكمل بسيرفرك المفضل وجودتك بلا «اختر سيرفر»
+        // ولا جاهزية دخول؛ جُهّزت مسبقًا قبل النهاية، وإن فشل التجهيز المسبق تُجهَّز الآن بالطريق العادي نفسه.
+        // (كان كل عضو يُعاد لاختيار السيرفر عند كل حلقة. تغيير الموسم مسار آخر: switchWork، ويبقى فيه الاختيار.)
         val p = prep ?: return
         val s = session ?: return
         val from = resume[n] ?: 0L
@@ -1187,7 +1300,7 @@ class PlayerActivity : Activity() {
 
     // ───────────── الواجهة ─────────────
 
-    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER }
+    private enum class SheetKind { SERVERS, EPISODES, QUALITY, SUBTITLES, AUDIO, SPEED, MORE, FRIENDS, SKIPS, NETWORK, TOGETHER, LEAVE }
 
     private var openSheet: SheetKind? = null
 
@@ -1342,7 +1455,7 @@ class PlayerActivity : Activity() {
         }
         root.addView(pill, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(84) })
 
-        unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = Tone.alpha(Tone.SURFACE, 0x99), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE }
+        unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = Tone.alpha(Tone.SURFACE, 0x99), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE; glassCircle() }
         root.addView(unlockButton, FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER_VERTICAL or Gravity.RIGHT).apply { rightMargin = dp(28) })
 
         netChip = label("", 11.5f, Color.WHITE, bold = true).apply {
@@ -1376,7 +1489,7 @@ class PlayerActivity : Activity() {
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(20), dp(14), dp(20), 0)
         }
-        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { finish() })
+        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { if (together != null) confirmExitRoom() else finish() }.apply { glassCircle() })
         titleView = label("", 16f, Color.WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; textDirection = View.TEXT_DIRECTION_ANY_RTL }
         episodeView = label("", 12.5f, Tone.TEXT_2).apply { setPadding(0, dp(4), 0, 0) }
         top.addView(LinearLayout(this).apply {
@@ -1385,10 +1498,14 @@ class PlayerActivity : Activity() {
             addView(titleView)
             addView(episodeView)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(iconButton(Glyph.Kind.CAMERA, desc = "قصّ مقطع من هذه اللحظة") { openClip() })
+        // أدوات الترويسة في مجموعة واحدة: في Glass كبسولة زجاجية، وفي المظهر الحالي التخطيط نفسه بلا خلفية
+        val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        tools.addView(iconButton(Glyph.Kind.CAMERA, desc = "قصّ مقطع من هذه اللحظة") { openClip() })
         fitButton = iconButton(if (fill) Glyph.Kind.FIT else Glyph.Kind.FILL, desc = "ملء الشاشة / ملاءمة") { toggleFit() }
-        top.addView(fitButton)
-        top.addView(iconButton(Glyph.Kind.MORE, desc = "المزيد") { showMore() })
+        tools.addView(fitButton)
+        tools.addView(iconButton(Glyph.Kind.MORE, desc = "المزيد") { showMore() })
+        tools.glassGroup()
+        top.addView(tools)
         controls.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
     }
 
@@ -1422,20 +1539,22 @@ class PlayerActivity : Activity() {
         left.addView(nextButton)
         left.addView(iconButton(Glyph.Kind.EPISODES, desc = "الحلقات") { showEpisodes() })
         left.addView(iconButton(Glyph.Kind.SERVERS, desc = "السيرفرات") { showServers() })
+        left.glassGroup()
         row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
 
         val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         // قرار المالك (14 نوفمبر): دائرة التشغيل/الإيقاف وزرّا ±10 في منتصف الشاشة لا في الصف السفلي، وأكبر قليلًا
-        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
+        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) }.apply { glassCircle(ring = true) })
         playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 30, boxDp = 72, desc = "إيقاف مؤقت") { togglePlay() }.apply {
             background = android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x33FFFFFF),
                 GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(dp(2), Color.WHITE); setColor(0x33000000) },
                 null,
             )
+            glassCircle(ring = true)
         }
         center.addView(playButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply { leftMargin = dp(40); rightMargin = dp(40) })
-        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) })
+        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) }.apply { glassCircle(ring = true) })
         controls.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         val right = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -1454,6 +1573,7 @@ class PlayerActivity : Activity() {
         right.addView(iconButton(Glyph.Kind.AUDIO, desc = "المسارات الصوتية") { showAudio() })
         right.addView(iconButton(Glyph.Kind.SPEED, desc = "السرعة") { showSpeed() })
         right.addView(iconButton(Glyph.Kind.UNLOCK, desc = "قفل الشاشة") { setLocked(true) })
+        right.glassGroup()
         row.addView(right, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT or Gravity.CENTER_VERTICAL))
         col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
         controls.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
@@ -2131,7 +2251,8 @@ class PlayerActivity : Activity() {
         for (g in text) for (i in 0 until g.length) {
             val f = g.getTrackFormat(i)
             if (f.id?.startsWith("addon|") == true) continue
-            val on = ownCues == null && !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) && g.isTrackSelected(i)
+            val shownByUs = ownSidecar != null && ownSidecar == current?.let { SidecarSubtitle.of(it.subtitles, it.sourceName, f.label, f.language) }
+            val on = shownByUs || (ownCues == null && !player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT) && g.isTrackSelected(i))
             val name = f.label ?: f.language?.let { java.util.Locale(it).getDisplayLanguage(java.util.Locale("ar")) } ?: "ترجمة ${i + 1}"
             body.addView(sheetRow(name, null, trailing = if (on) check() else null, selected = on) {
                 subtitleUserChoice = true
@@ -2159,11 +2280,16 @@ class PlayerActivity : Activity() {
         val shift = { d: Long ->
             subtitleDelayMs = (subtitleDelayMs + d).coerceIn(-30_000, 30_000)
             main.removeCallbacksAndMessages(embeddedCues)
+            // ترجمة مرفقة بالمصدر: «أبكر» يحمّل ملفها ويعرضها بأنفسنا فتتقدّم فعلًا
+            if (subtitleDelayMs < 0) takeOverSidecar()
             sheet.refresh()
         }
         body.addView(choiceRow(listOf("أبكر 0.5", "أبكر 0.1", "أتأخر 0.1", "أتأخر 0.5"), -1) { i -> shift(listOf(-500L, -100L, 100L, 500L)[i]) })
         body.addView(label("الترجمة تظهر بعد الكلام ← «أبكر». تسبقه ← «أتأخر».", 12f, Tone.TEXT_3).apply { setPadding(0, dp(8), 0, 0) })
-        if (ownCues == null && subtitleDelayMs < 0) body.addView(label("ترجمة الفيديو المدمجة لا تُقدَّم قبل موعدها؛ التقديم يعمل مع الترجمات الإضافية.", 12f, Tone.WARN).apply { setPadding(0, dp(6), 0, 0) })
+        if (ownCues == null && subtitleDelayMs < 0) {
+            val note = if (sidecarLoading) "نجهّز الترجمة لتقديمها…" else "ترجمة الفيديو المدمجة لا تُقدَّم قبل موعدها؛ التقديم يعمل مع الترجمات الإضافية."
+            body.addView(label(note, 12f, if (sidecarLoading) Tone.TEXT_3 else Tone.WARN).apply { setPadding(0, dp(6), 0, 0) })
+        }
         if (subtitleDelayMs != 0L) body.addView(pillButton("تصفير التوقيت", primary = false) { subtitleDelayMs = 0; main.removeCallbacksAndMessages(embeddedCues); sheet.refresh() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(10) })
 
         body.addView(sectionLabel("الحجم"))
@@ -2677,6 +2803,7 @@ class PlayerActivity : Activity() {
             clip != null -> clip?.close()
             sheet.isOpen -> sheet.close()
             locked -> flashUnlock()
+            together != null -> confirmExitRoom()
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
     }
@@ -2687,7 +2814,8 @@ class PlayerActivity : Activity() {
         sampleUsage()
         presenceActive = false
         main.removeCallbacks(presenceTick)
-        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها
+        // الخروج للخلفية يوقف فيديوك وحدك، لا الغرفة كلها، والغرفة لا تعيد تشغيله في الخلفية (TG15)
+        together?.onBackground()
         setPlayingQuietly(false)
         if (::seekPreview.isInitialized) seekPreview.hide()
         startup.active(false)
@@ -2698,6 +2826,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         usageForeground = true
+        together?.onForeground()
         startup.active(player.playWhenReady)
         watchStall()
         sampleUsage()

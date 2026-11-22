@@ -322,3 +322,31 @@ describe('placeholder chapter rows', () => {
 		expect(merged.map((c) => c.number)).toEqual([1, 0]);
 	});
 });
+
+describe('RD7: the chapter number is the chapter’s, not the first number in its name', () => {
+  it('reads the number after the chapter mark, drops volume/season numbers, keeps decimals', async () => {
+    const { parseChapterNumber } = await import('./catalog.js');
+    const cases = { 'Vol.3 Ch.25': 25, 'Season 2 Chapter 15': 15, 'الموسم 2 الفصل 7': 7, 'Chapter 10.5': 10.5, '第3話': 3, '12': 12, 'الفصل ١٢': 12, '86 Eighty Six Ch 3': 3, 'Vol.2': -1 };
+    for (const [name, n] of Object.entries(cases)) expect([name, parseChapterNumber(name)]).toEqual([name, n]);
+  });
+  it('a source listing two different chapters with one number keeps both; one chapter from two teams stays one', async () => {
+    const { mergeChapters } = await import('./catalog.js');
+    // Madara يرسل chapterNumber: -1 دائمًا: «Vol.1 Ch.1» و«Vol.1 Ch.2» كانا الرقم 1 فيُسقط الثاني
+    const vol = { sourceId: 'madara', label: 'M', manga: { url: '/m' }, chapters: [
+      { name: 'Vol.1 Ch.2', url: '/v1c2', chapterNumber: -1 },
+      { name: 'Vol.1 Ch.1', url: '/v1c1', chapterNumber: -1 },
+    ] };
+    expect(mergeChapters([vol]).map((r) => r.number)).toEqual([2, 1]);
+    // رقم واحد لفصلين مختلفين من المصدر نفسه (جزءان باسمين): لا يُسقط الثاني
+    const parts = { sourceId: 'teamx', label: 'T', manga: { url: '/t' }, chapters: [
+      { name: 'Chapter 1 Part 2', url: '/c1b', chapterNumber: 1 },
+      { name: 'Chapter 1', url: '/c1a', chapterNumber: 1 },
+    ] };
+    expect(mergeChapters([parts]).map((r) => r.chapter.url).sort()).toEqual(['/c1a', '/c1b']);
+    const dex = { sourceId: 'dex', label: 'D', manga: { url: '/d' }, chapters: [
+      { name: 'Chapter 5', url: '/a', chapterNumber: 5, scanlator: 'Group A' },
+      { name: 'Chapter 5', url: '/b', chapterNumber: 5, scanlator: 'Group B' },
+    ] };
+    expect(mergeChapters([dex])).toHaveLength(1);
+  });
+});

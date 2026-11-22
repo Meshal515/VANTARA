@@ -144,23 +144,42 @@ object TorrentPolicy {
      * حزمة فيها عدة حلقات وطُلبت حلقة ليست فيها = خطأ صريح، لا تشغيل حلقة أخرى (TR1). fileIdx يشير لغير فيديو
      * يرجع لمطابقة الاسم والرقم بدل الفشل النهائي (TR2).
      */
-    fun selectFile(files: List<TorrentFile>, requested: Int?, episode: Int? = null, filename: String? = null): TorrentFile {
+    /**
+     * [season]: موسم الطلب إن عُرف (null = عمل AniList بموسم واحد بأرقام نسبية). TO1-TO6: الهوية من الحزمة كلها
+     * ([EpisodeNames.pack]): الخاصة والملخصات لا تنافس، والرقم الذي يتغير بين الملفات هو الحلقة، والترقيم المطلق يُطابَق
+     * بالترتيب، وحزمة عدة مواسم بلا تلميح لا تُخمَّن (رفض فيُجرَّب مصدر آخر، لا حلقة موسم آخر).
+     */
+    fun selectFile(files: List<TorrentFile>, requested: Int?, episode: Int? = null, filename: String? = null, season: Int? = null): TorrentFile {
         if (requested != null) files.firstOrNull { it.index == requested && playable(it) }?.let { return it }
         val videos = files.filter(::playable)
         if (videos.isEmpty()) throw IllegalArgumentException("No playable file at requested torrent index")
         val hinted = filename?.let(::baseName)?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() }
         if (hinted != null) videos.firstOrNull { baseName(it.path).lowercase(Locale.ROOT) == hinted }?.let { return it }
         val wanted = episode?.takeIf { it > 0 }
+        val ids = EpisodeNames.pack(videos.map { it.path })
+        val regular = videos.filter { ids[it.path]?.let { id -> !id.special && !id.fraction } ?: true }
         if (wanted != null) {
-            val matches = videos.filter { EpisodeNames.episode(it.path) == wanted }
-            if (matches.isNotEmpty()) return matches.maxBy { it.size }
+            val inSeason = { f: TorrentFile -> season == null || ids[f.path]?.season.let { it == null || it == season } }
+            val matches = regular.filter { ids[it.path]?.episode == wanted && inSeason(it) }
+            if (matches.isNotEmpty()) {
+                val seasons = matches.mapNotNull { ids[it.path]?.season }.toSet()
+                if (season == null && seasons.size > 1) throw IllegalArgumentException("EPISODE_NOT_IN_TORRENT")
+                return matches.maxBy { it.size }
+            }
+            // ترقيم مطلق: حزمة متصلة من موسم واحد تبدأ بعد 1 (13..24) والمطلوب ترتيبه فيها (1 ← 13)
+            val numbered = regular.filter(inSeason).mapNotNull { f -> ids[f.path]?.episode?.let { it to f } }.sortedBy { it.first }
+            val numbers = numbered.map { it.first }
+            val oneSeason = numbered.mapNotNull { ids[it.second.path]?.season }.toSet().size <= 1
+            if (oneSeason && numbers.isNotEmpty() && numbers.first() > 1 && numbers.zipWithNext().all { (a, b) -> b == a + 1 } && wanted <= numbers.size) {
+                return numbered[wanted - 1].second
+            }
         }
         if (videos.size == 1) return videos.single()
         // fileIdx صريح لا يقود لفيديو: لا يُستبدل بملف آخر بلا دليل على أنه الحلقة نفسها
         if (requested != null) throw IllegalArgumentException("No playable file at requested torrent index")
         if (wanted != null) {
             // حزمة بلا أرقام حلقات قابلة للقراءة: الأكبر كما كان. فيها أرقام ولا تحوي المطلوبة: لا حلقة خاطئة
-            if (videos.any { EpisodeNames.episode(it.path) != null }) throw IllegalArgumentException("EPISODE_NOT_IN_TORRENT")
+            if (videos.any { ids[it.path]?.episode != null }) throw IllegalArgumentException("EPISODE_NOT_IN_TORRENT")
         }
         return videos.maxBy { it.size }
     }
@@ -373,9 +392,47 @@ object EpisodeNames {
         Regex("^(\\d{1,4})(?=[\\s._-])"),
     )
     fun episode(path: String): Int? {
-        var name = path.substringAfterLast('/').substringBeforeLast('.').replace('_', ' ').replace('.', ' ')
-        for (n in noise) name = name.replace(n, " ")
+        // TO6: التسمية اليابانية «第05話»
+        japanese.find(path.substringAfterLast('/'))?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+        val name = cleaned(path)
         for (p in patterns) p.find(name)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
         return null
+    }
+
+    private val japanese = Regex("第\\s*(\\d{1,4})\\s*[話话集]")
+    private val specialMark = Regex("(?i)(?:^|[/ ._\\-\\[(])(?:s00|specials?|ova|oad|ncop\\d*|nced\\d*|creditless|recap|preview|pv|menu)(?:[/ ._\\-\\])]|$)")
+    private val halfEpisode = Regex("(?<![\\d.])\\d{1,4}\\.5(?![\\d])")
+    private val seasonMark = Regex("(?i)(?:\\bS(\\d{1,2})[ ._-]*E\\d{1,4}\\b|(?:^|/)(?:Season|S)[ ._]?(\\d{1,2})(?:/|$))")
+
+    private fun cleaned(path: String): String {
+        var name = path.substringAfterLast('/').substringBeforeLast('.').replace('_', ' ').replace('.', ' ')
+        for (n in noise) name = name.replace(n, " ")
+        return name
+    }
+
+    /** هوية ملف في حزمة: موسمه وحلقته، وهل هو خاص (S00، OVA، NCOP…) أو نصف حلقة (05.5 ملخّص). */
+    data class Ident(val season: Int?, val episode: Int?, val special: Boolean, val fraction: Boolean)
+
+    fun ident(path: String): Ident {
+        val file = path.substringAfterLast('/').substringBeforeLast('.')
+        val season = seasonMark.findAll(path).firstNotNullOfOrNull { m -> (m.groupValues[1].ifEmpty { m.groupValues[2] }).toIntOrNull() }
+        return Ident(season, episode(path), specialMark.containsMatchIn(path) || season == 0, halfEpisode.containsMatchIn(file))
+    }
+
+    /**
+     * الحزمة كلها معًا (TO2، TO5): حين لا تفرّق الأنماط بين الملفات («العنوان 005» بلا شرطة، أو «86 Eighty Six 05» يُقرأ 86
+     * لكلها)، الرقم الذي يتغير بين ملفات الحزمة في الموضع نفسه هو رقم الحلقة.
+     */
+    fun pack(paths: List<String>): Map<String, Ident> {
+        val ids = paths.associateWith(::ident)
+        val regular = paths.filter { ids[it]?.let { id -> !id.special && !id.fraction } == true }
+        if (regular.size < 2) return ids
+        val distinct = regular.mapNotNull { ids[it]?.episode }.let { it.size == regular.size && it.toSet().size == it.size }
+        if (distinct) return ids
+        val tokens = regular.associateWith { p -> Regex("\\d{1,4}").findAll(cleaned(p)).map { it.value.toInt() }.toList() }
+        val width = tokens.values.map { it.size }.distinct().singleOrNull() ?: return ids
+        val varying = (0 until width).filter { i -> tokens.values.map { it[i] }.toSet().size == regular.size }
+        val at = varying.lastOrNull() ?: return ids
+        return ids + regular.associateWith { p -> ids[p]!!.copy(episode = tokens[p]!![at].takeIf { it > 0 }) }
     }
 }

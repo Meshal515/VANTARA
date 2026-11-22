@@ -57,6 +57,17 @@ export function cycleGenre(f, g) {
  *           openSheet: Function, closeSheet: Function, showPage: Function, genreAr: Function,
  *           genres: Array<[string, number]>, trending: () => any[], toast: Function, root?: Element }} deps
  */
+/**
+ * DS1: سبب الفشل كما هو. زحمة AniList (429، حد الطلبات في الدقيقة) ليست انقطاعًا، وكانت تظهر «تحقّق من الاتصال» في
+ * البحث والمجموعات والرئيسية (عولج في صفحة العمل وحدها من قبل).
+ */
+export function anilistFailureText(error, action = 'التحميل') {
+  const busy = error?.code === 'anilist_busy' || /anilist_429|too many|\b429\b/i.test(String(error?.message ?? ''));
+  if (busy) return 'AniList مزدحم الحين — حاول بعد لحظات.';
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'ما فيه اتصال بالإنترنت — تحقّق منه ثم أعد المحاولة.';
+  return `تعذّر ${action} — حاول مرة ثانية بعد لحظات.`;
+}
+
 export function createAnimeDiscover(deps) {
   const { q, el, button, genreAr } = deps;
   const recent = recentStore(RECENT_KEY);
@@ -318,8 +329,8 @@ export function createAnimeDiscover(deps) {
       stripIn(cards.slice(0, 9));
       if (page === 1 && !items.length) v.grid.replaceChildren(el('p', 'an-note', state.query ? 'لا نتائج — جرّب اسمًا آخر أو بالإنجليزي، أو خفّف الفلاتر.' : 'لا أعمال بهذه الفلاتر — خفّف بعضها.'));
       v.count.textContent = page === 1 && items.length ? (state.query ? `نتائج «${state.query}»` : 'نتائج الفلاتر') : v.count.textContent;
-    } catch {
-      if (token === state.token && page === 1) v.grid.replaceChildren(el('p', 'an-note', 'تعذّر البحث — تحقّق من الاتصال.'));
+    } catch (error) {
+      if (token === state.token && page === 1) v.grid.replaceChildren(el('p', 'an-note', anilistFailureText(error, 'البحث')));
     } finally {
       if (token === state.token) state.loading = false;
     }
@@ -561,8 +572,8 @@ export function createAnimeDiscover(deps) {
       else c.grid.append(...cards);
       stripIn(cards.slice(0, 9));
       if (page === 1 && !items.length) c.grid.replaceChildren(el('p', 'an-note', 'لا أعمال هنا بعد.'));
-    } catch {
-      if (token === c.token && page === 1) c.grid.replaceChildren(el('p', 'an-note', 'تعذّر التحميل — تحقّق من الاتصال.'));
+    } catch (error) {
+      if (token === c.token && page === 1) c.grid.replaceChildren(el('p', 'an-note', anilistFailureText(error)));
     } finally {
       if (token === c.token) c.loading = false;
     }

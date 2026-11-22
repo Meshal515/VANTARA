@@ -49,6 +49,7 @@ class TorrentEngine internal constructor(
      * تنزيل دائم واحد لكل تورنت في وقت واحد (TD2): حلقتان من حزمة موسم واحدة تتشاركان مقبض libtorrent نفسه
      * (أولويات الملفات، مسار الحفظ، والتقدّم)، فكانت الثانية تُوقف ملف الأولى ثم «تكمل» الاثنتين ويُحفظ ملف الأولى ناقصًا.
      */
+    private val permanentActive = ConcurrentHashMap.newKeySet<String>()
     private val permanentLocks = ConcurrentHashMap<String, java.util.concurrent.locks.ReentrantLock>()
     private val managerHolder = lazy {
         check(nativeAvailable()) { "Native torrent library unavailable on device ABI" }
@@ -154,6 +155,7 @@ class TorrentEngine internal constructor(
         val stopped = { shutdown.get() || synchronized(warming) { warming[hash] != until } }
         if (stopped() || !nativeAvailable()) return
         val state = synchronized(states) {
+            if (hash in permanentActive) return
             states[hash] ?: run {
                 if (states.size >= MAX_RESIDENT_STATES) {
                     val now = System.currentTimeMillis()
@@ -224,6 +226,7 @@ class TorrentEngine internal constructor(
         try {
             return downloadPermanentLocked(request, dest, cancelled, progress)
         } finally {
+            permanentActive.remove(request.infoHash)
             lock.unlock()
         }
     }
@@ -233,21 +236,25 @@ class TorrentEngine internal constructor(
         // حالة بث بلا قارئ (تسخين ورقة السيرفرات، أو مشاهدة انتهت وبقيت للعودة السريعة) لا تمنع التنزيل: تُخلى
         // ويُنزَّل إلى مجلد التحميلات. كانت أي حالة باقية ترفض بـTORRENT_BUSY ⇒ «المصدر رفض الطلب» بعد مجرد فتح
         // ورقة السيرفرات. المشغّل المفتوح فعلًا وحده يمنع (لا يُنزَع ملف من تحت فيديو يُشاهَد)
-        val cleared = synchronized(states) {
-            val existing = states[hash] ?: return@synchronized false
-            if (!existing.unused()) throw IOException("TORRENT_BUSY")
-            synchronized(warming) { warming.remove(hash) }
-            states.remove(hash, existing) && run { existing.remove(); true }
+        synchronized(states) {
+            val existing = states[hash]
+            if (existing?.unused() == false) throw IOException("TORRENT_BUSY")
+            permanentActive.add(hash)
+            if (existing != null) {
+                synchronized(warming) { warming.remove(hash) }
+                if (states.remove(hash, existing)) existing.remove()
+            }
         }
-        // libtorrent يزيل المقبض بلا انتظار: لا يُعاد استعمال مقبض البث وهو يُحذف (حفظه في مجلد الكاش)
-        if (cleared) runCatching { waitFor(cancelled, 5_000, "Torrent handle still closing") { if (manager.find(Sha1Hash(hash))?.isValid == true) null else Unit } }
+        // الإزالة غير متزامنة. المقبض القديم قد يبقى ظاهرًا بعد انتهاء حلقة من الحزمة نفسها.
+        // لا نغيّر أولوياته أو نكتب في مساره بينما ينتظر المحرك إغلاقه.
+        waitFor(cancelled, 5_000, "Torrent handle still closing") {
+            if (manager.find(Sha1Hash(hash))?.isValid == true) null else Unit
+        }
         dest.mkdirs()
-        var handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid }
-        if (handle == null) {
-            manager.download(request.magnetUri(), dest, com.frostwire.jlibtorrent.swig.torrent_flags_t())
-            handle = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent session unavailable") { manager.find(Sha1Hash(hash))?.takeIf { it.isValid } }
+        manager.download(request.magnetUri(), dest, com.frostwire.jlibtorrent.swig.torrent_flags_t())
+        val h = waitFor(cancelled, METADATA_TIMEOUT_MS, "Torrent session unavailable") {
+            manager.find(Sha1Hash(hash))?.takeIf { it.isValid }
         }
-        val h = handle!!
         try {
             // كمسار التشغيل (21–45 مشاركًا في الاختبار الحي): بلا حد اتصالات للتورنت، ومتتبّعات الإضافة والقائمة العامة
             // على المقبض نفسه، وإعلان فوري للمتتبّعات وDHT. كان التنزيل الدائم يكتفي بما في magnet ويبدأ بمشاركَين
@@ -362,6 +369,7 @@ class TorrentEngine internal constructor(
         checkCancelled(stopped)
         val request = ticket.request
         val state = synchronized(states) {
+            if (request.infoHash in permanentActive) throw IOException("TORRENT_BUSY")
             if (states[request.infoHash]?.unused() != false && states.values.count { !it.unused() } >= MAX_ACTIVE_STATES) throw IOException("Too many active torrent readers")
             if (!states.containsKey(request.infoHash) && states.size >= MAX_RESIDENT_STATES) {
                 val oldest = states.entries.filter { it.value.unused() }.minByOrNull { it.value.idleAt }
@@ -583,6 +591,7 @@ class TorrentEngine internal constructor(
         }
         fun handle(cancelled: () -> Boolean, request: TorrentRequest): TorrentHandle {
             synchronized(monitor) {
+                if (hash in permanentActive || states[hash] !== this) throw IOException("TORRENT_BUSY")
                 torrent?.takeIf { it.isValid }?.let { addTrackers(it, request); return it }
                 if (!starting) {
                     starting = true

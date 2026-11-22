@@ -12,6 +12,7 @@ import { layerIn, layerOut } from './page-motion.js';
 import { createSilk } from '../lib/silk.js';
 import { paletteFromAccent } from '../lib/silk-palette.js';
 import { agoAr } from './updates-view.js';
+import { tagWork } from '../lib/removed-works.js';
 
 export const UNIFIED_FILTERS = Object.freeze([['all', 'الكل'], ['manga', 'المانجا'], ['anime', 'الأنمي'], ['cinema', 'السينما']]);
 const FILTER_KEY = 'vantara.unified.filter.v1';
@@ -214,7 +215,7 @@ export function createUnifiedView({ el, glyph, data, open, genreAr = (g) => g, r
   }
   function airCard(e) {
     const t = now(); const done = e.airingAt <= t; const [hm, ap] = clock(e.airingAt);
-    const a = el('button', `uv-po uv-ac${done ? ' done' : ''}`); a.type = 'button';
+    const a = tagWork(el('button', `uv-po uv-ac${done ? ' done' : ''}`), `anime:${e.id}`); a.type = 'button';
     const art = el('span', 'uv-art'); art.append(img(e.poster, 'uv-img', e.title));
     art.append(el('span', 'uv-ep', `حلقة ${e.episode}`));
     const line = el('span', 'uv-t2');

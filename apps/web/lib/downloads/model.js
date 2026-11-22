@@ -137,6 +137,8 @@ export function unitLabel(item) {
   return u.season > 0 && item?.section === 'cinema' ? `م${u.season} · ${ep}` : ep;
 }
 
+const realUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) && !/^(blob|data|file|content):|_capacitor_file_/i.test(u) ? u : null);
+
 /** تطبيع مواصفات عنصر جديد قبل دخوله الطابور. يرمي إن نقصه ما لا يُنزَّل بدونه. */
 export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
   const section = SECTIONS.includes(spec?.section) ? spec.section : null;
@@ -155,9 +157,10 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
     work: {
       ref: String(ref),
       title: String(spec.work.title ?? ''),
-      cover: spec.work.cover ?? null,
-      banner: spec.work.banner ?? null,
-      logo: spec.work.logo ?? null,
+      // روابط حقيقية فقط: صفحة فُتحت من «على الجهاز» صورها blob: مؤقتة تموت بالإغلاق (بلاغ المالك، 20 نوفمبر)
+      cover: realUrl(spec.work.cover),
+      banner: realUrl(spec.work.banner),
+      logo: realUrl(spec.work.logo),
       color: spec.work.color ?? null,
       // مصدر غلاف المانجا: يُجلب بعميله وترويساته (الطلب المباشر من الواجهة يرفضه الموقع)
       coverSource: spec.work.coverSource ?? null,
@@ -204,6 +207,12 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
 
 const ts = (item) => item.finishedAt ?? item.updatedAt ?? item.createdAt ?? 0;
 
+// DLX1: هوية العمل في «على الجهاز» بفئته لا بمرجعه الحرفي: بعد دمج بطاقتين صار للعمل مرجعان فظهر مرتين. الواجهة تضبط
+// الفئة (canonicalRefOf للمانجا)؛ بلا ضبط كل مرجع عمل مستقل كما كان. لا يتغير مرجع أي عنصر محفوظ.
+let workGroup = (ref) => ref;
+export function setWorkGroup(fn) { workGroup = typeof fn === 'function' ? fn : (ref) => ref; }
+export const sameWork = (a, b) => a === b || workGroup(a) === workGroup(b);
+
 /**
  * «على الجهاز»: بطاقة لكل عمل فيه عنصر جاهز واحد على الأقل. الفاشل لا يُحسب محتوى محفوظًا،
  * والعمل الذي حُذف آخر عناصره يختفي. الأحدث نشاطًا أولًا.
@@ -214,10 +223,11 @@ export function onDeviceWorks(items, { section = 'all' } = {}) {
     if (item.state !== STATES.ready) continue;
     if (section !== 'all' && item.section !== section) continue;
     const ref = item.work.ref;
-    let w = works.get(ref);
+    const group = workGroup(ref);
+    let w = works.get(group);
     if (!w) {
       w = { ref, section: item.section, kind: item.kind, work: item.work, count: 0, bytes: 0, at: 0 };
-      works.set(ref, w);
+      works.set(group, w);
     }
     w.count++;
     w.bytes += Number(item.storage?.bytes ?? item.bytes ?? 0) || 0;
@@ -245,7 +255,7 @@ export function countText(kind, n) {
  * المسلسل يُقسَّم بالمواسم التي فيها تنزيلات فقط. لا عناصر معتمة لما لم يُنزَّل.
  */
 export function localWork(items, ref) {
-  const mine = (items ?? []).filter((i) => i.work.ref === ref);
+  const mine = (items ?? []).filter((i) => sameWork(i.work.ref, ref));
   const ready = mine.filter((i) => i.state === STATES.ready);
   const pending = mine.filter((i) => i.state !== STATES.ready);
   const byNumber = (a, b) => (a.unit.season ?? 0) - (b.unit.season ?? 0) || (a.unit.number ?? Infinity) - (b.unit.number ?? Infinity) || String(a.unit.key).localeCompare(String(b.unit.key));
@@ -272,6 +282,37 @@ export function localWork(items, ref) {
     seasons,
     bytes: ready.reduce((s, i) => s + (Number(i.storage?.bytes ?? i.bytes) || 0), 0),
   };
+}
+
+/** سجل التنزيل هو مرجع الإتاحة، والتفاصيل المحفوظة تُغني العنصر المطابق فقط. */
+export function localCinemaSeasons(items, saved = []) {
+  const seasons = new Map();
+  for (const { unit } of items) {
+    const match = /^s(\d+)e(\d+)$/.exec(unit.key);
+    if (!match) continue;
+    const season = Number(match[1]), episode = Number(match[2]);
+    if (!seasons.has(season)) {
+      const meta = saved.find((s) => Number(s.n) === season);
+      seasons.set(season, { ...meta, n: season, episodes: [] });
+    }
+    const entry = seasons.get(season);
+    const meta = saved.find((s) => Number(s.n) === season)?.episodes?.find((e) => Number(e.n) === episode);
+    entry.episodes.push({ ...meta, n: episode, name: meta?.name ?? unit.title ?? null });
+  }
+  return [...seasons.values()].sort((a, b) => a.n - b.n)
+    .map((s) => ({ ...s, episodes: s.episodes.sort((a, b) => a.n - b.n) }));
+}
+
+export function localCinemaResume(seasons, selected, watch) {
+  const season = seasons.find((s) => s.n === selected && s.episodes.length) ?? seasons.find((s) => s.episodes.length);
+  if (!season) return null;
+  const exact = Number(watch?.season) === season.n ? Number(watch.episode) : null;
+  const record = exact == null ? null : watch.episodes?.[`${season.n}:${exact}`];
+  if (record && !record.done && season.episodes.some((e) => e.n === exact)) {
+    return { season: season.n, episode: exact, position: record.position ?? 0, resume: true, record };
+  }
+  const next = exact == null ? null : season.episodes.find((e) => e.n > exact);
+  return { season: season.n, episode: (next ?? season.episodes[0]).n, position: 0, resume: Boolean(next), record: null };
 }
 
 /** ملخص «جاري التحميل»: النشطة والمنتظرة وإجمالي السرعة. */

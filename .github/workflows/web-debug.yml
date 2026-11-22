@@ -126,6 +126,7 @@ jobs:
           text = text.replace('__VANTARA_SYNC_URL__', os.environ['SYNC_URL'])
           text = text.replace('__VANTARA_API_URL__', os.environ['API_URL'])
           text = text.replace('__VANTARA_VERSION__', os.environ['PWA_VERSION'])
+          text = text.replace('__VANTARA_CHANNEL__', 'debug')
           open(path, 'w', encoding='utf-8').write(text)
           worker = pathlib.Path('apps/web/sw.js')
           source = worker.read_text()

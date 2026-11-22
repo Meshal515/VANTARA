@@ -34,3 +34,32 @@ describe('شريط القارئ السفلي (قرار المالك)', () => {
     expect(scrub).toContain('scrubQuietUntil = performance.now() + 400');
   });
 });
+
+describe('RD4: ورقة الفصول في القارئ', () => {
+  it('تعلّم الفصل المقروء كما في صفحة العمل (isChapterRead عبر مراجع العمل)', () => {
+    const sheet = js.slice(js.indexOf('function openChapters()'), js.indexOf('rd-chapter-choice__title'));
+    expect(sheet).toContain('isChapterRead(sync, ref, keyOf(row))');
+    expect(sheet).toContain("classList.add('is-read')");
+    expect(css).toContain('.rd-chapter-choice.is-read');
+  });
+});
+
+describe('القارئ على الكمبيوتر (RD1-RD3)', () => {
+  it('RD1: الصفحة المكبّرة تُسحب بالماوس وتُكبَّر بالعجلة حول المؤشر وتُغلق بنقرتين', () => {
+    const mouse = js.slice(js.indexOf('let mouseDrag = null'), js.indexOf("zoomEl.addEventListener('dblclick'") + 60);
+    expect(mouse).toContain("e.pointerType !== 'mouse'");
+    expect(mouse).toContain("zoomEl.addEventListener('wheel'");
+    expect(mouse).toContain('zoomAround({ base: zoom.base, scale: zoom.scale, t: zoom.t, from: at, to: at');
+    expect(mouse).toContain("addEventListener('dblclick', () => closeZoom())");
+  });
+  it('RD2: العمودي يستجيب للوحة المفاتيح فور الفتح (التركيز على حاوية التمرير بلا إطار)', () => {
+    expect(js).toContain('scroll.focus({ preventScroll: true })');
+    expect(css).toContain('.rd-scroll:focus { outline: none; }');
+  });
+  it('RD3: «صفحة صفحة» تقلّب بالمسافة وPageDown/PageUp والأسهم والعجلة، ولا تقلّب أثناء الكتابة في حقل', () => {
+    const keys = js.slice(js.indexOf('const pagedStep'), js.indexOf("scroll.addEventListener('wheel', onWheel"));
+    for (const k of ["'PageDown'", "'PageUp'", "e.key === ' '", "'ArrowDown'", "'ArrowUp'"]) expect(keys).toContain(k);
+    expect(keys).toContain("closest?.('input, textarea");
+    expect(keys).toContain('Math.abs(wheelSum) < 60');
+  });
+});
