@@ -280,6 +280,48 @@ export function searchScore(work, query) {
   return best;
 }
 
+/**
+ * أسماء العمل المقصود بالبحث (بلاغ المالك 22 نوفمبر: «أي اسم بأي لغة»). المصادر تعرف العمل بالإنجليزي أو الروماجي أو
+ * العربي، فالبحث بالياباني أو باسم بديل مختصر («OHSHC»، «몬스터») لا يجده عندها (6.7% و10.8% في القياس). الأسماء من
+ * قاموس الجهاز إن طابق عملًا واحدًا، وإلا من AniList بمطابقة اسم عمل واحد بالضبط (الغموض لا أسماء)، والكبار لا يوسَّعون.
+ * طلب واحد للعبارة في الجلسة.
+ */
+const queryNameCache = new Map();
+export async function queryNames(query, { fetchMatches = fetchMangaMatches } = {}) {
+  const q = normalizeTitle(query);
+  if (!q) return [];
+  if (queryNameCache.has(q)) return queryNameCache.get(q);
+  let names = [];
+  const hits = [...aliasMap()].filter(([key, list]) => key === q || (list ?? []).some((n) => normalizeTitle(n) === q));
+  if (hits.length === 1) names = [hits[0][0], ...hits[0][1]];
+  else if (!hits.length) {
+    try {
+      const found = (await fetchMatches([query])).get(query);
+      if (found?.identity?.names?.length && found.verdict !== 'adult') names = found.identity.names;
+    } catch { /* بلا شبكة: البحث بما كُتب يكفي */ }
+  }
+  const out = [...new Set(names.filter((n) => typeof n === 'string' && normalizeTitle(n) && normalizeTitle(n) !== q))];
+  if (queryNameCache.size > 200) queryNameCache.delete(queryNameCache.keys().next().value);
+  queryNameCache.set(q, out);
+  return out;
+}
+export function _resetQueryNames() { queryNameCache.clear(); }
+/**
+ * الاسم الذي تفهمه المصادر (لاتيني أو عربي)، واحد فقط: اسمان (إنجليزي وروماجي) يجلبان نسختين لا دليل على أنهما عمل
+ * واحد على جهاز جديد فتظهران بطاقتين (القياس: 209 من 453). بقية النسخ تنضم حين تُفتح البطاقة (discoverEditions).
+ */
+const sourceQueryNames = (names, query) => {
+  const seen = new Set([normalizeTitle(query).replace(/ /g, '')]);
+  return names.filter((n) => /^[\p{Script=Latin}\p{Script=Arabic}\p{N}\p{P}\p{Zs}\p{S}]+$/u.test(n)).filter((n) => {
+    const k = normalizeTitle(n).replace(/ /g, '');
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 1);
+};
+/** أعلى قرب بين النتائج: 3 فما فوق = وجدنا العمل بما كُتب، فلا حاجة لأسماء أخرى. */
+const bestScore = (index, query) => Math.max(0, ...index.list().map((w) => searchScore(w, query)));
+
 function listingPage(source, { kind = 'catalogue', page, query, genre }) {
   const request = () => requestSource(source, async () => {
     if (genre) return engine.genre(source.id, genre, page);
@@ -772,9 +814,15 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
     hasNextPage ||= Boolean(value?.hasNextPage);
     addPage(index, positions, source, value);
   }
+  // البحث بالياباني أو باسم بديل: المصادر تُسأل بأسماء العمل التي تعرفها، والترتيب يعرف أنها أسماؤه
+  const also = query && bestScore(index, query) < 3 ? await queryNames(query) : [];
+  for (const name of sourceQueryNames(also, query)) {
+    const more = await gather(list, (source) => listingPage(source, { kind, page, query: name, genre }));
+    for (const { source, value } of more.ok) addPage(index, positions, source, await withMangaDexNames(source.id, value));
+  }
   // البحث: الأعمال الأجنبية تنتظر حكم AniList قبل أن تظهر (المجهول لا يُعرض)
   if (query) await verifyForeignWorks(index.list());
-  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern, query }).map(toV35Work), hasNextPage, page };
+  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern, query, also }).map(toV35Work), hasNextPage, page };
 }
 
 function addPage(index, positions, source, value) {
@@ -788,7 +836,7 @@ function addPage(index, positions, source, value) {
     positions.set(hit.key, list);
   });
 }
-function ranked(index, positions, kind, { keepWestern = false, query = '' } = {}) {
+function ranked(index, positions, kind, { keepWestern = false, query = '', also = [] } = {}) {
   // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
   // قرار المالك (16 نوفمبر، UE10): عمل نسخه كلها من إضافة غير عربية يظهر في كل مكان، وبطاقته تحمل وسم لغته
   // (foreignLang). ترتيب النسخ يبقي العربي أولًا داخل كل عمل
@@ -808,7 +856,13 @@ function ranked(index, positions, kind, { keepWestern = false, query = '' } = {}
   const order = rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
   if (!query) return order;
   // البحث: الأقرب لما كُتب أولًا، والتعادل بترتيب المصادر نفسه (ترتيب ثابت)
-  const score = new Map(order.map((w) => [w, searchScore(w, query)]));
+  // اسم العمل المقصود من AniList أو القاموس (also) يقارب المطابقة، تحت ما كُتب حرفيًا
+  const closeness = (w) => {
+    const own = searchScore(w, query);
+    const viaName = Math.max(0, ...also.map((n) => searchScore(w, n)));
+    return Math.max(own, viaName >= 3 ? 3.9 : viaName * 0.9);
+  };
+  const score = new Map(order.map((w) => [w, closeness(w)]));
   return order.map((w, i) => ({ w, i })).sort((a, b) => score.get(b.w) - score.get(a.w) || a.i - b.i).map((x) => x.w);
 }
 
@@ -956,8 +1010,9 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   const flush = () => {
     clearTimeout(timer);
     timer = null;
-    onUpdate({ items: ranked(index, positions, mode, { query }).map(toV35Work), hasNextPage, page });
+    onUpdate({ items: ranked(index, positions, mode, { query, also }).map(toV35Work), hasNextPage, page });
   };
+  let also = [];
   let cursor = 0;
   const worker = async () => {
     while (cursor < list.length && shouldContinue()) {
@@ -982,12 +1037,25 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
   flush();
+  // البحث بالياباني أو باسم بديل: جولة ثانية بأسماء العمل التي تعرفها المصادر (فقط إن لم يُوجد العمل بما كُتب)
+  if (query && shouldContinue() && bestScore(index, query) < 3) {
+    also = await queryNames(query);
+    for (const name of sourceQueryNames(also, query)) {
+      if (!shouldContinue()) break;
+      await gather(list, async (source) => {
+        const value = await withMangaDexNames(source.id, await listingPage(source, { kind, page, query: name, genre }));
+        addPage(index, positions, source, value);
+        return value;
+      });
+      flush();
+    }
+  }
   // البحث: العربي ظهر فورًا، والأجنبي يظهر بعد حكم AniList بنظافته (المجهول لا يُعرض)
   if (query && shouldContinue()) {
     await verifyForeignWorks(index.list());
     flush();
   }
-  return { items: ranked(index, positions, mode, { query }).map(toV35Work), hasNextPage, page };
+  return { items: ranked(index, positions, mode, { query, also }).map(toV35Work), hasNextPage, page };
 }
 
 /** التحقق من الفصول منفصل عن عرض قوائم latest، وبتوازي محدود. */
