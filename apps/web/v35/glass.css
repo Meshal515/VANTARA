@@ -10,10 +10,11 @@
 /* ── الشريط: تصغير بالاتجاه عند التمرير (Glass تصغير فقط، بلا شفافية) ── */
 html[data-material='glass'] .v35 .dock {
   transform-origin: 50% 100%;
-  transition: scale 0.42s cubic-bezier(0.3, 1.2, 0.5, 1);
+  transition: transform 0.42s cubic-bezier(0.3, 1.2, 0.5, 1);
 }
+/* كالنموذج v9: translateX(-50%) scale() فيبقى في المنتصف (خاصية scale المستقلة كانت تزيحه جانبًا، مقيس) */
 html[data-material='glass'] .v35 .dock.g-compact {
-  scale: 0.85;
+  transform: translateX(-50%) scale(0.85);
 }
 
 /* ── الكبسولات: الزجاج في ::before تحت كل الكبسولات (لا يرى ظلالها)، والصبغة والظل على الكبسولة، واللمعة في ::after.

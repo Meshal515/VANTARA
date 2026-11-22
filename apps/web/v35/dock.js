@@ -883,6 +883,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     if (m.live) switchMotion = m;
   };
   const setOpen = (next, { focus = true, instant = false } = {}) => {
+    if (next) bar.classList.remove('d-compact');
     if (next === open) return;
     open = next;
     sw.setAttribute('aria-expanded', String(open));
@@ -1056,6 +1057,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
 
   /** تبديل المادة (من الإعدادات أو نزول مستوى الجهاز): ينشئ العدسة أو يزيلها ويرجع الدائرة الحالية كما هي. */
   const refreshMaterial = () => {
+    if (glassOn()) bar.classList.remove('d-compact');
     if (glassOn() && !lens) {
       for (const c of caps) { haltInd(c); stateOf(c).shown = false; }
       if (barInd) { haltInd(bar); stateOf(bar).shown = false; }
@@ -1072,10 +1074,22 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   };
   refreshMaterial();
 
+  // تصغير المظهر الحالي بالاتجاه (قرار المالك 22 نوفمبر): لتحت يصغر ويشف، ولفوق أو عند لمسه أو فتحه يرجع.
+  // حالة صنف وانتقال CSS (core.css: .dock.d-compact)، نفس منطق عدسة Glass.
+  let lastY = 0;
+  const plainScrolled = (y) => {
+    const d = y - lastY;
+    lastY = y;
+    if (open) return;
+    if (y < 24 || d < -6) bar.classList.remove('d-compact');
+    else if (d > 4) bar.classList.add('d-compact');
+  };
+  bar.addEventListener('pointerdown', () => bar.classList.remove('d-compact'), { capture: true });
+
   return {
     refreshMaterial,
-    /** تمرير الصفحة (من مستمع shell الوحيد): حالة تصغير الشريط في Glass. */
-    scrolled: (y) => lens?.scrolled(y),
+    /** تمرير الصفحة (من مستمع shell الوحيد): تصغير الشريط بالاتجاه. Glass عند العدسة (85%)، والحالي هنا (80% وشفافية 50%). */
+    scrolled: (y) => (lens ? lens.scrolled(y) : plainScrolled(y)),
     isOpen: () => open,
     toggle: () => setOpen(!open),
     open: () => setOpen(true),

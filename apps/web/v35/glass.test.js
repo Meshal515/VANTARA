@@ -143,13 +143,20 @@ describe('الشريط في Glass: العدسة ترسم التحديد، وال
     expect(calls.length).toBeGreaterThan(0); // الدائرة الحالية رجعت تعمل
   });
 
-  it('الحالي: لا عدسة ولا طبقة أيقونات ولا تصغير بالتمرير', () => {
+  it('الحالي: لا عدسة ولا طبقة أيقونات، وتصغيره الخاص بالاتجاه (قرار المالك 22 نوفمبر: 80% وشفافية 50%)', () => {
     const { $, dock } = mount();
     const d = dock();
     expect($('#bar .g-lens')).toBeNull();
     d.scrolled(400);
     d.scrolled(800);
     expect($('#bar').classList.contains('g-compact')).toBe(false);
+    expect($('#bar').classList.contains('d-compact')).toBe(true);
+    d.scrolled(700); // لفوق
+    expect($('#bar').classList.contains('d-compact')).toBe(false);
+    d.scrolled(900);
+    expect($('#bar').classList.contains('d-compact')).toBe(true);
+    d.scrolled(10); // أعلى الصفحة
+    expect($('#bar').classList.contains('d-compact')).toBe(false);
   });
 });
 
