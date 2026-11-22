@@ -70,8 +70,8 @@ describe('البطاقة العامة مع مصادر مثبّتة من مستو
     store.works.clear();
     engine.sources.mockResolvedValue([
       { id: mangalek, lang: 'ar', label: 'مانجا ليك', ready: true },
-      { id: million, lang: 'all', label: 'Manga Million', ready: false, user: true, filler: true },
-      { id: hizo, lang: 'ar', label: 'Hizo Manga', ready: true, user: true },
+      { id: million, lang: 'all', label: 'Manga Million', ready: false, user: true, filler: true, warning: 'SAFE' },
+      { id: hizo, lang: 'ar', label: 'Hizo Manga', ready: true, user: true, warning: 'SAFE' },
     ]);
     // محرك أندرويد ينتظر فك الحزمة في أول طلب، أيًا كانت العملية التي طلبتها.
     const ready = new Promise((resolve) => setTimeout(resolve, coldMs));
@@ -106,8 +106,11 @@ describe('البطاقة العامة مع مصادر مثبّتة من مستو
       await vi.advanceTimersByTimeAsync(50_000);
       const { items } = await latest;
       expect(items.map((card) => card.title.english)).toEqual([workTitle]);
-      expect(items[0]._work.editions.map((edition) => edition.sourceId)).toEqual([mangalek, hizo, million]);
-      expect((await loadWork(items[0]))._sources.map((source) => source.sourceId)).toEqual([mangalek, hizo, million]);
+      // قرار المالك (22 نوفمبر): الإضافة الأجنبية لا تبني «آخر التحديثات»، وتنضم للبطاقة العامة حين تُفتح
+      expect(items[0]._work.editions.map((edition) => edition.sourceId)).toEqual([mangalek, hizo]);
+      const opened = loadWork(items[0]);
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect((await opened)._sources.map((source) => source.sourceId)).toEqual([mangalek, hizo, million]);
     });
   });
 
@@ -123,7 +126,8 @@ describe('البطاقة العامة مع مصادر مثبّتة من مستو
   it('يقرأ فصول الإضافة التي جاءت نسختها من اللقطة قبل اكتمال تحميلها على الجهاز', async () => {
     await runOnColdDevice(async () => {
       const { items } = await browseLive({ kind: 'latestListing' });
-      expect(items[0]._work.editions.map((edition) => edition.sourceId)).toContain(million);
+      // لقطة الإضافة الأجنبية لا تبني القائمة (قرار المالك، 22 نوفمبر)، وفصولها تصل حين تُفتح البطاقة
+      expect(items[0]._work.editions.map((edition) => edition.sourceId)).not.toContain(million);
       const work = loadWork(items[0]);
       await vi.advanceTimersByTimeAsync(50_000);
       expect((await work)._sources.map((source) => [source.sourceId, source.count])).toEqual([[mangalek, 1], [hizo, 1], [million, 1]]);
@@ -140,7 +144,8 @@ describe('plan B, end to end on 1911 real works', () => {
   beforeAll(async () => {
     model = sourcesModel();
     const ids = [...model.catalog.keys()];
-    engine.sources.mockResolvedValue(ids.map((id) => ({ id, label: id.split('.').pop(), lang: id.includes('.all.') ? 'all' : 'ar' })));
+    // المحاكاة تعامل كل مصادرها (ومنها MangaDex) مصادر عربية آمنة: المقياس للهوية وحدها، لا لسياسة المصادر
+    engine.sources.mockResolvedValue(ids.map((id) => ({ id, label: id.split('.').pop(), lang: 'ar', warning: 'SAFE' })));
     engine.catalogue.mockImplementation(async (id, page) => ({ mangas: page === 1 ? model.catalog.get(id).all.map((x) => x.manga) : [], hasNextPage: false }));
     engine.search.mockImplementation(async (id, query) => {
       const src = model.catalog.get(id);

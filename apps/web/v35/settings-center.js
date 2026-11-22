@@ -209,7 +209,7 @@ export function renderAppearancePane(body, ctx) {
   // ── المادة (قرار المالك، 21 نوفمبر): «الحالي» الافتراضي، وGlass خيار مستقل. الخطة: docs/audits/GLASS_UI_PLACEMENT.md ──
   head('MATERIAL', 'المادة');
   const material = el('div', 'settings-list');
-  material.append(toggleRow(ctx, 'spark', 'التأثير الزجاجي', 'شريط التنقل والتحديد من زجاج سائل يكسر الضوء بلون كل قسم. إطفاؤه يرجع المظهر الحالي كما هو.', look.material === 'glass', (on) => saveLook(() => ({ material: on ? 'glass' : 'current' }))));
+  material.append(toggleRow(ctx, 'spark', 'التأثير الزجاجي (تجريبي)', 'قيد التطوير وفيه مشاكل معروفة نعمل عليها. شريط التنقل والتحديد من زجاج سائل يكسر الضوء بلون كل قسم، وإطفاؤه يرجع المظهر الحالي كما هو.', look.material === 'glass', (on) => saveLook(() => ({ material: on ? 'glass' : 'current' }))));
   // مختبر الشريط (Debug، سؤال المالك 22 نوفمبر: «هل المشكلة من الـAPK؟»): النموذج المعتمد v9 نفسه داخل WebView
   // التطبيق مع لوحة قياس. سلس ومتشتت هنا = العلة في تطبيق الصفحة؛ بطيء أو بلا تشتت هنا = العلة في WebView
   const lab = el('button', 'setting look-brand');

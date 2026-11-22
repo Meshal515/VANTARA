@@ -24,7 +24,7 @@ import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 import { noteListed, topChapters } from '../lib/update-engine.js';
 import { adultManga, adultSource, blockKey, ecchiManga, isBlockedKey } from '../lib/adult-filter.js';
-import { buildsLibrary, enrichOnly, noteSourceTiers, searchable } from '../lib/source-policy.js';
+import { buildsLibrary, enrichOnly, noteSourceTiers, searchable, tierOf } from '../lib/source-policy.js';
 import { needsVerdict, noteVerdicts, workVerdict } from '../lib/manga-verdict.js';
 import { fetchMangaMatches } from '../lib/manga-meta.js';
 
@@ -208,6 +208,12 @@ function sources() {
     throw error;
   });
   return sourcesPromise;
+}
+
+/** تصنيف مصدر مانجا على هذا الجهاز بعد قراءة بيان المصادر (عربي/أجنبي/مختلط/محظور). */
+export async function mangaSourceTier(sourceId) {
+  try { await sources(); } catch { /* بلا بيان: الحكم بالمعرّف وحده، بتشدد */ }
+  return tierOf(sourceId);
 }
 
 /** المصادر التي يشغّلها هذا الجهاز الآن، أو null إن تعذّر معرفتها. */

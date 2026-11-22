@@ -5,11 +5,11 @@ import { withUpdateSources } from './works.js';
 
 it('the event cover belongs to the source that published it, so it is fetched with that source headers', () => {
   const [g] = groupEvents([
-    { id: 'e2', section: 'manga', work: 'ext:w', title: 'W', number: 12, at: 2, cover: 'https://cdn.b.example/w.jpg', sources: [{ s: 'src.b', u: '/w' }] },
-    { id: 'e1', section: 'manga', work: 'ext:w', title: 'W', number: 11, at: 1, cover: 'https://cdn.a.example/w.jpg', sources: [{ s: 'src.a', u: '/w' }] },
+    { id: 'e2', section: 'manga', work: 'ext:w', title: 'W', number: 12, at: 2, cover: 'https://cdn.b.example/w.jpg', sources: [{ s: 'eu.kanade.tachiyomi.extension.ar.srcb', u: '/w' }] },
+    { id: 'e1', section: 'manga', work: 'ext:w', title: 'W', number: 11, at: 1, cover: 'https://cdn.a.example/w.jpg', sources: [{ s: 'eu.kanade.tachiyomi.extension.ar.srca', u: '/w' }] },
   ]);
   const work = withUpdateSources({ id: 'ext:w', _work: { editions: [] } }, g);
   const thumb = Object.fromEntries(work._work.editions.map((e) => [e.sourceId, e.manga.thumbnailUrl]));
-  expect(thumb['src.b']).toBe('https://cdn.b.example/w.jpg');
-  expect(thumb['src.a']).not.toBe('https://cdn.b.example/w.jpg');
+  expect(thumb['eu.kanade.tachiyomi.extension.ar.srcb']).toBe('https://cdn.b.example/w.jpg');
+  expect(thumb['eu.kanade.tachiyomi.extension.ar.srca']).not.toBe('https://cdn.b.example/w.jpg');
 });
