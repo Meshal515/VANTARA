@@ -177,6 +177,27 @@ describe('الشريط في Glass: العدسة ترسم التحديد، وال
     d.scrolled(10); // أعلى الصفحة
     expect($('#bar').classList.contains('d-compact')).toBe(false);
   });
+
+  it('الحالي يشف ولا يصغر: رجفة إصبع لا تشفه، واللمس يعيده، والانتقال لقسم يعيده ويبقى واضحًا رغم قفزة رجوع التمرير', () => {
+    const { $, dock } = mount();
+    const d = dock();
+    d.scrolled(400);
+    d.scrolled(410); // رجفة صغيرة بعد بلوغ أعلى: لا تغيّر شيئًا
+    expect($('#bar').classList.contains('d-compact')).toBe(true);
+    d.scrolled(405); d.scrolled(408); // اهتزاز صغير لا يعيده واضحًا
+    expect($('#bar').classList.contains('d-compact')).toBe(true);
+    $('#bar').dispatchEvent(new ($('#bar').ownerDocument.defaultView?.Event ?? Event)('pointerdown'));
+    expect($('#bar').classList.contains('d-compact')).toBe(false);
+    d.scrolled(430); // 22px بعد اللمس: ليست تمريرًا حقيقيًا
+    expect($('#bar').classList.contains('d-compact')).toBe(false);
+    d.scrolled(500);
+    expect($('#bar').classList.contains('d-compact')).toBe(true);
+    // الانتقال لقسم آخر: يرجع واضحًا، وقفزة رجوع الصفحة لموضع قارئها لا تعيده شفافًا
+    d.activate('discover');
+    expect($('#bar').classList.contains('d-compact')).toBe(false);
+    d.scrolled(2400);
+    expect($('#bar').classList.contains('d-compact')).toBe(false);
+  });
 });
 
 describe('دخول الشريط وخروجه في Glass: بلا opacity على الشريط (تعزل زجاجه)، والمدة والمنحنى كما هما', () => {
