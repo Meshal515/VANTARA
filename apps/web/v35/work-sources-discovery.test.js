@@ -33,7 +33,7 @@ it('a source installed while the app is open is asked about the work without res
   slowFirst=false;
   engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'}]);
   await loadWork(work());
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user: true, warning: 'SAFE'}]);
   // التثبيت من صفحة الإضافات يبلّغ المحرك (onSourcesChanged)؛ لا مزامنة ولا إعادة تشغيل
   for(const fn of changed)fn();
   const second=await loadWork(work());
@@ -50,7 +50,7 @@ it('a source too slow on its first search (cold extension load) still shows on t
     if(id===M&&slowFirst){slowFirst=false;await new Promise(r=>setTimeout(r,16_000));}
     return {mangas:[{title:arabic,url:id===M?'/m':'/a'}],hasNextPage:false};
   });
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user: true, warning: 'SAFE'}]);
   const first=loadWork(arWork());
   await vi.advanceTimersByTimeAsync(40_000);
   expect(ids(await first)).toContain(M);
@@ -60,7 +60,7 @@ it('a source too slow on its first search (cold extension load) still shows on t
 it('a source that does not answer at all is asked again later, not marked as asked for 12 hours, and not hammered',async()=>{
   vi.useFakeTimers({shouldAdvanceTime:true});
   let down=true;
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user: true, warning: 'SAFE'}]);
   engine.search.mockImplementation(async(id)=>{
     if(id===M&&down)throw new Error('HTTP error 503');
     return {mangas:[{title,url:id===M?'/m':'/a'}],hasNextPage:false};
@@ -86,7 +86,7 @@ it('only new or unanswered sources are asked when a source is added, not every s
   engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'}]);
   await loadWork(work());
   engine.search.mockClear();
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user: true, warning: 'SAFE'}]);
   resetSources();
   await loadWork(work());
   expect(new Set(engine.search.mock.calls.map(c=>c[0]))).toEqual(new Set([M]));
@@ -94,7 +94,7 @@ it('only new or unanswered sources are asked when a source is added, not every s
 
 it('never lists a source that did not return the work',async()=>{
   slowFirst=false;
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Million',lang:'ar',user: true, warning: 'SAFE'}]);
   engine.search.mockImplementation(async(id)=>({mangas:id===M?[{title:'Another Work Entirely',url:'/x'}]:[{title,url:'/a'}],hasNextPage:false}));
   // صفحة تفاصيل حقيقية: عنوان النسخة نفسها (الخطة ب تسأل التفاصيل حين لا دليل في القائمة)
   engine.series.mockImplementation(async(_id,manga)=>({manga:{title:manga.title},chapters:[chapter(1)]}));
@@ -107,7 +107,7 @@ it('The Savior\'s Bucket List: an Arabic-titled result is confirmed by its own d
   const english="The Savior's Bucket List";
   const arabic='قائمة أمنيات المنقذ';
   const saviors=()=>({id:'ext:the saviors bucket list',title:{english},_work:{key:'the saviors bucket list',title:english,editions:[{sourceId:A,label:'Mangakakalot',manga:{title:english,url:'/k'}}]}});
-  engine.sources.mockResolvedValue([{id:A,label:'Mangakakalot',lang:'en'},{id:M,label:'Manga Starz',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Mangakakalot',lang:'en'},{id:M,label:'Manga Starz',lang:'ar',user: true, warning: 'SAFE'}]);
   engine.search.mockImplementation(async(id)=>({mangas:id===M?[{title:arabic,url:'/ar/7731'}]:[{title:english,url:'/k'}],hasNextPage:false}));
   engine.series.mockImplementation(async(_id,manga)=>({manga:manga.url==='/ar/7731'?{title:arabic,altNames:[english,'Guwonjaui Beokit Riseuteu']}:{title:manga.title},chapters:[chapter(1)]}));
   const full=await loadWork(saviors());
@@ -119,7 +119,7 @@ it('The Savior\'s Bucket List: an Arabic-titled result is confirmed by its own d
 
 it('a detail page that does not name the work keeps the source out', async () => {
   slowFirst=false;
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user: true, warning: 'SAFE'}]);
   engine.search.mockImplementation(async(id)=>({mangas:id===M?[{title:'سولو ليفلينج: راجناروك',url:'/r'}]:[{title,url:'/a'}],hasNextPage:false}));
   engine.series.mockImplementation(async(_id,manga)=>({manga:manga.url==='/r'?{title:'سولو ليفلينج: راجناروك',altNames:['Solo Leveling: Ragnarok']}:{title:manga.title},chapters:[chapter(1)]}));
   const full=await loadWork(work());
@@ -128,7 +128,7 @@ it('a detail page that does not name the work keeps the source out', async () =>
 
 it('a work opened before the fix (old record that counted a timed-out source as asked) is asked again once, not trusted for 12 hours', async () => {
   slowFirst=false;
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user: true, warning: 'SAFE'}]);
   // سجل الإصدار السابق: كل المصادر «سُئلت» قبل دقيقة، بلا حقل discoveryRetryAt
   stored={at:Date.now(),discoveredAt:Date.now()-60_000,discoveredSources:[A,M],detail:{title},editions:[{sourceId:A,label:'Team X',manga:{title,url:'/a'},chapters:[chapter(1),chapter(2)]}]};
   const full=await loadWork(work());
@@ -152,7 +152,7 @@ it('the owner’s Zoro case: a stored One Piece edition (1152 chapters) leaves t
     editions:[{sourceId:A,label:'Team X',manga:{title:zoroTitle,url:'/zoro'},chapters:[chapter(1),chapter(2)]},{sourceId:M,label:'Manga Starz',manga:{title:'One Piece',url:'/one-piece'},chapters:many}]};
   // والجهاز تعلّم «One Piece» اسمًا بديلًا للقصة الجانبية من وصف مصدر
   learnAliases(zoroKey,['One Piece']);
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user: true, warning: 'SAFE'}]);
   engine.search.mockImplementation(async(id)=>({mangas:id===M?[{title:'One Piece',url:'/one-piece'}]:[{title:zoroTitle,url:'/zoro'}],hasNextPage:false}));
   engine.series.mockImplementation(async(_id,manga)=>({manga:{title:manga.title,altNames:manga.url==='/one-piece'?['ون بيس','ワンピース']:[]},chapters:manga.url==='/one-piece'?many:[chapter(1),chapter(2)]}));
   engine.chapters.mockImplementation(async(_id,manga)=>(manga.url==='/one-piece'?many:[chapter(1),chapter(2)]));
@@ -167,7 +167,7 @@ it('a known official id different from the work’s keeps the result out before 
   slowFirst=false;
   const { noteOfficialIds } = await import('../lib/manga-alias-store.js');
   noteOfficialIds([['solo leveling',105398],['solo leveling ragnarok',176009]]);
-  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user:true}]);
+  engine.sources.mockResolvedValue([{id:A,label:'Team X',lang:'ar'},{id:M,label:'Manga Starz',lang:'ar',user: true, warning: 'SAFE'}]);
   engine.search.mockImplementation(async(id)=>({mangas:id===M?[{title:'Solo Leveling: Ragnarok',url:'/rag',altNames:['Solo Leveling']}]:[{title,url:'/a'}],hasNextPage:false}));
   engine.series.mockClear();
   const full=await loadWork(work());
@@ -181,7 +181,7 @@ it('يواصل البحث باسم آخر إذا كان الدليل الظاه�
   const sideStory = 'Spy x Family: Family Portrait';
   const { noteOfficialIds } = await import('../lib/manga-alias-store.js');
   noteOfficialIds([['spy x family', 108556], ['spy x family family portrait', 202610]]);
-  engine.sources.mockResolvedValue([{ id: A, label: 'Team X', lang: 'ar' }, { id: M, label: 'Manga Million', lang: 'all', filler: true, user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, label: 'Team X', lang: 'ar' }, { id: M, label: 'Manga Million', lang: 'all', filler: true, user: true, warning: 'SAFE' }]);
   engine.series.mockImplementation(async (_id, manga) => ({ manga, chapters: [chapter(1)] }));
   engine.search.mockImplementation(async (_id, query) => ({ mangas: query === title
     ? [{ title: sideStory, altNames: [title], url: '/portrait' }]
@@ -195,7 +195,7 @@ it('يستخدم دليل العنوان في نتيجة لاحقة للرابط
   const title = 'Indigo Railway';
   const manga = { title, url: '/indigo-railway' };
   const work = { id: 'ext:indigo railway', title: { english: title }, _work: { key: 'indigo railway', title, editions: [{ sourceId: A, manga }] } };
-  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true, warning: 'SAFE' }]);
   engine.series.mockResolvedValue({ manga, chapters: [chapter(1)] });
   engine.search.mockImplementation(async (_id, query) => ({ mangas: [query === title ? { ...manga, title: 'Railway Adventures' } : manga] }));
 
@@ -207,7 +207,7 @@ it('يعيد سؤال المصدر بعد انقضاء مدة سجل البحث 
   const title = 'Cold Garden Chronicle';
   const manga = { title, url: '/garden-chronicle' };
   const work = { id: 'ext:cold garden chronicle', title: { english: title }, _work: { key: 'cold garden chronicle', title, editions: [{ sourceId: A, manga }] } };
-  engine.sources.mockResolvedValue([{ id: A, label: 'Team X', lang: 'ar' }, { id: M, label: 'Manga Million', lang: 'all', filler: true, user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, label: 'Team X', lang: 'ar' }, { id: M, label: 'Manga Million', lang: 'all', filler: true, user: true, warning: 'SAFE' }]);
   engine.series.mockResolvedValue({ manga, chapters: [chapter(1)] });
   engine.search.mockResolvedValue({ mangas: [] });
   expect(ids(await loadWork(work))).toEqual([A]);
@@ -222,7 +222,7 @@ it('يعيد البحث عند فتح بطاقة حفظت نتيجة سلبية 
   const edition = { sourceId: A, manga };
   const work = { id: 'ext:paper moon archive', title: { english: title }, _work: { key: 'paper moon archive', title, editions: [edition] } };
   stored = { editions: [{ ...edition, chapters: [chapter(1)] }], detail: manga, discoveredAt: Date.now(), discoveredSources: [A, M], discoveryRetryAt: {} };
-  engine.sources.mockResolvedValue([{ id: A, label: 'Team X', lang: 'ar' }, { id: M, label: 'Manga Million', lang: 'all', filler: true, user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, label: 'Team X', lang: 'ar' }, { id: M, label: 'Manga Million', lang: 'all', filler: true, user: true, warning: 'SAFE' }]);
   engine.search.mockResolvedValue({ mangas: [manga] });
 
   expect(ids(await loadWork(work, { fresh: true }))).toEqual([A, M]);
@@ -235,7 +235,7 @@ it('يعرض المصدر المثبّت الذي ردّ وفصوله قبل أ�
   const list = [{ sourceId: A, manga }];
   const initial = { id: 'ext:river lanterns', title: { english: title }, _work: { key: 'river lanterns', title, editions: list } };
   const stalled = 'eu.kanade.tachiyomi.extension.ar.stalled#123';
-  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true }, { id: stalled, lang: 'ar', user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true, warning: 'SAFE' }, { id: stalled, lang: 'ar', user: true, warning: 'SAFE' }]);
   engine.search.mockImplementation(async (id) => id === stalled ? new Promise(() => {}) : { mangas: [manga] });
   engine.series.mockResolvedValue({ manga, chapters: [chapter(1), chapter(2)] });
   const updates = [];
@@ -252,7 +252,7 @@ it('يستعيد النبذة من الإضافة المكتشفة إذا تعط
   const title = 'Copper Hills';
   const manga = { title, url: '/copper-hills' };
   const work = { id: 'ext:copper hills', title: { english: title }, _work: { key: 'copper hills', title, editions: [{ sourceId: A, manga }] } };
-  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true, warning: 'SAFE' }]);
   engine.search.mockResolvedValue({ mangas: [manga] });
   engine.series.mockImplementation(async (id) => {
     if (id === A) {
@@ -276,7 +276,7 @@ it('يستفيد من الاسم الموثوق القادم من تفاصيل �
   const first = { title: arabic, url: '/old-293' };
   const result = { title, url: '/edition-293', altNames: [arabic, title, other] };
   const work = { id: `ext:${arabic}`, title: { english: arabic }, _work: { key: arabic, title: arabic, editions: [{ sourceId: A, manga: first }] } };
-  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true }]);
+  engine.sources.mockResolvedValue([{ id: A, lang: 'ar' }, { id: M, lang: 'all', filler: true, user: true, warning: 'SAFE' }]);
   engine.search.mockResolvedValue({ mangas: [result] });
   engine.series.mockImplementation(async (id) => {
     if (id === M) return { manga: result, chapters: [chapter(1)] };

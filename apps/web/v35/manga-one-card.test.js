@@ -47,7 +47,9 @@ beforeEach(() => {
   resetAliases();
   resetSources();
   dexCalls = 0;
-  engine.sources.mockResolvedValue(Object.keys(PAGES).map((id) => ({ id, label: id.split('.').pop() })));
+  // بيان المصادر كما يعطيه المحرك للمدمج: لغته عربية وتصنيفه آمن. هنا تُعامل نسخة MangaDex كمصدر عربي آمن لاختبار
+  // الهوية وحدها؛ وتصنيفه الحقيقي «مختلط» يُختبر أدناه (قرار المالك، 22 نوفمبر)
+  engine.sources.mockResolvedValue(Object.keys(PAGES).map((id) => ({ id, label: id.split('.').pop(), lang: 'ar', warning: 'SAFE' })));
   engine.popular.mockImplementation(async (id) => ({ mangas: PAGES[id].map((m) => ({ ...m })), hasNextPage: false }));
   vi.stubGlobal('fetch', async (url) => {
     if (String(url).startsWith('https://api.mangadex.org/manga?')) {
@@ -284,6 +286,16 @@ describe('manga listing: one work = one card', () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]._work.editions.map((e) => e.sourceId.split('.').pop()).sort()).toEqual(['mangalek', 'mangaswat']);
     expect(mergeWorkPages(merged)).toHaveLength(1);
+  });
+
+  it('owner decision (22 Nov): the real MangaDex (MIXED) builds no card and is never asked for a list', async () => {
+    engine.sources.mockResolvedValue(Object.keys(PAGES).map((id) => ({ id, label: id.split('.').pop(), lang: 'ar', warning: id.endsWith('.mangadex') ? 'MIXED' : 'SAFE' })));
+    resetSources();
+    engine.popular.mockClear();
+    const { items } = await browse({ kind: 'popular' });
+    expect(engine.popular.mock.calls.some(([id]) => id.endsWith('.mangadex'))).toBe(false);
+    expect(items.some((w) => w._work.editions.some((e) => e.sourceId.endsWith('.mangadex')))).toBe(false);
+    expect(items.filter((w) => /Regressed Mercenary/.test(w.title.english))).toHaveLength(1);
   });
 
   it('MangaDex unreachable: the listing still renders, never merges by guessing', async () => {

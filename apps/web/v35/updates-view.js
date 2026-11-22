@@ -9,7 +9,11 @@
 import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
 import { loadAliases } from '../lib/manga-alias-store.js';
-import { adultTitle, isBlockedKey } from '../lib/adult-filter.js';
+import { adultSource, adultTitle, isBlockedKey } from '../lib/adult-filter.js';
+import { ARABIC, tierFromId, tierOf } from '../lib/source-policy.js';
+
+/** مصدر يبني «آخر التحديثات» العامة: عربي آمن بحكم الخادم (المعرّف) وبحكم هذا الجهاز إن عرفه. */
+const publicMangaSource = (id) => tierFromId(id) === ARABIC && tierOf(id) === ARABIC && !adultSource({ id });
 import { tagWork } from '../lib/removed-works.js';
 
 const MIN = 60_000;
@@ -130,6 +134,13 @@ export function groupEvents(events, canonical = null) {
     let e = canonicalEvent(raw);
     // محتوى للكبار (بعنوانه، أو بما كشفته صفحته سابقًا) لا يظهر في آخر التحديثات
     if (e.section === 'manga' && (adultTitle(e.title) || isBlockedKey(e.work))) continue;
+    // قرار المالك (22 نوفمبر): نسخ الإنجليزي والمختلط لا تبني الخط العام، وحدث بلا مصدر عربي آمن لا يظهر (حماية ثانية
+    // فوق الخادم، ولأحداث خادم أقدم من القاعدة)
+    if (e.section === 'manga') {
+      const sources = (e.sources ?? []).filter((x) => publicMangaSource(x?.s));
+      if (!sources.length) continue;
+      if (sources.length !== (e.sources ?? []).length) e = { ...e, sources };
+    }
     // نفس العمل بأسماء مختلفة («Magic Emperor» و«Demonic Emperor»): مفتاح الهوية الواحدة
     const same = canonical?.get(e.work);
     if (same && same !== e.work) e = { ...e, work: same };
