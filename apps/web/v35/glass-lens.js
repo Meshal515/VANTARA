@@ -139,7 +139,6 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
   const releaseSw = () => { swPress = null; swCap?.classList.remove('g-press'); swGlyph.classList.remove('g-press'); };
   const onDown = (e) => {
     if (e.button > 0) return;
-    bar.classList.remove('g-compact'); // المصغّر يكبر ويستجيب في اللمسة نفسها
     if (isOpen) {
       const o = e.target.closest?.('.dock-opt');
       const i = opts.indexOf(o);
@@ -187,6 +186,8 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
   };
   const onUp = (e) => {
     const cancel = e.type === 'pointercancel';
+    // يكبر بعد النقرة لا عند اللمس ولا عند الرفع: هدف نقرة اللمس يُحدَّد بعد الرفع، فلو كبر قبلها ذهبت لزر آخر
+    clearTimeout(growT); growT = setTimeout(grow, cancel ? 0 : 400);
     if (swPress && e.pointerId === swPress.id) releaseSw();
     if (!press || e.pointerId !== press.id) return;
     const p = press;
@@ -209,7 +210,10 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
     target = center(dest); kick();
     if (dest.dataset.page !== page) onCommit(dest.dataset.page);
   };
+  let growT = 0;
+  const grow = () => { clearTimeout(growT); growT = 0; bar.classList.remove('g-compact'); };
   const onClick = (e) => {
+    setTimeout(grow, 0);
     // بعد السحب يتجاهل نقرة المتصفح وحدها، وفي نافذة قصيرة فقط. اللمس لا يرسل نقرة بعد السحب أصلًا، فكانت العلامة
     // تبقى معلقة وتبلع نقرة اختيار القسم البرمجية (العدسة على المانجا والقسم لا يتحول) أو أول ضغطة حقيقية بعدها.
     if (suppressUntil) {

@@ -1093,7 +1093,15 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     if (y < 24 || d < -6) bar.classList.remove('d-compact');
     else if (d > 4) bar.classList.add('d-compact');
   };
-  bar.addEventListener('pointerdown', () => bar.classList.remove('d-compact'), { capture: true });
+  // يكبر بعد رفع الإصبع لا عند اللمس: لو كبر تحت الإصبع لتحرك الزر عن مكانه فلا تصل الضغطة إليه
+  // (بلاغ المالك: «أضغط على الأصدقاء ما ينقلني، يكبر»). pointerup قبل click، والضغطة تذهب للزر الذي لُمس.
+  // ولا عند رفعه: نقرة اللمس يُحدَّد هدفها بعد رفع الإصبع، فلو كبر قبلها ذهبت للزر الذي صار تحته (مقيس:
+  // pointerup على «الأصدقاء» ثم click على «مكتبتي»). يكبر بعد النقرة، أو بعد مهلة قصيرة إن لم تأت نقرة (سحب).
+  let growT = 0;
+  const grow = () => { clearTimeout(growT); growT = 0; bar.classList.remove('d-compact'); };
+  bar.addEventListener('click', () => setTimeout(grow, 0), { capture: true });
+  bar.addEventListener('pointerup', () => { clearTimeout(growT); growT = setTimeout(grow, 400); }, { capture: true });
+  bar.addEventListener('pointercancel', grow, { capture: true });
 
   return {
     refreshMaterial,

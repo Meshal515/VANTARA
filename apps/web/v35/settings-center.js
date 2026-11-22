@@ -210,6 +210,17 @@ export function renderAppearancePane(body, ctx) {
   head('MATERIAL', 'المادة');
   const material = el('div', 'settings-list');
   material.append(toggleRow(ctx, 'spark', 'التأثير الزجاجي', 'شريط التنقل والتحديد من زجاج سائل يكسر الضوء بلون كل قسم. إطفاؤه يرجع المظهر الحالي كما هو.', look.material === 'glass', (on) => saveLook(() => ({ material: on ? 'glass' : 'current' }))));
+  // مختبر الشريط (Debug، سؤال المالك 22 نوفمبر: «هل المشكلة من الـAPK؟»): النموذج المعتمد v9 نفسه داخل WebView
+  // التطبيق مع لوحة قياس. سلس ومتشتت هنا = العلة في تطبيق الصفحة؛ بطيء أو بلا تشتت هنا = العلة في WebView
+  const lab = el('button', 'setting look-brand');
+  lab.type = 'button';
+  lab.innerHTML = glyph('spark');
+  const labText = el('div');
+  labText.append(el('strong', null, 'قارن بالنموذج المعتمد'), el('small', null, 'يفتح شريط النموذج v9 نفسه داخل التطبيق مع قياس الإطارات والدعم'));
+  lab.append(labText);
+  lab.insertAdjacentHTML('beforeend', glyph('chevron', { cls: 'icon chev' }));
+  lab.onclick = () => { doc.defaultView.location.href = 'glass-lab.html'; };
+  material.append(lab);
   body.append(material);
 
   // ── أنماط العرض والتكامل: حالتان فقط (قرار المالك: «توحيد الشاشات» محذوف) ──

@@ -38,6 +38,16 @@ for (const material of ['glass', 'current']) {
     const p2 = await pageOf(h);
     console.log(material, 'ضغطة بعد السحب →', p2);
     if (p2 !== 'library') fails.push(`${material}: أول ضغطة بعد السحب لم تستجب (${p2})`);
+    // 4) الشريط مصغّر بعد التمرير: ضغطة واحدة على وجهة تنقل إليها (كانت تكبّر الشريط فقط، بلاغ المالك)
+    await h.page.evaluate(() => window.__shell.showPage('home')); await sleep(900);
+    for (const y of [120, 300, 520, 760]) { await h.page.evaluate((y) => scrollTo({ top: y, behavior: 'instant' }), y); await sleep(90); }
+    await sleep(700);
+    const compact = await h.page.evaluate(() => /(^| )(d|g)-compact( |$)/.test(document.querySelector('.dock').className));
+    await tap(cdp, await center(h, '.dock .nav[data-page="majlis"]')); await sleep(1300);
+    const p3 = await pageOf(h);
+    console.log(material, 'ضغطة على شريط مصغّر', compact ? '(مصغّر)' : '(لم يصغر!)', '→', p3);
+    if (!compact) fails.push(`${material}: الشريط لم يصغر بالتمرير`);
+    if (p3 !== 'majlis') fails.push(`${material}: ضغطة على الشريط المصغّر لم تنقل (${p3})`);
   } catch (e) { fails.push(`${material}: ${String(e).slice(0, 120)}`); } finally { await h.close(); }
 }
 console.log(fails.length ? `FAIL\n${fails.join('\n')}` : 'كل اللمسات سليمة');
