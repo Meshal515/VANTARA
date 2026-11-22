@@ -195,3 +195,18 @@ describe('«النمط الموحد» إعداد مستقل عن توحيد ال
     expect(unifiedLookOn(readAppearance(storage))).toBe(false);
   });
 });
+
+describe('Glass in Stable (owner, 22 November): locked "under development"; Debug and local development only', async () => {
+  const { glassAvailable, glassChosen } = await import('./appearance.js');
+  it('a shipped Stable build (version baked, no debug channel) never applies Glass, even if chosen before', () => {
+    expect(glassAvailable({ channel: null, development: false })).toBe(false);
+    expect(glassChosen({ material: 'glass' }, false)).toBe(false);
+  });
+  it('Debug builds and local development keep it, and the normal look is untouched everywhere', () => {
+    expect(glassAvailable({ channel: 'debug', development: false })).toBe(true);
+    expect(glassAvailable({ channel: null, development: true })).toBe(true);
+    expect(glassChosen({ material: 'glass' }, true)).toBe(true);
+    expect(glassChosen({ material: 'current' }, true)).toBe(false);
+    expect(glassChosen({ material: 'current' }, false)).toBe(false);
+  });
+});

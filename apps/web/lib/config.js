@@ -33,6 +33,11 @@ const BAKED = {
 
 /** نسخة هذا البناء. تُستبدل عند بناء APK أو نشر PWA. */
 const BAKED_VERSION = '__VANTARA_VERSION__';
+/**
+ * قناة البناء: تُختم `debug` في مسارات بناء Debug وحدها (android-debug وweb-debug وwindows-debug). Stable وأي بناء لم
+ * يُختم = null: ما هو «قيد التطوير» يبقى مقفلًا ما لم يُختم Debug صراحة، فنسيان مسار يقفل لا يفتح.
+ */
+const BAKED_CHANNEL = '__VANTARA_CHANNEL__';
 
 /**
  * خادم المزامنة الحقيقي، لأي بناء لم يُخبز فيه عنوان (بناء debug، أو APK
@@ -70,6 +75,11 @@ export function endpoints() {
 /** نسخة التطبيق العاملة، أو null في بناء محلي لم يُخبز فيه رقم الإصدار. */
 export function appVersion() {
   return unreplaced(BAKED_VERSION) ? null : BAKED_VERSION;
+}
+
+/** `debug` في بناء Debug، وإلا null. */
+export function buildChannel() {
+  return unreplaced(BAKED_CHANNEL) ? null : BAKED_CHANNEL;
 }
 
 export function setEndpoints(next) {
