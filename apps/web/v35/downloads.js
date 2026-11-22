@@ -645,6 +645,8 @@ export function createDownloadsUI(deps) {
         episode: item.unit.number ?? 1,
         position: position ?? 0,
         format: item.kind === 'movie' ? 'MOVIE' : 'SERIES',
+        // التأثير الزجاجي كما يطبّقه الويب: المشغّل الأصلي يلبسه لأزراره
+        ...(globalThis.document?.documentElement?.dataset?.material === 'glass' ? { material: 'glass' } : {}),
       });
     } catch (e) {
       toast(`تعذّر التشغيل: ${e?.message ?? e}`);

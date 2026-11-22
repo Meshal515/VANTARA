@@ -604,3 +604,20 @@ html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-t
 html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .cn-kinds:not(.cn-kinds--inline)) > :last-child:not(.g-seg) {
   margin-inline-end: 12px;
 }
+
+/* ── قائمة ⋮ في صفحة العمل (.aw-menu: تحميل، أتابعها، لاحقًا…): الدوائر زجاج م2 والأسماء كبسولات زجاج،
+ * كقائمة سياق iOS. الستارة الداكنة خلفها تبقى (تفصلها عن البنر). اكتشفها المالك بصورة. ── */
+html[data-material='glass'] .v35 .aw-menu-dot {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .aw-menu-label {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}

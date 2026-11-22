@@ -1324,3 +1324,33 @@ html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group
   -webkit-backdrop-filter: none;
   background: rgba(20, 18, 28, 0.42);
 }
+
+/* ── Glass: غرفة المشاهدة معًا (lobby.js: الويب وويندوز). الأزرار زجاج، والزر الأزرق الوحيد (الخطوة الحالية) يبقى بلون القسم.
+ * الأوراق الجانبية واللوحات تبقى معتمة (قرار المالك 15 نوفمبر: نصوص الغرفة لا تظهر من خلفها) وتأخذ حافة زجاجية فقط. ── */
+html[data-material='glass'] .pwa-player :is(.pl-close, .pl-icon, .pl-step-btn) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2c-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pwa-player .pl-go:not(.is-primary),
+html[data-material='glass'] .pwa-player .pl-start:not(.is-primary) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pl-side-close {
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+html[data-material='glass'] :is(.pwa-player .pl-more, .pl-side) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pl-close, .pl-icon, .pl-step-btn, .pl-go:not(.is-primary), .pl-start:not(.is-primary)) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(20, 18, 28, 0.42);
+}

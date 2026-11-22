@@ -352,6 +352,7 @@ class VSheet(private val host: FrameLayout) {
                 cornerRadii = if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
                 setStroke(dp(1), Tone.LINE)
             }
+            if (Glass.on) { val r = dp(22).toFloat(); foreground = GlassRim(ctx, if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)) }
             setPadding(dp(18), dp(if (side) 16 else 8), dp(18), dp(14))
             isClickable = true
             // لمسة داخل الورقة لا تصل للمشغّل تحتها
@@ -579,8 +580,15 @@ object Glass {
  * - ظل الشريط (0 10px 30px rgba(0,0,0,.32)) بطبقات داخل الحدود.
  * [ring]: حلقة 2dp زجاجية بتدرج الضوء نفسه لا بيضاء صلبة، على أزرار الوسط الثلاثة (طلب المالك: «كلهم زجاجيين»).
  */
-class GlassDrawable(ctx: Context, private val ring: Boolean = false) : Drawable() {
-    private val shadow = ctx.dp(5).toFloat()
+class GlassDrawable(
+    ctx: Context,
+    private val ring: Boolean = false,
+    /** نصف قطر ثابت (أزرار الغرفة المستطيلة بحواف 12)، أو null = كبسولة/دائرة. */
+    private val radius: Float? = null,
+    /** 0 يحفظ مقاس الزر كما هو (الظل داخل الحدود يصغّر الشكل). */
+    shadowDp: Float = 5f,
+) : Drawable() {
+    private val shadow = ctx.dp(shadowDp).toFloat()
     private val px = ctx.resources.displayMetrics.density
     private val veil = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1A000000 }
     private val tint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x0BFFFFFF }
@@ -609,9 +617,9 @@ class GlassDrawable(ctx: Context, private val ring: Boolean = false) : Drawable(
 
     override fun draw(canvas: Canvas) {
         if (shape.isEmpty) return
-        val r = shape.height() / 2f
+        val r = radius ?: (shape.height() / 2f)
         // ظل ناعم بطبقات (BlurMaskFilter لا يعمل مع تسريع العتاد قبل API 28)، أكثفه تحت الشكل كظل الشريط
-        for (i in 4 downTo 1) {
+        if (shadow > 0f) for (i in 4 downTo 1) {
             val g = shadow * i / 4f
             layer.set(shape.left - g, shape.top - g * 0.3f, shape.right + g, shape.bottom + g * 1.7f)
             soft.alpha = 26 - i * 5
@@ -651,3 +659,33 @@ fun LinearLayout.glassGroup() {
     val s = dp(5); val e = dp(2)
     setPadding(s + e, (s * 0.5f).toInt(), s + e, (s * 1.5f).toInt())
 }
+
+/**
+ * حافة زجاجية فقط فوق سطح معتم (الأوراق ولوحة الغرفة: قرار المالك 15 نوفمبر أن تبقى معتمة). تُركّب foreground.
+ * [radii] بترتيب GradientDrawable (8 قيم).
+ */
+class GlassRim(ctx: Context, private val radii: FloatArray) : Drawable() {
+    private val px = ctx.resources.displayMetrics.density
+    private val spec = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px * 1.2f }
+    private val path = Path()
+    override fun onBoundsChange(bounds: android.graphics.Rect) {
+        val h = spec.strokeWidth / 2f
+        val r = RectF(bounds.left + h, bounds.top + h, bounds.right - h, bounds.bottom - h)
+        path.reset(); path.addRoundRect(r, radii, Path.Direction.CW)
+        fun w(a: Float) = ((a * 255).toInt() shl 24) or 0x00FFFFFF
+        spec.shader = android.graphics.SweepGradient(r.centerX(), r.centerY(),
+            intArrayOf(w(0.34f), w(0.1f), w(0.04f), w(0.2f), w(0.04f), w(0.1f), w(0.34f)),
+            floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f)).apply {
+            setLocalMatrix(android.graphics.Matrix().apply { setRotate(-135f, r.centerX(), r.centerY()) })
+        }
+    }
+    override fun draw(canvas: Canvas) { canvas.drawPath(path, spec) }
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** زر الغرفة في Glass بشكله نفسه (حواف [radiusDp] بلا ظل يغيّر مقاسه)، وإلا خلفيته الحالية. */
+fun View.glassOr(radiusDp: Float?, current: Drawable): Drawable =
+    if (Glass.on) RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), GlassDrawable(context, radius = radiusDp?.let { dp(it).toFloat() }, shadowDp = 0f), null) else current

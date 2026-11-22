@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.vantara.anime.player.Glyph
 import com.vantara.anime.player.Tone
 import com.vantara.anime.player.dp
+import com.vantara.anime.player.glassOr
 import com.vantara.anime.player.label
 import com.vantara.anime.player.rounded
 import com.vantara.anime.player.swallowTouches
@@ -247,7 +248,7 @@ class TogetherPlayer(
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(context.dp(9), 0, context.dp(5), 0)
-            background = rounded(0x17FFFFFF, context.dp(18).toFloat(), context.dp(1), 0x1FFFFFFF)
+            background = glassOr(null, rounded(0x17FFFFFF, context.dp(18).toFloat(), context.dp(1), 0x1FFFFFFF))
             contentDescription = "الغرفة"
             setOnClickListener { openPanel() }
         }
@@ -942,7 +943,7 @@ class TogetherPlayer(
             top.addView(ImageView(context).apply {
                 setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.CLOSE, Color.WHITE))
                 setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x61000000) }
+                background = glassOr(null, GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x61000000) })
                 contentDescription = "اطلع من الغرفة"
                 setOnClickListener { hooks.leaveRoom() }
             }, LinearLayout.LayoutParams(context.dp(40), context.dp(40)))
@@ -1015,6 +1016,7 @@ class TogetherPlayer(
                 visibility = View.GONE
                 setPadding(context.dp(6), context.dp(6), context.dp(6), context.dp(6))
                 background = rounded(0xFF121218.toInt(), context.dp(14).toFloat(), context.dp(1), 0x1AFFFFFF)
+                if (com.vantara.anime.player.Glass.on) foreground = com.vantara.anime.player.GlassRim(context, FloatArray(8) { context.dp(14).toFloat() })
                 elevation = context.dp(8).toFloat()
             }
             lobbyMore = more
@@ -1207,7 +1209,7 @@ class TogetherPlayer(
             setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.MORE, Color.WHITE))
             rotation = 90f
             setPadding(context.dp(11), context.dp(11), context.dp(11), context.dp(11))
-            background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+            background = glassOr(12f, rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF))
             contentDescription = "المزيد"
             setOnClickListener {
                 val m = lobbyMore as? FrameLayout ?: return@setOnClickListener
@@ -1222,7 +1224,7 @@ class TogetherPlayer(
                 gravity = Gravity.CENTER
                 maxLines = 1
                 setPadding(context.dp(16), 0, context.dp(16), 0)
-                background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+                background = glassOr(12f, rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF))
                 contentDescription = "الحلقات"
                 setOnClickListener { hooks.openEpisodes() }
             }
@@ -1235,7 +1237,7 @@ class TogetherPlayer(
             setPadding(context.dp(18), 0, context.dp(18), 0)
             // الخطوة الحالية بالأزرق وحدها: قبل الاختيار هذا هو الزر الأزرق الوحيد في الشاشة
             if (!picking) textDirection = View.TEXT_DIRECTION_LTR
-            background = if (picking) rounded(accent, context.dp(12).toFloat()) else rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+            background = if (picking) rounded(accent, context.dp(12).toFloat()) else glassOr(12f, rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF))
             contentDescription = "اختر السيرفر"
             setOnClickListener { hooks.openServers() }
         }
@@ -1263,7 +1265,7 @@ class TogetherPlayer(
     private fun paintStartCard(card: FrameLayout, canStart: Boolean) {
         card.removeAllViews()
         val radius = context.dp(10).toFloat()
-        card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF)
+        card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else card.glassOr(10f, rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF))
         card.clipToOutline = true
         card.contentDescription = "ابدأ للجميع"
         launch.episodeImage?.let { url ->

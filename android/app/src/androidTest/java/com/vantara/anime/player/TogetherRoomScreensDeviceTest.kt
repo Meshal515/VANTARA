@@ -109,6 +109,8 @@ class TogetherRoomScreensDeviceTest {
         val launch = PlayerActivity.Launch(
             session = "room-shots", title = "Attack on Titan Season 2", animeId = "20958", episode = 1f, total = 12,
             copies = Json.encodeToString(ListSerializer(SourceAnime.serializer()), copies), together = together.toString(),
+            // -e glass 1: الغرفة نفسها بالتأثير الزجاجي (لقطات Glass، الخطة 13)
+            material = if (InstrumentationRegistry.getArguments().getString("glass") == "1") "glass" else null,
         )
         instrumentation.startActivitySync(PlayerActivity.intent(context, launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val activity = waitFor { resumed() as? PlayerActivity }
@@ -116,7 +118,7 @@ class TogetherRoomScreensDeviceTest {
         fun shot(name: String, settle: Long = 900) {
             Thread.sleep(settle)
             val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return
-            File(out, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            File(out, "${if (InstrumentationRegistry.getArguments().getString("glass") == "1") "g-" else ""}$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         fun call(name: String) = instrumentation.runOnMainSync {
             PlayerActivity::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(activity)
@@ -251,13 +253,15 @@ class TogetherRoomScreensDeviceTest {
         val launch = PlayerActivity.Launch(
             session = "room-leave", title = "Attack on Titan Season 2", animeId = "20958", episode = 1f, total = 12,
             copies = Json.encodeToString(ListSerializer(SourceAnime.serializer()), copies), together = together.toString(),
+            // -e glass 1: الغرفة نفسها بالتأثير الزجاجي (لقطات Glass، الخطة 13)
+            material = if (InstrumentationRegistry.getArguments().getString("glass") == "1") "glass" else null,
         )
         instrumentation.startActivitySync(PlayerActivity.intent(context, launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val activity = waitFor { resumed() as? PlayerActivity }
         fun shot(name: String, settle: Long = 900) {
             Thread.sleep(settle)
             val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return
-            File(out, "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            File(out, "${if (InstrumentationRegistry.getArguments().getString("glass") == "1") "g-" else ""}$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
         fun room(): Any? { var r: Any? = null; instrumentation.runOnMainSync {
             r = PlayerActivity::class.java.getDeclaredField("together").apply { isAccessible = true }.get(activity) }; return r }
