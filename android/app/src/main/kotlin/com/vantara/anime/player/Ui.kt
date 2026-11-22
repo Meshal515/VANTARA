@@ -572,50 +572,68 @@ object Glass {
     fun use(material: String?) { on = material == "glass" }
 }
 
-/** كبسولة أو دائرة زجاجية (نصف قطرها نصف الارتفاع). الظل داخل الحدود: الشكل يتقلص بقدره. */
-class GlassDrawable(ctx: Context) : Drawable() {
-    private val shadow = ctx.dp(4).toFloat()
+/**
+ * كبسولة أو دائرة زجاجية بمواصفات زجاج الشريط السفلي في الويب (glass.css: .dock-cap) — طلب المالك: «نفس إعدادات النافيقيشن بار»:
+ * - صبغة بيضاء 4.5% (rgba(255,255,255,.045))، وتحتها ستارة خفيفة جدًا تعوّض غياب الضباب فوق الفيديو فتبقى الرموز مقروءة.
+ * - حافة لامعة مخروطية (conic-gradient من -45°): ضوء من أعلى اليسار 0.5، يخفت إلى 0.05، ويعود 0.3 في الزاوية المقابلة.
+ * - ظل الشريط (0 10px 30px rgba(0,0,0,.32)) بطبقات داخل الحدود.
+ * [ring]: حلقة بيضاء 2dp فوق الزجاج (هوية زر التشغيل في المشغّل الحالي).
+ */
+class GlassDrawable(ctx: Context, private val ring: Boolean = false) : Drawable() {
+    private val shadow = ctx.dp(5).toFloat()
     private val px = ctx.resources.displayMetrics.density
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x6B14121C }
-    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px; color = 0x1FFFFFFF }
-    private val shine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px }
+    private val veil = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1A000000 }
+    private val tint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x0BFFFFFF }
+    private val spec = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px * 1.2f }
+    private val white = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px * 2f; color = Color.WHITE }
     private val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
     private val shape = RectF()
     private val layer = RectF()
 
     override fun onBoundsChange(bounds: android.graphics.Rect) {
-        shape.set(bounds.left + shadow, bounds.top + shadow * 0.6f, bounds.right - shadow, bounds.bottom - shadow * 1.4f)
-        // الحافة اللامعة: بيضاء من أعلى الشكل وتذوب قبل منتصفه، كإضاءة iOS
-        shine.shader = android.graphics.LinearGradient(0f, shape.top, 0f, shape.top + shape.height() * 0.55f, 0x57FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP)
+        shape.set(bounds.left + shadow, bounds.top + shadow * 0.5f, bounds.right - shadow, bounds.bottom - shadow * 1.5f)
+        // conic-gradient(from -45deg, .5 0°, .13 62°, .05 105°, .3 180°, .05 255°, .13 298°, .5 360°)
+        // CSS: 0° أعلى مع عقارب الساعة؛ SweepGradient: 0° يمين مع عقارب الساعة → دوران -135°
+        fun w(a: Float) = ((a * 255).toInt() shl 24) or 0x00FFFFFF
+        val sweep = android.graphics.SweepGradient(shape.centerX(), shape.centerY(),
+            intArrayOf(w(0.5f), w(0.13f), w(0.05f), w(0.3f), w(0.05f), w(0.13f), w(0.5f)),
+            floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f))
+        sweep.setLocalMatrix(android.graphics.Matrix().apply { setRotate(-135f, shape.centerX(), shape.centerY()) })
+        spec.shader = sweep
     }
 
     override fun draw(canvas: Canvas) {
         if (shape.isEmpty) return
         val r = shape.height() / 2f
-        // ظل ناعم بطبقات (BlurMaskFilter لا يعمل مع تسريع العتاد قبل API 28)
+        // ظل ناعم بطبقات (BlurMaskFilter لا يعمل مع تسريع العتاد قبل API 28)، أكثفه تحت الشكل كظل الشريط
         for (i in 4 downTo 1) {
             val g = shadow * i / 4f
-            layer.set(shape.left - g, shape.top - g * 0.5f, shape.right + g, shape.bottom + g * 1.5f)
-            soft.alpha = 14 - i * 2
+            layer.set(shape.left - g, shape.top - g * 0.3f, shape.right + g, shape.bottom + g * 1.7f)
+            soft.alpha = 26 - i * 5
             canvas.drawRoundRect(layer, r + g, r + g, soft)
         }
-        canvas.drawRoundRect(shape, r, r, fill)
-        val h = px / 2f
+        canvas.drawRoundRect(shape, r, r, veil)
+        canvas.drawRoundRect(shape, r, r, tint)
+        val h = spec.strokeWidth / 2f
         layer.set(shape.left + h, shape.top + h, shape.right - h, shape.bottom - h)
-        canvas.drawRoundRect(layer, r - h, r - h, rim)
-        canvas.drawRoundRect(layer, r - h, r - h, shine)
+        canvas.drawRoundRect(layer, r - h, r - h, spec)
+        if (ring) {
+            val k = white.strokeWidth / 2f
+            layer.set(shape.left + k, shape.top + k, shape.right - k, shape.bottom - k)
+            canvas.drawRoundRect(layer, r - k, r - k, white)
+        }
     }
 
-    override fun setAlpha(alpha: Int) { fill.alpha = alpha * 0x6B / 255 }
+    override fun setAlpha(alpha: Int) {}
     override fun setColorFilter(colorFilter: ColorFilter?) {}
     @Deprecated("Deprecated in Java")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
 
 /** زر وحيد في Glass: دائرة زجاجية تحت موجة الضغط. لا يفعل شيئًا في المظهر الحالي. */
-fun View.glassCircle() {
+fun View.glassCircle(ring: Boolean = false) {
     if (!Glass.on) return
-    background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), GlassDrawable(context), null)
+    background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), GlassDrawable(context, ring), null)
 }
 
 /**
@@ -625,6 +643,6 @@ fun View.glassCircle() {
 fun LinearLayout.glassGroup() {
     if (!Glass.on) return
     background = GlassDrawable(context)
-    val s = dp(4); val e = dp(2)
-    setPadding(s + e, (s * 0.6f).toInt(), s + e, (s * 1.4f).toInt())
+    val s = dp(5); val e = dp(2)
+    setPadding(s + e, (s * 0.5f).toInt(), s + e, (s * 1.5f).toInt())
 }

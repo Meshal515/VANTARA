@@ -1466,7 +1466,7 @@ class PlayerActivity : Activity() {
                 GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(dp(2), Color.WHITE); setColor(0x33000000) },
                 null,
             )
-            glassCircle()
+            glassCircle(ring = true)
         }
         center.addView(playButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply { leftMargin = dp(40); rightMargin = dp(40) })
         center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) }.apply { glassCircle() })
