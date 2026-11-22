@@ -249,12 +249,6 @@ describe('plan B, end to end on 1911 real works', () => {
     expect(detailCalls / pages.length).toBeLessThan(1.3);
   });
 
-  it('verification costs little: about one detail request per opened work, not one per source', () => {
-    // صفحة التفاصيل: واحدة لنبذة العمل في كل فتحة، والتحقق فوقها لما يحتاجه فقط (عنوان بأبجدية أخرى أو اسم محفوظ)
-    console.log(`[pipeline] detail requests=${detailCalls} for ${pages.length} opened works (${(detailCalls / pages.length).toFixed(2)} per work)`);
-    expect(detailCalls / pages.length).toBeLessThan(1.3);
-  });
-
   it('the identity graph never joined two works with different AniList ids', async () => {
     const { identityGraph } = await import('../lib/manga-alias-store.js');
     const g = identityGraph();
