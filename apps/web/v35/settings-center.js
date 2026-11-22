@@ -3,7 +3,7 @@
  * الصفحات نفسه). الخيارات القديمة كلها باقية بمفاتيحها؛ هنا ترتيبها فقط، و«المظهر والتخصيص» كاملة.
  */
 
-import { ACCENTS, BRAND_DEFAULT, preferenceSaved, readAppearance, stylesOf, workStyleOf } from './appearance.js';
+import { ACCENTS, BRAND_DEFAULT, glassAvailable, preferenceSaved, readAppearance, stylesOf, workStyleOf } from './appearance.js';
 import { modeOf, readStructure, SECTION_ORDER, setUnifyContent, writeStructure } from './experience.js';
 import { homePreview, previewPicture, workPreview } from './look-previews.js';
 
@@ -209,7 +209,10 @@ export function renderAppearancePane(body, ctx) {
   // ── المادة (قرار المالك، 21 نوفمبر): «الحالي» الافتراضي، وGlass خيار مستقل. الخطة: docs/audits/GLASS_UI_PLACEMENT.md ──
   head('MATERIAL', 'المادة');
   const material = el('div', 'settings-list');
-  material.append(toggleRow(ctx, 'spark', 'التأثير الزجاجي (تجريبي)', 'قيد التطوير وفيه مشاكل معروفة نعمل عليها. شريط التنقل والتحديد من زجاج سائل يكسر الضوء بلون كل قسم، وإطفاؤه يرجع المظهر الحالي كما هو.', look.material === 'glass', (on) => saveLook(() => ({ material: on ? 'glass' : 'current' }))));
+  // Stable: الخيار ظاهر ومقفل «قيد التطوير» (قرار المالك، 22 نوفمبر). Debug: يعمل كما هو للتجربة
+  material.append(glassAvailable()
+    ? toggleRow(ctx, 'spark', 'التأثير الزجاجي (تجريبي)', 'قيد التطوير وفيه مشاكل معروفة نعمل عليها. شريط التنقل والتحديد من زجاج سائل يكسر الضوء بلون كل قسم، وإطفاؤه يرجع المظهر الحالي كما هو.', look.material === 'glass', (on) => saveLook(() => ({ material: on ? 'glass' : 'current' })))
+    : toggleRow(ctx, 'spark', 'التأثير الزجاجي', 'قيد التطوير. يتوفر في تحديث قادم.', false, () => {}, { disabled: true }));
   body.append(material);
 
   // ── أنماط العرض والتكامل: حالتان فقط (قرار المالك: «توحيد الشاشات» محذوف) ──

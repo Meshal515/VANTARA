@@ -96,7 +96,7 @@ jobs:
           import os
           from pathlib import Path
           path = Path('apps/web/lib/config.js')
-          path.write_text(path.read_text().replace('__VANTARA_VERSION__', os.environ['DEBUG_VERSION']))
+          path.write_text(path.read_text().replace('__VANTARA_VERSION__', os.environ['DEBUG_VERSION']).replace('__VANTARA_CHANNEL__', 'debug'))
           PYCODE
 
       # بلا هذه الخطوة يبني Gradle أصولَ ويبٍ قديمة، فتُقرأ شاشةٌ لم تتغيّر
@@ -244,7 +244,7 @@ jobs:
           import os
           from pathlib import Path
           p=Path('apps/web/lib/config.js')
-          p.write_text(p.read_text().replace('__VANTARA_VERSION__',os.environ['VERSION']))
+          p.write_text(p.read_text().replace('__VANTARA_VERSION__',os.environ['VERSION']).replace('__VANTARA_CHANNEL__','debug'))
           PY
 
       - name: Pack the actual branch web assets

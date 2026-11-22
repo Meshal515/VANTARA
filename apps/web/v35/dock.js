@@ -1083,21 +1083,30 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   };
   refreshMaterial();
 
-  // تصغير المظهر الحالي بالاتجاه (قرار المالك 22 نوفمبر): لتحت يصغر ويشف، ولفوق أو عند لمسه أو فتحه يرجع.
-  // حالة صنف وانتقال CSS (core.css: .dock.d-compact)، نفس منطق عدسة Glass.
-  let lastY = 0;
+  // شفافية المظهر الحالي بالاتجاه (قرار المالك 22 نوفمبر): لتحت يشف 50% بحجمه، ولفوق أو عند لمسه أو فتحه يرجع.
+  // حالة صنف وانتقال CSS (core.css: .dock.d-compact).
+  // يشف بعد تمرير حقيقي لتحت (40px متصلة)، لا لكل رجفة إصبع، ويرجع واضحًا لفوق (12px) أو قرب أعلى الصفحة.
+  // وبعد الانتقال لقسم أو صفحة يرجع واضحًا ويبقى: رجوع الصفحة لموضع قارئها قفزة تمرير برمجية كانت تُحسب «لتحت»
+  // فتعيده شفافًا فور الوصول (بلاغ المالك)، فتُتجاهل لحظة الانتقال.
+  const FADE_AFTER = 40, CLEAR_AFTER = 12, SETTLE_MS = 700;
+  let lastY = 0, run = 0, settleUntil = 0;
+  const clearDock = () => { bar.classList.remove('d-compact'); run = 0; };
+  const settle = () => { clearDock(); settleUntil = nowMs() + SETTLE_MS; };
   const plainScrolled = (y) => {
     const d = y - lastY;
     lastY = y;
-    if (open) return;
-    if (y < 24 || d < -6) bar.classList.remove('d-compact');
-    else if (d > 4) bar.classList.add('d-compact');
+    if (open || nowMs() < settleUntil) { run = 0; return; }
+    if (y < 24) return clearDock();
+    run = d > 0 ? Math.max(0, run) + d : Math.min(0, run) + d;
+    if (run <= -CLEAR_AFTER) clearDock();
+    else if (run >= FADE_AFTER) bar.classList.add('d-compact');
   };
-  bar.addEventListener('pointerdown', () => bar.classList.remove('d-compact'), { capture: true });
+  // اللمس يعيده واضحًا بانتقاله الهادئ. الحجم والمكان لا يتغيران، فالنقرة تصل للزر نفسه
+  bar.addEventListener('pointerdown', clearDock, { capture: true });
 
   return {
     refreshMaterial,
-    /** تمرير الصفحة (من مستمع shell الوحيد): تصغير الشريط بالاتجاه. Glass عند العدسة (85%)، والحالي هنا (80% وشفافية 50%). */
+    /** تمرير الصفحة (من مستمع shell الوحيد): Glass يصغر عند العدسة (85%)، والحالي يشف هنا 50% بحجمه. */
     scrolled: (y) => (lens ? lens.scrolled(y) : plainScrolled(y)),
     isOpen: () => open,
     toggle: () => setOpen(!open),
@@ -1111,10 +1120,12 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     setSection(id) {
       section = id;
       mark();
+      if (!lens) settle();
       lens?.setSection(id);
     },
     /** الوجهة المختارة تغيّرت: المؤشر ينزلق داخل الكبسولة أو ينتقل بينها انكماشًا وكبرًا. */
     activate(page) {
+      if (!lens) settle();
       const visible = !bar.hidden && bar.getBoundingClientRect().width > 0;
       if (!visible) {
         activePage = navs.some((n) => n.dataset.page === page) ? page : null;
