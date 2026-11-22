@@ -321,3 +321,20 @@ describe('أسماء البحث العام: ما تكتبه المواقع ال�
     expect(engine.searchQueries(['Jujutsu Kaisen (TV)'])).toEqual(['Jujutsu Kaisen']);
   });
 });
+
+describe('Glass في المشغّل الأصلي', () => {
+  afterEach(() => { delete globalThis.Capacitor; delete globalThis.document; });
+  const run = async (material) => {
+    const sent = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { play: async (a) => { sent.push(a); return {}; } } } };
+    globalThis.document = { documentElement: { dataset: material ? { material } : {} } };
+    await engine.open({ session: 's1', title: 'x', section: 'anime' });
+    return sent[0];
+  };
+  it('يُرسل material=glass حين يطبّق الويب Glass فعلًا', async () => {
+    expect((await run('glass')).material).toBe('glass');
+  });
+  it('لا يُرسل شيئًا في المظهر الحالي (أو مع تقليل الشفافية)', async () => {
+    expect((await run(null)).material).toBeUndefined();
+  });
+});

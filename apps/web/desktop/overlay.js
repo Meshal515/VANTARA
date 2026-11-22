@@ -1,4 +1,12 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { syncGlass } from '../v35/glass.js';
+
+// Glass (خيار المظهر): نافذة الأدوات صفحة مستقلة، فتقرأ الاختيار نفسه وتتبعه إن تغيّر من النافذة الرئيسية.
+// لا قراءة لخلفية هنا (الفيديو في نافذة mpv)، فالقواعد في player.css «مظهر زجاجي» بلا backdrop-filter.
+if (globalThis.document) {
+  syncGlass({ doc: globalThis.document });
+  globalThis.addEventListener?.('storage', (e) => { if (!e.key || e.key === 'vantara.appearance.v1') syncGlass({ doc: globalThis.document }); });
+}
 /**
  * طبقة أدوات مشغل ويندوز — نفس تصميم مشغل الـAPK (PlayerActivity.kt) ونفس عناصر مشغل الويب
  * (pwa/player/player.js): تدرّج أعلى بالرجوع والعنوان والحلقة وملء الصورة وملء الشاشة والمزيد،
@@ -95,7 +103,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   peopleButton.onclick = () => openRoom();
   const fullTop = iconButton('full', 'ملء الشاشة (F أو F11)', () => cmd('fullscreen'));
   const hideBtn = iconButton('hide', 'إخفاء الأدوات (H)', () => hideControls()); hideBtn.hidden = true;
-  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  const topTools = el('div', 'pp-tools');
+  topTools.append(hideBtn, iconButton('users', 'شاهد مع أصدقائك', () => openRoom()), iconButton('crop', 'ملء الصورة (قصّ الحواف)', () => cmd('fit', state.fit === 'fill' ? 'fit' : 'fill')), fullTop, iconButton('more', 'المزيد', () => showMore()));
+  top.append(iconButton('back', 'رجوع', () => cmd('close')), titles, topTools);
 
   // ── الأسفل ──
   const bottom = el('div', 'pp-bottom');

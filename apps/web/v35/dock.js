@@ -1,3 +1,5 @@
+import { createGlassLens } from './glass-lens.js';
+import { liveAccent } from './appearance.js';
 /**
  * الشريط العائم: أربع وجهات ومبدّل الأقسام في قلبه، وانتقال الأقسام كطبقات.
  *
@@ -639,6 +641,9 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   const unified = () => Boolean(bar.closest?.('[data-content="unified"]'));
   const indOf = (cap) => (cap === bar ? barInd : cap?.querySelector('.cap-ind') ?? null);
   let open = false, section = current, dragged = false, activePage = null;
+  // Glass (خيار المظهر): العدسة السائلة (v9) ترسم التحديد وتستقبل اللمس بدل الدائرة. الحالة والتنقل هنا كما هما.
+  let lens = null;
+  const glassOn = () => bar.ownerDocument?.documentElement?.dataset?.material === 'glass';
   const indState = new Map(); // cap → { x, anims, path, start }
 
   const anim = (el, keys, opts) => (typeof el?.animate === 'function' ? el.animate(keys, opts) : null);
@@ -763,6 +768,10 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   };
   const moveIndicator = (page) => {
     const nav = navs.find((n) => n.dataset.page === page);
+    if (lens) {
+      activePage = nav ? page : null;
+      return lens.activate(page);
+    }
     if (unified() && barInd) {
       activePage = nav ? page : null;
       for (const c of caps) {
@@ -888,6 +897,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       onPrepare?.();
     }
     animateSwitch(open ? 1 : 0);
+    lens?.setOpen(open);
     if (instant) switchMotion?.finish();
     if (!open) onClose?.();
     // التركيز ينتقل للقسم الحالي فقط لمن يستعمل لوحة المفاتيح؛ اللمس لا يُظهر إطار تركيز
@@ -917,7 +927,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   let scrub = null, scrubbed = false;
   for (const cap of caps) {
     cap.addEventListener('pointerdown', (e) => {
-      if (open || e.button > 0 || !activePage) return;
+      if (lens || open || e.button > 0 || !activePage) return; // Glass: العدسة تستقبل اللمس
       // في التوحيد السحب على الشريط كله؛ وإلا داخل كبسولة الوجهة الحالية وحدها
       const zone = zoneOf(activePage);
       if (zone !== bar && zone !== cap) return;
@@ -1033,6 +1043,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   sw.addEventListener('pointercancel', endDrag);
 
   globalThis.addEventListener?.('resize', () => {
+    if (lens) return lens.repaint(activePage, true);
     if (activePage) {
       const nav = navs.find((n) => n.dataset.page === activePage);
       const zone = zoneOf(activePage);
@@ -1043,7 +1054,28 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   });
   mark();
 
+  /** تبديل المادة (من الإعدادات أو نزول مستوى الجهاز): ينشئ العدسة أو يزيلها ويرجع الدائرة الحالية كما هي. */
+  const refreshMaterial = () => {
+    if (glassOn() && !lens) {
+      for (const c of caps) { haltInd(c); stateOf(c).shown = false; }
+      if (barInd) { haltInd(bar); stateOf(bar).shown = false; }
+      lens = createGlassLens({
+        bar, navs, sw, opts, centerOf: barCenter, activePage, section, open, reduced: still, haptic: () => haptic(),
+        colorOf: (id) => liveAccent(id, { unified: unified() }),
+        onCommit: (page) => onNavigate?.(page),
+      });
+    } else if (!glassOn() && lens) {
+      lens.destroy();
+      lens = null;
+      if (activePage) { const page = activePage; activePage = null; moveIndicator(page); }
+    }
+  };
+  refreshMaterial();
+
   return {
+    refreshMaterial,
+    /** تمرير الصفحة (من مستمع shell الوحيد): حالة تصغير الشريط في Glass. */
+    scrolled: (y) => lens?.scrolled(y),
     isOpen: () => open,
     toggle: () => setOpen(!open),
     open: () => setOpen(true),
@@ -1056,12 +1088,14 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     setSection(id) {
       section = id;
       mark();
+      lens?.setSection(id);
     },
     /** الوجهة المختارة تغيّرت: المؤشر ينزلق داخل الكبسولة أو ينتقل بينها انكماشًا وكبرًا. */
     activate(page) {
       const visible = !bar.hidden && bar.getBoundingClientRect().width > 0;
       if (!visible) {
         activePage = navs.some((n) => n.dataset.page === page) ? page : null;
+        if (lens) return lens.repaint(activePage);
         for (const c of caps) stateOf(c).shown = false; // يُوضع بلا حركة عند الظهور
         return;
       }
@@ -1069,6 +1103,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     },
     /** `force`: أعد الدائرة لمركز وجهتها الآن (بعد تغيّر عرض الشريط) ولو كانت ظاهرة. */
     repaint(force = false) {
+      if (lens) return lens.repaint(activePage, force);
       if (!activePage) return;
       const cap = zoneOf(activePage);
       if (force && cap) {

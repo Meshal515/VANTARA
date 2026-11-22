@@ -1,0 +1,623 @@
+/* ───────────────────────── التأثير الزجاجي (Glass) ─────────────────────────
+ * خيار مظهر مستقل (قرار المالك، 21 نوفمبر). كل قاعدة هنا تحت html[data-material='glass']: المظهر الحالي
+ * (بلا السمة) لا تنطبق عليه قاعدة واحدة. القيم من نموذج v9 المعتمد (docs/audits/glass/vantara-dock-glass.html)،
+ * والقرارات والأدلة في docs/audits/GLASS_UI_PLACEMENT.md. الجوال فقط: من 1024 فأعلى لا شريط سفلي.
+ * قواعد البناء (الخطة 4.4): الزجاج طبقة ورقية (::before)، ولا opacity ولا filter ولا mask على أي أب له. */
+
+@property --tint { syntax: '<color>'; inherits: true; initial-value: #8f5cff; }
+@property --gk { syntax: '<number>'; inherits: false; initial-value: 1; }
+
+/* ── الشريط: تصغير بالاتجاه عند التمرير (Glass تصغير فقط، بلا شفافية) ── */
+html[data-material='glass'] .v35 .dock {
+  transform-origin: 50% 100%;
+  transition: scale 0.42s cubic-bezier(0.3, 1.2, 0.5, 1);
+}
+html[data-material='glass'] .v35 .dock.g-compact {
+  scale: 0.85;
+}
+
+/* ── الكبسولات: الزجاج في ::before تحت كل الكبسولات (لا يرى ظلالها)، والصبغة والظل على الكبسولة، واللمعة في ::after.
+ * isolation: auto لتنزل ::before تحت الكبسولات وتعلو العدسة وطبقات الأقسام فوقها (v9). overflow: clip بهامش يسمح
+ * بانتفاخ الضغط 3px ويبقي طبقات الأقسام مقصوصة بحد كبسولتها. ── */
+html[data-material='glass'] .v35 .dock-cap {
+  --hi: rgba(255, 255, 255, 0.5);
+  isolation: auto;
+  overflow: clip;
+  overflow-clip-margin: 4px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+}
+html[data-material='glass'] .v35 .dock-cap::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  backdrop-filter: var(--g-cap-f, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-cap-f, blur(12px) saturate(1.6));
+  transition: inset 0.5s cubic-bezier(0.3, 1.6, 0.5, 1), border-radius 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+/* اللمعة: ضوء من أعلى اليسار، حافة رفيعة تلمع في زاويتين متقابلتين (لا تنعكس في RTL: الضوء فيزيائي) */
+html[data-material='glass'] .v35 .dock-cap::after,
+html[data-material='glass'] .v35 .g-lens::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(from var(--spec), var(--hi) 0deg, rgba(255, 255, 255, 0.13) 62deg, rgba(255, 255, 255, 0.05) 105deg, rgba(255, 255, 255, calc(0.3 + 0.2 * var(--lift, 0))) 180deg, rgba(255, 255, 255, 0.05) 255deg, rgba(255, 255, 255, 0.13) 298deg, var(--hi) 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+html[data-material='glass'] .v35 .dock-cap::after {
+  --spec: -45deg;
+  transition: inset 0.5s cubic-bezier(0.3, 1.6, 0.5, 1), border-radius 0.5s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+/* زر المبدّل عند الضغط: ينتفخ 3px ويضيء من نقطة اللمس (بلا transform على الكبسولة) */
+html[data-material='glass'] .v35 .dock-cap.g-press::before,
+html[data-material='glass'] .v35 .dock-cap.g-press::after {
+  inset: -3px;
+  border-radius: 31px;
+  transition-duration: 0.2s;
+  transition-timing-function: cubic-bezier(0.3, 1.3, 0.5, 1);
+}
+html[data-material='glass'] .v35 .dock-cap.g-press {
+  --hi: rgba(255, 255, 255, 0.9);
+  background: radial-gradient(circle at var(--px, 50%) var(--py, 50%), rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.07) 40%, transparent 72%), rgba(255, 255, 255, 0.05);
+}
+
+/* الدائرة الحالية ورسم الأزرار يُخفيان: العدسة والأيقونات فوق الزجاج ترسمان. الأزرار نفسها تبقى للّمس والقارئ */
+html[data-material='glass'] .v35 .dock .cap-ind,
+html[data-material='glass'] .v35 .dock > .dock-ind {
+  display: none;
+}
+html[data-material='glass'] .v35 .dock .nav .nav-pill,
+html[data-material='glass'] .v35 .dock-switch > .dock-sq {
+  visibility: hidden;
+}
+
+/* ── العدسة: دائرة 40 ترتفع إلى 78×60. المتغيرات تكتبها glass-lens.js على العدسة وحدها ── */
+html[data-material='glass'] .v35 .g-lens {
+  --lx: 0px;
+  --lw: 40px;
+  --lh: 40px;
+  --lift: 0;
+  --spec: -45deg;
+  --tint: var(--accent);
+  --hi: rgba(255, 255, 255, calc(0.62 + 0.3 * var(--lift)));
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  top: 50%;
+  width: var(--lw);
+  height: var(--lh);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate3d(calc(var(--lx) - 50%), -50%, 0);
+  transition: --tint 0.35s ease;
+  /* المادة تثقل حين تكبر: ظل أعمق، ولمعة أقوى، وصبغة أخف */
+  box-shadow:
+    0 calc(5px + 13px * var(--lift)) calc(14px + 22px * var(--lift)) rgba(0, 0, 0, calc(0.3 + 0.2 * var(--lift))),
+    inset 0 0 calc(10px + 8px * var(--lift)) color-mix(in srgb, var(--tint) 24%, transparent);
+  backdrop-filter: var(--g-lens-f, blur(4px) saturate(1.6) brightness(1.1));
+  -webkit-backdrop-filter: var(--g-lens-f, blur(4px) saturate(1.6) brightness(1.1));
+}
+html[data-material='glass'] .v35 .g-lens::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--tint) 17%, transparent);
+  opacity: calc(1 - 0.7 * var(--lift));
+}
+html[data-material='glass'] .v35 .g-lens[data-off] {
+  visibility: hidden;
+}
+
+/* ── الأيقونات فوق الزجاج: نسخة من رسم كل زر في موضعه، تكبر حين تمر العدسة فوقها ── */
+html[data-material='glass'] .v35 .g-glyphs {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+html[data-material='glass'] .v35 .g-glyph {
+  --gk: 1;
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  color: rgba(255, 255, 255, 0.82);
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.55));
+  transform: translate(var(--gx, 0px), 0) scale(calc(var(--gs, 1) * var(--gk)));
+  transition: color 0.28s ease, opacity 0.26s cubic-bezier(0.4, 0, 0.2, 1), --gk 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+}
+html[data-material='glass'] .v35 .g-glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+html[data-material='glass'] .v35 .g-glyph.active svg {
+  stroke-width: 2;
+}
+html[data-material='glass'] .v35 .g-glyph.active,
+html[data-material='glass'] .v35 .g-glyph.near {
+  color: color-mix(in srgb, var(--accent) 32%, #fff);
+}
+html[data-material='glass'] .v35 .g-glyph.g-sw {
+  width: 62px;
+  margin-left: -31px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+html[data-material='glass'] .v35 .g-glyph .dock-sq {
+  border-color: rgba(255, 255, 255, 0.62);
+  visibility: visible;
+}
+html[data-material='glass'] .v35 .g-glyph.g-sw.g-press {
+  --gk: 0.9;
+  transition-duration: 0.28s, 0.26s, 0.16s;
+}
+/* فتح المبدّل: الأيقونات تخفت وتصغر كما في التطبيق (0.94، والمربعات 0.8) */
+html[data-material='glass'] .v35 .dock.open .g-glyph {
+  --gk: 0.94;
+  opacity: 0;
+  transition-duration: 0.28s, 0.34s, 0.34s;
+  transition-timing-function: ease, cubic-bezier(0.22, 1, 0.36, 1), cubic-bezier(0.22, 1, 0.36, 1);
+}
+html[data-material='glass'] .v35 .dock.open .g-glyph.g-sw {
+  --gk: 0.8;
+}
+
+/* ── المبدّل: الأقسام نصوص فوق الزجاج بألوانها، والعدسة نفسها هي التحديد (تتشكل كبسولة القسم) ── */
+html[data-material='glass'] .v35 .dock-opt,
+html[data-material='glass'] .v35 .dock-opt.current {
+  z-index: 8;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-material='glass'] .v35 .dock-opt-label {
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.6));
+  transition: scale 0.3s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+html[data-material='glass'] .v35 .dock-opt-label b {
+  color: color-mix(in oklab, var(--sec, var(--accent)) 78%, #fff);
+}
+html[data-material='glass'] .v35 .dock-opt.g-near .dock-opt-label small,
+html[data-material='glass'] .v35 .dock-opt.current .dock-opt-label small {
+  color: rgba(255, 255, 255, 0.85);
+}
+html[data-material='glass'] .v35 .dock.g-dragging-sec .dock-opt.g-near .dock-opt-label {
+  scale: 1.08;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-material='glass'] .v35 .dock,
+  html[data-material='glass'] .v35 .dock-cap::before,
+  html[data-material='glass'] .v35 .dock-cap::after,
+  html[data-material='glass'] .v35 .g-glyph {
+    transition: none;
+  }
+}
+html[data-motion='off'][data-material='glass'] .v35 .dock,
+html[data-motion='off'][data-material='glass'] .v35 .g-glyph {
+  transition: none;
+}
+
+/* ═══════════════════ المرحلة 2: الأدوات العائمة فوق البنرات والمحتوى (الخطة 8.2–8.4 و8.9) ═══════════════════
+ * م2 = انكسار الحافة بتشتت عائلتها + ضباب 1.5px + صبغة + لمعة حافة. الأشكال: دائرة c، كبسولة p، شريط عريض b.
+ * الأزرار الرئيسية داخلها (شاهد، ابدأ القراءة) تبقى صلبة بلون القسم: الزجاج للحاوية لا للفعل الأهم. */
+html[data-material='glass'] {
+  --g-tint: rgba(255, 255, 255, 0.06);
+  --g-rim: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 -1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --g-lift: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --g-m3: blur(24px) saturate(1.6);
+  --g-m3-bg: color-mix(in srgb, var(--bg) 58%, transparent);
+}
+/* أزرار الترويسات (القائمة ≡ والبحث والإشعارات في الرئيسية، والرجوع والقائمة والتحميلات في الصفحات الفرعية): دوائر م2
+ * كأزرار شريط التنقل في iOS. القياس (cover.mjs) أظهرها بلا زجاج، فصُححت الخطة (8.2). الشعار يبقى نصًا. */
+html[data-material='glass'] .v35 :is(.header, .page-top) .icon-btn,
+html[data-material='glass'] .v35 .cn-eps-head .cn-season-btn {
+  border-radius: 999px !important;
+  background: var(--g-tint) !important;
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22) !important;
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
+}
+/* كبسولة الموسم: خريطة الكبسولة لا الدائرة (!important لأن القاعدة أعلاه !important)، وحشوة ومسافة عن العنوان.
+ * الأنماط غير «الحالي» تجعله نصًا بلا حشوة (cinema.css:2156)، فصار الزجاج يلصق النص بحافته ويدخل في «الحلقات» (صورة المالك). */
+html[data-material='glass'] .v35 .cn-eps-head .cn-season-btn {
+  min-height: 36px;
+  padding: 0 14px !important;
+  margin-inline-start: 12px;
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+}
+/* أزرار الرجوع وأدوات صفحة العمل فوق البنر (أفضل مكان للزجاج في التطبيق) */
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar) > .icon-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar, .aw-bar.collapsed, .cn-detail-bar.collapsed) .aw-tools,
+html[data-material='glass'] .v35 .an-btn--glass {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .cn-detail-bar .aw-tools .aw-tool,
+html[data-material='glass'] .v35 .cn-detail-bar.collapsed > .icon-btn {
+  background: transparent;
+}
+/* الأنماط التي تبدأ فوق لون صلب (8.9): كانت رموزًا حتى ينطوي البطل، وبطلب المالك («كل زر احترافي iOS») صارت زجاجًا دائمًا
+ * كأزرار شريط iOS 26 فوق أي خلفية. فلا تبدّل عند الانطواء، ولا قفزة. */
+/* الشريط العلوي حين ينطوي البطل: م3 يتجسد بالضباب (يتدرج) بدل لوح صلب يظهر بالشفافية */
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar)::before {
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: blur(0px) saturate(1);
+  -webkit-backdrop-filter: blur(0px) saturate(1);
+  transition: backdrop-filter 0.26s ease, background-color 0.26s ease, box-shadow 0.26s ease;
+}
+html[data-material='glass'] .v35 :is(.aw-bar, .cn-detail-bar).collapsed::before {
+  background: var(--g-m3-bg);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+/* أشرطة وكبسولات تطفو فوق المحتوى: صفحة الحلقة، والتحديد، والمجلس، والغرفة، وشريط الكتابة (تشتت 10، فيه نص يُكتب) */
+html[data-material='glass'] .v35 :is(.wl-mini, .mj-bar),
+html[data-material='glass'] .tg-pop,
+html[data-material='glass'] .mj-bar {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.wl-dock, .dl-selectbar, #detail .mw-selbar) {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2b-nav, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2b-nav, blur(16px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .rf-dock {
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2b-player, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2b-player, blur(16px) saturate(1.6));
+}
+
+/* ── عدسة الأقسام المجزأة (bindGlassTabs في glass.js): م1 تنزلق بنابض CSS، بلون القسم ── */
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ul-shelves, .mw-ranges, .drawer-sections),
+html[data-material='glass'] .v35 .cn-kinds:not(.cn-hero-alt > .cn-kinds) {
+  position: relative;
+}
+html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .mj-filters, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .mw-ranges, .drawer-sections) > :not(.g-seg) {
+  position: relative;
+  z-index: 1;
+}
+html[data-material='glass'] .v35 .g-seg {
+  --tint: var(--accent);
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  width: var(--sw, 0px);
+  height: var(--sh, 0px);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(calc(var(--sx, 0px) + var(--hx, 0px)), var(--sy, 0px));
+  background: color-mix(in srgb, var(--tint) 18%, rgba(255, 255, 255, 0.05));
+  box-shadow: var(--g-rim), inset 0 0 12px color-mix(in srgb, var(--tint) 22%, transparent), 0 4px 14px rgba(0, 0, 0, 0.25);
+  backdrop-filter: var(--g-m2p-nav, blur(8px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(8px) saturate(1.6));
+  /* نابض CSS بتجاوز خفيف كعدسة v9، على المؤلِّف (transform) */
+  transition: transform 0.52s cubic-bezier(0.3, 1.25, 0.5, 1), width 0.52s cubic-bezier(0.3, 1.25, 0.5, 1), height 0.4s ease, --tint 0.35s ease;
+}
+html[data-material='glass'] .v35 .g-seg[data-init] {
+  transition: none;
+}
+html[data-material='glass'] .v35 .g-seg[data-off] {
+  visibility: hidden;
+}
+html[data-material='glass'] .v35 .drawer-sections .g-seg {
+  border-radius: var(--r-md);
+}
+/* التحديد القديم يُخفى في Glass وحده: الخط تحت الكلمة، والتعبئة، وحلقة القسم في الدرج */
+html[data-material='glass'] .v35 :is(.library-tab, .cn-kind, .mw-tabs button, .uv-tabs button, .ins-tabs button, .us-seg button)::after {
+  display: none;
+}
+html[data-material='glass'] .v35 .social-tab.active {
+  background: transparent;
+}
+html[data-material='glass'] .v35 .drawer-section,
+html[data-material='glass'] .v35 .drawer-section[aria-checked='true'] {
+  /* الشريط الجانبي صلب (قرار المالك)؛ الرقائق شفافة فتظهر العدسة المنزلقة تحتها بلون القسم */
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ═══════════════════ المرحلة 3: الأوراق والدرج والتنبيه والترويسات (م3، تشتت 0) ═══════════════════
+ * R3: تلاشي الستارة عبر الأب يعزل زجاج الورقة (F1). في Glass: الستارة لا تتلاشى بنفسها؛ التعتيم طبقة ::before
+ * تتلاشى، والورقة تتلاشى بنفسها (عنصر الزجاج ذاته لا يُعزل)، بنفس المدة والمنحنى. */
+html[data-material='glass'] .v35 .sheet-backdrop {
+  opacity: 1;
+  background: transparent;
+  visibility: hidden;
+  transition: visibility 0s linear var(--dur);
+}
+html[data-material='glass'] .v35 .sheet-backdrop.show {
+  visibility: visible;
+  transition-delay: 0s;
+}
+html[data-material='glass'] .v35 .sheet-backdrop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+html[data-material='glass'] .v35 .sheet-backdrop.show::before {
+  opacity: 1;
+}
+html[data-material='glass'] .v35 .sheet {
+  position: relative;
+  opacity: 0;
+  background: color-mix(in srgb, var(--bg-raised) 66%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 -1px 0 rgba(255, 255, 255, 0.06), 0 -18px 50px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  transition: transform var(--dur-slow) var(--ease-out), opacity var(--dur) var(--ease);
+}
+html[data-material='glass'] .v35 .show > .sheet {
+  opacity: 1;
+}
+/* الدرج في الجوال (من 1024 يصير شريطًا جانبيًا صلبًا بقرار المالك، فلا يُمس) */
+@media (max-width: 1023.98px) {
+  html[data-material='glass'] .v35 .drawer-backdrop {
+    opacity: 1;
+    background: transparent;
+    visibility: hidden;
+    transition: visibility 0s linear var(--dur);
+  }
+  html[data-material='glass'] .v35 .drawer-backdrop.open {
+    visibility: visible;
+    transition-delay: 0s;
+  }
+  html[data-material='glass'] .v35 .drawer-backdrop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+  }
+  html[data-material='glass'] .v35 .drawer-backdrop.open::before {
+    opacity: 1;
+  }
+  html[data-material='glass'] .v35 .drawer {
+    background: color-mix(in srgb, var(--bg-raised) 64%, transparent);
+    border-inline-start: 0;
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.1), -18px 0 50px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(30px) saturate(1.6);
+    -webkit-backdrop-filter: blur(30px) saturate(1.6);
+  }
+}
+/* التنبيه وترويسات الصفحات الفرعية: م3 بلا تشتت (نص يُقرأ) */
+html[data-material='glass'] .v35 .toast {
+  background: color-mix(in srgb, var(--surface-3) 60%, transparent);
+  box-shadow: var(--g-rim), 0 10px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+html[data-material='glass'] .v35 :is(.page-top, .ac-top),
+html[data-material='glass'] .us-head {
+  background: var(--g-m3-bg);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-material='glass'] .v35 .g-seg { transition: none; }
+}
+html[data-motion='off'][data-material='glass'] .v35 .g-seg {
+  transition: none;
+}
+
+/* ═══════════════════ المرحلة 4: قارئ المانجا (تشتت 14، الخطة 8.6) ═══════════════════
+ * الترويسة الذائبة في الصفحة لا تُمس (قرار المالك). صفحات المانجا لا زجاج عليها أبدًا. */
+html[data-material='glass'] .v35 .rd-bottom {
+  background: color-mix(in srgb, rgb(18, 16, 25) 42%, transparent);
+  box-shadow: var(--g-rim), 0 12px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: var(--g-m2b-reader, blur(18px) saturate(1.5));
+  -webkit-backdrop-filter: var(--g-m2b-reader, blur(18px) saturate(1.5));
+}
+html[data-material='glass'] .v35 .rd-tl-btn:not([aria-pressed='true']) {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2c-reader, blur(12px) saturate(1.5));
+  -webkit-backdrop-filter: var(--g-m2c-reader, blur(12px) saturate(1.5));
+}
+html[data-material='glass'] .v35 :is(.rd-tray, .rd-tl-gate) {
+  background: color-mix(in srgb, rgb(10, 9, 14) 62%, transparent);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m3);
+  -webkit-backdrop-filter: var(--g-m3);
+}
+html[data-material='glass'] .v35 .sx-tabs > .sx-tabs-line {
+  display: none;
+}
+
+/* أزرار متجاورة في ترويسة = كبسولة زجاج واحدة (كمجموعات أزرار iOS)، لا دوائر متلاصقة. الزر الوحيد يبقى دائرة.
+ * (اكتُشف بالتكبير: الجرس والبحث صارا دائرتين متداخلتين.) */
+/* !important: ترويسة السينما لها قواعد بمعرّف #home تلغي خلفية المجموعة عند التمرير (مُقاس) */
+html[data-material='glass'] .v35 :is(.header, .page-top) :is(.header-start, .header-end, .header-actions, .page-top-left, .page-top-right):has(> .icon-btn + .icon-btn) {
+  border-radius: 999px !important;
+  background: var(--g-tint) !important;
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22) !important;
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+}
+html[data-material='glass'] .v35 :is(.header, .page-top) :is(.header-start, .header-end, .header-actions, .page-top-left, .page-top-right):has(> .icon-btn + .icon-btn) > .icon-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ── إكمال التغطية (قياس glass-cover.mjs على بقية الصفحات) ── */
+/* نطاقات الفصول: العدسة خلف المختار، والمختار بلا تعبئته القديمة ونصه مقروء فوق الزجاج */
+html[data-material='glass'] .v35 .mw-ranges button.on {
+  background: transparent;
+  color: var(--text-1);
+}
+/* «المظهر الموحد» يزيل خلفية الأدوات وضبابها بقواعد بمعرّف (#detail) أقوى (unified-look.css)؛ في Glass تبقى زجاجًا */
+html[data-material='glass'] .v35 :is(.aw, .cn-detail, #detail)[data-unified] :is(.aw-bar, .cn-detail-bar) .aw-tools {
+  background: var(--g-tint) !important;
+  box-shadow: var(--g-rim), var(--g-lift) !important;
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6)) !important;
+}
+html[data-material='glass'] .v35 :is(.aw, .cn-detail, #detail)[data-unified] :is(.aw-bar, .cn-detail-bar) > .icon-btn {
+  filter: none !important;
+  background: var(--g-tint) !important;
+  box-shadow: var(--g-rim), var(--g-lift) !important;
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6)) !important;
+}
+html[data-material='glass'] .v35 :is(.aw, .cn-detail, #detail)[data-unified] :is(.aw-bar, .cn-detail-bar) .aw-tool {
+  filter: none !important;
+}
+/* أزرار رأس الحلقات (البحث في الحلقات والترتيب) في «المسلسل أولًا»: دوائر م2 */
+html[data-material='glass'] .v35 .cn-eps-head .icon-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+
+
+/* ── غرفة المجلس (الشات، majlis-chat.js): كرسائل iOS. الرجوع والأعضاء و«رشّح» والصوت دوائر م2،
+ * حقل الكتابة كبسولة م2، وزر الإرسال يبقى بلون القسم (الإجراء الرئيسي). خطوط الفصل تختفي كأشرطة iOS 26.
+ * الرأس وشريط الكتابة في مكانهما (لا تتغير التخطيطات ولا تثبيت المحادثة في أسفلها).
+ * «انزل لآخر رسالة» يطفو فوق الرسائل: كبسولة م2 حقيقية. ── */
+html[data-material='glass'] .v35 .mc-head,
+html[data-material='glass'] .v35 .mc-compose {
+  border-color: transparent;
+}
+html[data-material='glass'] .v35 :is(.mc-head .mc-icon, .mc-bar .mc-icon, .mc-act:not(.is-send)) {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .mc-field {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .mc-field:focus-within {
+  box-shadow: var(--g-rim), inset 0 0 0 1px var(--line-strong), 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+html[data-material='glass'] .v35 .mc-jump {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(16px) saturate(1.6));
+}
+/* فلاتر «آخر ما صار» (الكل، فريمات، ترشيحات، قراءة): ألسنة ملتصقة بلا فراغ، فالعدسة تحتاج مسافة تتنفس فيها */
+html[data-material='glass'] .v35 .mj-filters {
+  gap: 18px;
+}
+
+/* ── حقول البحث وزر الفلترة (البحث في الأقسام الثلاثة، واكتشف الأنمي والسينما): كحقل بحث iOS 26،
+ * كبسولة زجاج م2 بخريطة الشريط العريض. يُعدّل قرار 8.4 («حقل البحث ❌») بطلب المالك. ── */
+html[data-material='glass'] .v35 :is(.search-input, .ad-search, .cn-search),
+html[data-material='glass'] .v35[data-section='manga'] :is(#discover, #search, #collection) .search-input {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: var(--g-m2b-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2b-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.search-input, .cn-search):is(:focus, :focus-visible, :focus-within),
+html[data-material='glass'] .v35 .ad-search:focus-within {
+  box-shadow: var(--g-rim), inset 0 0 0 1px var(--line-strong), 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+html[data-material='glass'] .v35 .cn-filter-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+/* أيقونة العدسة فوق الحقل: الزجاج (backdrop-filter) يجعل الحقل طبقة مستقلة تُرسم فوق أخيه السابق */
+html[data-material='glass'] .v35 .search-bar .icon {
+  z-index: 1;
+}
+/* ألسنة «أفلام/مسلسلات» في اكتشف السينما: العدسة تحيط بالكلمة 12px، فتُزاح الألسنة بقدرها لتبقى العدسة داخل حافة الصفحة */
+html[data-material='glass'] .v35 .cn-kinds--inline {
+  padding-inline: calc(var(--cn-gutter, 16px) + 12px);
+}
+/* أداتا «ابحث في الحلقات» و«الترتيب والتصفية» متجاورتان: كبسولة زجاج واحدة، لا دائرتان (أنمي، ورأس حلقات السينما) */
+html[data-material='glass'] .v35 :is(.aw-eps-tools, .cn-sf-tools):has(> .icon-btn:not([hidden]) ~ .icon-btn:not([hidden])) {
+  margin-inline-end: 0;
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 :is(.aw-eps-tools, .cn-sf-tools):has(> .icon-btn:not([hidden]) ~ .icon-btn:not([hidden])) > .icon-btn {
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html[data-material='glass'] .v35 :is(.aw-eps-tools, .cn-sf-tools):not(:has(> .icon-btn:not([hidden]) ~ .icon-btn:not([hidden]))) > .icon-btn {
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 4px 14px rgba(0, 0, 0, 0.22);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+/* العدسة تحيط بالكلمة 12px، والألسنة تبدأ عند حافة الصفحة (16px)، فكانت العدسة على بعد 4px من حافة الشاشة
+ * (قياس glass-align: 9 أماكن). أول لسان وآخره يُزاحان بقدر حشوة العدسة في Glass وحده. */
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .cn-kinds:not(.cn-kinds--inline)) > .g-seg + * {
+  margin-inline-start: 12px;
+}
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .cn-kinds:not(.cn-kinds--inline)) > :last-child:not(.g-seg) {
+  margin-inline-end: 12px;
+}
+
+/* ── قائمة ⋮ في صفحة العمل (.aw-menu: تحميل، أتابعها، لاحقًا…): الدوائر زجاج م2 والأسماء كبسولات زجاج،
+ * كقائمة سياق iOS. الستارة الداكنة خلفها تبقى (تفصلها عن البنر). اكتشفها المالك بصورة. ── */
+html[data-material='glass'] .v35 .aw-menu-dot {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .aw-menu-label {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}

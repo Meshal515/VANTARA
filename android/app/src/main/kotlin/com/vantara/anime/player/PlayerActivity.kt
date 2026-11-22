@@ -109,6 +109,8 @@ class PlayerActivity : Activity() {
         val section: String = "anime",
         /** لون القسم الذي اختاره المستخدم (#RRGGBB)، أو null = لون القسم المصمّم. */
         val accent: String? = null,
+        /** «glass» حين فعّل المستخدم التأثير الزجاجي في المظهر، وإلا المظهر الحالي كما هو. */
+        val material: String? = null,
         val usageUserId: String? = null,
         val malId: Int? = null,
         val episode: Float = 1f,
@@ -623,6 +625,7 @@ class PlayerActivity : Activity() {
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
         Tone.use(launch.section, launch.accent)
+        Glass.use(launch.material)
         sessionId = launch.session
         presenceAuthorization = launch.presenceAuthorization
         episode = launch.episode
@@ -1452,7 +1455,7 @@ class PlayerActivity : Activity() {
         }
         root.addView(pill, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(84) })
 
-        unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = Tone.alpha(Tone.SURFACE, 0x99), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE }
+        unlockButton = iconButton(Glyph.Kind.LOCK, iconDp = 22, boxDp = 52, bg = Tone.alpha(Tone.SURFACE, 0x99), desc = "إلغاء قفل الشاشة") { setLocked(false) }.apply { visibility = View.GONE; glassCircle() }
         root.addView(unlockButton, FrameLayout.LayoutParams(dp(52), dp(52), Gravity.CENTER_VERTICAL or Gravity.RIGHT).apply { rightMargin = dp(28) })
 
         netChip = label("", 11.5f, Color.WHITE, bold = true).apply {
@@ -1486,7 +1489,7 @@ class PlayerActivity : Activity() {
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(20), dp(14), dp(20), 0)
         }
-        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { if (together != null) confirmExitRoom() else finish() })
+        top.addView(iconButton(Glyph.Kind.BACK, desc = "رجوع") { if (together != null) confirmExitRoom() else finish() }.apply { glassCircle() })
         titleView = label("", 16f, Color.WHITE, bold = true).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END; textDirection = View.TEXT_DIRECTION_ANY_RTL }
         episodeView = label("", 12.5f, Tone.TEXT_2).apply { setPadding(0, dp(4), 0, 0) }
         top.addView(LinearLayout(this).apply {
@@ -1495,10 +1498,14 @@ class PlayerActivity : Activity() {
             addView(titleView)
             addView(episodeView)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(iconButton(Glyph.Kind.CAMERA, desc = "قصّ مقطع من هذه اللحظة") { openClip() })
+        // أدوات الترويسة في مجموعة واحدة: في Glass كبسولة زجاجية، وفي المظهر الحالي التخطيط نفسه بلا خلفية
+        val tools = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        tools.addView(iconButton(Glyph.Kind.CAMERA, desc = "قصّ مقطع من هذه اللحظة") { openClip() })
         fitButton = iconButton(if (fill) Glyph.Kind.FIT else Glyph.Kind.FILL, desc = "ملء الشاشة / ملاءمة") { toggleFit() }
-        top.addView(fitButton)
-        top.addView(iconButton(Glyph.Kind.MORE, desc = "المزيد") { showMore() })
+        tools.addView(fitButton)
+        tools.addView(iconButton(Glyph.Kind.MORE, desc = "المزيد") { showMore() })
+        tools.glassGroup()
+        top.addView(tools)
         controls.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
     }
 
@@ -1532,20 +1539,22 @@ class PlayerActivity : Activity() {
         left.addView(nextButton)
         left.addView(iconButton(Glyph.Kind.EPISODES, desc = "الحلقات") { showEpisodes() })
         left.addView(iconButton(Glyph.Kind.SERVERS, desc = "السيرفرات") { showServers() })
+        left.glassGroup()
         row.addView(left, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.LEFT or Gravity.CENTER_VERTICAL))
 
         val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         // قرار المالك (14 نوفمبر): دائرة التشغيل/الإيقاف وزرّا ±10 في منتصف الشاشة لا في الصف السفلي، وأكبر قليلًا
-        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) })
+        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) }.apply { glassCircle(ring = true) })
         playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 30, boxDp = 72, desc = "إيقاف مؤقت") { togglePlay() }.apply {
             background = android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x33FFFFFF),
                 GradientDrawable().apply { shape = GradientDrawable.OVAL; setStroke(dp(2), Color.WHITE); setColor(0x33000000) },
                 null,
             )
+            glassCircle(ring = true)
         }
         center.addView(playButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply { leftMargin = dp(40); rightMargin = dp(40) })
-        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) })
+        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) }.apply { glassCircle(ring = true) })
         controls.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         val right = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -1564,6 +1573,7 @@ class PlayerActivity : Activity() {
         right.addView(iconButton(Glyph.Kind.AUDIO, desc = "المسارات الصوتية") { showAudio() })
         right.addView(iconButton(Glyph.Kind.SPEED, desc = "السرعة") { showSpeed() })
         right.addView(iconButton(Glyph.Kind.UNLOCK, desc = "قفل الشاشة") { setLocked(true) })
+        right.glassGroup()
         row.addView(right, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.RIGHT or Gravity.CENTER_VERTICAL))
         col.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
         controls.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
