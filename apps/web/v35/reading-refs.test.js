@@ -186,3 +186,15 @@ describe('phase 1: a dead cover is forgotten in every reference (CV4 regression 
     expect(store.get('ext:unrelated')).toEqual(other);
   });
 });
+
+describe('RD7: a chapter whose number reading changed keeps its old marks', () => {
+  it('«Vol.3 Ch.25» marked under the old key n:3 still reads as read under its new key n:25', async () => {
+    const { chapterKeyOf, isChapterRead } = await import('./reading.js');
+    const row = { sourceId: 'madara', chapter: { name: 'Vol.3 Ch.25', url: '/c25', chapterNumber: -1 } };
+    const key = chapterKeyOf('ext:work', row);
+    expect(key).toBe('ext:work#n:25');
+    const marks = [{ user_id: 'u1', chapter_key: 'ext:work#n:3', read: 1, updated_at: 5 }];
+    const sync = { user: { userId: 'u1' }, rows: (t, p) => (t === 'chapter_marks' ? marks.filter(p) : []) };
+    expect(isChapterRead(sync, 'ext:work', key, { refsOf: (r) => [r] })).toBe(true);
+  });
+});

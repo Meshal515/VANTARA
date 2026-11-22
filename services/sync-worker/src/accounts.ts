@@ -275,7 +275,7 @@ const PERSONAL: ReadonlyArray<readonly [string, string]> = [
   ['recommendation_recipients', 'user_id'], ['recommendations', 'from_id'], ['recommendations', 'to_id'],
   ['notifications', 'user_id'], ['notify_devices', 'user_id'], ['pin_reset_keys', 'user_id'], ['pin_reset_keys', 'created_by'], ['activity_receipts', 'user_id'], ['activity', 'actor_id'], ['activity', 'target_user_id'],
   ['settings', 'user_id'],
-  ['pairing_tokens', 'user_id'], ['frames', 'from_id'], ['frames', 'to_id'], ['chapter_marks', 'user_id'],
+  ['pairing_tokens', 'user_id'], ['frames', 'from_id'], ['frames', 'to_id'], ['chapter_marks', 'user_id'], ['playback_positions', 'user_id'],
   ['media', 'owner_id'], ['majlis_reactions', 'user_id'], ['majlis_receipts', 'user_id'], ['work_views', 'user_id'],
   ['public_work_views', 'user_id'], ['completions', 'user_id'], ['translation_usage', 'user_id'],
   ['translation_usage_chapters', 'user_id'], ['translation_creator_totals', 'created_by'],

@@ -91,6 +91,15 @@ const MAX_QUARANTINE = 100;
 const MAX_PULL_ROUNDS = 20;
 
 /** الجداول التي تصل في الفروقات، ومفتاح كل صف. */
+const FEATURES_KEY = 'vantara.sync.features';
+let serverFeatures = new Set((() => { try { const v = JSON.parse(globalThis.localStorage?.getItem(FEATURES_KEY) ?? '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; } })());
+function noteFeatures(list) {
+  const next = new Set(list.filter((x) => typeof x === 'string').slice(0, 64));
+  if (next.size === serverFeatures.size && [...next].every((x) => serverFeatures.has(x))) return;
+  serverFeatures = next;
+  try { globalThis.localStorage?.setItem(FEATURES_KEY, JSON.stringify([...next])); } catch { /* يُعاد من السحب التالي */ }
+}
+
 const KEYS = {
   accounts: (row) => row.user_id,
   profiles: (row) => row.user_id,
@@ -99,6 +108,8 @@ const KEYS = {
   chapter_reads: (row) => `${row.user_id}/${row.chapter_key}`,
   // عين الفصل: علامة المالك وحده، آخر كتابة تفوز
   chapter_marks: (row) => `${row.user_id}/${row.chapter_key}`,
+  // موضع التوقف داخل الحلقة/الفيلم (ANX1): جدول مستقل عن تقدم المانجا، الأحدث بوقت القياس يفوز
+  playback_positions: (row) => `${row.user_id}/${row.media_key}`,
   usage_daily: (row) => `${row.user_id}/${row.day}`,
   collections: (row) => `${row.user_id}/${row.kind}/${row.series_ref}`,
   // «المكتمل»: صف لكل عمل أكملته
@@ -413,11 +424,23 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     pinGrant = token && user?.userId ? saved.pinGrant ?? null : null;
     refreshOverlay();
   });
-  const persistMirror = () => writeLocalCache(MIRROR_KEY, mirror);
+  // SY2: المرآة (آلاف الصفوف، حتى 4MB) كانت تُكتب في localStorage المشترك، فامتلاؤه يُسقط بصمت ما هو أصغر وأهم: مواضع
+  // القراءة وقرارات الأغلفة وسجل الدمج (refAliases). مكانها IndexedDB (ونسخة أندرويد): حين تُحفظ هناك تُحذف نسخة
+  // localStorage لتحرير المساحة. بلا IndexedDB (وضع خاص، متصفح يمنعه) تبقى في localStorage كما كانت. الإقلاع ينتظر
+  // sync.ready (القراءة من IndexedDB) قبل رسم الواجهة، فلا وميض.
+  const releaseLocalMirror = () => {
+    if (!dataOwner || dataOwner !== localCacheOwner) return;
+    try { localStorage.removeItem(MIRROR_KEY); } catch { /* يبقى؛ النسخة المستقلة محفوظة */ }
+  };
+  const persistMirror = () => {
+    const snapshot = mirror;
+    void storeCopy('snapshot', { mirror: snapshot, cursor, auditedAt: lastAudit?.userId === user?.userId ? lastAudit.at : null })
+      .then((saved) => { if (saved) releaseLocalMirror(); else writeLocalCache(MIRROR_KEY, snapshot); }, () => writeLocalCache(MIRROR_KEY, snapshot));
+  };
   const commitMirror = async (snapshot, nextCursor, auditedAt = lastAudit?.userId === user?.userId ? lastAudit.at : null) => {
-    const localSaved = writeLocalCache(MIRROR_KEY, snapshot);
-    const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt });
-    return localSaved || independentSaved;
+    const independentSaved = await storeCopy('snapshot', { mirror: snapshot, cursor: nextCursor, auditedAt }).catch(() => false);
+    if (independentSaved) { releaseLocalMirror(); return true; }
+    return writeLocalCache(MIRROR_KEY, snapshot);
   };
   const recovered = sessionReady.then(async () => {
     const recoveryOwner = user?.userId;
@@ -1140,6 +1163,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
           break;
         }
 
+        // ما يدعمه الخادم من عمليات جديدة (position.set…): لا تُرسل عملية لخادم أقدم فيعزلها وتضيع
+        if (Array.isArray(payload.features)) noteFeatures(payload.features);
         const touched = [];
         // شاهد قبر وصل: كل صف في المرآة يخص ذلك الـUUID يُمسح هنا أيضًا، فلا
         // يبقى على هذا الجهاز ما مُسح من الخادم (الخادم يمسح ولا يرسل «حُذف»)
@@ -1165,7 +1190,10 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
         }
 
         const nextCursor = Number(payload.cursor ?? cursor) || cursor;
-        if (!await commitMirror(mirror, nextCursor)) throw new Error('mirror_storage_full');
+        // جولة بلا صفوف لا تُعيد حفظ المرآة كاملة (SY1: ثلاث كتابات كاملة على الخيط الرئيسي كل 60 ث وبعد كل إرسال).
+        // المؤشر يتقدم في الذاكرة فقط: لا شيء وصل ليضيع، وبعد إعادة الفتح يُسحب من المؤشر المحفوظ فيرجع الفراغ نفسه.
+        // القاعدة باقية: ما وصل يُحفظ قبل أن يتقدم المؤشر المحفوظ، وفشل الحفظ يوقف السحب (mirror_storage_full).
+        if (touched.length && !await commitMirror(mirror, nextCursor)) throw new Error('mirror_storage_full');
         if (generation !== sessionGeneration || dataOwner !== pullUserId || pullUserId !== (user?.userId ?? null)) break;
         if (payload.more && nextCursor === 0) {
           if (skippedInitialZero) throw new Error('mirror_delta_stalled_zero');
@@ -1851,6 +1879,8 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     translation,
     stream,
     pendingProgress,
+    /** هل يدعم الخادم هذه العملية؟ (أعلنها في /v1/sync). قبل أول سحب: لا. */
+    supports: (feature) => serverFeatures.has(feature),
     latestSnapshots: () => request('/v1/source-latest'),
     privacyCapability: () => request('/v1/privacy/capabilities'),
     claimLatest: (sourceId) => request('/v1/source-latest/claim', { method: 'POST', body: { sourceId } }),

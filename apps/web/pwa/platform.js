@@ -58,3 +58,9 @@ export function webPlugin(name, g = globalThis) {
   if (isDesktop(g)) return null;
   return g?.VantaraWeb?.[name] ?? null;
 }
+
+/**
+ * «جسرك الخاص» من الإعدادات (v35/shell.js): البوابة الوحيدة لوحدات الـPWA خارجها (اختبار السلامة 51).
+ * pwa/net/endpoint.js صغير بلا آثار جانبية، فيُعاد تصديره هنا.
+ */
+export { bridgeConfig, clearBridge, setBridge, testBridge } from './net/endpoint.js';

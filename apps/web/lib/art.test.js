@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { artRatio, createArtStore, isOfficialArt } from './art.js';
+import { artRatio, createArtStore, isLocalArt, isOfficialArt } from './art.js';
 
 const memory = (init = {}) => { const m = new Map(Object.entries(init)); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), _m: m }; };
 const dims = { 'https://s4.anilist.co/c.jpg': [460, 690], 'https://src/a.jpg': [500, 750], 'https://src/big.jpg': [900, 1350], 'https://src/a.gif': [420, 600], 'https://s4.anilist.co/ban.jpg': [1900, 400], 'https://src/small-ban.jpg': [800, 300] };
@@ -54,6 +54,37 @@ describe('قرار فن العمل الواحد (lib/art.js)', () => {
     expect(store.get('s2').cover).toBe('https://src/big.jpg');
     expect(store.get('s3').cover).toBe('https://s4.anilist.co/c.jpg');
   });
+  // CV1: كان القرار يُحفظ بمسار الملف المحلي؛ يقلّمه المحرّك (MAX_COVERS) فيضيع الغلاف ويُحسم غيره
+  it('القرار يُحفظ بالرابط الأصلي ولو قِيس من الملف المحلي المحفوظ', async () => {
+    const local = 'http://localhost/_capacitor_file_/covers/a.jpg';
+    dims[local] = [500, 750];
+    const store = createArtStore({ storage: memory(), probe: fakeProbe() });
+    const d = await store.decide('l', { sources: [{ url: Promise.resolve(local), origin: 'https://src/a.jpg', sid: 'x' }] });
+    expect(d).toMatchObject({ cover: 'https://src/a.jpg', w: 500, h: 750, sid: 'x' });
+    expect(isLocalArt(local)).toBe(true);
+    expect(isLocalArt('https://src/a.jpg')).toBe(false);
+  });
+  // CV3: أي فشل لحظي (شبكة، 403) كان يمحو القرار فيُحسم غلاف آخر بعد العرض
+  it('فشل لحظي لا يمحو القرار؛ يُنسى فقط بعد ثلاث مرات على امتداد يوم', async () => {
+    const store = createArtStore({ storage: memory(), probe: fakeProbe() });
+    await store.decide('f', { sources: ['https://src/a.jpg'] });
+    const t0 = 1_000_000;
+    expect(store.failed('f', t0)).toBe(false);
+    expect(store.get('f').cover).toBe('https://src/a.jpg');
+    expect(store.failed('f', t0 + 1000)).toBe(false);
+    expect(store.failed('f', t0 + 2000)).toBe(false); // ثلاث في ثوانٍ: لحظي، يبقى
+    expect(store.get('f').cover).toBe('https://src/a.jpg');
+    store.shown('f'); // ظهر: تُصفّر
+    expect(store.get('f').fail).toBeUndefined();
+    store.failed('f', t0); store.failed('f', t0 + 3600_000);
+    expect(store.failed('f', t0 + 25 * 3600_000)).toBe(true); // ميت فعلًا
+    expect(store.get('f')).toBeNull();
+  });
+  it('قرار قديم مساره ملف محلي بلا أصل يُنسى عند فشله كما كان', async () => {
+    const store = createArtStore({ storage: memory({ 'vantara.art.v1': JSON.stringify({ old: { cover: 'http://localhost/_capacitor_file_/c.jpg', w: 500, h: 750 } }) }), probe: fakeProbe() });
+    expect(store.failed('old')).toBe(true);
+    expect(store.get('old')).toBeNull();
+  });
   it('المرشح وعدٌ (غلاف المحرّك المحفوظ) يدخل السباق لحظة وصوله', async () => {
     const store = createArtStore({ storage: memory(), probe: fakeProbe() });
     const d = await store.decide('p', { sources: [{ url: Promise.resolve('https://src/a.jpg'), sid: 'x' }] });
@@ -93,5 +124,16 @@ describe('قرار فن العمل الواحد (lib/art.js)', () => {
     // غلاف شاذ لا يكسر التخطيط: يُحصر
     expect(artRatio({ w: 300, h: 1200 })).toBe('0.55');
     expect(artRatio({ w: 1000, h: 800 })).toBe('0.85');
+  });
+});
+
+// بلاغ المالك (20 نوفمبر): بنر عمل محمّل (رابط blob: مؤقت) حُفظ «خلفية ظهرت»، فظهرت صورة مكسورة في الفتح التالي
+describe('durable art urls', () => {
+  it('only real web urls may be remembered past the session', async () => {
+    const { isDurableArtUrl } = await import('./art.js');
+    expect(isDurableArtUrl('https://images.metahub.space/background/medium/tt0111161/img')).toBe(true);
+    for (const bad of ['blob:https://app/1234', 'blob:capacitor://localhost/abc', 'http://localhost/_capacitor_file_/data/x.webp', 'file:///x.jpg', 'data:image/png;base64,AA', 'content://media/1', 'http://127.0.0.1:3000/x', null, '']) {
+      expect(isDurableArtUrl(bad), String(bad)).toBe(false);
+    }
   });
 });

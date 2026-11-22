@@ -306,3 +306,57 @@ describe('مقياس الهوية: أجزاء ومجموعات لا تُدمج',
     expect(card.editions).toHaveLength(1);
   });
 });
+
+describe('ID3: «X 2» is never merged into «X» through the original title', () => {
+  it('나 혼자만 레벨업 and 나 혼자만 레벨업 2 stay two works (the number belongs to the original title key)', () => {
+    const index = build(
+      [entry('teamx', 'Solo Leveling'), entry('mangaswat', 'Ragnarok Arise')],
+      { 'solo leveling': ['나 혼자만 레벨업'], 'ragnarok arise': ['나 혼자만 레벨업 2'] },
+    );
+    expect(index.list()).toHaveLength(2);
+    // والعنوان الأصلي نفسه بلا رقم عند المصدرين يبقى دليل دمج كما كان
+    const same = build([entry('teamx', 'World Extinction War'), entry('mangaswat', 'World Destruction War')],
+      { 'world extinction war': ['세계멸망전'], 'world destruction war': ['세계멸망전'] });
+    expect(same.list()).toHaveLength(1);
+  });
+});
+
+describe('ID1/ID2: one confirmed AniList id is one card, behind two guards', () => {
+  const withIds = (entries, ids, aliases = {}) => {
+    const index = canonicalIndex({ aliases: new Map(Object.entries(aliases)), officialIds: new Map(Object.entries(ids)) });
+    for (const e of entries) index.add(e);
+    return index;
+  };
+  it('the owner’s case: three source titles of work 214315 become one card', () => {
+    const index = withIds(
+      [entry('teamx', 'Until No Demon Remains'), entry('mangaswat', 'Myeolgwisudojeon'), entry('azora', 'Chronicles of the Demon-Slaying Ascetic')],
+      { 'until no demon remains': 214315, myeolgwisudojeon: 214315, 'chronicles of the demon slaying ascetic': 214315 },
+    );
+    expect(index.list()).toHaveLength(1);
+    expect(index.list()[0].editions).toHaveLength(3);
+  });
+  it('guard 1: one source showing both as separate works blocks the merge', () => {
+    const index = withIds([entry('teamx', 'Story Alpha'), entry('teamx', 'Story Beta')], { 'story alpha': 77, 'story beta': 77 });
+    expect(index.list()).toHaveLength(2);
+    expect(index.rejected.join(' ')).toContain('معرّف رسمي 77');
+  });
+  it('guard 2: an ambiguous AniList search (two works carry the name) or a novel gives no identity', async () => {
+    const { matchMangaIdentity } = await import('./manga-meta.js');
+    const a = { id: 1, format: 'MANHWA', title: { english: 'The Hero' }, synonyms: [] };
+    const b = { id: 2, format: 'MANGA', title: { romaji: 'The Hero' }, synonyms: [] };
+    expect(matchMangaIdentity('The Hero', [a, b])).toBeNull();
+    expect(matchMangaIdentity('The Hero', [{ ...a, format: 'NOVEL' }])).toBeNull();
+    expect(matchMangaIdentity('Myeolgwisudojeon', [{ id: 214315, format: 'MANHWA', title: { romaji: 'Myeolgwisudojeon', english: 'Until No Demon Remains', native: '멸귀수도전' }, synonyms: ['The Tale of Cultivation'] }]))
+      .toEqual({ id: 214315, names: ['Myeolgwisudojeon', 'Until No Demon Remains', '멸귀수도전', 'The Tale of Cultivation'] });
+  });
+});
+
+describe('ID4: the index honours a user split over every kind of evidence', () => {
+  it('two works the user separated stay two cards even with a shared official id', () => {
+    const index = canonicalIndex({ officialIds: new Map([['story alpha', 5], ['story gamma', 5]]), separate: new Set(['story alpha|story gamma']) });
+    index.add(entry('teamx', 'Story Alpha'));
+    index.add(entry('azora', 'Story Gamma'));
+    expect(index.list()).toHaveLength(2);
+    expect(index.rejected.join(' ')).toContain('فصلهما المستخدم');
+  });
+});

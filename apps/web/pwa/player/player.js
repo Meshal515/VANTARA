@@ -26,7 +26,7 @@ import { createTogetherPlayer } from './together-player.js';
 import { createVideoOffsetControls } from '../../lib/together/offset-controls.js';
 import { connectionLabel } from '../../v35/together.js';
 import { renderLobby, pendingInvitees } from './together-lobby.js';
-import { sectionAccent } from '../../lib/together/lobby.js';
+import { sectionAccent, serverKey, hostServerSuggestion } from '../../lib/together/lobby.js';
 import { episodeLine, mediaKind, resolveArt } from '../../lib/together/art.js';
 import { activeSegment, loadSkipTimes, skipStatusText } from './skip-times.js';
 
@@ -43,7 +43,9 @@ const WARMUP_WINDOW_MS = 4 * 60_000;
 const VOLUME_KEY = 'vantara.player.volume';
 
 /** يجهّز الحلقة التالية الآن؟ نفس شرط الـAPK. */
-export const shouldWarmNext = (durationMs, positionMs) => durationMs > 0 && positionMs >= 0 && positionMs < durationMs && durationMs - positionMs <= WARMUP_WINDOW_MS;
+/** في الغرفة: قبل النهاية بثلاث دقائق (قرار المالك، 19 نوفمبر: «دقيقتين إلى ثلاث»)، وكل عضو بسيرفره وجودته. */
+export const ROOM_WARMUP_WINDOW_MS = 3 * 60_000;
+export const shouldWarmNext = (durationMs, positionMs, windowMs = WARMUP_WINDOW_MS) => durationMs > 0 && positionMs >= 0 && positionMs < durationMs && durationMs - positionMs <= windowMs;
 
 /** اختصارات الكيبورد في الكمبيوتر — مصدر واحد للتنفيذ ولورقة «الاختصارات». */
 export const SHORTCUTS = [
@@ -397,8 +399,10 @@ export function openPlayer(args) {
         tg?.repaint();
       });
     };
+    // سيرفرات المضيف التي رفضها العضو («لا»): لا يُعاد اقتراحها
+    const declinedServers = new Set();
     tg = createTogetherPlayer({ room: together.session.room, mode: together.session.mode, mediaPrefix: together.mediaPrefix, video,
-      episode: () => state.episode, source: () => state.current?.code ?? null,
+      episode: () => state.episode, source: () => state.current?.code ?? null, server: () => serverKey(state.current),
       onEpisode: n => { void goEpisode(n, true).catch(() => { tg?.failed(); showError('تعذّر تجهيز الحلقة التي اختارها المضيف'); }); }, message,
       onLobby: (l) => {
         offsetControls?.refresh();
@@ -410,6 +414,10 @@ export function openPlayer(args) {
         refreshArt(episode);
         const media = together.session.media ?? {};
         const c = state.current;
+        // سيرفر المضيف متوفر عندك جاهزًا وأنت على غيره: إشعار ثابت «نعم/لا» (قرار المالك، 19 نوفمبر)
+        const routes = [...(sessionOf(state.session)?.routes?.values() ?? [])].filter((r) => r.state === 'READY');
+        const suggestion = l.selectingSource ? null : hostServerSuggestion({ roster: l.roster, me: l.me, mine: serverKey(c),
+          available: routes.map((r) => ({ id: r.id, key: serverKey(r), label: r.code })), declined: declinedServers });
         renderLobby(lobby, {
           ...l,
           roster: l.roster.map(r => ({ ...r, avatarKey: r.avatarKey || hub.person(r.userId)?.avatarKey || null })),
@@ -421,11 +429,20 @@ export function openPlayer(args) {
           connectionText: connectionLabel(l.connection),
           pending: pendingInvitees(l.invited, l.roster, l.me, (id) => hub.person(id)),
           server: c ? { code: c.code, quality: fmtQ(c.quality ?? currentHeight()) } : null,
+          suggestion,
         }, {
           avatar: (p, size) => hub.avatar(p, size),
           start: l.start,
           resume: l.resume,
           changeServer: () => showServers(),
+          acceptSuggestion: () => {
+            if (!suggestion) return;
+            declinedServers.add(suggestion.key);
+            const r = sessionOf(state.session)?.routes?.get(suggestion.id);
+            const pick = r?.candidates?.map((id) => sessionOf(state.session)?.cands.get(id)).find(Boolean);
+            if (pick) void playFrom(pick.id, Math.round((video.currentTime || 0) * 1000));
+          },
+          declineSuggestion: () => { if (suggestion) declinedServers.add(suggestion.key); tg?.refreshLobby?.(); },
           leave: () => closePlayer(),
           setOffset: (ms) => { const v = tg?.setOffset(ms) ?? 0; message(v ? `ديلاي فيديوك ${v > 0 ? '+' : '−'}${Math.abs(v / 1000).toFixed(1)} ث` : 'بدون ديلاي', 1200); },
         });
@@ -643,8 +660,9 @@ export function openPlayer(args) {
 
   // ── الحلقة التالية تُجهَّز في آخر 4 دقائق (NextEpisodeWarmup في الـAPK) ──
   function maybeWarmNext() {
-    if (state.warm || !state.started || isLast() || tg || !Number.isFinite(video.duration)) return;
-    if (!shouldWarmNext(video.duration * 1000, (video.currentTime || 0) * 1000)) return;
+    // داخل الغرفة أيضًا (كان معطّلًا فيها فينتظر الكل عند كل حلقة): الحلقة التالية تُجهَّز مسبقًا لكل عضو بسيرفره
+    if (state.warm || !state.started || isLast() || !Number.isFinite(video.duration)) return;
+    if (!shouldWarmNext(video.duration * 1000, (video.currentTime || 0) * 1000, tg ? ROOM_WARMUP_WINDOW_MS : undefined)) return;
     const n = state.episode + 1;
     const copies = nextEpisodeCopies(args.copies, n, { ...args.subtitleIdentity, episode: n });
     if (!copies.length || (state.total > 0 && n > state.total)) return;

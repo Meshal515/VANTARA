@@ -137,6 +137,8 @@ export function unitLabel(item) {
   return u.season > 0 && item?.section === 'cinema' ? `م${u.season} · ${ep}` : ep;
 }
 
+const realUrl = (u) => (typeof u === 'string' && /^https?:\/\//i.test(u) && !/^(blob|data|file|content):|_capacitor_file_/i.test(u) ? u : null);
+
 /** تطبيع مواصفات عنصر جديد قبل دخوله الطابور. يرمي إن نقصه ما لا يُنزَّل بدونه. */
 export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
   const section = SECTIONS.includes(spec?.section) ? spec.section : null;
@@ -155,9 +157,10 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
     work: {
       ref: String(ref),
       title: String(spec.work.title ?? ''),
-      cover: spec.work.cover ?? null,
-      banner: spec.work.banner ?? null,
-      logo: spec.work.logo ?? null,
+      // روابط حقيقية فقط: صفحة فُتحت من «على الجهاز» صورها blob: مؤقتة تموت بالإغلاق (بلاغ المالك، 20 نوفمبر)
+      cover: realUrl(spec.work.cover),
+      banner: realUrl(spec.work.banner),
+      logo: realUrl(spec.work.logo),
       color: spec.work.color ?? null,
       // مصدر غلاف المانجا: يُجلب بعميله وترويساته (الطلب المباشر من الواجهة يرفضه الموقع)
       coverSource: spec.work.coverSource ?? null,
@@ -204,6 +207,12 @@ export function createItem(spec, { now = Date.now(), order = 0 } = {}) {
 
 const ts = (item) => item.finishedAt ?? item.updatedAt ?? item.createdAt ?? 0;
 
+// DLX1: هوية العمل في «على الجهاز» بفئته لا بمرجعه الحرفي: بعد دمج بطاقتين صار للعمل مرجعان فظهر مرتين. الواجهة تضبط
+// الفئة (canonicalRefOf للمانجا)؛ بلا ضبط كل مرجع عمل مستقل كما كان. لا يتغير مرجع أي عنصر محفوظ.
+let workGroup = (ref) => ref;
+export function setWorkGroup(fn) { workGroup = typeof fn === 'function' ? fn : (ref) => ref; }
+export const sameWork = (a, b) => a === b || workGroup(a) === workGroup(b);
+
 /**
  * «على الجهاز»: بطاقة لكل عمل فيه عنصر جاهز واحد على الأقل. الفاشل لا يُحسب محتوى محفوظًا،
  * والعمل الذي حُذف آخر عناصره يختفي. الأحدث نشاطًا أولًا.
@@ -214,10 +223,11 @@ export function onDeviceWorks(items, { section = 'all' } = {}) {
     if (item.state !== STATES.ready) continue;
     if (section !== 'all' && item.section !== section) continue;
     const ref = item.work.ref;
-    let w = works.get(ref);
+    const group = workGroup(ref);
+    let w = works.get(group);
     if (!w) {
       w = { ref, section: item.section, kind: item.kind, work: item.work, count: 0, bytes: 0, at: 0 };
-      works.set(ref, w);
+      works.set(group, w);
     }
     w.count++;
     w.bytes += Number(item.storage?.bytes ?? item.bytes ?? 0) || 0;
@@ -245,7 +255,7 @@ export function countText(kind, n) {
  * المسلسل يُقسَّم بالمواسم التي فيها تنزيلات فقط. لا عناصر معتمة لما لم يُنزَّل.
  */
 export function localWork(items, ref) {
-  const mine = (items ?? []).filter((i) => i.work.ref === ref);
+  const mine = (items ?? []).filter((i) => sameWork(i.work.ref, ref));
   const ready = mine.filter((i) => i.state === STATES.ready);
   const pending = mine.filter((i) => i.state !== STATES.ready);
   const byNumber = (a, b) => (a.unit.season ?? 0) - (b.unit.season ?? 0) || (a.unit.number ?? Infinity) - (b.unit.number ?? Infinity) || String(a.unit.key).localeCompare(String(b.unit.key));

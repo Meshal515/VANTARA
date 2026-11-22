@@ -21,16 +21,28 @@ import java.util.Base64
 
 internal object SourceCompatRepairs {
 
-    suspend fun loadChapters(source: CatalogueSource, manga: SManga): List<SChapter> {
-        if (source.name == "Hizo Manga" && source is HttpSource) {
-            return loadHizo(source, manga).chapters
+    /**
+     * SR1: كان إصلاح «Hizo Manga» يُطبَّق بالاسم المعروض دائمًا، فلا يُنفَّذ كود الإضافة أبدًا ولو حدّثها صاحبها
+     * وأصلحها. الآن كود الإضافة أولًا (كـDilar وMangaDar)، والإصلاح احتياط فقط حين يفشل أو يرجع فارغًا؛ فيسقط
+     * وحده حين تُحدَّث الإضافة وتعمل. وسبب فشل الإضافة نفسها يبقى الأدق إن فشل الاحتياط أيضًا.
+     */
+    private fun isHizo(source: CatalogueSource) = source.name == "Hizo Manga" && source is HttpSource
+
+    internal suspend fun <T> ownFirst(own: suspend () -> T, usable: (T) -> Boolean, repair: suspend () -> T): T {
+        val first = runCatching { own() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        first.getOrNull()?.let { if (usable(it)) return it }
+        return try { repair() } catch (failure: Throwable) {
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            throw (first.exceptionOrNull() ?: failure).apply { if (this !== failure) addSuppressed(failure) }
         }
-        return source.getMangaUpdate(
-            manga = manga,
-            chapters = emptyList(),
-            fetchDetails = false,
-            fetchChapters = true,
-        ).chapters
+    }
+
+    suspend fun loadChapters(source: CatalogueSource, manga: SManga): List<SChapter> {
+        val own: suspend () -> List<SChapter> = {
+            source.getMangaUpdate(manga = manga, chapters = emptyList(), fetchDetails = false, fetchChapters = true).chapters
+        }
+        if (isHizo(source)) return ownFirst(own, { it.isNotEmpty() }) { loadHizo(source as HttpSource, manga).chapters }
+        return own()
     }
 
     /**
@@ -40,16 +52,16 @@ internal object SourceCompatRepairs {
      * لنفس العمل. وHizo وحده يُخدم من صفحته مباشرة كما في [loadChapters].
      */
     suspend fun loadSeries(source: CatalogueSource, manga: SManga): SMangaUpdate {
-        if (source.name == "Hizo Manga" && source is HttpSource) {
-            val payload = loadHizo(source, manga)
-            return SMangaUpdate(payload.manga, payload.chapters)
+        val own: suspend () -> SMangaUpdate = {
+            source.getMangaUpdate(manga = manga, chapters = emptyList(), fetchDetails = true, fetchChapters = true)
         }
-        return source.getMangaUpdate(
-            manga = manga,
-            chapters = emptyList(),
-            fetchDetails = true,
-            fetchChapters = true,
-        )
+        if (isHizo(source)) {
+            return ownFirst(own, { it.chapters.isNotEmpty() }) {
+                val payload = loadHizo(source as HttpSource, manga)
+                SMangaUpdate(payload.manga, payload.chapters)
+            }
+        }
+        return own()
     }
 
     suspend fun loadDetails(
@@ -57,15 +69,11 @@ internal object SourceCompatRepairs {
         manga: SManga,
         knownChapters: List<SChapter>,
     ): SManga {
-        if (source.name == "Hizo Manga" && source is HttpSource) {
-            return loadHizo(source, manga).manga
+        val own: suspend () -> SManga = {
+            source.getMangaUpdate(manga = manga, chapters = knownChapters, fetchDetails = true, fetchChapters = false).manga
         }
-        return source.getMangaUpdate(
-            manga = manga,
-            chapters = knownChapters,
-            fetchDetails = true,
-            fetchChapters = false,
-        ).manga
+        if (isHizo(source)) return ownFirst(own, { runCatching { it.title.isNotBlank() }.getOrDefault(false) }) { loadHizo(source as HttpSource, manga).manga }
+        return own()
     }
 
     suspend fun loadPages(source: CatalogueSource, chapter: SChapter): List<Page> {

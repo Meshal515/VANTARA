@@ -21,8 +21,9 @@ const edition = (source, al, manga) => ({ sourceId: `${P}.${source}`, label: sou
 export function simulate(works, scenario = 'full') {
   const entries = [];
   const aliases = new Map();
-  const withDex = scenario === 'mangadex' || scenario === 'full';
-  const withDetails = scenario === 'details' || scenario === 'full';
+  const withDex = scenario === 'mangadex' || scenario === 'full' || scenario === 'ids';
+  const withDetails = scenario === 'details' || scenario === 'full' || scenario === 'ids';
+  const withIds = scenario === 'ids';
   for (const w of works) {
     const [en, romaji, native] = w.t;
     const main = en || romaji;
@@ -41,7 +42,22 @@ export function simulate(works, scenario = 'full') {
       if (key && names.length) aliases.set(key, [...new Set([...(aliases.get(key) ?? []), ...names])]);
     }
   }
-  return { entries, aliases };
+  // «المعرّف الرسمي» (ID1) كما يتعلّمه الجهاز من بحث AniList: اسم البطاقة يطابق أسماء عمل واحد بالضبط في AniList
+  // (الغموض لا دليل، matchMangaIdentity). الحقيقة الأرضية نفسها لا تُعطى للفهرس: يُحسب من الأسماء وحدها
+  const officialIds = new Map();
+  if (withIds) {
+    const owners = new Map();
+    for (const w of works) for (const n of new Set([...w.t, ...(w.s ?? [])].map(normalizeTitle).filter(Boolean))) {
+      if (!owners.has(n)) owners.set(n, new Set());
+      owners.get(n).add(w.al);
+    }
+    for (const e of entries) {
+      const own = normalizeTitle(e.manga.title);
+      const ids = owners.get(own);
+      if (ids?.size === 1) officialIds.set(own, [...ids][0]);
+    }
+  }
+  return { entries, aliases, officialIds };
 }
 
 /**

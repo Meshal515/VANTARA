@@ -263,10 +263,17 @@ object RepoIndex {
         }
     }
 
-    /** المصادر التي تظهر في التطبيق: العربية إن وُجدت، وإلا مصادر لغة الإضافة. */
+    /**
+     * المصادر التي تظهر في التطبيق: العربية إن وُجدت، وإلا مصادر لغة الإضافة. حزمة متعددة اللغات بلا عربي (`all`): كان
+     * يُؤخذ أول مصدر بترتيب الفهرس (عشوائي بين الإصدارات)، والآن اختيار ثابت معلن (UE1): الإنجليزية، وإلا أصغر رمز لغة.
+     */
     fun visibleSources(ext: Extension): List<Source> =
         ext.sources.filter { it.lang.equals("ar", ignoreCase = true) }.ifEmpty {
-            ext.sources.filter { it.lang.equals(ext.lang, ignoreCase = true) }.ifEmpty { ext.sources.take(1) }
+            ext.sources.filter { it.lang.equals(ext.lang, ignoreCase = true) }.ifEmpty {
+                ext.sources.filter { it.lang.equals("en", ignoreCase = true) }.ifEmpty {
+                    ext.sources.minByOrNull { "${it.lang.lowercase()}|${it.id}" }?.let(::listOf).orEmpty()
+                }
+            }
         }
 }
 
@@ -351,6 +358,11 @@ data class UserExtensionState(
     val extensions: List<UserExtension> = emptyList(),
     /** Hides only the old optional catalogue; installed packages and account choices are retained. */
     val readyCatalogDismissed: Boolean = false,
+    /**
+     * حزم كانت مدمجة ورُحّلت (BuiltinMigration) أو ثُبّتت/حُذفت كإضافة: لها حالة واحدة بعدها، مثبّتة أو لا، ومسار
+     * المدمجة لها مغلق فلا تعود وحدها بعد حذفها.
+     */
+    val formerBuiltins: List<String> = emptyList(),
 )
 
 /** الحالة في ملف خاص بالتطبيق؛ الكتابة ذرّية فلا يفسدها إغلاق مفاجئ. */
@@ -358,6 +370,8 @@ class UserExtensionStore(private val file: File) {
     private val shared = open(file)
 
     val state: UserExtensionState get() = shared.state
+    /** ES1: نسخة الحالة التالفة التي نُقلت جانبًا عند الإقلاع، أو null. */
+    val quarantined: File? get() = shared.quarantined
 
     class InstallToken internal constructor(
         internal val owner: UserExtensionStore,
@@ -439,8 +453,19 @@ class UserExtensionStore(private val file: File) {
         val storage = ExtensionStateFile(file)
         val packageRevisions = mutableMapOf<String, Long>()
         val repositoryRevisions = mutableMapOf<String, Long>()
-        @Volatile var state = storage.read(UserExtensionState()) { json.decodeFromString<UserExtensionState>(it) }
+        /** ES1: مسار نسخة الحالة التالفة إن نُقلت جانبًا عند الإقلاع (لإعلام المستخدم مرة)، وإلا null. */
+        @Volatile var quarantined: File? = null
+        @Volatile var state = try {
+            storage.read(UserExtensionState()) { json.decodeFromString<UserExtensionState>(it) }
+        } catch (unreadable: IllegalStateException) {
+            quarantined = storage.quarantine()
+            UserExtensionState()
+        }
 
+        /**
+         * قراءة صارمة: ملف تالف أثناء العمل يرمي ولا يُكتب فوقه بنسخة الذاكرة القديمة (لا يُستبدل ما لا يُقرأ بلقطة
+         * قديمة، UserRepositoryRemovalTest). الإقلاع وحده يتسامح (ES1، في init أعلاه)، ونداءات الواجهة تلتقط الخطأ.
+         */
         fun refresh() {
             accept(storage.read(state) { json.decodeFromString<UserExtensionState>(it) })
         }

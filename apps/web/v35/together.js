@@ -117,7 +117,19 @@ export function stripPeople(roster, max = 3) {
 export function createTogether(deps) {
   const join = deps.joinRoomImpl ?? joinRoom;
   const create = deps.createRoomImpl ?? createRoom;
-  const info = deps.roomInfoImpl ?? roomInfo;
+  const rawInfo = deps.roomInfoImpl ?? roomInfo;
+  // CH3: كل رسم للمحادثة كان يطلق roomInfo لكل بطاقة دعوة. حالة الغرفة تُحفظ 30 ث لكل رمز (والفشل لا يُحفظ)
+  const infoCache = new Map();
+  const INFO_TTL_MS = 30_000;
+  const cachedInfo = (opts) => {
+    const hit = infoCache.get(opts.code);
+    if (hit && Date.now() - hit.at < INFO_TTL_MS) return hit.promise;
+    const promise = Promise.resolve().then(() => rawInfo(opts));
+    infoCache.set(opts.code, { at: Date.now(), promise });
+    promise.catch(() => { if (infoCache.get(opts.code)?.promise === promise) infoCache.delete(opts.code); });
+    if (infoCache.size > 200) infoCache.delete(infoCache.keys().next().value);
+    return promise;
+  };
   const token = () => deps.sync.authorizationHeader?.replace(/^Bearer\s+/i, '') ?? null;
   const listeners = new Set();
   let session = null;
@@ -229,12 +241,14 @@ export function createTogether(deps) {
     return true;
   }
 
-  function leave() {
+  // explicit: المستخدم ضغط «اطلع من الغرفة» (لا طرد ولا انتقال لغرفة أخرى): تُرسل «bye» فتنتقل الاستضافة فورًا
+  function leave(explicit = false) {
     if (!session) return;
     const s = session;
     session = null;
     for (const off of s.offs) off();
-    s.room.close();
+    if (explicit && typeof s.room.leave === 'function') s.room.leave();
+    else s.room.close();
     for (const node of s.strips) node.replaceChildren();
     emit();
   }
@@ -386,7 +400,7 @@ export function createTogether(deps) {
     body.append(cover, text);
     wrap.append(top, body, enter);
     // من لم يُدعَ للغرفة يرد الخادم عليه 403: البطاقة تبقى كما هي بلا خطأ صامت في الخلفية
-    void info({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).catch(() => undefined).then((r) => {
+    void cachedInfo({ baseUrl: deps.baseUrl(), token: token(), code: row.code }).catch(() => undefined).then((r) => {
       if (r === undefined) return;
       alive = r != null;
       if (!r) {
@@ -558,7 +572,7 @@ export function createTogether(deps) {
           const mode = s.room.info?.mode ?? s.mode;
           actions.append(button('tg-action', `${glyph('refresh', { size: 18 })}<span>${mode === 'sync' ? 'حوّلها منفصلة' : 'حوّلها متزامنة'}</span>`, () => s.room.setMode(mode === 'sync' ? 'free' : 'sync')));
         }
-        actions.append(button('tg-action tg-leave', `${glyph('back', { size: 18 })}<span>اطلع من الغرفة</span>`, () => { ui().closeSheet(); leave(); ui().toast('طلعت من الغرفة'); }));
+        actions.append(button('tg-action tg-leave', `${glyph('back', { size: 18 })}<span>اطلع من الغرفة</span>`, () => { ui().closeSheet(); leave(true); ui().toast('طلعت من الغرفة'); }));
       };
       paint();
       const offs = [s.room.on('roster', paint), s.room.on('room', paint), s.room.on('connection', paint), s.room.on('state', paint)];
@@ -583,7 +597,7 @@ export function createTogether(deps) {
     card,
     mountStrip,
     openPanel,
-    leave,
+    leave: () => leave(true),
     /** هل الجلسة النشطة لهذا العمل (و/أو هذه الحلقة)؟ */
     matches(seriesRef, episode = null) {
       const m = session?.room.timeline?.media ?? session?.media;
@@ -646,7 +660,7 @@ export function createTogether(deps) {
       let mode = row?.mode;
       // إشعار سبق المزامنة: نقرأ الحلقة من الغرفة نفسها.
       if (!media) {
-        const r = await info({ baseUrl: deps.baseUrl(), token: token(), code }).catch(() => null);
+        const r = await rawInfo({ baseUrl: deps.baseUrl(), token: token(), code }).catch(() => null);
         if (!r) return ui().toast('انتهت الغرفة أو ما عاد لها وجود');
         media = mediaFromRoom(r);
         mode = r.mode ?? r.room?.mode ?? 'sync';

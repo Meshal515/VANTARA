@@ -155,9 +155,23 @@ export function titlesMatch(a, b) {
  * أول عدد في النص: «Chapter 330 - القوات الخاصة» ← 330، و«1288.5» ←
  * 1288.5، و«الفصل ٣٣٠» ← 330 بعد طيّ الأرقام.
  */
-export function parseChapterNumber(name) {
+// RD7: «أول عدد في الاسم» كان يقرأ «Vol.3 Ch.25» ← 3، و«Season 2 Chapter 15» ← 2، و«الموسم 2 الفصل 7» ← 2، فتتساوى
+// فصول مختلفة برقم واحد ويُسقطها الدمج. الآن: الرقم بعد علامة الفصل أولًا (ch، chapter، الفصل، فصل، 第…話/章)، وإلا يُحذف
+// المجلد والموسم والجزء برقمها ثم أول رقم يبقى. الكسور (10.5) مدعومة. تنفيذ مستقل على فكرة ChapterRecognition في Mihon.
+const CHAPTER_MARK = /(?:\bch(?:apter|ap)?\.?|\bep(?:isode)?\.?|\bep\b|الفصل|فصل|الحلقة|第)\s*#?\s*(\d+(?:\.\d+)?)/iu;
+const VOLUME_MARK = /(?:\bvol(?:ume)?\.?|\bv\.|\bseason|\bs(?=\d)|\bpart|المجلد|مجلد|الموسم|موسم|الجزء|جزء|第\s*\d+\s*[巻部季])\s*#?\s*\d+(?:\.\d+)?/giu;
+/** القراءة القديمة (أول عدد في الاسم) كما كُتبت بها مفاتيح العلامات قبل RD7: لقراءة العلامات القديمة لا للعرض. */
+export function legacyChapterNumber(name) {
 	if (typeof name !== 'string') return -1;
 	const match = foldDigits(name.normalize('NFKC')).match(/\d+(?:\.\d+)?/);
+	return match ? Number(match[0]) : -1;
+}
+export function parseChapterNumber(name) {
+	if (typeof name !== 'string') return -1;
+	const text = foldDigits(name.normalize('NFKC'));
+	const marked = text.match(CHAPTER_MARK);
+	if (marked) return Number(marked[1]);
+	const match = text.replace(VOLUME_MARK, ' ').match(/\d+(?:\.\d+)?/);
 	return match ? Number(match[0]) : -1;
 }
 
@@ -252,7 +266,10 @@ export function createWorkIndex() {
  * والطلبات: نسخة واحدة تُسأل، والبقية بدائل.
  */
 export const MIRROR_FAMILIES = Object.freeze([['mangalek', 'mangastarz', 'mangaspark', 'mangalink', 'mangalionz']]);
-const slugOfSource = (sourceId) => String(sourceId ?? '').split('@')[0].split('.').pop()?.toLowerCase() ?? '';
+// الحزمة من المعرّف بصيغه الثلاث: `pkg`، `pkg@lang` (التكملة)، `pkg#sourceId` (إضافة من مستودع). كان «#رقم» يبقى ملتصقًا
+// باسم الموقع («mangastarz#123»)، فمرايا مانجا ليك المثبّتة من المستودع لا تُعرف عائلة واحدة
+export const sourcePackage = (sourceId) => String(sourceId ?? '').split('#')[0].split('@')[0];
+const slugOfSource = (sourceId) => sourcePackage(sourceId).split('.').pop()?.toLowerCase() ?? '';
 export function mirrorFamily(sourceId) {
 	const slug = slugOfSource(sourceId);
 	return MIRROR_FAMILIES.find((f) => f.includes(slug))?.[0] ?? String(sourceId);
@@ -340,7 +357,9 @@ export function originalTitle(raw) {
 	const text = String(raw ?? '').normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu, '');
 	const chars = text.match(ORIGINAL_SCRIPT) ?? [];
 	if (chars.length < 4 || chars.length < text.length * 0.8) return null;
-	return chars.join('');
+	// الأرقام جزء من المفتاح (ID3): كانت تُرمى فيصير «나 혼자만 레벨업» و«나 혼자만 레벨업 2» مفتاحًا واحدًا فيُدمج
+	// الجزء الثاني بالأول. الأحرف الأصلية والأرقام بترتيبها؛ «第2部» و«시즌2» أحرفهما أصلية أصلًا
+	return (text.match(new RegExp(`${ORIGINAL_SCRIPT.source}|\\d`, 'gu')) ?? []).join('');
 }
 
 /**
@@ -440,7 +459,7 @@ function preparedAliases(aliases) {
 	return hit;
 }
 
-export function canonicalIndex({ aliases = new Map() } = {}) {
+export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set(), editionRefOf = null } = {}) {
 	const entries = [];
 	const rejected = [];
 	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
@@ -463,12 +482,16 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 		rejected.length = 0;
 		const parent = new Map();
 		const families = new Map(); // جذر ← Map<عائلة، Set<مفتاح>>
+		// جذر ← معرّفاته الرسمية المؤكدة. معرّفان مختلفان في بطاقة واحدة = دمج خاطئ مؤكد (الخطة ب): يُرفض أيًّا كان الدليل
+		const officials = new Map();
 		const nodes = new Set();
 		const touch = (k) => {
 			if (!nodes.has(k)) {
 				nodes.add(k);
 				parent.set(k, k);
 				families.set(k, new Map());
+				const id = officialIds.get(k);
+				officials.set(k, Number.isSafeInteger(id) ? new Set([id]) : new Set());
 			}
 		};
 		const find = (k) => {
@@ -509,7 +532,24 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 				rejected.push(`«${a}» ≠ «${b}» (${why}): ${family} يعرضهما عملين`);
 				return false;
 			}
+			// فصلهما المستخدم (ID4): لا دليل يعيد دمجهما
+			if (separate.size) {
+				const keysOf = (r) => [r, ...[...families.get(r).values()].flatMap((set) => [...set])];
+				const ka = keysOf(ra);
+				const kb = keysOf(rb);
+				if (ka.some((x) => kb.some((y) => separate.has(x < y ? `${x}|${y}` : `${y}|${x}`)))) {
+					rejected.push(`«${a}» ≠ «${b}» (${why}): فصلهما المستخدم`);
+					return false;
+				}
+			}
+			const ids = new Set([...officials.get(ra), ...officials.get(rb)]);
+			if (ids.size > 1) {
+				rejected.push(`«${a}» ≠ «${b}» (${why}): معرّفان رسميان مختلفان (${[...ids].sort((x, y) => x - y).join(' ≠ ')})`);
+				return false;
+			}
 			parent.set(rb, ra);
+			officials.set(ra, ids);
+			officials.delete(rb);
 			for (const [f, keys] of families.get(rb)) {
 				if (!families.get(ra).has(f)) families.get(ra).set(f, new Set());
 				for (const k of keys) families.get(ra).get(f).add(k);
@@ -519,6 +559,17 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 		};
 
 		const entryKeys = [...new Set(entries.map((e) => e.own))].sort();
+		// 0) الهوية (الخطة ب): نسخة رُبطت بعملها بدليل موثَّق (صفحة العمل، اسمها في صفحة المصدر، معرّف رسمي) تنضم إليه
+		// في كل قائمة، مهما اختلف عنوانها. الحراس نفسها فوقها: مصدر يعرضهما عملين، فصل المستخدم، معرّفان مختلفان
+		const linkTargets = new Set();
+		if (editionRefOf) {
+			for (const e of [...entries].sort((x, y) => (x.own < y.own ? -1 : x.own > y.own ? 1 : 0))) {
+				const target = String(editionRefOf(e.entry) ?? '').replace(/^ext:/, '') || null;
+				if (!target) continue;
+				touch(target);
+				if (union(target, e.own, 'هوية')) linkTargets.add(target);
+			}
+		}
 		// 1) توائم العناوين: نفس المفتاح المرن
 		const byLoose = new Map();
 		for (const k of entryKeys) {
@@ -607,6 +658,19 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 			}
 		}
 
+		// 5) المعرّف الرسمي المؤكد (ID1): بطاقتان طابق اسماهما عمل AniList نفسه مطابقة غير غامضة (manga-meta
+		// matchMangaIdentity) عمل واحد. حارس «مصدر يعرضهما عملين» داخل union نفسه: يرفض ويُسجَّل في rejected
+		const byOfficial = new Map();
+		for (const k of entryKeys) {
+			const id = officialIds.get(k);
+			if (!Number.isSafeInteger(id)) continue;
+			if (!byOfficial.has(id)) byOfficial.set(id, []);
+			byOfficial.get(id).push(k);
+		}
+		for (const [id, list] of [...byOfficial].sort(([a], [b]) => a - b)) {
+			for (let i = 1; i < list.length; i++) union(list[0], list[i], `معرّف رسمي ${id}`);
+		}
+
 		// البطاقات: مكوّن لكل جذر، بمفتاح ثابت
 		const members = new Map();
 		for (const k of nodes) {
@@ -616,11 +680,12 @@ export function canonicalIndex({ aliases = new Map() } = {}) {
 		}
 		const repOf = new Map();
 		for (const [r, keys] of members) {
-			const rank = (k) => [staticOwners.has(k) ? 0 : 1, -(pointed.get(k) ?? 0), -k.length];
+			// مرجع عمل مربوط (فتحته وربطت نسخه) يبقى مفتاح بطاقته: لا يتبدل مرجع ما كُتبت به بياناتك
+			const rank = (k) => [linkTargets.has(k) ? 0 : 1, staticOwners.has(k) ? 0 : 1, -(pointed.get(k) ?? 0), -k.length];
 			const rep = [...keys].sort((a, b) => {
 				const ra = rank(a);
 				const rb = rank(b);
-				return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || (a < b ? -1 : a > b ? 1 : 0);
+				return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2] || ra[3] - rb[3] || (a < b ? -1 : a > b ? 1 : 0);
 			})[0];
 			repOf.set(r, rep);
 		}
@@ -764,6 +829,7 @@ export function isPlaceholderChapter(chapter) {
 export function mergeChapters(editions, { rank = null } = {}) {
 	const byNumber = new Map();
 	const loose = new Map();
+	const extra = [];
 	// `rank` (اختياري): أولوية المصدر، الأصغر أولًا — المصادر الموثوقة تفوز بالفصل
 	// حين تملكه، والبقية تكمل ما ينقصها. التساوي بعدد الفصول كما كان.
 	const tier = (e) => (rank ? rank(e.sourceId) : 0);
@@ -785,11 +851,20 @@ export function mergeChapters(editions, { rank = null } = {}) {
 				if (!loose.has(key)) loose.set(key, row);
 			} else if (!byNumber.has(number)) {
 				byNumber.set(number, row);
+			} else {
+				// المصدر نفسه يسرد فصلين مختلفين برقم واحد (موسمان، «فصل 1» و«فصل 1 الجزء 2»): لا يُسقط الثاني (RD7).
+				// نسخ الفصل نفسه من فرق ترجمة مختلفة (MangaDex) تبقى واحدة: الاسم نفسه أو فريق آخر
+				const first = byNumber.get(number);
+				const sameEdition = first.sourceId === edition.sourceId && first.manga?.url === edition.manga?.url;
+				const otherLink = chapter?.url && first.chapter?.url && chapter.url !== first.chapter.url;
+				const otherName = normalizeTitle(chapter?.name) !== normalizeTitle(first.chapter?.name);
+				const sameTeam = (chapter?.scanlator ?? '') === (first.chapter?.scanlator ?? '');
+				if (sameEdition && otherLink && otherName && sameTeam) extra.push(row);
 			}
 		}
 	}
 
-	const numbered = [...byNumber.values()].sort((a, b) => b.number - a.number);
+	const numbered = [...byNumber.values(), ...extra].sort((a, b) => b.number - a.number);
 	return [...numbered, ...loose.values()];
 }
 

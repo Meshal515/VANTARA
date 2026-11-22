@@ -90,6 +90,18 @@ describe('model', () => {
     expect(onDeviceWorks(items, { section: 'anime' })).toHaveLength(1);
   });
 
+  it('DLX1: two references of one merged work are one on-device card, and opening it shows both', async () => {
+    const { setWorkGroup } = await import('./model.js');
+    const old = { ...createItem({ ...mangaSpec(1), work: { ref: 'ext:solo old name', title: 'Solo' } }), state: 'ready' };
+    const now = { ...createItem(mangaSpec(2)), state: 'ready' };
+    setWorkGroup((ref) => (ref === 'ext:solo old name' ? 'ext:solo' : ref));
+    try {
+      expect(onDeviceWorks([old, now])).toHaveLength(1);
+      expect(localWork([old, now], 'ext:solo').ready).toHaveLength(2);
+    } finally { setWorkGroup(null); }
+    expect(onDeviceWorks([old, now])).toHaveLength(2);
+  });
+
   it('shows only the downloaded chapters of a 150-chapter work, keeping 1, 4, 7 as 1, 4, 7', () => {
     const items = [7, 1, 4].map((n) => ({ ...createItem(mangaSpec(n)), state: 'ready' }));
     const view = localWork(items, 'ext:solo');
@@ -766,4 +778,46 @@ it('records a failed artwork request and recovers it after the backoff without t
   expect(await artUrl(store, work.ref, 'cover')).toMatch(/^blob:/);
   await dropWorkArt(store, work.ref);
   expect(await artUrl(store, work.ref, 'cover')).toBeNull();
+});
+
+// بلاغ المالك (20 نوفمبر): بنرات ومعلومات العمل المحمّل خربت، ومع رجوع الإنترنت لم يرجع البنر
+import { durableUrl as dlDurableUrl, withoutLocalUrls as dlWithoutLocalUrls } from './art.js';
+import { createItem as dlCreateItem } from './model.js';
+describe('downloaded work art never keeps temporary urls', () => {
+  it('drops blob/local urls from saved details and queue items, keeping real links', () => {
+    const snap = { poster: 'blob:https://app/1', background: 'https://images.metahub.space/background/medium/tt1/img',
+      seasons: [{ n: 1, poster: 'http://localhost/_capacitor_file_/x.webp', episodes: [{ n: 1, thumb: 'blob:x', thumbHd: 'https://img/1.jpg' }] }] };
+    const clean = dlWithoutLocalUrls(snap);
+    expect(clean.poster).toBeNull();
+    expect(clean.background).toBe(snap.background);
+    expect(clean.seasons[0].poster).toBeNull();
+    expect(clean.seasons[0].episodes[0]).toEqual({ n: 1, thumb: null, thumbHd: 'https://img/1.jpg' });
+    const item = dlCreateItem({ section: 'cinema', kind: 'movie', work: { ref: 'cinema:tt1', title: 'X', cover: 'blob:a', banner: 'https://b/1.jpg', logo: 'file:///l.png' } });
+    expect(item.work).toMatchObject({ cover: null, banner: 'https://b/1.jpg', logo: null });
+    expect(dlDurableUrl('https://x/y.jpg')).toBe(true);
+    expect(dlDurableUrl('blob:https://x/1')).toBe(false);
+  });
+});
+
+// بلاغ المالك (20 نوفمبر): مشغّل التحميلات يعرض اسم العمل بدل شعاره
+import { artDataUrl as dlArtDataUrl } from './art.js';
+import { readFileSync as dlReadSource } from 'node:fs';
+describe('the downloads player gets the saved logo', () => {
+  it('turns the saved logo into a data url the native player can draw offline', async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+    const store = { getArt: async (key) => (key === 'anime:1|logo' ? { type: 'image/png', data: bytes.buffer } : null) };
+    expect(await dlArtDataUrl(store, 'anime:1', 'logo')).toBe(`data:image/png;base64,${Buffer.from(bytes).toString('base64')}`);
+    expect(await dlArtDataUrl(store, 'anime:1', 'banner')).toBeNull();
+  });
+  it('playItem passes logo, banner and cover to the native player', () => {
+    const src = dlReadSource(new URL('../../v35/downloads.js', import.meta.url), 'utf8');
+    const play = src.slice(src.indexOf('async function playItem'), src.indexOf('function confirmDelete'));
+    expect(play).toContain("saved('logo', item.work.logo)");
+    expect(play).toContain('...(logo ? { logo } : {})');
+    expect(play).toContain('...(backdrop ? { backdrop } : {})');
+    const kt = dlReadSource(new URL('../../../../android/app/src/main/kotlin/com/vantara/downloads/DownloadsPlugin.kt', import.meta.url), 'utf8');
+    // يُحفظ ملفًا بجانب الحلقة ويُمرَّر مساره، لا محتواه (Intent بحد ~1MB)
+    expect(kt).toContain('logo = stageArt("logo")');
+    expect(kt).toContain('val file = File(dir, "art-$kind")');
+  });
 });

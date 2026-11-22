@@ -207,23 +207,65 @@ describe('Together room core', () => {
     expect(of(core.handle('c-b', { t: 'report', pos: 0, state: 'failed', source: 'okru' }, 3_400), 'status')[0]!.msg).toMatchObject({ state: 'failed', source: 'okru' });
   });
 
-  it('the next episode stays in the same room and never starts by itself, even when everyone is ready', () => {
+  it('the next episode of the same work does not re-apply entry readiness (owner decision, 19 Nov): play is not gated', () => {
     const core = room();
     core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:21#5', kind: 'anime', label: '5' } }, 2_500);
+    core.handle('c-host', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:21#5' }, 2_600);
+    core.handle('c-b', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:21#5' }, 2_700);
     core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 3_000);
-    const next = { key: 'anime:frieren:e6', kind: 'anime', label: 'Frieren 6' };
-    core.handle('c-host', { t: 'cmd', op: 'load', media: next }, 1_500_000);
-    expect(core.timeline).toMatchObject({ started: false, autoStart: false, playing: false, pos: 0 });
-    expect(core.timeline.media?.key).toBe(next.key);
-    core.handle('c-host', { t: 'report', pos: 0, state: 'ready', mediaKey: next.key }, 1_503_000);
-    const out = core.handle('c-b', { t: 'report', pos: 0, state: 'ready', mediaKey: next.key }, 1_505_000);
-    expect(of(out, 'state')).toHaveLength(0);
-    expect(core.timeline.started).toBe(false);
+    const out = core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:21#6', kind: 'anime', label: '6' } }, 1_500_000);
+    // الكل «يجهّز» حلقته (للعرض)، لكن الغرفة لا ترجع للوبي
+    expect(core.timeline).toMatchObject({ started: true, playing: false, pos: 0 });
+    expect(of(out, 'roster')[0]!.msg['roster']).toEqual(expect.arrayContaining([expect.objectContaining({ userId: 'u-b', state: 'preparing' })]));
+    // العضو ما زال يجهّز، و«ابدأ» تُقبل: يلحق حين تجهز حلقته
+    const play = core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 1_500_500);
+    expect(of(play, 'denied')).toHaveLength(0);
+    expect(core.timeline).toMatchObject({ started: true, playing: true });
+    // ولا شيء يبدأ وحده
     expect(core.nextDeadline()).toBeNull();
-    expect(core.tick(1_505_000 + 600_000).out).toHaveLength(0);
-    // «ابدأ» من المضيف وحده يبدأ، بعدّ تنازلي مشترك
-    core.handle('c-host', { t: 'cmd', op: 'play', pos: 0, countdownMs: 3_000 }, 1_506_000);
-    expect(core.timeline).toMatchObject({ started: true, playing: true, at: 1_509_000 });
+  });
+
+  it('another work (a season change) is a new lobby: everyone picks a server and gets ready again', () => {
+    const core = room();
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'دحمي', avatarKey: null }, 2_000);
+    core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:21#12', kind: 'anime', label: '12' } }, 2_100);
+    core.handle('c-b', { t: 'report', pos: 0, state: 'ready', mediaKey: 'anime:21#12' }, 2_200);
+    core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 2_500);
+    core.handle('c-host', { t: 'cmd', op: 'load', media: { key: 'anime:99#1', kind: 'anime', label: 'S2' } }, 10_000);
+    expect(core.timeline.started).toBe(false);
+    expect(of(core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 11_000), 'denied')[0]!.msg).toMatchObject({ reason: 'not_ready', waiting: ['دحمي'] });
+  });
+
+  it('entry readiness: an invitee who never entered the lobby is not waited for', () => {
+    const core = room({}, 1_000, ['u-b', 'u-c']);
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.handle('c-b', { t: 'report', pos: 0, state: 'ready', mediaKey: media.key }, 2_500);
+    // u-c مدعو ولم يدخل: لا يُنتظر
+    expect(of(core.handle('c-host', { t: 'cmd', op: 'play', pos: 0 }, 3_000), 'denied')).toHaveLength(0);
+    expect(core.timeline.started).toBe(true);
+  });
+
+  it('the host leaving explicitly hands the room to the oldest member at once; a dropped connection still waits', () => {
+    const core = room();
+    core.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    core.join({ conn: 'c-c', userId: 'u-c', name: 'ج', avatarKey: null }, 3_000);
+    // انقطاع لحظي: الاستضافة لا تنتقل قبل المهلة
+    const dropped = room();
+    dropped.join({ conn: 'c-b', userId: 'u-b', name: 'ب', avatarKey: null }, 2_000);
+    dropped.leave('c-host', 4_000);
+    expect(dropped.settings.hostUserId).toBe(HOST);
+    // ضيف يقول «bye»: لا شيء يتغير
+    expect(core.handle('c-c', { t: 'bye' }, 4_000)).toHaveLength(0);
+    // المضيف يطلع صريحًا: أقدم حاضر (ب) فورًا
+    const out = core.handle('c-host', { t: 'bye' }, 4_500);
+    expect(of(out, 'host')[0]!.msg).toEqual({ t: 'host', userId: 'u-b' });
+    core.leave('c-host', 4_600);
+    expect(core.settings.hostUserId).toBe('u-b');
+    expect(core.hostAwaySince).toBeNull();
+    // المضيف وحده يطلع: لا أحد ينتقل له
+    const alone = room();
+    expect(alone.handle('c-host', { t: 'bye' }, 5_000)).toHaveLength(0);
   });
 
   it('the host cannot start while a guest is not ready on this episode (stale, preparing or failed)', () => {

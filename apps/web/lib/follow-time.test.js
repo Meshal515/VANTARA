@@ -131,3 +131,19 @@ it('native foreground listener accepts a direct handle without requiring .then()
   expect(() => stop()).not.toThrow();
   expect(handle.remove).toHaveBeenCalledTimes(1);
 });
+
+// بلاغ المالك (20 نوفمبر): مسلسل في «السينما» حلقاته 40-60 دقيقة، والإحصائيات تقول ساعة
+it('a cinema series watched in the phone player counts toward daily watch time, not only toward the work', async () => {
+  const cinema = { ...item, id: 'cinema-minute', owner: { userId: 'u1', section: 'cinema', seriesRef: 'cinema:tt1', title: 'Series', coverUrl: null } };
+  let pending = [cinema];
+  globalThis.Capacitor = { Plugins: { FollowTime: {
+    pending: async () => ({ items: pending }),
+    acknowledge: async ({ ids }) => { pending = pending.filter((x) => !ids.includes(x.id)); },
+  } } };
+  const sync = createSync({ baseUrl: 'https://sync.test' });
+  await flushFollowTime(sync);
+  const queue = JSON.parse(store.get('vantara.queue'));
+  const kinds = queue.map((op) => [op.kind ?? op.type, op.payload?.section]);
+  expect(kinds).toContainEqual(['usage.work', 'cinema']);
+  expect(kinds).toContainEqual(['usage.watch', 'cinema']);
+});

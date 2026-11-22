@@ -77,6 +77,14 @@ export const DATA_OWNERSHIP: readonly DataDomainSpec[] = [
     why: 'التقييم في VANTARA إشارة اجتماعية تُعرض للأصدقاء وتُزامَن بين الأجهزة، فمالكه D1. تقييم Uchiyomi الداخلي ليس نفس الحقيقة ولا يُكتب من هنا.',
   },
   {
+    key: 'watch.position',
+    owner: 'D1',
+    mirrors: [],
+    tables: { D1: ['playback_positions'] },
+    retired: {},
+    why: 'موضع التوقف داخل الحلقة أو الفيلم (ANX1). كل جهاز يقيسه ويحفظه محليًا أولًا، وD1 يحمل أحدث قياس بين الأجهزة («الأحدث بوقت القياس يفوز»، لا «الأكبر» كتقدم المانجا). جدول مستقل عن progress فلا يختلط بالمانجا ولا بصندوق Uchiyomi.',
+  },
+  {
     key: 'stats.reading',
     owner: 'D1',
     mirrors: [],

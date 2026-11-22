@@ -1020,6 +1020,27 @@ html.pwa-playing body {
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
 }
 .pwa-player .pl-more[hidden] { display: none; }
+/* اقتراح سيرفر المضيف: إشعار ثابت فوق الشريط حتى يرد العضو (لا يختفي وحده) */
+.pwa-player .pl-suggest {
+  position: absolute;
+  z-index: 4;
+  inset-block-end: 100px;
+  inset-inline-start: 40px;
+  width: min(440px, calc(100% - 48px));
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--pl-accent, #8f5cff) 45%, transparent);
+  background: #121218;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.pwa-player .pl-suggest-text { margin: 0; font-size: 14px; line-height: 1.6; color: #f3f4f8; }
+.pwa-player .pl-suggest-text bdi { font-weight: 700; }
+.pwa-player .pl-suggest-acts { display: flex; gap: 8px; }
+.pwa-player .pl-suggest-acts .pl-go { flex: 1; justify-content: center; }
+.pwa-player .pp-lobby.is-counting .pl-suggest { visibility: hidden; }
 .pwa-player .pl-more, .pwa-player .pl-bar { box-sizing: border-box; }
 .pwa-player .pl-more-row { display: flex; align-items: center; gap: 12px; }
 .pwa-player .pl-more-label { min-width: 0; }
@@ -1110,6 +1131,7 @@ html.pwa-playing body {
   .pwa-player .pl-go, .pwa-player .pl-wait { flex: 1; justify-content: center; text-align: center; height: 52px; border-radius: 999px; padding-inline: 12px; gap: 6px; }
   .pwa-player .pl-wait { display: grid; place-items: center; background: rgba(255, 255, 255, 0.07); }
   .pwa-player .pl-more { inset: auto 16px calc(84px + var(--pl-bottom)); width: auto; }
+  .pwa-player .pl-suggest { inset: auto 16px calc(84px + var(--pl-bottom)); width: auto; }
   .pwa-player .pl-more-row { flex-wrap: wrap; }
   .pwa-player .pl-more-label { flex-basis: 100%; }
   .pwa-player .pl-icon { width: 44px; height: 44px; }

@@ -192,3 +192,20 @@ it('ignores messages and close callbacks belonging to a replaced socket',()=>{
   expect(room.timeline.pos).toBe(20); expect(room.status).toBe('live');
   expect(room.command('seek',{pos:30})).toBe(true); room.close();
 });
+
+describe('explicit leave', () => {
+  it('«اطلع من الغرفة» sends bye before closing, so the host role moves at once; a plain close does not', async () => {
+    const h = harness();
+    await Promise.resolve(); await Promise.resolve();
+    h.sockets[0].open();
+    h.sockets[0].receive(welcome);
+    h.room.leave();
+    expect(h.sockets[0].sent.map((m) => m.t)).toContain('bye');
+    expect(h.sockets[0].readyState).toBe(3);
+    const other = harness();
+    await Promise.resolve(); await Promise.resolve();
+    other.sockets[0].open();
+    other.room.close();
+    expect(other.sockets[0].sent.map((m) => m.t)).not.toContain('bye');
+  });
+});

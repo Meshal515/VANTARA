@@ -116,7 +116,13 @@ export function createRoom(ctx) {
   let lastRead = 0;
   let lastReadKey = null;
   let actionsLayer = null;
+  let actionsKey = null;
   let actionsTimer = null;
+  // CH1: عقدة كل رسالة ببصمة ما تعرضه؛ إعادة الرسم تعيد استعمال ما لم يتغير (لا تُبنى المحادثة كلها مع كل مشاهدة صديق)
+  const nodeCache = new Map();
+  const dayNodes = new Map();
+  // تمرير يضبطه الرسم نفسه (رسالة وصلت) لا يُعد فعل مستخدم يغلق قائمة الأفعال (CH2)
+  let ownScrollAt = 0;
 
   const meta = () => sync.rows('majlis_meta', (m) => m.id === 'main')[0] ?? null;
   const roomName = () => meta()?.name || 'المجلس';
@@ -653,13 +659,28 @@ export function createRoom(ctx) {
     actionsTimer = null;
     actionsLayer?.remove();
     actionsLayer = null;
+    actionsKey = null;
     return true;
+  }
+
+  /**
+   * بصمة ما تعرضه رسالة: صفها، وتجميعها مع جاراتها، وتفاعلاتها، وعملها (للترشيح)، ونص ما ترد عليه. المرسل
+   * (الاسم والصورة) يُغطّى بمسح الكاش كله حين تتغير profiles أو accounts. الإيصالات تُحدَّث وحدها (refreshReaders).
+   */
+  function itemSig(it) {
+    const r = it.row;
+    const extra = [];
+    if (it.type === 'rec' || it.type === 'frame') extra.push(sync.rows('majlis_reactions', (x) => x.target_kind === it.type && x.target_id === r.id && x.emoji).map((x) => [x.user_id, x.emoji]));
+    if (it.type === 'rec') { const w = sync.rows('works', (x) => x.series_ref === r.series_ref)[0]; extra.push(w ? [w.title, w.cover_url] : null); }
+    if (it.type === 'msg' && r.reply_to && !r.deleted) extra.push(snippetOf(r.reply_to)?.text ?? null);
+    return JSON.stringify([it.type, r, it.first, it.last, it.at, it.from === me(), extra]);
   }
 
   function openActions(it, bubble) {
     closeActions();
     // بطاقة الدعوة: زرّها «دخول»، بلا تفاعل ولا حذف
     if (it.type === 'together') return;
+    actionsKey = it.key;
     const r = it.row;
     const mine = it.from === me();
     const canDelete = (mine || kit.isOwner(me())) && !(it.type === 'msg' && r.deleted);
@@ -738,7 +759,7 @@ export function createRoom(ctx) {
 
   function renderList() {
     if (!list) return;
-    if (actionsLayer) closeActions();
+    // CH2: المزامنة لا تغلق قائمة الأفعال تحت الإصبع؛ تُغلق فقط إن اختفت رسالتها نفسها (حُذفت أو أُخفيت)
     const fromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     const items = timeline(sync, me());
     const readState = receiptState(sync);
@@ -748,21 +769,32 @@ export function createRoom(ctx) {
       const d = dayLabel(it.at ?? 0);
       if (d !== day) {
         day = d;
-        nodes.push(el('div', 'mc-day', d));
+        if (!dayNodes.has(d)) dayNodes.set(d, el('div', 'mc-day', d));
+        nodes.push(dayNodes.get(d));
       }
-      nodes.push(itemNode(it, readState));
+      const sig = itemSig(it);
+      const cached = nodeCache.get(it.key);
+      const node = cached?.sig === sig ? cached.node : itemNode(it, readState);
+      if (cached?.node !== node) nodeCache.set(it.key, { sig, node });
+      nodes.push(node);
     }
+    const live = new Set(items.map((it) => it.key));
+    for (const key of nodeCache.keys()) if (!live.has(key)) nodeCache.delete(key);
+    if (actionsLayer && actionsKey && !live.has(actionsKey)) closeActions();
     if (!items.length) {
       const empty = el('div', 'mc-empty');
       empty.append(el('b', null, 'أول رسالة لك'), el('span', null, 'قل شي، رشّح عملًا، أو أرسل صوت.'));
       nodes.push(empty);
     }
-    list.replaceChildren(...nodes);
+    // العقد المعاد استعمالها تبقى في مكانها (لا replaceChildren): تُدرج الجديدة وتُزال الغائبة فقط
+    nodes.forEach((n, i) => { if (list.children[i] !== n) list.insertBefore(n, list.children[i] ?? null); });
+    while (list.children.length > nodes.length) list.lastElementChild.remove();
 
     const fresh = items.filter((it) => !shown.has(it.key));
     const firstPaint = shown.size === 0;
     for (const it of items) shown.add(it.key);
     const mineFresh = fresh.some((it) => it.from === me());
+    ownScrollAt = Date.now();
     if (firstPaint || fromBottom < 120 || mineFresh) {
       scroller.scrollTop = scroller.scrollHeight;
       jump.hidden = true;
@@ -776,6 +808,8 @@ export function createRoom(ctx) {
       g?.fromTo(fresher, { y: 10 }, { y: 0, duration: 0.26, ease: 'power2.out', stagger: 0.03, clearProps: 'all' });
     }
     markRead(items);
+    // العقد المعاد استعمالها تحمل إيصالاتها القديمة
+    refreshReaders();
   }
 
   function refreshReaders() {
@@ -1070,7 +1104,7 @@ export function createRoom(ctx) {
     scroller.addEventListener(
       'scroll',
       () => {
-        if (actionsLayer) closeActions();
+        if (actionsLayer && Date.now() - ownScrollAt > 150) closeActions();
         if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80) {
           jump.hidden = true;
           markRead();
@@ -1111,6 +1145,8 @@ export function createRoom(ctx) {
     const n = node;
     node = null;
     list = null;
+    nodeCache.clear();
+    dayNodes.clear();
     window.visualViewport?.removeEventListener('resize', onViewport);
     window.visualViewport?.removeEventListener('scroll', onViewport);
     // أزل الشاشة فورًا: توقف GSAP في WebView كان يترك طبقة المجلس فوق الصفحات.
@@ -1127,6 +1163,8 @@ export function createRoom(ctx) {
     onChange(tables) {
       if (!node) return;
       const watched = ['majlis_messages', 'majlis_hidden', 'recommendations', 'frames', 'together_invites', 'majlis_reactions', 'profiles', 'accounts', 'works'];
+      // الاسم والصورة تتغير: كل الرسائل تُبنى من جديد (نادر)؛ وما سواها يعيد استعمال ما لم يتغير
+      if (tables.includes('profiles') || tables.includes('accounts')) nodeCache.clear();
       if (tables.some((t) => watched.includes(t))) renderList();
       else if (tables.includes('majlis_message_receipts') || tables.includes('majlis_reads') || tables.includes('majlis_receipts')) refreshReaders();
       if (tables.includes('majlis_meta') || tables.includes('accounts')) node.querySelector('.mc-head')?.replaceWith(header());

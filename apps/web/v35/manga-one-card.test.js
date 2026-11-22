@@ -74,6 +74,20 @@ describe('manga listing: one work = one card', () => {
     expect(merged[0].coverImage.large).toBe('/cover.jpg');
   });
 
+  // ID6: بطاقة AniList بلا نسخ تنضم لبطاقة المصدر باسمها الرسمي؛ وبطاقتان تحملان الاسم = غموض فلا دمج
+  it('an AniList-only card (popular, categories) joins the source card that carries its official name', () => {
+    const anilist = { id: 'ext:until no demon remains', _metaId: 214315, title: { english: 'Until No Demon Remains', romaji: 'Myeolgwisudojeon', native: '멸귀수도전' }, synonyms: ['The Tale of Cultivation'], coverImage: { large: '/al.jpg' }, _work: { key: 'until no demon remains', editions: [] } };
+    const asura = card('ar.asura', 'Myeolgwisudojeon', '/m');
+    const merged = mergeWorkPages([anilist, asura]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]._work.editions).toHaveLength(1);
+    // اسماه الرسميان عند بطاقتين منفصلتين بلا دليل يجمعهما: لا يُعرف أيهما، فتبقى بطاقة AniList وحدها
+    resetAliases();
+    const twoOwners = mergeWorkPages([anilist, card('ar.a', 'Myeolgwisudojeon', '/a'), card('ar.b', '멸귀수도전', '/b')]);
+    expect(twoOwners).toHaveLength(3);
+    expect(twoOwners.find((w) => w.id === 'ext:until no demon remains')._work.editions).toHaveLength(0);
+  });
+
   it('a thinner refreshed edition does not erase the already loaded cover', () => {
     const known = card('ar.a', 'Magic Emperor', '/magic', { thumbnailUrl: '/known-cover.jpg' });
     const fresh = card('ar.a', 'Magic Emperor', '/magic', { thumbnailUrl: null });
@@ -126,8 +140,8 @@ describe('manga listing: one work = one card', () => {
 
   it('merges a thousand works with five sources without writing the full reference graph per edition', () => {
     const data = new Map();
-    let writes = 0;
-    vi.stubGlobal('localStorage', { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { writes++; data.set(key, value); } });
+    const writes = new Map();
+    vi.stubGlobal('localStorage', { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { writes.set(key, (writes.get(key) ?? 0) + 1); data.set(key, value); } });
     resetAliases();
     const cards = Array.from({ length: 1000 }, (_, i) => Array.from({ length: 5 }, (_, s) =>
       card(`source.${s}`, s === 0 ? `Saga Hero ${i}` : `قصة بطل ${i}`, `/work/${i}`, s === 0 ? { altNames: [`قصة بطل ${i}`] } : {})
@@ -137,7 +151,10 @@ describe('manga listing: one work = one card', () => {
     expect(merged.every((w) => w._work.editions.length === 5)).toBe(true);
     const persisted = JSON.parse(data.get('vantara.manga.refAliases.v1'));
     expect(Object.values(persisted).flat()).toHaveLength(2000);
-    expect(writes).toBeLessThanOrEqual(2);
+    // مرة للدفعة لكل سجل (سجل الدمج بشكله القديم، وأدلته في سجل الهوية)، لا مرة لكل نسخة
+    expect(writes.get('vantara.manga.refAliases.v1')).toBeLessThanOrEqual(2);
+    expect(writes.get('vantara.manga.identity.v1') ?? 0).toBeLessThanOrEqual(2);
+    expect([...writes.keys()].sort()).toEqual(['vantara.manga.identity.v1', 'vantara.manga.refAliases.v1']);
   });
 
   it('preserves chapter editions and detail facts when a saved work merges with a later page', () => {

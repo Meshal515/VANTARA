@@ -26,6 +26,8 @@ object ImagePayloadPolicy {
         bytes.startsWithAscii("GIF87a") || bytes.startsWithAscii("GIF89a") -> "image/gif"
         bytes.startsWithAscii("RIFF") && bytes.asciiAt(8, 4) == "WEBP" -> "image/webp"
         bytes.asciiAt(4, 4) == "ftyp" && bytes.asciiAt(8, 4) in setOf("avif", "avis") -> "image/avif"
+        // IP1: HEIC كان يُقبل بلا نوع فيُحفظ ‎.jpg‎ من الرابط، وWebView لا يفكه: صفحة سليمة لا تظهر. يُعرَّف بنوعه ليُحوَّل
+        bytes.asciiAt(4, 4) == "ftyp" && bytes.asciiAt(8, 4) in setOf("heic", "heix", "mif1") -> "image/heic"
         else -> null
     }
 

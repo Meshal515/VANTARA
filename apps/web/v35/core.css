@@ -731,6 +731,14 @@ html,
   width: 60%;
   margin-top: 6px;
 }
+/* هيكل في السطر (شرائح المصادر ونطاقات الفصول قبل وصولها): يأخذ مقاس صنفه ومكانه في سطره. لا يرث
+ * absolute + inset:0 من .skeleton (صُممت لتغطي إطار الغلاف)، وإلا التصق بأقرب أب موضوع: كبسولة سوداء أعلى
+ * الصفحة، ولوح أسود بطولها في الكلاسيكي (VI1). */
+.v35 .skeleton-inline {
+  position: relative;
+  pointer-events: none;
+  animation: v35-pulse 1.6s ease-in-out infinite;
+}
 @keyframes v35-pulse {
   50% {
     opacity: 0.6;
@@ -3841,3 +3849,7 @@ html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !importa
 .v35 .ins-pav { transition: left .7s cubic-bezier(.22,.8,.2,1), top .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease, scale .3s ease; }
 .v35 .ins-pav--gone { opacity: 0; scale: .6; pointer-events: none; }
 .v35 .ins-row-gone { opacity: 0; transform: translateY(-4px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }
+
+/* «جسرك الخاص» (الإعدادات، الويب): خطوات النشر مرقّمة وواضحة */
+.v35 .bridge-steps { margin: 10px 0 14px; padding-inline-start: 22px; display: grid; gap: 8px; font-size: 14px; line-height: 1.7; color: var(--text-2, #c9c2d8); }
+.v35 .bridge-steps li::marker { color: var(--accent, #c2b0ff); font-weight: 800; }

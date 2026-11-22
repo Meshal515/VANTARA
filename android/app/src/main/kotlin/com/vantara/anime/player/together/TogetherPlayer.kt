@@ -104,6 +104,12 @@ class TogetherPlayer(
         fun hasEpisodes(): Boolean = false
         /** «OKRU · 1080p» للسيرفر الحالي. */
         fun serverLabel(): String? = sourceName()
+        /** هوية السيرفر الحالي الثابتة بين الأجهزة («معرّف المصدر|رمز السيرفر»، بصيغة الويب وويندوز)، أو null. */
+        fun serverKey(): String? = null
+        /** السيرفرات الجاهزة عندك لهذه الحلقة: (الهوية، معرّف المرشح، الاسم). */
+        fun readyServers(): List<Triple<String, String, String>> = emptyList()
+        /** شغّل هذا المرشح من الموضع نفسه («نعم» على اقتراح سيرفر المضيف). */
+        fun useServer(candidateId: String) {}
         /** تقدّم تجهيز فيديوك الحقيقي 0..1 (مراحل المصدر والتورنت والمشغّل) لامتلاء الشعار ومراحل الغرفة. */
         fun loadProgress(): Float = 0f
         /** المضيف نقل الغرفة لعمل آخر (موسم ثانٍ): يُغلق المشغّل وتفتح الواجهة غرفة الموسم الجديد للاختيار. */
@@ -124,6 +130,8 @@ class TogetherPlayer(
     private var lobbyBar: LinearLayout? = null
     private var lobbyConn: TextView? = null
     private var lobbyMore: View? = null
+    /** إشعار اقتراح سيرفر المضيف (ثابت حتى يرد العضو). */
+    private var lobbySuggest: View? = null
     /** بطاقة «البدء» الكبيرة فوق الشريط (المضيف وحده): صورة الحلقة ودائرة تشغيل. */
     private var lobbyStart: FrameLayout? = null
     private var lobbyCount: TextView? = null
@@ -559,7 +567,57 @@ class TogetherPlayer(
             durationMs = hooks.player.duration.takeIf { it > 0 },
             driftMs = drift,
             driftP95 = p95,
+            server = if (failedSource != null) null else hooks.serverKey(),
         )
+    }
+
+    /** سيرفرات المضيف التي رفضها العضو («لا»): لا يُعاد اقتراحها في هذه الغرفة. */
+    private val declinedServers = mutableSetOf<String>()
+
+    /**
+     * اقتراح سيرفر المضيف في اللوبي (قرار المالك، 19 نوفمبر): متوفر عندك جاهزًا وأنت على غيره ⇒ إشعار ثابت «نعم/لا» لا
+     * يختفي حتى ترد. «نعم» يجعله سيرفرك، و«لا» يبقيك على اختيارك. لا يُفرض. نفس قاعدة الويب (hostServerSuggestion).
+     */
+    private fun hostSuggestion(): Triple<String, String, String>? {
+        if (client.isHost || awaitingPick) return null
+        val host = client.roster.firstOrNull { it.host } ?: return null
+        val key = host.server ?: return null
+        if (key == hooks.serverKey() || key in declinedServers) return null
+        val match = hooks.readyServers().firstOrNull { it.first == key } ?: return null
+        return Triple(key, match.second, host.source ?: match.third)
+    }
+
+    private fun paintSuggestion(root: FrameLayout, portrait: Boolean) {
+        lobbySuggest?.let { root.removeView(it) }
+        lobbySuggest = null
+        val pick = hostSuggestion() ?: return
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
+            background = rounded(0xFF121218.toInt(), context.dp(14).toFloat(), context.dp(1), 0x40FFFFFF)
+            elevation = context.dp(8).toFloat()
+        }
+        card.addView(context.label("المضيف يشاهد على ${pick.third}، وهو متوفر عندك. تبي نفس السيرفر؟", 14f, Color.WHITE, bold = false))
+        val acts = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val yes = context.label("نعم", 14f, com.vantara.anime.player.Tone.ON_ACCENT, bold = true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(accent, context.dp(12).toFloat())
+            contentDescription = "نعم، استخدم سيرفر المضيف"
+            setOnClickListener { declinedServers.add(pick.first); lobbySig = ""; hooks.useServer(pick.second); paintLobby() }
+        }
+        val no = context.label("لا", 14f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+            contentDescription = "لا، أبقَ على سيرفري"
+            setOnClickListener { declinedServers.add(pick.first); lobbySig = ""; paintLobby() }
+        }
+        acts.addView(yes, LinearLayout.LayoutParams(0, context.dp(44), 1f).apply { marginEnd = context.dp(8) })
+        acts.addView(no, LinearLayout.LayoutParams(0, context.dp(44), 1f))
+        card.addView(acts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(12) })
+        lobbySuggest = card
+        root.addView(card, FrameLayout.LayoutParams(if (portrait) ViewGroup.LayoutParams.MATCH_PARENT else context.dp(400), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+            marginStart = context.dp(16); marginEnd = context.dp(16); bottomMargin = context.dp(if (portrait) 168 else 84)
+        })
     }
 
     private inline fun withApplying(block: () -> Unit) {
@@ -722,7 +780,7 @@ class TogetherPlayer(
             if (client.isHost) {
                 body.addView(button(if (synced) "حوّلها منفصلة" else "حوّلها متزامنة", primary = false) { client.setMode(if (synced) "free" else "sync") })
             }
-            body.addView(button("اطلع من الغرفة", primary = false) { hooks.leaveRoom() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
+            body.addView(button("اطلع من الغرفة", primary = false) { client.bye(); hooks.leaveRoom() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
         }
     }
 
@@ -785,20 +843,8 @@ class TogetherPlayer(
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = context.dp(8) })
     }
 
-    /**
-     * الغرفة انتقلت لحلقة أخرى: لا سيرفر يُختار تلقائيًا ولا تشغيل (قرار المالك، 15 نوفمبر). الكل يرجع لشاشة الغرفة
-     * و«اختر سيرفر» كما عند دخولها، والسيرفرات تتجهّز في الخلفية للورقة.
-     */
-    fun awaitPick() {
-        awaitingPick = true
-        ready = false
-        failedSource = null
-        progressShown = 0f
-        mute(false)
-        showLobby()
-        report("preparing", force = true)
-        paintLobby()
-    }
+    // «اختر سيرفر» عند كل حلقة (قرار 15 نوفمبر) أُلغي بقرار المالك في 19 نوفمبر: الحلقة التالية من العمل نفسه تُجهَّز
+    // مسبقًا لكل عضو بسيرفره وجودته وتكمل (PlayerActivity.switchEpisode). تغيير الموسم وحده يعيد اللوبي (handOff).
 
     /**
      * المضيف نقل الغرفة لموسم آخر: الواجهة تجهّز مشغّل الموسم الجديد تحت هذا المشغّل، وهذا يبقى ظاهرًا بشاشة الغرفة
@@ -945,7 +991,7 @@ class TogetherPlayer(
                 setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
                 background = glassOr(null, GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x61000000) })
                 contentDescription = "اطلع من الغرفة"
-                setOnClickListener { hooks.leaveRoom() }
+                setOnClickListener { client.bye(); hooks.leaveRoom() }
             }, LinearLayout.LayoutParams(context.dp(40), context.dp(40)))
             root.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
@@ -1101,6 +1147,7 @@ class TogetherPlayer(
         lobbyBar = null
         lobbyConn = null
         lobbyMore = null
+        lobbySuggest = null
         lobbyStart = null
         lobbyCount = null
         lobbySig = ""
@@ -1158,9 +1205,11 @@ class TogetherPlayer(
         val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
             (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
         val sig = listOf(connected, ready, failedSource, awaitingPick, client.isHost, hooks.serverLabel(), portrait,
-            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
+            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}:${it.server}" }, pending().joinToString { it.userId }, headline().first,
+            hostSuggestion()?.first).joinToString("|")
         if (sig == lobbySig && bar.childCount > 0) return
         lobbySig = sig
+        root?.let { paintSuggestion(it, portrait) }
         bar.removeAllViews()
         bar.orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         val details = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }

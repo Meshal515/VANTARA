@@ -7,6 +7,9 @@
  * (`canonicalIndex` في catalog.js)، ومنها تُربط المراجع القديمة بالعمل.
  */
 
+import { saveWithRelief } from './storage-relief.js';
+import { RANK, createIdentityGraph } from './work-identity.js';
+
 const KEY = 'vantara.manga.aliases.v1';
 const TWINS_KEY = 'vantara.manga.twins.v1';
 const REFS_KEY = 'vantara.manga.refAliases.v1';
@@ -19,12 +22,14 @@ const read = (key) => {
     return {};
   }
 };
+// SY2: فشل الحفظ (تخزين ممتلئ) لا يُبتلع: سجل الدمج يربط علاماتك ومواضعك بالعمل، وضياعه بصمت يُخفيها بعد إعادة الفتح.
+// يبقى في الذاكرة للجلسة، ويُعلن مرة (vantara:storage-full) فتقوله الواجهة.
+export let storageFailures = 0;
 const write = (key, value) => {
-  try {
-    globalThis.localStorage?.setItem(key, JSON.stringify(value));
-  } catch {
-    // تخزين ممتلئ: الذاكرة للجلسة تكفي
-  }
+  // الكاش يُفسح أولًا (lib/storage-relief.js)، والإعلان فقط إن بقي ممتلئًا
+  const ok = saveWithRelief(globalThis.localStorage, key, JSON.stringify(value));
+  if (!ok) storageFailures++;
+  return ok;
 };
 
 let shipped = {};
@@ -88,86 +93,175 @@ export function learnAliases(key, names) {
   rebuild();
 }
 
-// ───────── المراجع: عمل كان بطاقة باسمه ثم صار جزءًا من عمل قانوني ─────────
-// تقدّم القراءة والمكتبة محفوظة بمرجع الاسم القديم؛ لا تُنقل ولا تُحذف، بل تُقرأ
-// مع العمل القانوني (`refsOf`).
+// ───────── المعرّف الرسمي (ID1): عنوان البطاقة ← معرّف AniList المؤكد ─────────
+// بطاقتان بمعرّف واحد عمل واحد (canonicalIndex، الخطوة 5)، بحارس «مصدر يعرضهما عملين» في الدمج نفسه. ومعرّفان
+// مختلفان لا يجتمعان في عمل واحد أبدًا (حارس التعارض في الفهرس وفي رسم الهوية).
+const OFFICIAL_KEY = 'vantara.manga.officialIds.v1';
+const MAX_OFFICIAL = 6000;
+let official = read(OFFICIAL_KEY);
+let officialMap = null;
 
-let refAliases = read(REFS_KEY);
+/** [[مفتاح العنوان المطبَّع، معرّف AniList]] من مطابقة مؤكدة؛ يُحفظ مرة للدفعة. */
+export function noteOfficialIds(pairs) {
+  let changed = false;
+  for (const [key, id] of pairs ?? []) {
+    if (!key || !Number.isSafeInteger(id) || id <= 0 || official[key] === id) continue;
+    delete official[key];
+    official[key] = id;
+    changed = true;
+  }
+  if (!changed) return false;
+  const keys = Object.keys(official);
+  for (const k of keys.slice(0, Math.max(0, keys.length - MAX_OFFICIAL))) delete official[k];
+  officialMap = null;
+  write(OFFICIAL_KEY, official);
+  // معرّف جديد قد يكشف دمجًا قديمًا خاطئًا: يُقطع الآن (ويبقى مسجّلًا)
+  graph.invalidate();
+  if (graph.heal().length) saveGraph();
+  return true;
+}
+
+export function officialIdMap() {
+  return officialMap ??= new Map(Object.entries(official));
+}
+
+// ───────── رسم الهوية (الخطة ب، lib/work-identity.js) ─────────
+// المراجع: عمل كان بطاقة باسمه ثم صار جزءًا من عمل قانوني. تقدّم القراءة والمكتبة محفوظة بمرجع الاسم القديم؛ لا
+// تُنقل ولا تُحذف، بل تُقرأ مع العمل كله (`refsOf`). كل دمج حافة بدليلها ورتبتها، والدمج الخاطئ يُقطع حين يظهر
+// تعارضه، وفصل المستخدم (ID4) حدث مسجَّل لا حذف.
+//
+// التخزين: سجل الدمج (REFS_KEY) بشكله القديم للحواف الفعّالة، فلا يتضاعف الحجم ويقرؤه إصدار أقدم؛ وما لا يحمله
+// (الرتب، المقطوع، روابط النسخ) في IDENTITY_KEY. والفصل في SPLITS_KEY بشكله القديم.
+const SPLITS_KEY = 'vantara.manga.splits.v1';
+const IDENTITY_KEY = 'vantara.manga.identity.v1';
+const bare = (ref) => String(ref ?? '').replace(/^ext:/, '');
+const splitKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+let splits = read(SPLITS_KEY);
+let graph = null;
+
+function openGraph() {
+  graph = createIdentityGraph({ officialOf: (ref) => officialIdMap().get(bare(ref)) ?? null });
+  const pairs = Object.entries(splits).map(([key, value]) => {
+    const cut = key.indexOf('|');
+    return [`ext:${key.slice(0, cut)}`, `ext:${key.slice(cut + 1)}`, Number(value?.at) || 0];
+  });
+  const healed = graph.load({ refAliases: read(REFS_KEY), meta: read(IDENTITY_KEY), splits: pairs });
+  if (healed.length) saveGraph();
+}
+
+function saveGraph() {
+  const { refAliases, meta } = graph.dump();
+  // تخزين ممتلئ يُعلن مرة: الثاني سيفشل مثله، والرسم باقٍ في الذاكرة للجلسة
+  if (write(REFS_KEY, refAliases)) write(IDENTITY_KEY, meta);
+}
+
+/** رسم الهوية الحي (للقراءة والتشخيص). */
+export const identityGraph = () => graph;
+
+/** يفصل مرجعين (`ext:<مفتاح>` أو المفتاح نفسه) كانا عملًا واحدًا. */
+export function splitRefs(a, b, at = Date.now()) {
+  const k = splitKey(bare(a), bare(b));
+  if (!bare(a) || !bare(b) || bare(a) === bare(b) || splits[k]) return false;
+  splits[k] = { at };
+  write(SPLITS_KEY, splits);
+  graph.split(`ext:${bare(a)}`, `ext:${bare(b)}`, at);
+  saveGraph();
+  return true;
+}
+export function unsplitRefs(a, b) {
+  const k = splitKey(bare(a), bare(b));
+  if (!splits[k]) return false;
+  delete splits[k];
+  write(SPLITS_KEY, splits);
+  graph.unsplit(`ext:${bare(a)}`, `ext:${bare(b)}`);
+  saveGraph();
+  return true;
+}
+export const isSplit = (a, b) => Boolean(splits[splitKey(bare(a), bare(b))]);
+/** أزواج المفاتيح المفصولة («a|b» مرتبة) لحارس الفهرس. */
+export function splitSet() {
+  return new Set(Object.keys(splits));
+}
 
 /** `ext:demonic emperor` صار جزءًا من `ext:magic emperor`. */
 export function noteRefAlias(aliasRef, canonicalRef) {
   noteRefAliases([[aliasRef, canonicalRef]]);
 }
 
-/** Persist one listing's new references once, rather than serializing the
- * entire graph synchronously for every edition of thousands of works. */
-export function noteRefAliases(pairs) {
+/**
+ * دمج القوائم (دليل عنوان، RANK.TITLE): يُحفظ مرة للدفعة. حارس التعارض في الرسم يرفض ما يخالف معرّفًا رسميًا أو
+ * فصل المستخدم، فلا يُحفظ دمج خاطئ ثم يجرّ غيره.
+ */
+export function noteRefAliases(pairs, { rank = RANK.TITLE, why = '' } = {}) {
+  const before = graph.edges().length;
   let changed = false;
-  for (const [aliasRef, canonicalRef] of pairs) {
+  for (const [aliasRef, canonicalRef] of pairs ?? []) {
     if (!aliasRef || !canonicalRef || aliasRef === canonicalRef) continue;
-    const list = refAliases[canonicalRef] ?? [];
-    if (list.includes(aliasRef)) continue;
-    // These references own saved progress/library rows; dropping an old name
-    // would hide user data even though no server row was deleted.
-    refAliases[canonicalRef] = [...list, aliasRef];
-    changed = true;
+    const had = graph.sameClass(String(aliasRef), String(canonicalRef));
+    if (graph.propose(String(aliasRef), String(canonicalRef), { rank, why }) && !had) changed = true;
   }
-  if (changed) {
-    reverse = null;
-    write(REFS_KEY, refAliases);
-  }
-}
-
-// الاتجاه العكسي (اسم قديم ← القوانين التي صار جزءًا منها)، يُبنى مرة ويُرمى عند أي تعلّم جديد.
-// بلا هذا الاتجاه كانت البطاقة القديمة (من «الأكثر قراءة» أو سجلّ قبل الدمج) لا ترى تقدّم العمل القانوني،
-// فيظهر العمل الواحد بطاقتين في «تابع القراءة» و«مكتبتي».
-let reverse = null;
-function reverseIndex() {
-  if (reverse) return reverse;
-  reverse = new Map();
-  for (const [canonical, olds] of Object.entries(refAliases)) {
-    for (const old of olds ?? []) {
-      if (!reverse.has(old)) reverse.set(old, []);
-      reverse.get(old).push(canonical);
-    }
-  }
-  return reverse;
+  if (changed || graph.edges().length !== before) saveGraph();
 }
 
 /**
- * كل مراجع العمل الواحد: المرجع نفسه أولًا، ثم أسماؤه القديمة، ثم ما صار هو جزءًا منه.
- * القراءة فقط تتبع الفئة كلها؛ الكتابة تبقى بمرجع البطاقة، فلا يُنقل ولا يُحذف صف محفوظ.
+ * دليل قوي على أن مرجعين عمل واحد (معرّف رسمي، المصدر نفسه، المستخدم). يرجع هل صارا عملًا واحدًا، ومع الرفض سببه
+ * في سجل الرسم.
+ */
+export function proposeSameWork(a, b, { rank = RANK.SOURCE, why = '' } = {}) {
+  const had = graph.sameClass(String(a), String(b));
+  const ok = graph.propose(String(a), String(b), { rank, why });
+  if (ok && !had) saveGraph();
+  return ok;
+}
+
+/** نسخة مصدر رُبطت بعملها بدليل موثَّق: تُحفظ فتظهر في بطاقته في كل قائمة بعدها. */
+export function linkEdition(key, ref, options) {
+  const before = graph.editionRef(key);
+  const out = graph.linkEdition(key, String(ref), options);
+  if (out.ok && (before !== graph.editionRef(key) || out.merged)) saveGraph();
+  return out;
+}
+export const editionRef = (key) => graph.editionRef(key);
+/** عمل النسخة في القوائم: المكوّن الموثَّق لمرجعها، فنسخ عمل واحد ربطتها صفحات بطاقتين مختلفتين بطاقة واحدة. */
+export function editionWork(key) {
+  const ref = graph.editionRef(key);
+  return ref ? graph.strongCanonical(ref) : null;
+}
+
+/**
+ * كل مراجع العمل الواحد: المرجع نفسه أولًا، ثم بقية مراجعه بترتيب الوصول.
+ * القراءة فقط تتبع العمل كله؛ الكتابة تبقى بمرجع البطاقة، فلا يُنقل ولا يُحذف صف محفوظ.
  */
 export function refsOf(ref) {
-  const refs = [ref];
-  const seen = new Set(refs);
-  const back = reverseIndex();
-  for (let i = 0; i < refs.length; i++) {
-    for (const next of [...(refAliases[refs[i]] ?? []), ...(back.get(refs[i]) ?? [])]) {
-      if (!seen.has(next)) { seen.add(next); refs.push(next); }
-    }
-  }
-  return refs;
+  return graph.classOf(String(ref));
 }
 
 /**
- * مفتاح تجميع ثابت للعمل: أصغر مرجع في فئته. لا يُعرض ولا يُخزَّن، بل يجمع بطاقات
- * العمل الواحد في القوائم (السجل، المكتبة، لقطات الأقسام) أيًّا كان مرجع كل بطاقة.
+ * مفتاح تجميع ثابت للعمل: أصغر مرجع فيه. لا يُعرض ولا يُخزَّن، بل يجمع بطاقات العمل الواحد في القوائم (السجل،
+ * المكتبة، لقطات الأقسام) أيًّا كان مرجع كل بطاقة.
  */
 export function canonicalRefOf(ref) {
   const key = String(ref ?? '');
   if (!key.startsWith('ext:')) return key;
-  if (!refAliases[key] && !reverseIndex().has(key)) return key;
-  return refsOf(key).reduce((min, r) => (r < min ? r : min));
+  return graph.canonical(key);
 }
+
+/** هوية العمل الثابتة `vw:…`: واحدة لكل مراجعه، وتُحسب بالقاعدة نفسها على كل جهاز. */
+export function workIdentity(ref) {
+  return graph.identity(String(ref ?? ''));
+}
+
+openGraph();
 
 /** للاختبار فقط. */
 export function _reset() {
+  splits = read(SPLITS_KEY);
+  official = read(OFFICIAL_KEY);
+  officialMap = null;
   shipped = {};
   learned = read(KEY);
   twins = read(TWINS_KEY);
-  refAliases = read(REFS_KEY);
-  reverse = null;
   map = null;
   loading = null;
+  openGraph();
 }

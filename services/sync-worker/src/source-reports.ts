@@ -17,7 +17,8 @@ const MAX_EVENTS = 200;
 const SECTIONS = new Set(['manga', 'anime', 'cinema']);
 const PLATFORMS = new Set(['apk', 'pwa']);
 const OUTCOMES = new Set(['ok', 'timeout', 'error', 'challenge', 'no_match', 'empty', 'unavailable']);
-const ID = /^[a-z0-9._@-]{1,120}$/i;
+// «#»: معرّف إضافة مثبّتة من مستودع (`حزمة#رقم`). الجهاز يرسلها `حزمة.رقم` (lib/source-report.js)، والنسخ الأقدم بـ«#»
+const ID = /^[a-z0-9._@#-]{1,120}$/i;
 const STAGE = /^[a-z_]{1,24}$/;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });

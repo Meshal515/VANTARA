@@ -15,13 +15,23 @@ const FLUSH_MS = 4000;
 const MAX_UNITS = 40;
 const MAX_BATCH = 20;
 const MAX_BATCH_UNITS = 200;
+// v1: الطابور كله في مفتاح واحد، يُحوَّل نصًا كاملًا مرتين مع كل تقرير (UQ1: كلفة تربيعية، 3.8 ث لـ600 عمل بلا إرسال).
+// v2: مدخل لكل عمل وفهرس صغير بأسماء المداخل؛ التقرير يكتب مدخله وحده، والفهرس فقط حين يُضاف عمل أو يُحذف.
+// القديم يُقرأ مرة ويُنقل (لا يضيع تقرير)، ثم يُفرَّغ.
 const STORAGE_KEY = 'vantara.update-reports.v1';
+const INDEX_KEY = 'vantara.update-reports.v2';
+const ENTRY_PREFIX = 'vantara.update-reports.v2:';
 const MAX_QUEUE_WORKS = 1000;
 const MAX_QUEUE_UNITS = 50_000;
-const MAX_STORAGE_BYTES = 2_000_000;
+// UQ2: كان يحجز حتى 2MB من localStorage المشترك (المواضع، قرارات الأغلفة، سجل الدمج)
+const MAX_STORAGE_BYTES = 1_000_000;
 
 let transport = null;
 const queue = new Map();
+/** حجم كل مدخل محفوظ ووحداته: الإجمالي بعدّاد، لا بتحويل الطابور كله مع كل تقرير. */
+const sizes = new Map();
+let totalBytes = 0;
+let totalUnits = 0;
 let timer = null;
 let inFlight = null;
 let dropped = 0;
@@ -30,24 +40,67 @@ let storageFailed = false;
 const keyOf = (r) => `${r.work}|${r.kind}|${r.source?.s ?? ''}`;
 const unitKey = (u) => `${u.season ?? 0}:${u.number}`;
 const order = (a, b) => (b.season ?? 0) - (a.season ?? 0) || b.number - a.number;
+const store = () => globalThis.localStorage ?? null;
 
-function persist() {
+function account(key, entry) {
+  const old = sizes.get(key);
+  if (old) { totalBytes -= old.bytes; totalUnits -= old.units; }
+  if (!entry) { sizes.delete(key); return null; }
+  const text = JSON.stringify(entry);
+  sizes.set(key, { bytes: text.length, units: entry.units.length });
+  totalBytes += text.length; totalUnits += entry.units.length;
+  return text;
+}
+function writeIndex() {
+  try { store()?.setItem(INDEX_KEY, JSON.stringify([...queue.keys()])); } catch { storageFailed = true; }
+}
+// الفهرس يُكتب مرة في نهاية اللحظة الجارية لا مع كل عمل جديد: مئات التقارير المتتالية (جلب قائمة) فهرس واحد
+let indexPending = false;
+function scheduleIndex() {
+  if (indexPending) return;
+  indexPending = true;
+  queueMicrotask(() => { indexPending = false; writeIndex(); });
+}
+/** يحفظ مدخل عمل واحد (أو يمحوه)، والفهرس فقط إن تغيّرت قائمة الأعمال. */
+function persistEntry(key, text, indexChanged) {
+  const ls = store();
+  if (!ls) { storageFailed = true; return; }
   try {
-    const value = JSON.stringify([...queue.values()]);
-    if (value.length > MAX_STORAGE_BYTES) { storageFailed = true; return; }
-    globalThis.localStorage?.setItem(STORAGE_KEY, value);
-    storageFailed = !globalThis.localStorage;
+    if (text == null) { if (ls.removeItem) ls.removeItem(ENTRY_PREFIX + key); else ls.setItem(ENTRY_PREFIX + key, ''); }
+    else ls.setItem(ENTRY_PREFIX + key, text);
+    if (indexChanged) scheduleIndex();
+    storageFailed = false;
   } catch { storageFailed = true; }
 }
+function setEntry(key, entry) {
+  const isNew = !queue.has(key);
+  queue.set(key, entry);
+  persistEntry(key, account(key, entry), isNew);
+}
+function deleteEntry(key) {
+  if (!queue.delete(key)) return;
+  account(key, null);
+  persistEntry(key, null, true);
+}
 try {
-  const rows = JSON.parse(globalThis.localStorage?.getItem(STORAGE_KEY) ?? '[]');
-  if (Array.isArray(rows)) for (const row of rows.slice(0, MAX_QUEUE_WORKS)) {
-    if (row?.work && row?.title && Array.isArray(row.units)) queue.set(keyOf(row), row);
+  const ls = store();
+  const add = (row) => {
+    if (queue.size < MAX_QUEUE_WORKS && row?.work && row?.title && Array.isArray(row.units)) { queue.set(keyOf(row), row); account(keyOf(row), row); }
+  };
+  for (const key of JSON.parse(ls?.getItem(INDEX_KEY) ?? '[]')) {
+    try { add(JSON.parse(ls.getItem(ENTRY_PREFIX + key) || 'null')); } catch { /* مدخل تالف لا يُسقط الباقي */ }
+  }
+  const legacy = JSON.parse(ls?.getItem(STORAGE_KEY) ?? '[]');
+  if (Array.isArray(legacy) && legacy.length) {
+    for (const row of legacy) if (!queue.has(keyOf(row ?? {}))) add(row);
+    for (const [key, entry] of queue) persistEntry(key, JSON.stringify(entry), false);
+    writeIndex();
+    ls.setItem(STORAGE_KEY, '[]');
   }
 } catch { storageFailed = true; }
 
 export function updateReportStatus() {
-  return { pendingWorks: queue.size, pendingUnits: [...queue.values()].reduce((n, w) => n + w.units.length, 0), dropped, storageFailed, sending: Boolean(inFlight) };
+  return { pendingWorks: queue.size, pendingUnits: totalUnits, dropped, storageFailed, sending: Boolean(inFlight) };
 }
 
 /** `send(path, {method, body})` → `{status, body}` (نفس `sync.translation`). */
@@ -87,10 +140,9 @@ export async function flush() {
       if (!current) continue;
       const sent = new Map(work.units.map(u => [unitKey(u), JSON.stringify(u)]));
       const remaining = current.units.filter(u => sent.get(unitKey(u)) !== JSON.stringify(u));
-      if (remaining.length) queue.set(key, { ...current, units: remaining });
-      else queue.delete(key);
+      if (remaining.length) setEntry(key, { ...current, units: remaining });
+      else deleteEntry(key);
     }
-    persist();
   })();
   try { await inFlight; } finally {
     inFlight = null;
@@ -106,13 +158,15 @@ export function report(r) {
   const units = new Map((prev?.units ?? []).map((u) => [unitKey(u), u]));
   for (const u of r.units ?? []) units.set(unitKey(u), { ...units.get(unitKey(u)), ...u });
   const merged = { ...prev, ...r, units: [...units.values()].sort(order) };
-  const total = [...queue.values()].reduce((n, w) => n + w.units.length, 0) - (prev?.units.length ?? 0) + merged.units.length;
-  if ((!prev && queue.size >= MAX_QUEUE_WORKS) || total > MAX_QUEUE_UNITS || JSON.stringify([...queue.values()].filter(w => keyOf(w) !== key).concat(merged)).length > MAX_STORAGE_BYTES) {
+  // الحد بالعدّادات: كلفة التقرير بحجم عمله وحده، لا بحجم الطابور كله
+  const old = sizes.get(key);
+  const total = totalUnits - (old?.units ?? 0) + merged.units.length;
+  const bytes = totalBytes - (old?.bytes ?? 0) + JSON.stringify(merged).length;
+  if ((!prev && queue.size >= MAX_QUEUE_WORKS) || total > MAX_QUEUE_UNITS || bytes > MAX_STORAGE_BYTES) {
     dropped += r.units?.length ?? 1;
     return false;
   }
-  queue.set(key, merged);
-  persist();
+  setEntry(key, merged);
   schedule();
   return true;
 }
