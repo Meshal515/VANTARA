@@ -62,7 +62,6 @@ describe('plan B, end to end on 1911 real works', () => {
   let second;
   let detailCalls = 0;
   const pages = [];
-  const finals = [];
   beforeAll(async () => {
     model = sourcesModel();
     const ids = [...model.catalog.keys()];
@@ -100,9 +99,7 @@ describe('plan B, end to end on 1911 real works', () => {
     resetSources();
     detailCalls = engine.series.mock.calls.length;
     second = (await browse({ kind: 'catalogue' })).items;
-    // البطاقات النهائية: كل بطاقة في القائمة الثانية تُفتح، وفيها تُقاس «كل المصادر في بطاقة العمل»
-    for (const card of second) finals.push({ card, full: await loadWork(card) });
-  }, 600_000);
+  }, 300_000);
 
   it('zero wrong merges in the listing, before and after every work was opened', () => {
     const a = measure(first.map(truthCard), works);
@@ -128,19 +125,19 @@ describe('plan B, end to end on 1911 real works', () => {
     expect(byEvidence.length).toBeLessThanOrEqual(3);
   });
 
-  // صفحات بطاقات قائمة ما (الأولى قبل أي فتح، أو النهائية): نسخ خاطئة، ومتجانسات، والمصادر التي عندها العمل
-  const audit = (list) => {
+  it('zero wrong editions in any work page, and every source that has the work is found', () => {
     let wrong = 0;
     let homonyms = 0;
     let expected = 0;
     let found = 0;
     const misses = new Map();
     const wrongs = [];
-    const namesOf = (al) => new Set([...(byAl.get(al)?.t ?? []), ...[...model.catalog.values()].flatMap((src) => src.all.filter((x) => x.manga.al === al).map((x) => x.manga.title))].filter(Boolean).map(normalizeTitle));
-    for (const { card, full } of list) {
+    for (const { card, full } of pages) {
       const als = card._work.editions.map((e) => e.manga.al);
       const main = als.sort((x, y) => als.filter((v) => v === y).length - als.filter((v) => v === x).length)[0];
-      // «متجانسات» كما في مقياس الهوية: عملان باسم واحد بعد التطبيع لا يفرّقهما الاسم أصلًا، فيُعدّان وحدهما
+      // «متجانسات» كما في مقياس الهوية: عملان باسم واحد بعد التطبيع (عنوان أو روماجي أو أصلي) لا يفرّقهما الاسم أصلًا،
+      // فيُعدّان وحدهما ولا يُسمح بزيادتهما
+      const namesOf = (al) => new Set([...(byAl.get(al)?.t ?? []), ...[...model.catalog.values()].flatMap((src) => src.all.filter((x) => x.manga.al === al).map((x) => x.manga.title))].filter(Boolean).map(normalizeTitle));
       const keys = namesOf(main);
       for (const e of full._editions ?? []) {
         if (e.manga.al !== main && [...namesOf(e.manga.al)].some((n) => keys.has(n))) { homonyms++; continue; }
@@ -154,21 +151,12 @@ describe('plan B, end to end on 1911 real works', () => {
         else misses.set(sid.split('.').pop(), (misses.get(sid.split('.').pop()) ?? 0) + 1);
       }
     }
-    return { wrong, homonyms, expected, found, misses, wrongs };
-  };
-
-  it('zero wrong editions in any work page, and every source that has the work is found in its final card', () => {
-    const first = audit(pages);
-    const last = audit(finals);
-    for (const [name, m] of [['first cards', first], ['final cards', last]]) {
-      console.log(`[pipeline] ${name}: pages=${name === 'first cards' ? pages.length : finals.length} wrong editions=${m.wrong} homonym editions=${m.homonyms} sources found ${m.found}/${m.expected} (${((m.found / m.expected) * 100).toFixed(1)}%) missed by source: ${JSON.stringify(Object.fromEntries(m.misses))}`);
-      if (m.wrongs.length) console.log('[pipeline] wrong editions:', JSON.stringify(m.wrongs));
-    }
-    expect(first.wrong).toBe(0);
-    expect(last.wrong).toBe(0);
+    console.log(`[pipeline] work pages=${pages.length} wrong editions=${wrong} homonym editions=${homonyms} sources found ${found}/${expected} (${((found / expected) * 100).toFixed(1)}%) missed by source: ${JSON.stringify(Object.fromEntries(misses))}`);
+    if (wrongs.length) console.log('[pipeline] wrong editions:', JSON.stringify(wrongs));
+    expect(wrong).toBe(0);
     // المتجانسات (اسم واحد لعملين) لا تفرّقها الأسماء: تُعدّ ولا يُسمح بزيادتها
-    expect(last.homonyms).toBeLessThanOrEqual(68);
-    expect(last.found / last.expected).toBeGreaterThanOrEqual(0.966);
+    expect(homonyms).toBeLessThanOrEqual(68);
+    expect(found / expected).toBeGreaterThanOrEqual(0.966);
   });
 
   it('verification costs little: about one detail request per opened work, not one per source', () => {

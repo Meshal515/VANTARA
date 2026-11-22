@@ -1138,8 +1138,7 @@ export function reviewStoredEditions(v35work, list, { detail = null } = {}) {
     let ok = true;
     if (!listed.has(key)) {
       const linked = editionRef(key);
-      // النسخة لعمل واحد: المربوطة بدليل موثَّق بعمل آخر لا تبقى هنا (القائمة تجمع البطاقتين إن كانتا عملًا واحدًا)
-      if (linked && !graph.sameClass(linked, id)) ok = false;
+      if (linked && !graph.sameClass(linked, id)) ok = !graph.contradiction(linked, id, RANK.SOURCE);
       else if (!linked) {
         const title = normalizeTitle(e?.manga?.title);
         ok = !officialConflict(e?.manga, workOfficial, officialOf)
@@ -1150,6 +1149,16 @@ export function reviewStoredEditions(v35work, list, { detail = null } = {}) {
     else if (e?.sourceId) dropped.push(String(e.sourceId));
   }
   return { kept, dropped: [...new Set(dropped)] };
+}
+
+/** نسخ البطاقة التي تحمل اسمها نفسه: نسخها بدليل المصدر، فتُربط بها (لا تأخذها بطاقة أخرى بدليل ضعيف). */
+function noteOwnEditions(v35work) {
+  const id = String(v35work?.id ?? '');
+  if (!id.startsWith('ext:')) return;
+  const key = id.slice(4);
+  for (const e of v35work?._work?.editions ?? []) {
+    if (normalizeTitle(e?.manga?.title) === key) linkEdition(editionKeyOf(e), id, { rank: RANK.SOURCE, why: 'اسم البطاقة' });
+  }
 }
 
 /**
@@ -1179,6 +1188,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
     cached?.editions,
     scoped(v35work._updateEditions??[]).map(e=>({...e,chapters:cached?.editions?.find(c=>sameEdition(c,e))?.chapters??null})),
   );
+  noteOwnEditions(v35work);
   if (pinnedSource) editions = scoped(editions);
   let detail = cached?.detail ?? null;
   const failed = new Map();
@@ -1439,7 +1449,7 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
     const graph = identityGraph();
     const ownedElsewhere = (manga, sourceId) => {
       const linked = editionRef(editionKeyOf({ sourceId, manga }));
-      return Boolean(linked) && !graph.sameClass(linked, workRef);
+      return Boolean(linked) && !graph.sameClass(linked, workRef) && Boolean(graph.contradiction(linked, workRef, RANK.SOURCE));
     };
     const ask = async (source) => {
       const candidates = new Map();

@@ -419,10 +419,7 @@ export function createIdentityGraph({ officialOf = () => null, now = () => Date.
       note({ type: 'relink', a: key, b: ref, rank, why });
       return { ok: true };
     }
-    // النسخة لعمل آخر: أول دليل موثَّق يفوز، ولا تجرّ النسخة بطاقتها معها. كان الربط هنا يدمج المرجعين كليهما، فصفحة
-    // «Haikyu!!» التي وجدت نسخة manga3asq «Haikyuu!!» تسحب معها فصلًا تجريبيًا بالاسم نفسه عند مصدر آخر (متجانسات).
-    // القوائم تجمع البطاقتين حين يكون العمل واحدًا فعلًا، بأدلتها وحراسها
-    note({ type: 'refused', a: key, b: ref, rank, why: 'النسخة لعمل آخر' });
+    if (propose(cur.ref, ref, { rank: Math.min(rank, cur.rank), why: why || 'نسخة مصدر واحدة', at })) return { ok: true, merged: true };
     return { ok: false, reason: 'النسخة لعمل آخر' };
   }
 
@@ -448,7 +445,7 @@ export function createIdentityGraph({ officialOf = () => null, now = () => Date.
     }
     return {
       refAliases,
-      meta: { v: 2, e: rows, n: Object.fromEntries([...editions].map(([k, v]) => [k, [v.ref, v.rank, v.at]])) },
+      meta: { v: 1, e: rows, n: Object.fromEntries([...editions].map(([k, v]) => [k, [v.ref, v.rank, v.at]])) },
     };
   }
 
@@ -458,17 +455,12 @@ export function createIdentityGraph({ officialOf = () => null, now = () => Date.
    */
   function load({ refAliases = {}, meta = null, splits: pairs = [] } = {}) {
     const rows = new Map();
-    // الإصدار 1 (ساعات على Debug، 21 نوفمبر): روابط نسخ بالاسم وحده ودمج مرجعين عبر نسخة. كلاهما يجمع المتجانسات، فلا
-    // يُقرأ: الروابط تُعاد من صفحات الأعمال، والدمج الذي صنعته يُترك (مسار القائمة القديم refAliases باقٍ كما هو)
-    const legacyLinks = (row) => typeof row?.[4] === 'string' && (/^بحث صفحة العمل/.test(row[4]) || row[4] === 'نسخة مصدر واحدة');
-    const dropped = new Set();
-    if (meta && typeof meta === 'object' && (meta.v === 1 || meta.v === 2)) {
+    if (meta && typeof meta === 'object' && meta.v === 1) {
       for (const row of Array.isArray(meta.e) ? meta.e : []) {
         if (!Array.isArray(row) || typeof row[0] !== 'string' || typeof row[1] !== 'string' || !row[0] || !row[1] || row[0] === row[1]) continue;
-        if (meta.v === 1 && legacyLinks(row)) { dropped.add(pairKey(row[0], row[1])); continue; }
         rows.set(pairKey(row[0], row[1]), row);
       }
-      for (const [key, row] of Object.entries(meta.v === 2 && meta.n && typeof meta.n === 'object' ? meta.n : {})) {
+      for (const [key, row] of Object.entries(meta.n && typeof meta.n === 'object' ? meta.n : {})) {
         if (!Array.isArray(row) || typeof row[0] !== 'string' || !row[0]) continue;
         editions.set(key, { ref: row[0], rank: Number.isFinite(row[1]) ? row[1] : RANK.SOURCE, at: Number(row[2]) || 0 });
         touch(row[0]);
@@ -485,7 +477,6 @@ export function createIdentityGraph({ officialOf = () => null, now = () => Date.
     for (const [canonicalRef, olds] of Object.entries(refAliases && typeof refAliases === 'object' ? refAliases : {})) {
       for (const old of Array.isArray(olds) ? olds : []) {
         if (typeof old !== 'string' || !old || old === canonicalRef) continue;
-        if (dropped.has(pairKey(old, canonicalRef))) continue;
         const row = rows.get(pairKey(old, canonicalRef));
         // في السجل القديم = فعّالة، ولو وصفتها meta مقطوعة (كتبها إصدار أقدم بعد القطع): القطع يُعاد بسببه أدناه
         add(old, canonicalRef, row ? row.slice(0, 5) : null);
