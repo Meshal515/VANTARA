@@ -20,6 +20,15 @@ const fake = `export async function loadWork(v, { onUpdate = () => {} } = {}) {
   const editions = srcs.map(([id, label, c]) => ({ sourceId: id, label, manga: { url: '/m' }, chapters: rows.filter((r) => r.number <= c).map((r) => ({ ...r.chapter, sourceId: id })) }));
   // التفاصيل تصل متأخرة: النبذة والمؤلف والحالة والتصنيفات (كما يحدث من المصادر)
   const full = { ...v, description: 'In a world where awakened beings called Hunters must battle deadly monsters to protect humanity, the weakest hunter of all mankind finds himself in a constant struggle for survival.', staff: { edges: [{ role: 'Story', node: { name: { full: 'Writer A' } } }] }, status: 'FINISHED', genres: ['Action', 'Fantasy'], _chapters: rows, chapters: 201, _editions: editions, _sources: srcs.map(([sourceId, label, count]) => ({ sourceId, label, count, lang: 'ar' })), _failedSources: [] };
+  if (v.__sourcesDuringMotion) {
+    const builtin = { sourceId: 'eu.kanade.tachiyomi.extension.ar.mangalek', label: 'مانجا ليك', count: rows.length, lang: 'ar' };
+    onUpdate({ ...full, _sources: [builtin] }, { settled: false });
+    await new Promise((resolve) => { window.__finishSourceDiscovery = resolve; });
+    const installed = { sourceId: 'eu.kanade.tachiyomi.extension.all.mangamillion#8929911308540155494', label: 'Manga Million', count: rows.length, lang: 'en' };
+    const discovered = { ...full, _sources: [builtin, installed] };
+    onUpdate(discovered, { settled: true });
+    return discovered;
+  }
   await new Promise((r) => setTimeout(r, 1800));
   onUpdate(full, { settled: true });
   return full;
@@ -51,7 +60,7 @@ const errors = [];
 const results = [];
 const base = `http://127.0.0.1:${server.address().port}`;
 
-async function open(look, [w, h, touch]) {
+async function open(look, [w, h, touch], { sourcesDuringMotion = false } = {}) {
   const page = await browser.newPage({ viewport: { width: w, height: h }, isMobile: touch, hasTouch: touch, locale: 'ar' });
   // الرئيسية خلف الصفحة تسأل محرّك الإضافات (غير موجود في المتصفح): ليس من صفحة العمل
   page.on('pageerror', (e) => /محرّك الإضافات غير متاح/.test(e.message) || errors.push(`${look}: ${e.message}`));
@@ -71,15 +80,40 @@ async function open(look, [w, h, touch]) {
     window.__work = { id: ref, title: { english: 'Fixture Work' }, coverImage: { large: `${base}/__cover.svg`, extraLarge: `${base}/__cover.svg` }, bannerImage: `${base}/__cover.svg`, wideBanner: `${base}/__banner.svg`, genres: [], status: null, averageScore: 84, startDate: { year: 2018 }, staff: { edges: [] }, description: undefined, chapters: 201, _work: { key: 'fixture work', title: 'Fixture Work', thumbnailUrl: `${base}/__cover.svg`, editions: [{ sourceId: 'teamx', label: 'Team X', manga: { url: '/m' } }] } };
   }, { look, base });
   await page.waitForTimeout(800);
-  await page.evaluate(() => {
+  await page.evaluate(async (sourcesDuringMotion) => {
     window.__shifts = [];
     new PerformanceObserver((list) => {
       for (const e of list.getEntries()) if (!e.hadRecentInput && e.sources?.some((s) => s.node?.closest?.('#detail') || s.node?.parentElement?.closest?.('#detail'))) { window.__shifts.push(e.value); (window.__shiftNodes ??= []).push(e.sources.map((s) => `${s.node?.id || s.node?.className || s.node?.nodeName} ${JSON.stringify(s.previousRect)}→${JSON.stringify(s.currentRect)}`).join(' | ')); }
     }).observe({ type: 'layout-shift' });
-    window.__shell.openWork(window.__work);
-  });
+    if (sourcesDuringMotion) {
+      const { motionActive } = await import('/v35/page-motion.js');
+      window.__workMotionActive = () => motionActive(document.querySelector('#detail'));
+    }
+    window.__openWorkResult = window.__shell.openWork({ ...window.__work, __sourcesDuringMotion: sourcesDuringMotion });
+  }, sourcesDuringMotion);
+  if (sourcesDuringMotion) return page;
   await page.waitForTimeout(4200);
   return page;
+}
+
+const duringMotion = await open('page', [390, 844, true], { sourcesDuringMotion: true });
+try {
+  await duringMotion.waitForFunction(() => window.__workMotionActive() && window.__finishSourceDiscovery);
+  await duringMotion.evaluate(() => { window.__finishSourceDiscovery(); return window.__openWorkResult; });
+  await duringMotion.waitForFunction(() => !window.__workMotionActive());
+  assert.match(await duringMotion.locator('#sourceRow').innerText(), /Manga Million/, 'تُرسم الدفعة الأخيرة من المصادر بعد انتهاء حركة الدخول');
+} catch (error) {
+  await browser.close();
+  server.close();
+  throw error;
+} finally {
+  if (!duringMotion.isClosed()) await duringMotion.close();
+}
+console.log('ظهرت Manga Million مع مانجا ليك بعد اكتمال حركة دخول الصفحة.');
+if (process.argv.includes('--source-motion-only')) {
+  await browser.close();
+  server.close();
+  process.exit(0);
 }
 
 for (const look of LOOKS) {

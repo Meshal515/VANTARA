@@ -104,24 +104,36 @@ class VerificationPlugin : Plugin() {
         val data = result.data
         val matches = data?.getStringExtra("host") == item.host && data?.getStringExtra("token") == item.token
         val state = if (matches) data?.getStringExtra("state") else "cancelled"
-        val value = if (matches && state == "verified" && result.resultCode == Activity.RESULT_OK)
-            data?.getStringExtra("clearance")?.let { VerificationPolicy.clearance("cf_clearance=$it") } else null
+        val verified = matches && state == "verified" && result.resultCode == Activity.RESULT_OK
+        val value = if (verified) data?.getStringExtra("clearance")?.let { VerificationPolicy.clearance("cf_clearance=$it") } else null
+        // كل كوكيز الموقع من متصفح التحقق (لا cf_clearance وحده)، والقيم محصورة في VerificationPolicy.cookiePairs
+        val pairs = if (verified) VerificationPolicy.cookiePairs(data?.getStringExtra("cookies")).filter { it.first != "cf_clearance" } else emptyList()
         fun finish(state: String, reason: String?) {
             VerificationCoordinator.finish(item.host, item.token, state, reason)
             call?.resolve(json(item, state, reason))
         }
-        if (value == null) {
-            finish(if (state == "cancelled") "cancelled" else "failed", if (matches) data?.getStringExtra("reason") else "interrupted")
-        } else {
-            // Host-only, HTTPS, precisely one clearance cookie. Existing session cookies stay intact.
+        if (!verified) {
+            finish(if (state == "cancelled" || !matches) "cancelled" else "failed", if (matches) data?.getStringExtra("reason") else "interrupted")
+            return@post
+        }
+        // صفحة فتحت بلا تحدٍّ ولا كوكي تنقله: لا شيء يُحفظ، والمصدر يُعاد طلبه كما هو
+        if (value == null && pairs.isEmpty()) { finish("verified", null); return@post }
+        // HTTPS فقط. cf_clearance بلا Max-Age قصير مفروض: كان 1800 ث يُرجع التحقق بعد نصف ساعة ولو كان الموقع
+        // أعطاه مدة أطول. الخادم يقرر صلاحيته؛ إن رفضه يظهر التحدي ويُحل كما الآن. بقية الكوكيز بالمدة نفسها.
+        val jar = try { CookieManager.getInstance() } catch (_: RuntimeException) { return@post finish("failed", "cookie_store_unavailable") }
+        val all = (listOfNotNull(value?.let { "cf_clearance" to it }) + pairs)
+        var left = all.size
+        var ok = false
+        for ((name, v) in all) {
             try {
-                CookieManager.getInstance().setCookie(item.origin + "/", "cf_clearance=$value; Path=/; Max-Age=1800; Secure; HttpOnly; SameSite=Lax") { accepted ->
-                    try {
-                        if (accepted) { CookieManager.getInstance().flush(); finish("verified", null) }
-                        else finish("failed", "cookie_rejected")
-                    } catch (_: RuntimeException) { finish("failed", "cookie_store_unavailable") }
+                jar.setCookie(item.origin + "/", "$name=$v; Path=/; Max-Age=2592000; Secure; SameSite=Lax") { accepted ->
+                    if (accepted) ok = true
+                    if (--left == 0) {
+                        try { jar.flush() } catch (_: RuntimeException) {}
+                        if (ok) finish("verified", null) else finish("failed", "cookie_rejected")
+                    }
                 }
-            } catch (_: RuntimeException) { finish("failed", "cookie_store_unavailable") }
+            } catch (_: RuntimeException) { if (--left == 0) finish(if (ok) "verified" else "failed", if (ok) null else "cookie_store_unavailable") }
         }
     } }
 }

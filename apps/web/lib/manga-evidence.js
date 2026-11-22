@@ -51,6 +51,17 @@ export function mangaDexNames(m) {
 
 let dexNames = null;
 const dexCache = () => (dexNames ??= read(DEX_KEY));
+/**
+ * معرّف AniList الذي يربطه MangaDex بالعمل (`attributes.links.al`): دليل على **النسخة** نفسها لا على اسمها. اسم واحد
+ * قد يحمله عملان («Shoukoku no Altair» عنوان MangaDex لقصة جانبية برقم آخر)، والرقم يفرّقهما (بلاغ المالك: 0% دمج خاطئ).
+ */
+const DEX_AL_KEY = 'vantara.mangadex.al.v1';
+let dexAl = null;
+const dexAlCache = () => (dexAl ??= read(DEX_AL_KEY));
+export function mangaDexOfficialId(m) {
+  const al = Number(m?.attributes?.links?.al);
+  return Number.isSafeInteger(al) && al > 0 ? al : null;
+}
 
 /**
  * صفحة قائمة من MangaDex بأسمائها البديلة. ما حمل أسماءه (محرك الـPWA) يبقى كما هو،
@@ -60,7 +71,8 @@ export async function withMangaDexNames(sourceId, value, { fetchImpl = globalThi
   const mangas = value?.mangas;
   if (!isMangaDex(sourceId) || !Array.isArray(mangas) || !mangas.length) return value;
   const cache = dexCache();
-  const need = [...new Set(mangas.filter((m) => !m?.altNames?.length).map((m) => uuidOf(m?.url)).filter((id) => UUID.test(id) && !cache[id]))];
+  const als = dexAlCache();
+  const need = [...new Set(mangas.filter((m) => !m?.altNames?.length || !Number.isSafeInteger(m?.officialId)).map((m) => uuidOf(m?.url)).filter((id) => UUID.test(id) && !cache[id]))];
   if (need.length && typeof fetchImpl === 'function') {
     const url = new URL('https://api.mangadex.org/manga');
     url.searchParams.set('limit', '100');
@@ -73,8 +85,13 @@ export async function withMangaDexNames(sourceId, value, { fetchImpl = globalThi
         const res = await fetchImpl(url.toString(), { signal: controller?.signal, headers: { Accept: 'application/json' } });
         if (res?.ok) {
           const data = await res.json();
-          for (const m of data?.data ?? []) if (UUID.test(m?.id ?? '')) cache[m.id] = mangaDexNames(m);
+          for (const m of data?.data ?? []) if (UUID.test(m?.id ?? '')) {
+            cache[m.id] = mangaDexNames(m);
+            const al = mangaDexOfficialId(m);
+            if (al) als[m.id] = al;
+          }
           write(DEX_KEY, trim(cache));
+          write(DEX_AL_KEY, trim(als));
         }
       } finally {
         clearTimeout(timer);
@@ -85,7 +102,12 @@ export async function withMangaDexNames(sourceId, value, { fetchImpl = globalThi
   }
   return {
     ...value,
-    mangas: mangas.map((m) => (m?.altNames?.length || !cache[uuidOf(m?.url)] ? m : { ...m, altNames: cache[uuidOf(m.url)] })),
+    mangas: mangas.map((m) => {
+      const id = uuidOf(m?.url);
+      const names = !m?.altNames?.length && cache[id] ? { altNames: cache[id] } : null;
+      const official = !Number.isSafeInteger(m?.officialId) && als[id] ? { officialId: als[id] } : null;
+      return names || official ? { ...m, ...names, ...official } : m;
+    }),
   };
 }
 

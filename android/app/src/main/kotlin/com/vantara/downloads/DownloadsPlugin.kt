@@ -328,6 +328,7 @@ class DownloadsPlugin : Plugin() {
             backdrop = stageArt("backdrop"),
             logo = stageArt("logo"),
             usageUserId = call.getString("usageUserId"),
+            material = call.getString("material")?.takeIf { it == "glass" },
         )
         activity.startActivity(com.vantara.anime.player.PlayerActivity.intent(context, launch))
         call.resolve(JSObject().put("session", session))

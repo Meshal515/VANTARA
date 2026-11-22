@@ -14,6 +14,16 @@
 
 import type { D1Database } from './types.ts';
 import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js';
+import { adultSource, adultTitle } from '../../../apps/web/lib/adult-filter.js';
+import { ARABIC, tierFromId } from '../../../apps/web/lib/source-policy.js';
+
+/**
+ * سياسة المصادر في «آخر التحديثات» (قرار المالك، 22 نوفمبر): المانجا يبنيها المصدر العربي الآمن وحده. الخادم لا
+ * يصدّق الجهاز: يحكم من معرّف المصدر نفسه (lib/source-policy.js)، فالإنجليزي والمختلط ومصدر جهاز آخر لا يدخل.
+ */
+const publicMangaSource = (id: unknown) => typeof id === 'string' && tierFromId(id) === ARABIC;
+/** نفس الحكم في SQL على عنصر من مصفوفة sources: بلا `#` ولا `@`، ومدمج (بلا نقطة) أو حزمة `extension.ar.`. */
+const PUBLIC_SOURCE_SQL = (x: string) => `(${x} NOT LIKE '%#%' AND ${x} NOT LIKE '%@%' AND (instr(${x},'.')=0 OR ${x} LIKE '%.extension.ar.%'))`;
 
 export interface UpdatesEnv {
   DB: D1Database;
@@ -127,6 +137,8 @@ export function parseReport(raw: unknown, now: number): Report | null {
   }
   if (kind === 'movie' && !units.length) units.push({ season: null, number: 0, publishedAt: null });
   if (!units.length) return null;
+  // مانجا من مصدر غير عربي آمن، أو بعنوان للكبار: لا تدخل الخط الزمني العام ولا الإشعارات
+  if (section === 'manga' && (!source || !publicMangaSource(source.s) || adultSource({ id: source.s }) || adultTitle(title))) return null;
   const listedAt = num(r.listed);
   const listed = kind !== 'movie' && listedAt != null && listedAt <= now && now - listedAt <= LISTED_WINDOW ? listedAt : null;
   return { work: workKey, section, kind, title, cover: cover && /^https?:\/\//.test(cover) ? cover : null, source, units, listed };
@@ -367,6 +379,8 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
     `(kind <> 'movie' OR published_at IS NOT NULL)`,
     `(published_at IS NOT NULL OR observed_advance = 1 OR (SELECT COUNT(*) FROM update_events b WHERE b.work = update_events.work AND b.first_seen_at = update_events.first_seen_at AND b.published_at IS NULL) <= ${BURST})`,
   ];
+  // المانجا: حدث بلا مصدر عربي آمن لا يُعرض، ومنه ما سُجّل قبل هذه القاعدة (يختفي بلا كتابة في القاعدة)
+  if (section === 'manga') where.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(sources) THEN sources ELSE '[]' END) j WHERE ${PUBLIC_SOURCE_SQL(`json_extract(j.value,'$.s')`)})`);
   const binds: unknown[] = [section];
   if (work) {
     where.push('work = ?');
@@ -389,7 +403,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return reply({
-    events: page.map((r) => {
+    events: page.flatMap((r) => {
       let sources: Source[] = [];
       try {
         sources = JSON.parse(r.sources) as Source[];
@@ -398,8 +412,13 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
       }
       // أحداث سُجّلت قبل فكّ الكيانات: العنوان والمفتاح يُصحّحان عند القراءة
       const title = decodeEntities(r.title);
+      if (r.section === 'manga') {
+        // نسخ الإنجليزي والمختلط لا تُعرض في الخط الزمني العام، والعنوان الصريح للكبار لا يُعرض أبدًا
+        sources = sources.filter((x) => publicMangaSource(x?.s) && !adultSource({ id: x.s }));
+        if (!sources.length || adultTitle(title)) return [];
+      }
       const work = r.section === 'manga' && title !== r.title ? `ext:${normalizeTitle(title)}` : r.work;
-      return {
+      return [{
         id: r.id,
         work,
         section: r.section,
@@ -413,7 +432,7 @@ export async function handleUpdatesList(url: URL, env: UpdatesEnv): Promise<Resp
         firstSeenAt: r.first_seen_at,
         observedAdvance: r.observed_advance === 1,
         sources,
-      };
+      }];
     }),
     snapshotAt: Date.now(),
     next: rows.length > limit && last ? `${last.at}~${last.id}` : null,

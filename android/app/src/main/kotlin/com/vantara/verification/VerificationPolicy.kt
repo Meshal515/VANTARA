@@ -67,6 +67,20 @@ object VerificationPolicy {
             !(a == 203 && b == 0 && c == 113)
     }
 
+    /**
+     * كل كوكيز الموقع من متصفح التحقق المعزول (ترويسة CookieManager: «a=1; b=2»)، لا cf_clearance وحده.
+     * كان التطبيق يأخذ cf_clearance فقط فيضيع ما يحتاجه الموقع مع الكوكي، ويرجع يطلب التحقق (بلاغ المالك 22 نوفمبر).
+     * أسماء وقيم محصورة (لا حقن ترويسات)، وأربعون كوكي على الأكثر، و8KB للقيمة.
+     */
+    fun cookiePairs(header: String?): List<Pair<String, String>> {
+        if (header == null || header.length > 65536 || header.any { it == '\r' || it == '\n' }) return emptyList()
+        val name = Regex("^[A-Za-z0-9_.!#$%&'*+^`|~-]{1,128}$")
+        return header.split(';').asSequence().map(String::trim).filter { '=' in it }.mapNotNull { part ->
+            val n = part.substringBefore('=').trim(); val v = part.substringAfter('=').trim()
+            if (!name.matches(n) || v.length > 8192 || v.any { it == ';' || it == ',' || it.code < 0x20 || it.code > 0x7e || it == ' ' }) null else n to v
+        }.distinctBy { it.first }.take(40).toList()
+    }
+
     /** CookieManager returns a request header: import precisely one bounded token. */
     fun clearance(header: String?): String? {
         if (header == null || header.length > 65536 || header.any { it == '\r' || it == '\n' }) return null

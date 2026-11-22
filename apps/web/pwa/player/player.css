@@ -119,6 +119,12 @@ html.pwa-playing body {
   gap: 2px;
   padding: calc(env(safe-area-inset-top, 0px) + 14px) max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
 }
+.pwa-player .pp-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
 .pwa-player .pp-titles {
   flex: 1;
   min-width: 0;
@@ -1275,3 +1281,112 @@ html.pwa-playing body {
 .pl-ep-text b { font-size: 15px; }
 .pl-ep-text small { font-size: 12.5px; color: rgba(255, 255, 255, 0.65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-ep-text em { justify-self: start; font-style: normal; font-size: 11px; font-weight: 800; padding: 1px 7px; border-radius: 6px; background: var(--pl-accent, #3b82f6); }
+
+/* ═══════════════════ Glass: أدوات المشغّل (المرحلة 5، الخطة 8.7؛ تشتت 10 على الحافة، الأوراق 0) ═══════════════════
+ * تحت html[data-material='glass'] وحدها: المظهر الحالي لا يتغير. الويب: الفيديو في الصفحة نفسها فيكسره الزجاج.
+ * ويندوز (overlay.html، صنف desktop-overlay): الفيديو في نافذة mpv مستقلة لا تراها طبقة الأدوات (الخطة F13)،
+ * فلا قراءة للخلفية هناك: «مظهر زجاجي» بالصبغة والحافة والظل فقط. شريط التقدم والترجمة لا زجاج عليهما. */
+html[data-material='glass'] .pwa-player :is(.pp-icon, .pp-icon--big, .pp-play, .pp-unlock) {
+  background: rgba(255, 255, 255, 0.07) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2c-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pwa-player .pp-skip {
+  /* المظهر الحالي أبيض صلب بـ !important؛ في Glass كبسولة زجاج بنص أبيض (اكتُشف بالتكبير: بقي أبيض) */
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pwa-player :is(.pp-pill, .pp-next) {
+  background: color-mix(in srgb, var(--surface, #15141b) 55%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 10px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+}
+html[data-material='glass'] .pwa-player .pp-sheet {
+  background: color-mix(in srgb, var(--surface, #15141b) 64%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 -18px 50px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(30px) saturate(1.6);
+  -webkit-backdrop-filter: blur(30px) saturate(1.6);
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-icon, .pp-icon--big, .pp-play, .pp-unlock, .pp-skip, .pp-pill, .pp-next, .pp-sheet) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-icon, .pp-icon--big, .pp-play, .pp-unlock) {
+  background: rgba(20, 18, 28, 0.42) !important;
+}
+html.desktop-overlay[data-material='glass'] .pwa-player .pp-skip {
+  background: rgba(20, 18, 28, 0.5) !important;
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-pill, .pp-next, .pp-sheet) {
+  background: color-mix(in srgb, var(--surface, #15141b) 84%, transparent);
+}
+
+/* أزرار متجاورة = كبسولة زجاج واحدة (كمجموعات أزرار iOS)، لا دوائر متلاصقة (ملاحظة المالك على الجرس والبحث).
+ * أدوات الترويسة (.pp-tools) ومجموعتا الشريط السفلي. أزرار الوسط (رجوع 10، تشغيل، تقديم 10) تبقى دوائر متباعدة. */
+html[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)):has(> :is(.pp-icon, .pp-volume, .pp-quality):not([hidden]) ~ :is(.pp-icon, .pp-quality):not([hidden])) {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)):has(> :is(.pp-icon, .pp-volume, .pp-quality):not([hidden]) ~ :is(.pp-icon, .pp-quality):not([hidden])) .pp-icon {
+  background: transparent !important;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(20, 18, 28, 0.42);
+}
+
+/* ── Glass: غرفة المشاهدة معًا (lobby.js: الويب وويندوز). الأزرار زجاج، والزر الأزرق الوحيد (الخطوة الحالية) يبقى بلون القسم.
+ * الأوراق الجانبية واللوحات تبقى معتمة (قرار المالك 15 نوفمبر: نصوص الغرفة لا تظهر من خلفها) وتأخذ حافة زجاجية فقط. ── */
+html[data-material='glass'] .pwa-player :is(.pl-close, .pl-icon, .pl-step-btn) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2c-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pwa-player .pl-go:not(.is-primary),
+html[data-material='glass'] .pwa-player .pl-start:not(.is-primary) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.3);
+  backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-player, blur(14px) saturate(1.6));
+}
+html[data-material='glass'] .pl-side-close {
+  border-color: transparent;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+html[data-material='glass'] :is(.pwa-player .pl-more, .pl-side) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+html.desktop-overlay[data-material='glass'] .pwa-player :is(.pl-close, .pl-icon, .pl-step-btn, .pl-go:not(.is-primary), .pl-start:not(.is-primary)) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(20, 18, 28, 0.42);
+}
+
+/* الضغط على أزرار المشغّل والغرفة في Glass: ينتفخ ويضيء (كانت خلفية !important تمنع أي أثر للمس) */
+html[data-material='glass'] .pwa-player :is(.pp-icon, .pp-play, .pp-unlock, .pp-skip, .pl-close, .pl-icon, .pl-step-btn, .pl-go:not(.is-primary)) {
+  transition: scale 0.34s cubic-bezier(0.3, 1.6, 0.5, 1), background-color 0.2s ease;
+}
+html[data-material='glass'] .pwa-player :is(.pp-icon, .pp-play, .pp-unlock, .pp-skip, .pl-close, .pl-icon, .pl-step-btn, .pl-go:not(.is-primary)):active {
+  scale: 1.1;
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+html[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)) .pp-icon:active {
+  scale: 1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16) !important;
+}

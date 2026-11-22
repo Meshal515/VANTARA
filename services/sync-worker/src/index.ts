@@ -653,17 +653,20 @@ async function handleSourceLatest(request: Request, env: Env, path: string, now:
   }
   if (request.method !== 'POST') return json({ error: 'method' }, { status: 405 });
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  const sourceId = asString(body?.['sourceId'], 120);
-  if (!sourceId || !/^[\w.:-]+$/.test(sourceId)) return json({ error: 'source' }, { status: 400 });
+  const sourceId = typeof body?.['sourceId'] === 'string' ? body['sourceId'].trim() : '';
+  // هذا مفتاح اللقطة، لذلك يبقى المعرّف كاملًا كما أعطاه المحرك (حزمة، حزمة@لغة، حزمة#رقم).
+  if (sourceId.length > 120 || !/^[\w.:-]+(?:@[a-z0-9-]+|#-?\d+)?$/i.test(sourceId)) return json({ error: 'source' }, { status: 400 });
   if (path === '/v1/source-latest/claim') {
     const leaseToken = crypto.randomUUID();
+    // 45 ثانية لتحميل المحرك و20 ثانية لرد الموقع، مع مهلة قصيرة لإرسال اللقطة.
+    const leaseUntil = now + 75_000;
     const out = await env.DB.prepare(
       `INSERT INTO source_latest (source_id, lease_until, lease_token) VALUES (?, ?, ?)
        ON CONFLICT (source_id) DO UPDATE SET lease_until = excluded.lease_until, lease_token = excluded.lease_token
        WHERE source_latest.fetched_at < ? AND source_latest.lease_until < ?`,
-    ).bind(sourceId, now + 45_000, leaseToken, now - 60_000, now).run();
+    ).bind(sourceId, leaseUntil, leaseToken, now - 60_000, now).run();
     const claimed = Number(out.meta?.changes ?? 0) > 0;
-    return json({ claimed, leaseUntil: now + 45_000, ...(claimed ? { leaseToken } : {}) });
+    return json({ claimed, leaseUntil, ...(claimed ? { leaseToken } : {}) });
   }
   if (path !== '/v1/source-latest') return json({ error: 'not_found' }, { status: 404 });
   const value = body?.['value'] as { mangas?: unknown[]; hasNextPage?: unknown } | null;

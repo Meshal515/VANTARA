@@ -106,6 +106,7 @@ class AnimeEnginePlugin : Plugin() {
                 animeId = call.getString("animeId").orEmpty(),
                 section = call.getString("section")?.takeIf { it == "cinema" } ?: "anime",
                 accent = call.getString("accent")?.takeIf { Regex("^#[0-9a-fA-F]{6}$").matches(it) },
+                material = call.getString("material")?.takeIf { it == "glass" },
                 usageUserId = call.getString("usageUserId"),
                 malId = call.getInt("malId"),
                 episode = (call.getDouble("episode") ?: 1.0).toFloat(),

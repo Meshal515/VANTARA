@@ -114,7 +114,7 @@ describe('Update Engine: خط الأساس', () => {
     const e = env();
     const put = (id: string, number: number, published: number | null, first: number) =>
       e.DB.prepare('INSERT INTO update_events (id, work, section, kind, season, number, title, cover, at, published_at, first_seen_at, sources, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, ?)')
-        .bind(id, 'ext:old', 'manga', 'chapter', number, 'old', published ?? first, published, first, '[]', first);
+        .bind(id, 'ext:old', 'manga', 'chapter', number, 'old', published ?? first, published, first, JSON.stringify([{ s: 'teamx' }]), first);
     await e.DB.batch([
       ...range(3, 9).map((n) => put(`ext:old|c:${n}`, n, null, NOW)),
       put('ext:old|c:21', 21, Date.UTC(2026, 7, 7), NOW),
@@ -261,4 +261,42 @@ it('two devices discovering the same chapter concurrently retain both source edi
   expect(((await list(e, 'section=manga')).events[0]!.sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b']);
   await Promise.all([observe(e, [manga('ext:concurrent', [2], 'c')], NOW + 2 * H), observe(e, [manga('ext:concurrent', [2], 'd')], NOW + 2 * H)]);
   expect(((await list(e, 'section=manga')).events[0]!.sources as Array<{ s: string }>).map(s => s.s).sort()).toEqual(['a','b','c','d']);
+});
+
+/**
+ * بلاغ المالك (22 نوفمبر): «آخر التحديثات» صارت كموقع إباحي من إضافات إنجليزية ومختلطة ثبّتها مستخدمون. الخادم لا
+ * يصدّق الجهاز: المانجا يبنيها المصدر العربي الآمن وحده بحكم معرّفه، والقائمة تُفلتر وقت القراءة فيختفي ما سُجّل قبل
+ * القاعدة بلا كتابة في القاعدة.
+ */
+describe('سياسة المصادر في الخط الزمني العام', () => {
+  const P = 'eu.kanade.tachiyomi.extension';
+  it('refuses manga reports from foreign, mixed, unknown-device and adult sources, and adult titles', async () => {
+    const e = env();
+    const out = await observe(e, [
+      manga('ext:wrath of the underdog', [35], `${P}.all.mangafire@en`, { 35: NOW - H }),
+      manga('ext:siren getty', [30], `${P}.en.somerepo#3`, { 30: NOW - H }),
+      manga('ext:nighthawk', [8], `${P}.all.mangadex@ar`, { 8: NOW - H }),
+      manga('ext:x', [2], `${P}.en.toonily`, { 2: NOW - H }),
+      manga('ext:night nsfw', [2], `${P}.ar.teamx`, { 2: NOW - H }),
+      { ...manga('ext:night', [2], `${P}.ar.teamx`, { 2: NOW - H }), title: 'Night [NSFW]' },
+      manga('ext:solo leveling', [201], `${P}.ar.mangalek`, { 201: NOW - H }),
+    ], NOW);
+    // «night nsfw» عنوانه صريح فيُرفض حتى من مصدر عربي آمن
+    expect(out).toMatchObject({ accepted: 1, created: 1 });
+    expect((await list(e, 'section=manga')).events.map((x) => x.work)).toEqual(['ext:solo leveling']);
+  });
+
+  it('hides events stored before the rule when no Arabic safe source carries them, and strips foreign sources', async () => {
+    const e = env();
+    await observe(e, [manga('ext:solo leveling', [201], `${P}.ar.mangalek`, { 201: NOW - H })], NOW);
+    const db = (e as unknown as { DB: { prepare: (q: string) => { bind: (...a: unknown[]) => { run: () => Promise<unknown> } } } }).DB;
+    const insert = (id: string, work: string, title: string, sources: unknown[]) => db.prepare(`INSERT INTO update_events (id,work,section,kind,season,number,title,cover,at,published_at,first_seen_at,sources,updated_at,observed_advance)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, work, 'manga', 'chapter', null, 1, title, null, NOW - 60_000, NOW - 60_000, NOW, JSON.stringify(sources), NOW, 0).run();
+    await insert('old1', 'ext:sleeping with a friend s mom', "Sleeping With a Friend's Mom", [{ s: `${P}.all.mangafire@en` }]);
+    await insert('old2', 'ext:secret taste zip', 'Secret Taste.Zip', [{ s: `${P}.en.mangafire#4` }]);
+    await insert('old3', 'ext:mixed both', 'Mixed Both', [{ s: `${P}.all.mangafire@en` }, { s: `${P}.ar.teamx` }]);
+    const shown = (await list(e, 'section=manga')).events;
+    expect(shown.map((x) => x.work)).toEqual(['ext:mixed both', 'ext:solo leveling']);
+    expect((shown[0]!.sources as Array<{ s: string }>).map((s) => s.s)).toEqual([`${P}.ar.teamx`]);
+  });
 });

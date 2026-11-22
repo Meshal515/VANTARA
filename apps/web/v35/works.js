@@ -12,8 +12,8 @@
 import engine from '../lib/extension-engine.js';
 import { saveWithRelief } from '../lib/storage-relief.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
-import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, sourcePackage, titleTwins } from '../lib/catalog.js';
-import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
+import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, sourcePackage, titleForms, titleTwins } from '../lib/catalog.js';
+import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt, ambiguousNames } from '../lib/manga-alias-store.js';
 import { RANK, editionKey } from '../lib/work-identity.js';
 import { detailEvidence, detailNames, isPartName, listingEvidence, namesPointElsewhere, officialConflict, ownNames, pickEdition } from '../lib/work-evidence.js';
 import { twinAliases } from '../lib/manga-twins.js';
@@ -23,7 +23,10 @@ import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 import { noteListed, topChapters } from '../lib/update-engine.js';
-import { adultManga, adultSource, blockKey, isBlockedKey } from '../lib/adult-filter.js';
+import { adultManga, adultSource, blockKey, ecchiManga, isBlockedKey } from '../lib/adult-filter.js';
+import { buildsLibrary, enrichOnly, noteSourceTiers, searchable, tierOf } from '../lib/source-policy.js';
+import { needsVerdict, noteVerdicts, workVerdict } from '../lib/manga-verdict.js';
+import { fetchMangaDexArabicNames, fetchMangaMatches } from '../lib/manga-meta.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -71,7 +74,7 @@ export const editionKeyOf = (edition) => editionKey(mirrorFamily(edition?.source
 /** مرجع العمل الذي رُبطت به النسخة بدليل موثَّق، أو null. */
 const editionRefOf = (edition) => editionWork(editionKeyOf(edition));
 /** خيارات الفهرس الواحدة لكل قائمة: الأسماء والمعرّفات الرسمية وفصل المستخدم وروابط الهوية. */
-const indexOptions = () => ({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet(), editionRefOf });
+const indexOptions = () => ({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet(), editionRefOf, ambiguous: ambiguousNames() });
 
 /**
  * فهرس الأعمال بالهوية الواحدة (ZERO DUPLICATE): نفس العمل بأسماء مختلفة بين
@@ -193,6 +196,8 @@ function sources() {
     // المتخصص في الإباحية يختفي؛ العام «المختلط» يبقى وأعماله تُفلتر بـisAdult (قرار المالك، 16 نوفمبر). كان كل مصدر
     // مختلط ثبّته المستخدم (MangaDex مثلًا) يُستبعد كله
     const clean = (list ?? []).filter((s) => !adultSource(s));
+    // سياسة المصادر (قرار المالك، 22 نوفمبر): عربي آمن يبني المكتبة، وأجنبي آمن للبحث، ومختلط للإثراء فقط
+    noteSourceTiers(clean);
     for (const s of clean) {
       if (s.filler) fillerIds.add(String(s.id));
       if (s.lang) langById.set(String(s.id), String(s.lang).toLowerCase());
@@ -205,11 +210,17 @@ function sources() {
   return sourcesPromise;
 }
 
-/** معرّفات المصادر التي يشغّلها هذا الجهاز الآن (ظاهرة ومضافة)، أو null إن تعذّر معرفتها (فلا نُسقط شيئًا). */
-async function runnableSourceIds() {
+/** تصنيف مصدر مانجا على هذا الجهاز بعد قراءة بيان المصادر (عربي/أجنبي/مختلط/محظور). */
+export async function mangaSourceTier(sourceId) {
+  try { await sources(); } catch { /* بلا بيان: الحكم بالمعرّف وحده، بتشدد */ }
+  return tierOf(sourceId);
+}
+
+/** المصادر التي يشغّلها هذا الجهاز الآن، أو null إن تعذّر معرفتها. */
+async function runnableSources() {
   if (!available()) return null;
   try {
-    return new Set((await sources()).map((s) => String(s.id)));
+    return new Map((await sources()).map((source) => [String(source.id), source]));
   } catch {
     return null;
   }
@@ -229,9 +240,109 @@ export const available = () => engine.isAvailable();
 
 let sharedLatest = null;
 export function setSharedLatest(fetchShared) { sharedLatest = fetchShared; }
-const sourceLatest = (sourceId, page) => page === 1 && sharedLatest
-  ? sharedLatest(sourceId, () => engine.latest(sourceId, page))
-  : engine.latest(sourceId, page);
+
+/**
+ * صيغ البحث بالترتيب (بلاغ المالك 22 نوفمبر: «The Savior’s Bucket List» لا نتائج): كما كُتب، ثم بفواصل
+ * مستقيمة (’ ← ')، ثم بلا علامات. بحث أغلب المواقع حرفي، فالفاصلة المنحنية أو النقطتان تُفوّت العمل.
+ * الصيغة التالية تُجرَّب على المصدر فقط إن لم تجد السابقة شيئًا: لا كلفة على البحث العادي.
+ */
+export function searchVariants(query) {
+  const q = String(query ?? '').trim().replace(/\s+/g, ' ');
+  const straight = q.replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"');
+  const bare = straight.replace(/['"]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  // «SPY×FAMILY» يكتبه الموقع «Spy x Family» (titleForms)
+  return [...new Set([q, straight, ...titleForms(straight).slice(1), bare].filter(Boolean))];
+}
+
+/**
+ * قرب العمل مما كُتب في البحث (بلاغ المالك: «بطاقة وحدة من العمل، وممكن تطلع 50 عمل غيره عادي، الأقرب أول»).
+ * على كل أسماء العمل (عنوان كل نسخة وأسماؤها البديلة) بعد الطيّ نفسه: 4 مطابق تمامًا، 3 مطابق بلا مسافات،
+ * 2 يبدأ به، 1 فيه كل كلماته، وإلا نسبة الكلمات المشتركة.
+ */
+export function searchScore(work, query) {
+  const q = normalizeTitle(query);
+  if (!q) return 0;
+  const qWords = q.split(' ');
+  const names = new Set((work?.editions ?? []).flatMap((e) => [e?.manga?.title, ...(e?.manga?.altNames ?? [])]).concat(work?.title).map((t) => normalizeTitle(t)).filter(Boolean));
+  let best = 0;
+  for (const n of names) {
+    let s;
+    if (n === q) s = 4;
+    else if (n.replace(/ /g, '') === q.replace(/ /g, '')) s = 3;
+    else if (n.startsWith(q)) s = 2;
+    else {
+      const words = new Set(n.split(' '));
+      const shared = qWords.filter((w) => words.has(w)).length;
+      s = shared === qWords.length ? 1 : shared / (qWords.length + 1);
+    }
+    if (s > best) best = s;
+    if (best === 4) break;
+  }
+  return best;
+}
+
+/**
+ * أسماء العمل المقصود بالبحث (بلاغ المالك 22 نوفمبر: «أي اسم بأي لغة»). المصادر تعرف العمل بالإنجليزي أو الروماجي أو
+ * العربي، فالبحث بالياباني أو باسم بديل مختصر («OHSHC»، «몬스터») لا يجده عندها (6.7% و10.8% في القياس). الأسماء من
+ * قاموس الجهاز إن طابق عملًا واحدًا، وإلا من AniList بمطابقة اسم عمل واحد بالضبط (الغموض لا أسماء)، والكبار لا يوسَّعون.
+ * طلب واحد للعبارة في الجلسة.
+ */
+const queryNameCache = new Map();
+export async function queryNames(query, { fetchMatches = fetchMangaMatches } = {}) {
+  const q = normalizeTitle(query);
+  if (!q) return [];
+  if (queryNameCache.has(q)) return queryNameCache.get(q);
+  let names = [];
+  const hits = [...aliasMap()].filter(([key, list]) => key === q || (list ?? []).some((n) => normalizeTitle(n) === q));
+  if (hits.length === 1) names = [hits[0][0], ...hits[0][1]];
+  else if (!hits.length) {
+    try {
+      const found = (await fetchMatches([query])).get(query);
+      if (found?.identity?.names?.length && found.verdict !== 'adult') names = found.identity.names;
+    } catch { /* بلا شبكة: البحث بما كُتب يكفي */ }
+  }
+  const out = [...new Set(names.filter((n) => typeof n === 'string' && normalizeTitle(n) && normalizeTitle(n) !== q))];
+  if (queryNameCache.size > 200) queryNameCache.delete(queryNameCache.keys().next().value);
+  queryNameCache.set(q, out);
+  return out;
+}
+export function _resetQueryNames() { queryNameCache.clear(); }
+/**
+ * الاسم الذي تفهمه المصادر (لاتيني أو عربي)، واحد فقط: اسمان (إنجليزي وروماجي) يجلبان نسختين لا دليل على أنهما عمل
+ * واحد على جهاز جديد فتظهران بطاقتين (القياس: 209 من 453). بقية النسخ تنضم حين تُفتح البطاقة (discoverEditions).
+ */
+const sourceQueryNames = (names, query) => {
+  const seen = new Set([normalizeTitle(query).replace(/ /g, '')]);
+  return names.filter((n) => /^[\p{Script=Latin}\p{Script=Arabic}\p{N}\p{P}\p{Zs}\p{S}]+$/u.test(n)).filter((n) => {
+    const k = normalizeTitle(n).replace(/ /g, '');
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 1);
+};
+/** أعلى قرب بين النتائج: 3 فما فوق = وجدنا العمل بما كُتب، فلا حاجة لأسماء أخرى. */
+const bestScore = (index, query) => Math.max(0, ...index.list().map((w) => searchScore(w, query)));
+
+function listingPage(source, { kind = 'catalogue', page, query, genre }) {
+  const request = () => requestSource(source, async () => {
+    if (genre) return engine.genre(source.id, genre, page);
+    if (query) {
+      let last = null;
+      for (const variant of searchVariants(query)) {
+        last = await engine.search(source.id, variant, page);
+        if (last?.mangas?.length) return last;
+      }
+      return last;
+    }
+    if (kind === 'popular') return engine.popular(source.id, page);
+    if (kind === 'latest' || kind === 'latestListing') return engine.latest(source.id, page);
+    return engine.catalogue(source.id, page);
+  }, LISTING_TIMEOUT_MS);
+  if (page === 1 && sharedLatest && !query && !genre && (kind === 'latest' || kind === 'latestListing')) {
+    return sharedLatest(source.id, request);
+  }
+  return request();
+}
 
 const CHAPTER_UPDATES_KEY = 'chapterUpdates.v2';
 const chapterId = (chapter) => {
@@ -273,7 +384,7 @@ export function latestBoundary(keys, prev) {
  * Source baselines on the server, rather than list motion, decide real advances.
  */
 export async function collectLatestChapters(list, page, {
-  latest = (id, p) => engine.latest(id, p),
+  latest = null,
   chapters = (id, manga) => engine.chapters(id, manga),
   listed = noteListed,
   now = Date.now(),
@@ -310,7 +421,9 @@ export async function collectLatestChapters(list, page, {
       let value;
       try {
         diagnostics.pages++;
-        value = await withTimeout(latest(source.id, p), LISTING_TIMEOUT_MS);
+        value = await (latest
+          ? withTimeout(latest(source.id, p), LISTING_TIMEOUT_MS)
+          : listingPage(source, { kind: 'latest', page: p }));
       } catch {
         diagnostics.failedPages++;
         nextPage = p;
@@ -414,7 +527,7 @@ function recentWorks(entries) {
     if (!hit) continue;
     if (!observed.has(hit.key) || observedAt > observed.get(hit.key).at) observed.set(hit.key, { chapter, at: observedAt });
   }
-  const works = index.list().filter((w) => !isWestern(w) && !isAdult(w));
+  const works = index.list().filter((w) => !isWestern(w) && !isAdult(w) && surfaceAllows(w));
   // ما رُصد لكل نسخة يصير للبطاقة التي انضمت إليها (الأحدث يفوز)
   for (const [own, seen] of [...observed]) {
     const key = index.keyOf(own);
@@ -567,13 +680,45 @@ export function collapseMirrors(list) {
     return f === String(s.id) || best.get(f) === s;
   });
 }
-const listingSources = async ({ query = '', includeFillers = false } = {}) => {
+/**
+ * مصادر القائمة (قرار المالك، 22 نوفمبر، يحلّ محل قرار 16 نوفمبر «الأجنبي في كل مكان» الذي أغرق «آخر التحديثات»):
+ * الرئيسية و«آخر التحديثات» والأقسام من المصدر العربي الآمن وحده، والبحث المقصود (`query`) من العربي والأجنبي الآمن.
+ * المختلط لا يُسأل عن قائمة ولا بحث أبدًا: يُثري الأعمال الموجودة فقط (discoverEditions).
+ */
+const listingSources = async ({ query = '' } = {}) => {
   const all = await sources();
-  void query;
-  // قرار المالك (16 نوفمبر): أعمال الإضافات غير العربية تظهر في كل مكان بوسم لغتها؛ includeFillers باقٍ للتوافق
-  void includeFillers;
-  return collapseMirrors(all);
+  const search = Boolean(String(query ?? '').trim());
+  return collapseMirrors(all.filter((s) => (search ? searchable(s.id) : buildsLibrary(s.id))));
 };
+
+/**
+ * بوابة العرض الأخيرة لكل بطاقة في قائمة أو بحث، فوق اختيار المصادر (بطاقة من الفهرس المحفوظ قد تحمل نسخًا قديمة):
+ * - المكتبة: نسخة عربية آمنة واحدة على الأقل، ولا إيتشي (الإيتشي للبحث المقصود وحده).
+ * - البحث: نسخة آمنة (عربية أو أجنبية). وعمل بلا نسخة عربية لا يظهر حتى يحكم له AniList بالنظافة (المجهول لا يُعرض).
+ */
+export function surfaceAllows(work, { search = false } = {}) {
+  const editions = work?.editions ?? [];
+  if (!search) return editions.some((e) => buildsLibrary(e.sourceId)) && !editions.some((e) => ecchiManga(e.manga));
+  if (!editions.some((e) => searchable(e.sourceId))) return false;
+  if (editions.some((e) => buildsLibrary(e.sourceId))) return true;
+  const verdict = workVerdict(editions.map((e) => e.manga?.title).filter(Boolean));
+  return verdict === 'clean' || verdict === 'ecchi';
+}
+const foreignOnly = (work) => !(work?.editions ?? []).some((e) => buildsLibrary(e.sourceId));
+
+/**
+ * يسأل AniList عن حكم عناوين الأعمال الأجنبية في نتائج البحث (20 عنوانًا للطلب، مرة لكل عنوان؛ المجهول يُعاد بعد أيام).
+ * عنوان حكمه «للكبار» يُحجب مفتاح عمله في كل مكان.
+ */
+export async function verifyForeignWorks(works, { fetchMatches = fetchMangaMatches, limit = 40 } = {}) {
+  const titles = [...new Set(works.filter(foreignOnly).flatMap((w) => (w.editions ?? []).map((e) => e.manga?.title)).filter((t) => t && needsVerdict(t)))].slice(0, limit);
+  for (let i = 0; i < titles.length; i += 20) {
+    let found;
+    try { found = await fetchMatches(titles.slice(i, i + 20)); } catch { return; }
+    noteVerdicts([...found].map(([title, m]) => [title, m?.verdict ?? 'unknown']));
+  }
+  for (const w of works) if (workVerdict((w.editions ?? []).map((e) => e.manga?.title).filter(Boolean)) === 'adult') for (const k of [w.key, ...(w.keys ?? [])]) blockKey(k);
+}
 /**
  * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
  * القارئ لا يرى لغتين؛ والترجمة تعرف الفصل الإنجليزي من `sourceId`.
@@ -659,19 +804,8 @@ export const isAdult = (work) => isBlockedKey(work?.key) || (work?.keys ?? []).s
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
   await loadAliases(); // The first page must use the shipped aliases.
-  const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
-  // مصدرٌ معلّق لا يحبس الصفحة: 20 ثانية ثم يُتجاوز، والباقي يُعرض
-  const { ok } = await gather(list, (source) =>
-    withTimeout(genre
-      ? engine.genre(source.id, genre, page)
-      : query
-      ? engine.search(source.id, query, page)
-      : kind === 'popular'
-        ? engine.popular(source.id, page)
-        : kind === 'latest' || kind === 'latestListing'
-        ? sourceLatest(source.id, page)
-          : engine.catalogue(source.id, page), LISTING_TIMEOUT_MS),
-  );
+  const list = await listingSources({ query });
+  const { ok } = await gather(list, (source) => listingPage(source, { kind, page, query, genre }));
   const index = workIndex();
   const positions = new Map();
   let hasNextPage = false;
@@ -681,7 +815,15 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
     hasNextPage ||= Boolean(value?.hasNextPage);
     addPage(index, positions, source, value);
   }
-  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern }).map(toV35Work), hasNextPage, page };
+  // البحث بالياباني أو باسم بديل: المصادر تُسأل بأسماء العمل التي تعرفها، والترتيب يعرف أنها أسماؤه
+  const also = query && bestScore(index, query) < 3 ? await queryNames(query) : [];
+  for (const name of sourceQueryNames(also, query)) {
+    const more = await gather(list, (source) => listingPage(source, { kind, page, query: name, genre }));
+    for (const { source, value } of more.ok) addPage(index, positions, source, await withMangaDexNames(source.id, value));
+  }
+  // البحث: الأعمال الأجنبية تنتظر حكم AniList قبل أن تظهر (المجهول لا يُعرض)
+  if (query) await verifyForeignWorks(index.list());
+  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern, query, also }).map(toV35Work), hasNextPage, page };
 }
 
 function addPage(index, positions, source, value) {
@@ -695,11 +837,12 @@ function addPage(index, positions, source, value) {
     positions.set(hit.key, list);
   });
 }
-function ranked(index, positions, kind, { keepWestern = false } = {}) {
+function ranked(index, positions, kind, { keepWestern = false, query = '', also = [] } = {}) {
   // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
   // قرار المالك (16 نوفمبر، UE10): عمل نسخه كلها من إضافة غير عربية يظهر في كل مكان، وبطاقته تحمل وسم لغته
   // (foreignLang). ترتيب النسخ يبقي العربي أولًا داخل كل عمل
-  const works = index.list().filter((w) => (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w));
+  const search = Boolean(String(query ?? '').trim());
+  const works = index.list().filter((w) => (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w) && surfaceAllows(w, { search }));
   const byWork = new Map();
   for (const [own, list] of positions) {
     const key = index.keyOf(own);
@@ -711,7 +854,17 @@ function ranked(index, positions, kind, { keepWestern = false } = {}) {
     w.title = w.editions[0]?.manga?.title ?? w.title;
     w.thumbnailUrl = w.editions.find((e) => e.manga?.thumbnailUrl)?.manga.thumbnailUrl ?? w.thumbnailUrl;
   }
-  return rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
+  const order = rankListing(works, byWork, kind === 'latest' || kind === 'latestListing' ? 'latest' : 'popular');
+  if (!query) return order;
+  // البحث: الأقرب لما كُتب أولًا، والتعادل بترتيب المصادر نفسه (ترتيب ثابت)
+  // اسم العمل المقصود من AniList أو القاموس (also) يقارب المطابقة، تحت ما كُتب حرفيًا
+  const closeness = (w) => {
+    const own = searchScore(w, query);
+    const viaName = Math.max(0, ...also.map((n) => searchScore(w, n)));
+    return Math.max(own, viaName >= 3 ? 3.9 : viaName * 0.9);
+  };
+  const score = new Map(order.map((w) => [w, closeness(w)]));
+  return order.map((w, i) => ({ w, i })).sort((a, b) => score.get(b.w) - score.get(a.w) || a.i - b.i).map((x) => x.w);
 }
 
 
@@ -848,7 +1001,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   concurrency = Infinity, shouldContinue = () => true,
 } = {}) {
   await loadAliases(); // Streaming first paint must resolve canonical names too.
-  const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
+  const list = await listingSources({ query });
   const index = workIndex();
   const positions = new Map();
   const mode = query || genre ? 'search' : kind === 'latestListing' ? 'latest' : kind;
@@ -858,8 +1011,9 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   const flush = () => {
     clearTimeout(timer);
     timer = null;
-    onUpdate({ items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page });
+    onUpdate({ items: ranked(index, positions, mode, { query, also }).map(toV35Work), hasNextPage, page });
   };
+  let also = [];
   let cursor = 0;
   const worker = async () => {
     while (cursor < list.length && shouldContinue()) {
@@ -867,18 +1021,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
       const t0 = Date.now();
       const stage = query ? 'search' : 'list';
       try {
-        const value = await withMangaDexNames(source.id, await withTimeout(
-          genre
-            ? engine.genre(source.id, genre, page)
-            : query
-              ? engine.search(source.id, query, page)
-              : kind === 'popular'
-                ? engine.popular(source.id, page)
-                : kind === 'latest' || kind === 'latestListing'
-                  ? sourceLatest(source.id, page)
-                  : engine.catalogue(source.id, page),
-          LISTING_TIMEOUT_MS,
-        ));
+        const value = await withMangaDexNames(source.id, await listingPage(source, { kind, page, query, genre }));
         hasNextPage ||= Boolean(value?.hasNextPage);
         reportSource({ section: 'manga', sourceId: source.id, stage, outcome: value?.mangas?.length ? 'ok' : 'empty', ms: Date.now() - t0 });
         addPage(index, positions, source, value);
@@ -895,17 +1038,34 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
   flush();
-  return { items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page };
+  // البحث بالياباني أو باسم بديل: جولة ثانية بأسماء العمل التي تعرفها المصادر (فقط إن لم يُوجد العمل بما كُتب)
+  if (query && shouldContinue() && bestScore(index, query) < 3) {
+    also = await queryNames(query);
+    for (const name of sourceQueryNames(also, query)) {
+      if (!shouldContinue()) break;
+      await gather(list, async (source) => {
+        const value = await withMangaDexNames(source.id, await listingPage(source, { kind, page, query: name, genre }));
+        addPage(index, positions, source, value);
+        return value;
+      });
+      flush();
+    }
+  }
+  // البحث: العربي ظهر فورًا، والأجنبي يظهر بعد حكم AniList بنظافته (المجهول لا يُعرض)
+  if (query && shouldContinue()) {
+    await verifyForeignWorks(index.list());
+    flush();
+  }
+  return { items: ranked(index, positions, mode, { query, also }).map(toV35Work), hasNextPage, page };
 }
 
 /** التحقق من الفصول منفصل عن عرض قوائم latest، وبتوازي محدود. */
 export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldContinue = () => true } = {}) {
   // Every available source participates; each source has its own resumable cursor.
-  const list = await listingSources({ includeFillers: true });
+  const list = await listingSources();
   const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
   const { entries, known } = await collectLatestChapters(list, 1, {
     known: prior,
-    latest: sourceLatest,
     concurrency: 3,
     shouldContinue,
     onUpdate: (found) => onUpdate(recentWorks(found)),
@@ -924,7 +1084,9 @@ export function failureOf(error) {
   return {
     state: timeout ? 'SOURCE_TIMEOUT' : 'SOURCE_ERROR',
     // الويب بلا «جسرك الخاص» والمصدر لا يسمح بالقراءة المباشرة (pwa/net/fetcher.js NEEDS_BRIDGE)
-    reason: error?.code === 'needs_bridge' || /القراءة المباشرة من المتصفح/.test(message) ? 'يحتاج «جسرك الخاص» في الويب (الإعدادات)' : error?.code === 'bridge_key' ? 'مفتاح جسرك الخاص غير صحيح' : timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
+    // الويب (pwa/net/fetcher.js `FetchError('challenge')`): المتصفح لا يحل Cloudflare لموقع آخر ولا ينقل كوكيه، فلا نافذة
+    // تحقق ولا إعادة محاولة بلا نتيجة؛ المسار المدعوم يُقال مرة: التطبيق أو «جسرك الخاص»
+    reason: error?.code === 'needs_bridge' || /القراءة المباشرة من المتصفح/.test(message) ? 'يحتاج «جسرك الخاص» في الويب (الإعدادات)' : error?.code === 'bridge_key' ? 'مفتاح جسرك الخاص غير صحيح' : error?.code === 'challenge' ? 'حماية Cloudflare: افتحه في التطبيق أو عبر «جسرك الخاص» (الإعدادات)' : timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
   };
 }
 
@@ -1071,6 +1233,7 @@ export function sourceRank(sourceId) {
 }
 
 const REDISCOVER_MS = 12 * 3600e3;
+const DISCOVERY_VERSION = 1;
 /** مصدر لم يرد (مهلة أول تحميل لإضافة، موقع بطيء): يُسأل من جديد بعد هذه المدة لا بعد 12 ساعة. */
 const UNANSWERED_RETRY_MS = 10 * 60e3;
 const CHAPTERS_TIMEOUT_MS = 30_000;
@@ -1200,35 +1363,70 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
     const full = assemble(v35work, withChapters.length ? withChapters : editions, detail, [...failed.values()]);
     // ردّ كل من يمكن أن يردّ ولا نبذة: نص فارغ («لا توجد نبذة من المصدر») لا undefined يُبقي القصة هيكلًا للأبد
     if (settled && full.description === undefined) full.description = '';
-    if (!settled && last && (full._chapters?.length ?? 0) === (last._chapters?.length ?? 0) && full.description === last.description) return last;
+    if (!settled && last && (full._chapters?.length ?? 0) === (last._chapters?.length ?? 0) && full.description === last.description
+      && full._sources.length === last._sources.length
+      && full._sources.every((source, i) => source.sourceId === last._sources[i].sourceId && source.count === last._sources[i].count)) return last;
     last = full;
     onUpdate(full, { settled });
     return full;
   };
   if (cached?.editions?.some((e) => e.chapters?.length)) emit();
 
-  const refresh = async (all) => {
+  let readingDetail = false;
+  let firstDetails = null;
+  const triedDetails = new Set();
+  let detailFallbacks = 0;
+  const fetchDetail = async (edition, source) => {
+    triedDetails.add(edition.sourceId);
+    const out = await requestSource(source, () => engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
+    if (out?.manga) {
+      detail = out.manga;
+      if (isWesternManga(detail)) learnWestern(v35work._work?.key);
+      if (adultManga(detail)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
+      learnDetailAliases(v35work._work?.key, detail);
+    }
+    return out;
+  };
+  // إن أخفقت النسخة الأولى، فالنبذة والتصنيف من التالية بالترتيب، بمحاولتين إضافيتين على الأكثر.
+  const recoverDetail = async (list, runnable) => {
+    if (detail || readingDetail || detailFallbacks >= 2) return;
+    const rest = list.filter((e) => !triedDetails.has(e.sourceId) && (!runnable || runnable.has(String(e.sourceId))))
+      .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId)).slice(0, 2 - detailFallbacks);
+    readingDetail = true;
+    try {
+      for (const edition of rest) {
+        detailFallbacks++;
+        try { await fetchDetail(edition, runnable?.get(String(edition.sourceId))); }
+        catch { continue; }
+        if (detail) { emit(); break; }
+      }
+    } finally {
+      readingDetail = false;
+    }
+  };
+  const refresh = async (all, fromDiscovery = false) => {
     // نسخة من مصدر لا يملكه هذا الجهاز (عرفناها من جهاز آخر أو من وصف العمل المشترك، أو مصدر غير مضاف
     // لهذا الحساب) لا تُسأل: كانت ترمي فورًا وتظهر «لم يرد في الوقت» مع أن موقعها يعمل. فصولها المحفوظة تبقى.
-    const runnable = await runnableSourceIds();
+    const runnable = await runnableSources();
     const list = runnable ? all.filter((e) => runnable.has(String(e.sourceId))) : all;
     // التفاصيل (النبذة والتصنيف) من أوثق نسخة
     const primary = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))[0];
     await Promise.allSettled(
       list.map(async (edition) => {
+        const started = Date.now();
+        const takeDetail = edition === primary && !detail && !readingDetail && !triedDetails.has(edition.sourceId);
+        if (takeDetail) readingDetail = true;
+        const source = runnable?.get(String(edition.sourceId));
         try {
-          if (edition === primary && !detail) {
-            const out = await withTimeout(engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
-            detail = out.manga ?? detail;
-            // التفاصيل كشفت كوميكس غربية: لا تعود للقوائم على هذا الجهاز
-            if (isWesternManga(detail)) learnWestern(v35work._work?.key);
-            // التفاصيل كشفت محتوى للكبار: يُحجب العمل بكل مفاتيحه على هذا الجهاز
-            if (adultManga(detail)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
-            learnDetailAliases(v35work._work?.key, detail);
+          if (takeDetail) {
+            const request = fetchDetail(edition, source);
+            if (!fromDiscovery) firstDetails = request;
+            const out = await request;
             edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {
-            edition = { ...edition, chapters: await withTimeout(engine.chapters(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS) };
+            edition = { ...edition, chapters: await requestSource(source, () => engine.chapters(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS) };
           }
+          if (fromDiscovery) reportSource({ section: 'manga', sourceId: edition.sourceId, stage: 'discover_chapters', outcome: edition.chapters?.length ? 'ok' : 'empty', reason: 'no_chapters', ms: Date.now() - started });
           failed.delete(edition.sourceId);
           if (Array.isArray(edition.chapters)) noteEditionChapters(mirrorFamily(edition.sourceId), edition.manga?.url, edition.chapters.length);
           // مصدرٌ ردّ بلا فصول اليوم لا يمحو ما عرفناه منه أمس
@@ -1237,30 +1435,15 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
           }
           emit();
         } catch (error) {
+          if (fromDiscovery) reportSource({ section: 'manga', sourceId: edition.sourceId, stage: 'discover_chapters', outcome: outcomeOf(error), reason: 'chapters_failed', ms: Date.now() - started });
           // السبب الحقيقي (مهلة، 403، حماية، خطأ) لا «لم يرد في الوقت» لكل شيء
           failed.set(edition.sourceId, { sourceId: edition.sourceId, label: edition.label, ...failureOf(error) });
+        } finally {
+          if (takeDetail) readingDetail = false;
         }
       }),
     );
-    // أوثق نسخة لم تُعد التفاصيل (فشل أو مهلة): النبذة والتصنيف من التالية بالترتيب، واحدة بعد واحدة (حد اثنتين).
-    // كانت القصة تبقى هيكلًا للأبد لأن التفاصيل تُطلب من نسخة واحدة فقط.
-    if (!detail) {
-      const rest = [...list].sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId)).filter((e) => e !== primary).slice(0, 2);
-      for (const edition of rest) {
-        try {
-          const out = await withTimeout(engine.series(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS);
-          if (!out?.manga) continue;
-          if (isWesternManga(out.manga)) learnWestern(v35work._work?.key);
-          if (adultManga(out.manga)) for (const k of [v35work._work?.key, ...(v35work._work?.keys ?? [])]) blockKey(k);
-          learnDetailAliases(v35work._work?.key, out.manga);
-          detail = out.manga;
-          emit();
-          break;
-        } catch {
-          // التالية
-        }
-      }
-    }
+    await recoverDetail(list, runnable);
   };
 
   // عملٌ لا نعرف له إلا نسخة واحدة ولا شيء محفوظ: فصولها وحدها ليست الحقيقة
@@ -1286,26 +1469,31 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   const now = Date.now();
   // سجل الإصدار السابق (بلا discoveryRetryAt) كان يحسب من فاتته المهلة «مسؤولًا»: لا يُوثق به، فيُعاد السؤال مرة كاملة
   // (بلاغ المالك 21 نوفمبر: عمل فُتح قبل الإصلاح بقي بلا مصدره العربي)
-  const legacyRecord = Boolean(cached) && !('discoveryRetryAt' in cached);
+  // إعادة تقييم النتائج السلبية القديمة مرة واحدة عند فتح البطاقة العامة بعد تصحيح قواعد البحث.
+  const oldSearchPolicy = fresh && requestedChapter == null && cached?.discoveryVersion !== DISCOVERY_VERSION;
+  const legacyRecord = Boolean(cached) && (!('discoveryRetryAt' in cached) || oldSearchPolicy);
   const interval = !cached || legacyRecord || now - (cached?.discoveredAt ?? 0) > REDISCOVER_MS;
   const pending = sourceIds.filter((sid) => !askedBefore.has(sid) && !knownIds.includes(sid) && (retryAt[sid] ?? 0) <= now);
   const due = discover && available() && (interval || pending.length > 0);
   const target=Number.isFinite(requestedChapter)&&requestedChapter>=0?requestedChapter:null;
   const hasTarget=()=>target!==null&&editions.some(e=>(!arabicOnly||arabicSource(e.sourceId))&&(e.chapters??[]).some(c=>chapterNumberOf(c)===target));
   const discoverMore = async (options = {}) => {
-        try {
-          const out = await discoverEditions(assemble(v35work, editions, detail), { ...options, moreNames: () => detailNames(detail) });
-          const found = out.filter((e) => !editions.some((x) => x.sourceId === e.sourceId));
-          if (found.length) {
-            editions = unionEditions(editions, found.map((e) => ({ ...e, chapters: null })));
-            await refresh(found);
-          }
-          return { answered: out.answered ?? [], unanswered: out.unanswered ?? [] };
-        } catch {
-          // الاكتشاف تكميلي: ما عندنا يبقى
-          return null;
-        }
-      };
+    const chapterRequests = [];
+    const onFound = (edition) => {
+      if (editions.some((e) => e.sourceId === edition.sourceId)) return;
+      editions = unionEditions(editions, [{ ...edition, chapters: null }]);
+      chapterRequests.push(refresh([edition], true));
+    };
+    try {
+      const out = await discoverEditions(assemble(v35work, editions, detail), { ...options, moreNames: () => detailNames(detail), firstDetails: () => firstDetails, onFound });
+      return { answered: out.answered ?? [], unanswered: out.unanswered ?? [] };
+    } catch {
+      // الاكتشاف تكميلي: ما عندنا يبقى
+      return null;
+    } finally {
+      await Promise.allSettled(chapterRequests);
+    }
+  };
   // موعد الإعادة الدورية: الكل. وإلا: الجديد ومن لم يرد فقط، لا كل المصادر مع كل إضافة تُثبَّت
   const discovery = due ? discoverMore({ refresh: target!==null&&!hasTarget(), ...(interval ? {} : { only: new Set(pending) }) }) : Promise.resolve(null);
 
@@ -1313,6 +1501,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   // An update names a particular chapter. A recent broad discovery must not
   // prevent searching other Arabic providers when that chapter is still absent.
   if(discover&&!due&&available()&&target!==null&&!hasTarget())await discoverMore({refresh:true,arabicOnly});
+  if (!detail) await recoverDetail(editions.filter((e) => e.chapters?.length), await runnableSources());
   held = false;
   const full = emit(true);
   const discoveredNow = await discovery;
@@ -1329,6 +1518,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
     editions: pinnedSource ? unionEditions(stored?.editions, editions) : editions,
     detail,
     discoveredAt: discoveredNow && interval ? now : cached?.discoveredAt ?? 0,
+    discoveryVersion: discoveredNow && interval ? DISCOVERY_VERSION : cached?.discoveryVersion,
     discoveredSources: asked,
     discoveryRetryAt: retries,
   });
@@ -1374,7 +1564,9 @@ export async function prewarm(works, { onDone = () => {}, maxAgeMs = 6 * 3600e3,
 
 const SEARCH_TIMEOUT_MS = 15_000;
 const LISTING_TIMEOUT_MS = 20_000;
+const SOURCE_READY_TIMEOUT_MS = 45_000;
 const discovered = new Map();
+const preparations = new WeakMap();
 
 const withTimeout = (promise, ms) => {
   let timer;
@@ -1382,10 +1574,38 @@ const withTimeout = (promise, ms) => {
     .finally(() => clearTimeout(timer));
 };
 
+/** نداءات القائمة وصفحة العمل تتشارك تحميل المحرك، بمهلة منفصلة عن سؤال الموقع. */
+function prepareSource(source) {
+  if (source?.ready === false && typeof engine.prepare === 'function') {
+    let ready = preparations.get(source);
+    if (!ready) {
+      const started = Date.now();
+      ready = withTimeout(engine.prepare(source.id), SOURCE_READY_TIMEOUT_MS).then(() => {
+        reportSource({ section: 'manga', sourceId: source.id, stage: 'source_ready', outcome: 'ok', ms: Date.now() - started });
+      }, (error) => {
+        preparations.delete(source);
+        reportSource({ section: 'manga', sourceId: source.id, stage: 'source_ready', outcome: outcomeOf(error), reason: 'prepare_failed', ms: Date.now() - started });
+        throw error;
+      });
+      preparations.set(source, ready);
+    }
+    return ready;
+  }
+  return null;
+}
+
+async function requestSource(source, fetch, timeout) {
+  const ready = prepareSource(source);
+  if (ready) await ready;
+  return withTimeout(fetch(), timeout);
+}
+
 /** عناوين العمل كما تسمّيه نسخه المعروفة: كل واحد منها سؤال ومفتاح مطابقة. */
 function titleVariants(v35work) {
   // أسماؤه البديلة أيضًا: مصدر يسمّيه «Demonic Emperor» يُسأل بهذا الاسم لا بـ«Magic emperor»
-  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).flatMap((e) => [e.manga?.title, ...(e.manga?.altNames ?? [])]), ...(v35work.synonyms ?? []), ...(aliasMap().get(v35work._work?.key) ?? [])];
+  // وصيغها المكافئة («SPY×FAMILY» ← «SPY x FAMILY»): موقع يكتب العمل بحرف x لا يجده سؤال «spy family»
+  const raw = [v35work.title?.english, v35work.title?.romaji, v35work._work?.title, ...(v35work._work?.editions ?? []).flatMap((e) => [e.manga?.title, ...(e.manga?.altNames ?? [])]), ...(v35work.synonyms ?? []), ...(aliasMap().get(v35work._work?.key) ?? [])]
+    .flatMap((t) => (typeof t === 'string' ? titleForms(t) : []));
   const seen = new Set();
   return raw.filter((t) => {
     if (typeof t !== 'string' || !t.trim() || t.startsWith('ext:')) return false;
@@ -1410,15 +1630,41 @@ export function matchingWork(items, saved) {
   return matches.length === 1 ? matches[0].item : null;
 }
 
+/** الأسماء العربية لعمل من MangaDex، محفوظة للعمل (مرة كل أسبوعين للعمل الواحد، ولو لم تُوجد). */
+const ARABIC_NAMES_KEY = 'vantara.mangadex.arabicNames.v1';
+const ARABIC_NAMES_TTL = 14 * 86_400_000;
+let arabicNamesCache = null;
+async function arabicNamesOf(workKey, title, officialId, { fetchNames = fetchMangaDexArabicNames } = {}) {
+  arabicNamesCache ??= (() => { try { return JSON.parse(localStorage.getItem(ARABIC_NAMES_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+  const key = String(workKey ?? '');
+  const hit = arabicNamesCache[key];
+  if (hit && Date.now() - (hit.at ?? 0) < ARABIC_NAMES_TTL) return hit.names ?? [];
+  const names = key && title ? await fetchNames(title, { officialId: Number.isSafeInteger(officialId) ? officialId : null, timeoutMs: 3000 }).catch(() => []) : [];
+  arabicNamesCache[key] = { names, at: Date.now() };
+  try {
+    const entries = Object.entries(arabicNamesCache);
+    localStorage.setItem(ARABIC_NAMES_KEY, JSON.stringify(Object.fromEntries(entries.slice(-3000))));
+  } catch { /* تخزين ممتلئ: للجلسة */ }
+  return names;
+}
+
 /**
- * نسخ العمل في المصادر التي لم نعرف أنه فيها. تُحفظ للجلسة؛ والمصدر الذي لا
- * يردّ خلال 15 ثانية يُتجاوز بلا أن يؤخّر غيره.
+ * نسخ العمل في المصادر التي لم نعرف أنه فيها. تتشارك الاستدعاءات المتزامنة البحث نفسه.
+ * موعد إعادة السؤال يُحفظ في سجل العمل.
  * @returns {Promise<Array<{sourceId, label, manga}>>}
  */
-export function discoverEditions(v35work, { refresh = false, arabicOnly = false, only = null, moreNames = null } = {}) {
+export function discoverEditions(v35work, { refresh = false, arabicOnly = false, only = null, moreNames = null, firstDetails = null, onFound = null } = {}) {
   const key = `${arabicOnly?`${v35work.id}|ar`:v35work.id}${only ? `|${[...only].sort().join(',')}` : ''}`;
   if(refresh)discovered.delete(key);
-  if (discovered.has(key)) return discovered.get(key);
+  const running = discovered.get(key);
+  if (running) {
+    if (onFound) {
+      running.listeners.add(onFound);
+      running.found.forEach(onFound);
+    }
+    return running.promise;
+  }
+  const job = { found: [], listeners: new Set(onFound ? [onFound] : []) };
   const promise = (async () => {
     await loadAliases();
     const variants = titleVariants(v35work);
@@ -1444,33 +1690,89 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
     const workRef = String(v35work.id);
     const workOfficial = workOfficialOf(v35work);
     const officialOf = (key) => officialIdMap().get(key) ?? null;
+    // المصدر العربي يُسأل بالاسم العربي إن عرفناه (تقارير الأجهزة: مصادر عربية ردّت «فارغ» على كل أسئلة الاكتشاف
+    // الإنجليزية). من MangaDex مرة للعمل؛ وما طابق رقم العمل الرسمي اسمٌ موثوق له، يقبل نسخة بعنوانها العربي
+    const officialArabic = [];
+    if (Number.isSafeInteger(workOfficial) && !variants.some(arabic) && others.some((s) => arabicSource(s.id))) {
+      const names = await arabicNamesOf(v35work._work?.key ?? v35work.id, variants[0], workOfficial);
+      variants.push(...names);
+      officialArabic.push(...names);
+    }
     // `moreNames`: أسماء العمل في صفحة تفاصيل نسخته (loadWork)، تُقرأ عند كل مصدر لأن التفاصيل قد تصل أثناء البحث
-    const ownNow = () => ownNames(v35work, { workOfficial, officialOf, more: moreNames?.() ?? [] });
+    const ownNow = () => ownNames(v35work, { workOfficial, officialOf, more: [...(moreNames?.() ?? []), ...officialArabic] });
     const graph = identityGraph();
     const ownedElsewhere = (manga, sourceId) => {
       const linked = editionRef(editionKeyOf({ sourceId, manga }));
       return Boolean(linked) && !graph.sameClass(linked, workRef) && Boolean(graph.contradiction(linked, workRef, RANK.SOURCE));
     };
     const ask = async (source) => {
+      const started = Date.now();
+      const report = (stage, outcome, reason, at = started) => reportSource({ section: 'manga', sourceId: source.id, stage, outcome, reason, ms: Date.now() - at });
+      const reject = (reason) => { report('discover', 'no_match', reason); return null; };
+      try {
+        const ready = prepareSource(source);
+        if (ready) await ready;
+      }
+      catch (error) { report('discover', outcomeOf(error), 'prepare_failed'); throw error; }
       const candidates = new Map();
       // «سُئل» = ردّ فعلًا على سؤال واحد على الأقل. مهلة أو خطأ في كل الأسئلة ليس جوابًا «ليس عندي»: كان يُحسب
       // مسؤولًا فلا يُسأل 12 ساعة، فإضافة جديدة تفوت مهلة أول تحميل لها تغيب عن العمل (بلاغ المالك 21 نوفمبر)
       let answered = false;
+      let searchError;
       let results = 0;
       const guard = { workOfficial, officialOf };
+      const rejectionOf = (manga) => {
+        if (officialConflict(manga, workOfficial, officialOf)) return 'official_conflict';
+        if (ownedElsewhere(manga, source.id)) return 'owned_elsewhere';
+        return null;
+      };
       for (const query of queriesFor(source, ownNow())) {
-        const page = await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS).catch(() => null);
-        if (page) answered = true;
-        results = Math.max(results, page?.mangas?.length ?? 0);
-        for (const manga of page?.mangas ?? []) if (!candidates.has(manga.url || normalizeTitle(manga.title))) candidates.set(manga.url || normalizeTitle(manga.title), manga);
-        if ((page?.mangas ?? []).some((manga) => listingEvidence(manga, ownNow(), guard))) break;
+        const sent = Date.now();
+        let mangas;
+        try {
+          // نتائج MangaDex بأسمائها ومعرّف AniList لكل نسخة (links.al): نسخة برقم عمل آخر تُرفض ولو طابق اسمها
+          const page = await withMangaDexNames(source.id, await withTimeout(engine.search(source.id, query, 1), SEARCH_TIMEOUT_MS));
+          if (!Array.isArray(page?.mangas)) throw new Error('invalid_search_response');
+          mangas = page.mangas;
+          answered = true;
+          report('discover_search', mangas.length ? 'ok' : 'empty', 'no_candidates', sent);
+        } catch (error) {
+          searchError = error;
+          report('discover_search', outcomeOf(error), 'search_failed', sent);
+          continue;
+        }
+        results = Math.max(results, mangas.length);
+        const own = ownNow();
+        for (const manga of mangas) {
+          const key = manga.url || normalizeTitle(manga.title);
+          const previous = candidates.get(key);
+          // الدليل اللاحق يكمل وصف الرابط الناقص، ويبقى تعارض الهوية مانعًا مهما كان ترتيب الأجوبة.
+          if (!previous || rejectionOf(manga) || (!rejectionOf(previous) && !listingEvidence(previous, own, guard) && listingEvidence(manga, own, guard))) {
+            candidates.set(key, manga);
+          }
+        }
+        if ([...candidates.values()].some((candidate) => !rejectionOf(candidate) && listingEvidence(candidate, own, guard))) break;
       }
-      if (!answered) throw new Error('unanswered');
+      if (!answered) {
+        report('discover', outcomeOf(searchError), 'no_search_reply');
+        throw searchError ?? new Error('unanswered');
+      }
+      if (!candidates.size) {
+        report('discover', 'empty', 'no_candidates');
+        return null;
+      }
       // الأسماء من جديد بعد الأجوبة: صفحة تفاصيل نسخة العمل ربما وصلت أثناء البحث
-      const own = ownNow();
-      const list = [...candidates.values()].filter((manga) => !officialConflict(manga, workOfficial, officialOf) && !ownedElsewhere(manga, source.id));
+      let own = ownNow();
+      const rejections = new Set();
+      const list = [...candidates.values()].filter((manga) => {
+        const reason = rejectionOf(manga);
+        if (reason) rejections.add(reason);
+        return !reason;
+      });
+      if (!list.length) return reject([...rejections].sort().join(','));
       // 1) ما قاله المصدر في القائمة نفسها: عنوانها، أسماؤها البديلة، رابطها
-      const accepted = list.map((manga) => ({ manga, ev: listingEvidence(manga, own, guard) })).filter((a) => a.ev);
+      const listingMatches = () => list.map((manga) => ({ manga, ev: listingEvidence(manga, own, guard) })).filter((a) => a.ev);
+      const accepted = listingMatches();
       // 2) الأسماء البديلة المحفوظة (المشحونة من صفحات المصادر، وما تعلّمه الجهاز): تقبل النسخة إن لم تكن اسم سلسلة
       // أم أو جزء منها (قصة زورو ليست ون بيس)، ولا تُحفظ في الهوية إلا بعد أن تؤكدها صفحة تفاصيل النسخة
       const index = canonicalIndex(indexOptions());
@@ -1487,10 +1789,13 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
         accepted.push({ manga, ev: 'alias' });
       }
       let hit = pickEdition(accepted);
+      if (!hit && accepted.length) return reject('ambiguous');
       // 3) لا دليل في القائمة: صفحة تفاصيل أقرب النتائج تُسأل عن أسمائها (عنوان عربي لعمل عرفناه بالإنجليزي). قليل
       // النتائج فقط (البحث وجد العمل لا قائمة عامة)، ونتيجتان على الأكثر لكل مصدر
       const verify = async (manga) => {
-        const out = await withTimeout(engine.series(source.id, manga), SEARCH_TIMEOUT_MS).catch(() => null);
+        let out;
+        try { out = await withTimeout(engine.series(source.id, manga), SEARCH_TIMEOUT_MS); }
+        catch (error) { report('discover', outcomeOf(error), 'details_failed'); throw error; }
         return detailEvidence(out?.manga, own, guard) ? { manga: { ...manga, ...(out?.manga ?? {}), url: manga.url }, ev: 'detail' } : null;
       };
       // التحقق لما يحتاجه فقط (كلفته طلب تفاصيل): نتيجة قريبة باسم محفوظ، أو عنوان بأبجدية غير أبجديات أسماء العمل كلها
@@ -1498,25 +1803,43 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
       const scripts = (t) => new Set([...String(t ?? '')].map((c) => (/[a-z0-9]/i.test(c) ? 'latin' : /[\u0600-\u06ff]/.test(c) ? 'arabic' : /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(c) ? 'cjk' : null)).filter(Boolean));
       const ownScripts = new Set([...own].flatMap((n) => [...scripts(n)]));
       const foreign = (manga) => { const sc = scripts(normalizeTitle(manga.title)); return sc.size > 0 && [...sc].every((x) => !ownScripts.has(x)); };
-      if (!hit && !accepted.length && list.length && results <= 6) {
-        const order = [...list].filter((manga) => near.has(manga) || foreign(manga)).sort((x, y) => Number(near.has(y)) - Number(near.has(x))).slice(0, 1);
-        const verified = [];
-        for (const manga of order) {
-          const v = await verify(manga);
-          if (v) verified.push(v);
+      const candidate = !hit && results <= 6 ? list.find((manga) => near.has(manga)) ?? list.find(foreign) : null;
+      const pendingDetails = (candidate || hit?.ev === 'alias') && firstDetails?.();
+      if (pendingDetails) {
+        // قد تحمل تفاصيل النسخة المعروفة الاسم الموثوق الذي ينقصنا. أعد تقييم كل الروابط حتى يبقى حارس الغموض.
+        await pendingDetails.catch(() => {});
+        own = ownNow();
+        const matches = listingMatches();
+        if (matches.length) {
+          hit = pickEdition(matches);
+          if (!hit) return reject('ambiguous');
         }
-        hit = pickEdition(verified);
       }
-      if (!hit) return null;
+      if (!hit && candidate) {
+        hit = await verify(candidate);
+        if (!hit) return reject(foreign(candidate) ? 'foreign_title_unconfirmed' : 'details_unconfirmed');
+      }
+      if (!hit) return reject([...rejections, 'no_title_evidence'].sort().join(','));
       // اسم محفوظ وحده ليس دليلًا: صفحة تفاصيل النسخة تؤكده أو لا تُقبل (الفصل التجريبي ليس السلسلة، وقصة زورو ليست
       // ون بيس، ولو حمل الجهاز اسمًا متعلَّمًا يجمعهما)
       if (hit.ev === 'alias') hit = await verify(hit.manga);
-      if (!hit) return null;
+      if (!hit) return reject('details_unconfirmed');
+      // المختلط (قرار المالك، 22 نوفمبر): يُثري عملًا موجودًا من مصدر آمن فقط، بعد أن تؤكد صفحة تفاصيله أنه العمل نفسه
+      // وأنه نظيف. لا يُقبل بدليل القائمة وحده، ونسخة للكبار تُرفض ولا تُلصق
+      if (enrichOnly(source.id)) {
+        if (hit.ev !== 'detail') hit = await verify(hit.manga);
+        if (!hit) return reject('mixed_details_unconfirmed');
+      }
+      if (adultManga(hit.manga)) return reject('adult');
       // الربط في الهوية: النسخة صارت لهذا العمل في كل قائمة. نسخة لعمل آخر لا يتعارض معه تجمعهما (لا تكرار)،
       // والمتعارض يُرفض فلا تُلصق
       const link = linkEdition(editionKeyOf({ sourceId: source.id, manga: hit.manga }), workRef, { rank: RANK.SOURCE, why: `بحث صفحة العمل: ${hit.ev}` });
-      if (!link.ok) return null;
-      return { sourceId: source.id, label: source.label, manga: hit.manga, evidence: hit.ev };
+      if (!link.ok) return reject('identity_link_refused');
+      report('discover', 'ok');
+      const edition = { sourceId: source.id, label: source.label, manga: hit.manga, evidence: hit.ev };
+      job.found.push(edition);
+      for (const listener of job.listeners) listener(edition);
+      return edition;
     };
     const first = await gather(others, ask);
     // جولة ثانية فورًا لمن لم يرد: أول بحث في إضافة لم تُحمَّل بعد يفوت مهلته وهو يفك حزمتها، وبعدها صارت جاهزة
@@ -1531,9 +1854,11 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
       unanswered: { value: failed.map((r) => String(r.source.id)) },
     });
   })();
-  // نتيجة فيها من لم يرد لا تُحفظ للجلسة: الفتحة التالية تسأله من جديد
-  promise.then((out) => { if (out?.unanswered?.length && discovered.get(key) === promise) discovered.delete(key); }, () => discovered.delete(key));
-  discovered.set(key, promise);
+  // الذاكرة تجمع النداءات الجارية فقط. إبقاء جواب «لا نتائج» فيها كان يلغي إعادة السؤال بعد 12 ساعة.
+  const clear = () => { if (discovered.get(key) === job) discovered.delete(key); };
+  promise.then(clear, clear);
+  job.promise = promise;
+  discovered.set(key, job);
   return promise;
 }
 

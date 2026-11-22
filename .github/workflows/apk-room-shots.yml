@@ -11,7 +11,18 @@ on:
       - 'android/app/src/main/kotlin/com/vantara/anime/player/PlayerActivity.kt'
       - 'android/app/src/main/kotlin/com/vantara/anime/player/SeekPreview.kt'
       - 'android/app/src/androidTest/java/com/vantara/anime/player/SeekPreviewScreensDeviceTest.kt'
+      - 'android/app/src/androidTest/java/com/vantara/anime/player/GlassPlayerScreensDeviceTest.kt'
+      - 'android/app/src/main/kotlin/com/vantara/anime/player/Ui.kt'
   workflow_dispatch:
+    inputs:
+      classes:
+        description: 'فئات الاختبار (لقطات Glass وحدها: com.vantara.anime.player.GlassPlayerScreensDeviceTest)'
+        required: false
+        default: 'com.vantara.anime.player.TogetherRoomScreensDeviceTest,com.vantara.anime.player.SeekPreviewScreensDeviceTest'
+      glass:
+        description: '1 = الغرفة بالتأثير الزجاجي'
+        required: false
+        default: '0'
 permissions:
   contents: read
 concurrency:
@@ -56,7 +67,7 @@ jobs:
             mkdir -p player-shots
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w -r -e roomShots 1 -e class com.vantara.anime.player.TogetherRoomScreensDeviceTest,com.vantara.anime.player.SeekPreviewScreensDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee player-shots/instrumentation.txt
+            adb shell am instrument -w -r -e roomShots 1 -e glass ${{ inputs.glass || '0' }} -e class ${{ inputs.classes || 'com.vantara.anime.player.TogetherRoomScreensDeviceTest,com.vantara.anime.player.SeekPreviewScreensDeviceTest' }} com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee player-shots/instrumentation.txt
             for f in $(adb shell run-as com.vantara.app.debug ls files/player-shots | tr -d '\r'); do adb exec-out run-as com.vantara.app.debug cat "files/player-shots/$f" > "player-shots/$f"; done
             ls -la player-shots
       - name: Shots as notes (readable through the checks API)
@@ -66,7 +77,7 @@ jobs:
           python3 - <<'PY'
           import base64, io, pathlib
           from PIL import Image
-          shots = sorted(p for p in pathlib.Path('player-shots').glob('*.png') if not p.stem.startswith('leave-'))
+          shots = sorted(p for p in pathlib.Path('player-shots').glob('*.png') if not p.stem.lstrip('g-').startswith('leave-'))
           if not shots:
               print('::error title=shots::لا لقطات'); raise SystemExit(0)
           for p in shots[:10]:

@@ -206,6 +206,12 @@ export function renderAppearancePane(body, ctx) {
   dark.append(toggleRow(ctx, 'moon', 'الخلفية الداكنة الصريحة', 'أسود كامل بدل الداكن. على شاشات OLED يُطفأ البكسل الأسود فيوفّر شيئًا من الطاقة.', look.pureBlack, (on) => saveLook(() => ({ pureBlack: on }))));
   body.append(dark);
 
+  // ── المادة (قرار المالك، 21 نوفمبر): «الحالي» الافتراضي، وGlass خيار مستقل. الخطة: docs/audits/GLASS_UI_PLACEMENT.md ──
+  head('MATERIAL', 'المادة');
+  const material = el('div', 'settings-list');
+  material.append(toggleRow(ctx, 'spark', 'التأثير الزجاجي (تجريبي)', 'قيد التطوير وفيه مشاكل معروفة نعمل عليها. شريط التنقل والتحديد من زجاج سائل يكسر الضوء بلون كل قسم، وإطفاؤه يرجع المظهر الحالي كما هو.', look.material === 'glass', (on) => saveLook(() => ({ material: on ? 'glass' : 'current' }))));
+  body.append(material);
+
   // ── أنماط العرض والتكامل: حالتان فقط (قرار المالك: «توحيد الشاشات» محذوف) ──
   head('STRUCTURE', 'أنماط العرض والتكامل', 'العرض فقط يتغيّر: مكتباتك وتقدّمك وتشغيل كل نوع كما هي، وترجع متى شئت.');
   const mode = modeOf(structure);

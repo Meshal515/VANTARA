@@ -10,6 +10,8 @@
  */
 
 import { chapterNumberOf, normalizeTitle } from './catalog.js';
+import { adultManga, ecchiManga, isBlockedKey } from './adult-filter.js';
+import { buildsLibrary } from './source-policy.js';
 
 const FLUSH_MS = 4000;
 const MAX_UNITS = 40;
@@ -204,6 +206,9 @@ export function observeMangaChapters(sourceId, manga, chapters) {
   const key = normalizeTitle(manga?.title);
   const listed = takeListed(sourceId, manga);
   if (!key || !chapters?.length) return;
+  // «آخر التحديثات» عامة لكل المستخدمين ويبنيها المصدر العربي الآمن وحده (قرار المالك، 22 نوفمبر): الإنجليزي
+  // والمختلط يقرأ منه صاحبه ولا يبلَّغ، والكبار والإيتشي لا يُبلَّغ عنهما من أي مصدر
+  if (!buildsLibrary(sourceId) || adultManga(manga) || ecchiManga(manga) || isBlockedKey(`ext:${key}`)) return;
   const units = trustDates(
     chapters
       .map((c) => ({ number: chapterNumberOf(c), ...(Number(c?.dateUpload) > 0 ? { publishedAt: Number(c.dateUpload) } : {}) }))

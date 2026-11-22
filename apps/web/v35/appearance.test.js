@@ -103,7 +103,7 @@ describe('المظهر', () => {
     expect(accentOf('anime', a)).toBe('#c9a227');
     expect(workStyleOf('anime', { style: { anime: 'nope' } })).toBe('core');
     s.setItem('vantara.appearance.v1', '{bad');
-    expect(readAppearance(s)).toEqual({ style: {}, accent: {}, pureBlack: false, unifiedLook: false });
+    expect(readAppearance(s)).toEqual({ style: {}, accent: {}, pureBlack: false, unifiedLook: false, material: 'current' });
   });
 
   it('اللون يصل لجذر التطبيق و<html> معًا، ويُمسح كله عند الرجوع للون المصمّم', () => {

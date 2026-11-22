@@ -32,7 +32,7 @@ import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, createSavedWorks, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, mangaSourceTier, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, createSavedWorks, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { readerEngine } from '../lib/reader-engine.js';
@@ -67,14 +67,15 @@ import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
-import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
+import { fetchMangaDexIdentity, fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
 import { artRatio, createArtStore, isLocalArt } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
-import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
+import { adultManga, blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { installRemovedGate, isRemovedAny, removeWorkEverywhere, removedChanged, restoreRemovedWork, setRemovedSource, tagWork } from '../lib/removed-works.js';
 import { heroSlideIn, stripIn } from './motion.js';
-import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, readyGate, settleIn, veil } from './page-motion.js';
+import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, glassDockLayers, readyGate, settleIn, veil } from './page-motion.js';
 import { createCrossfade, createDock, createLayers, haptic } from './dock.js';
+import { syncGlass } from './glass.js';
 import { onLongPress, roomInitial } from './social-kit.js';
 import { canManageDangerZone } from '../lib/identity.js';
 import { pinPad } from '../screens/pin-pad.js';
@@ -84,7 +85,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { canonicalRefOf, learnAliases, noteOfficialIds, noteRefAliases, refsOf, splitRefs } from '../lib/manga-alias-store.js';
+import { ambiguousNames, canonicalRefOf, learnAliases, noteAmbiguousNames, noteOfficialIds, noteRefAliases, officialIdMap, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -969,6 +970,52 @@ export function mountV35(deps, { page = 'home' } = {}) {
     matchFor(title);
     return artPromises.get(title);
   }
+  /**
+   * تغطية المرساة (مهمة التكرار، 22 نوفمبر): كانت هوية AniList تُتعلَّم لعنوان البطاقة وحده، فنسخها بأسماء أخرى (روماجي،
+   * عربي) تبقى بلا رقم ولا تجتمع في القوائم التالية. أسماء نسخ البطاقة الظاهرة تدخل الدفعة نفسها (20 عنوانًا للطلب)،
+   * إلا ما عُرف رقمه أو غموضه من قبل، وأربعة على الأكثر للبطاقة.
+   */
+  function learnEditionIdentities(work) {
+    const known = officialIdMap();
+    const shared = ambiguousNames();
+    const titles = [...new Set((work?._work?.editions ?? []).map((e) => e?.manga?.title).filter((t) => typeof t === 'string' && t.trim()))];
+    let queued = 0;
+    for (const title of titles) {
+      const key = normalizeTitle(title);
+      if (!key || known.has(key) || shared.has(key) || ratingPromises.has(title)) continue;
+      // الاسم العربي لا يعرفه AniList: هويته من MangaDex (links.al) بطابور هادئ
+      if (/[؀-ۿ]/.test(title)) { queueDexIdentity(title, key); continue; }
+      matchFor(title);
+      if (++queued >= 4) break;
+    }
+  }
+  // MangaDex: حدّه خمسة طلبات في الثانية للجميع. طلب كل 400ms، والاسم يُسأل مرة كل أسبوعين على الجهاز
+  const DEX_TRIED_KEY = 'vantara.mangadex.arabicIdentity.v1';
+  const DEX_RETRY_MS = 14 * 86_400_000;
+  const dexTried = (() => { try { return JSON.parse(localStorage.getItem(DEX_TRIED_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+  const dexQueue = new Map();
+  let dexRunning = false;
+  function queueDexIdentity(title, key) {
+    if (dexQueue.has(key) || Date.now() - (dexTried[key] ?? 0) < DEX_RETRY_MS || dexQueue.size >= 40) return;
+    dexQueue.set(key, title);
+    void runDexIdentity();
+  }
+  async function runDexIdentity() {
+    if (dexRunning) return;
+    dexRunning = true;
+    try {
+      for (const [key, title] of dexQueue) {
+        dexQueue.delete(key);
+        const identity = await fetchMangaDexIdentity(title).catch(() => null);
+        dexTried[key] = Date.now();
+        if (identity) { noteOfficialIds([[key, identity.id]]); learnAliases(key, identity.names); }
+        try { localStorage.setItem(DEX_TRIED_KEY, JSON.stringify(Object.fromEntries(Object.entries(dexTried).slice(-3000)))); } catch { /* تخزين ممتلئ */ }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } finally {
+      dexRunning = false;
+    }
+  }
   // مطابقة AniList (التقييم والغلاف والبنر الرسمي) لكل ما ظهر من أعمال في طلب واحد: 20 عنوانًا في الطلب وطلبان في
   // آنٍ على الأكثر، بلا انتظار بين الدفعات. القياس الحي: 30 عنوانًا بطلب واحد 170ms، وبدفعات 8 ينتظر بينها 750ms
   // كانت 2.7 ثانية، فتنتظر أغلفة القائمة كلها خلفها.
@@ -987,6 +1034,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // الهوية الرسمية المؤكدة تُتعلَّم (ID1، ID2): المعرّف دليل دمج، وأسماء AniList البديلة أسماء للعمل نفسه. تُستعمل في بناء
       // الفهرس التالي لا في البطاقات الظاهرة الآن (لا يتبدل شيء تحت عينك). الحارسان في matchMangaIdentity وفي الدمج نفسه
       const learnedIds = [];
+      // اسم لأكثر من عمل في AniList: لا يُدمج به بين مصدرين بعد الآن (canonicalIndex: ambiguous)
+      const ambiguousKeys = batch.filter(({ title }) => matches.get(title)?.ambiguous).map(({ title }) => normalizeTitle(title)).filter(Boolean);
+      if (ambiguousKeys.length) noteAmbiguousNames(ambiguousKeys);
       for (const { title } of batch) {
         const identity = matches.get(title)?.identity;
         if (!identity) continue;
@@ -1080,6 +1130,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     onLongPress(a, () => openCardActions(a._work));
     void nearViewport(a).then(async () => {
       if (!a.isConnected) return;
+      learnEditionIdentities(work);
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
         // AniList يعرف العمل للكبار (هنتاي، إيتشي…): يُحجب ويختفي من هنا ومن كل قائمة بعدها
@@ -1792,6 +1843,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
 
   // ───────────────────────── صفحة العمل ─────────────────────────
 
+  let mangaWorkOpen = 0;
   async function openWork(work, { readNumber = null, readLanguage = null, expectedChapter = null, autoRead = false, local = null } = {}) {
     // كيان داخلي (فحص/اختبار) لا يُفتح كعمل أبدًا
     if (/^__/.test(String(work?.id ?? ''))) return;
@@ -1802,6 +1854,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (isRemovedAny([String(work?.id ?? ''), work?._work?.key, ...(work?._work?.keys ?? [])].filter(Boolean))) return toast('هذا العمل غير متاح');
     if (isAnimeRef(String(work?.id ?? ''))) return openAnimeRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
     if (String(work?.id ?? '').startsWith('cinema:')) return openCinemaRef(String(work.id), { title: titleOf(work), cover: work.coverImage?.large ?? null });
+    const opening = ++mangaWorkOpen;
+    const isCurrentWork = () => opening === mangaWorkOpen && state.current?.id === work.id;
     // بطاقةٌ بُنيت قبل وصول وصف العمل من الخادم: يُعاد بناؤها بما عُرف منذ ذلك
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة، والفصول المحمّلة وحدها تُقرأ من الجهاز
     state.localManga = local;
@@ -1865,14 +1919,24 @@ export function mountV35(deps, { page = 'home' } = {}) {
         toast(readLanguage==='ar'?`الفصل ${number} غير متاح في المصادر العربية حاليًا؛ قد يكون مقفلًا عند المصدر`:'هالفصل مو متوفر في مصادرنا الحين');
       }
     };
+    let deferredWork = null;
     const show = (full, { settled }) => {
-      if (state.current?.id !== work.id) return;
+      if (!isCurrentWork()) return;
       if (!full._chapters?.length && !settled) return;
       // والقارئ مفتوح: تُحفظ النسخة الأحدث (يقرؤها القارئ بـgetWork) بلا رسم الصفحة التي خلفه
       if (currentPage() === 'reader') { state.current = full; return; }
       // الصفحة تتحرك (تدخل أو تغادر): تُرسم الفصول حين تنتهي الحركة، لا في منتصفها (page-motion.js: afterMotion)
       const page = q('detail');
-      if (motionActive(page)) return void afterMotion(page, () => { if (state.current?.id === work.id && currentPage() === 'detail') show(state.current?._chapters ? state.current : full, { settled }); });
+      if (motionActive(page)) {
+        const alreadyQueued = deferredWork !== null;
+        deferredWork = { full, settled };
+        if (!alreadyQueued) afterMotion(page, () => {
+          const latest = deferredWork;
+          deferredWork = null;
+          if (currentPage() === 'detail') show(latest.full, { settled: latest.settled });
+        });
+        return;
+      }
       // غادرها المستخدم: تُحفظ النسخة الأحدث بلا رسم صفحة لا تُرى
       if (currentPage() !== 'detail') { state.current = full; return; }
       const first = !state.current?._chapters;
@@ -1890,7 +1954,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     };
     try {
       const full = await loadWork(work, { onUpdate: show, requestedChapter: expectedChapter??readNumber, arabicOnly: readLanguage==='ar', pinnedSource: work._pinnedSource ?? null, fresh: true });
-      if (state.current?.id !== work.id) return;
+      if (!isCurrentWork()) return;
       // ما عُرف من نسخ وغلاف يُحفظ للبطاقات وللأجهزة الأخرى
       rememberWork(full);
       if (!full._chapters?.length) {
@@ -5407,12 +5471,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
       const latestOf = async (addon) => {
         if (!addon.bundled || !addon.sourceId) return [];
+        // معاينة مصدر مانجا: المختلط لا تُعرض أعماله أبدًا، ولا عمل للكبار من أي مصدر (قرار المالك، 22 نوفمبر)
+        const manga = addon.contentTypes?.includes('manga');
+        if (manga && !['arabic', 'foreign'].includes(await mangaSourceTier(addon.sourceId))) return [];
         // لقطة مشتركة أولًا؛ مصدر بلا لقطة (إضافة ثبّتها المستخدم للتو) يُسأل مباشرة
         const value = (await shots).get(addon.sourceId) ?? await addons.sourceLatest?.(addon.sourceId).catch(() => null);
         const list = value?.mangas ?? value?.items ?? (Array.isArray(value) ? value : []);
         const out = [];
         for (const item of list) {
           if (out.length >= 5) break;
+          if (manga && adultManga(item)) continue;
           try { out.push({ work: sourceWorkModel(item, { addon, episodes: [] }) }); } catch { /* عمل بلا نوع مؤكد */ }
         }
         return out;
@@ -5469,6 +5537,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if(!active())return;
     sourceSnapshot=addons.registry.snapshot();
     addonSourcePending=false;
+    // مصدر مانجا مختلط (أو محظور): لا يُتصفح مباشرة. وظيفته إثراء الأعمال الموجودة من المصادر الآمنة فقط (قرار المالك، 22 نوفمبر)
+    if(addon.sourceId && addon.contentTypes?.includes('manga') && !addon.contentTypes.some(t=>t!=='manga')){
+      const tier=await mangaSourceTier(addon.sourceId);
+      if(!active())return;
+      if(tier!=='arabic'&&tier!=='foreign'){
+        q('utilityBody').replaceChildren(el('p','work-meta',tier==='blocked'?'هذا المصدر غير متاح في VANTARA.':'هذا مصدر مختلط: لا يُتصفّح مباشرة. يُستعمل لإكمال فصول الأعمال الموجودة من المصادر الآمنة، وتظهر فصوله داخل بطاقة العمل.'));
+        return;
+      }
+    }
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
     const openSelectedWork = async function openSelectedWork(item) {
       if(!active())return;
@@ -7379,6 +7456,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if (!keepLabel || !layers?.moving) q('brandSectionName').textContent = root.dataset.content === 'unified' ? 'ALL' : s.word;
     // لون القسم المختار (أو المصمّم) وصبغة خلفيته على الجذر و<html> معًا
     const black = applyAppearance(root.dataset.content === 'unified' ? 'unified' : s.id, [root, document.documentElement]);
+    // المادة: «الحالي» بلا أي سمة، وGlass سمة على <html> بمستوى الجهاز (glass.js). الشريط ينشئ عدسته أو يزيلها
+    syncGlass({ doc: document });
+    dockCtl?.refreshMaterial?.();
     // وكل صفحة قسم بلونها هي (المصمّم أو ما اختاره المستخدم لها)، لا بلون القسم الحالي
     for (const [section, home] of Object.entries(HOMES)) { const view = q(home); if (view) applyAppearance(section, [view]); }
     // الأوراق والنوافذ بنغمة قسم (data-tone) تلبس اللون المختار أيضًا، لا الأزرق أو الأحمر المصمّم
@@ -7452,7 +7532,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
     dockMotion = null;
     dockCtl?.activate(currentPage());
     if (document.documentElement.dataset.motion === 'off' || matchMedia?.('(prefers-reduced-motion: reduce)').matches || !nav.animate) return;
-    const a = nav.animate([{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' });
+    const timing = { duration: 320, easing: 'cubic-bezier(.22,.8,.2,1)' };
+    // Glass: opacity على الشريط تعزل زجاجه (الخطة 7.R1)، فالتلاشي نفسه على طبقاته، وscale على الشريط
+    const glass = glassDockLayers(nav, 0.35, 1, timing);
+    const a = nav.animate(glass ? [{ scale: '0.94' }, { scale: '1' }] : [{ opacity: 0.35, scale: '0.94' }, { opacity: 1, scale: '1' }], timing);
     // بعد الحركة: الدائرة تُوضع من جديد على مركز وجهتها بلا حركة (الشريط تغيّر عرضه)
     a?.finished?.then(() => dockCtl?.repaint?.(true)).catch(() => {});
   }
@@ -7730,7 +7813,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   const onScroll = () => {
     // كما في نموذج المالك: الشريط يصير صلبًا مع الاسم بعد 220px
     if (currentPage() === 'detail') q('detailTop').classList.toggle('collapsed', window.scrollY > 220);
+    // Glass: حالة تصغير الشريط بالاتجاه (صنف وانتقال CSS، لا حركة إطار بإطار). الحالي لا يتغير
+    dockCtl?.scrolled?.(window.scrollY);
   };
+  // مراقب الأداء أنزل مستوى الزجاج على هذا الجهاز: الشريط يتبع (قد يرجع للحالي)
+  window.addEventListener('vantara:glass-tier', () => dockCtl?.refreshMaterial?.());
   window.addEventListener('scroll', onScroll, { passive: true });
 
   const onKey = (e) => {

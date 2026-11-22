@@ -16,7 +16,7 @@ it('keeps loading pages until the grid has many works, even when one work floods
   // 300 حدث: كل عمل له 30 فصلًا متتالية، فصفحة 100 حدث = 3–4 أعمال فقط
   const all = Array.from({ length: 300 }, (_, i) => ({
     id: `w${Math.floor(i / 30)}|c:${i % 30}`, work: `ext:w${Math.floor(i / 30)}`, section: 'manga', kind: 'chapter',
-    number: 30 - (i % 30), title: `W${Math.floor(i / 30)}`, at: NOW - i * 1000, publishedAt: NOW - i * 1000, sources: [],
+    number: 30 - (i % 30), title: `W${Math.floor(i / 30)}`, at: NOW - i * 1000, publishedAt: NOW - i * 1000, sources: [{ s: 'teamx' }],
   }));
   const asked = [];
   connectUpdates(async (path) => {
