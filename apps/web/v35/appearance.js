@@ -8,6 +8,7 @@
  */
 
 import { trimArtCache } from '../lib/together/art.js';
+import { relieveStorage } from '../lib/storage-relief.js';
 
 /** كاشات تُعاد من الشبكة بلا فقد: تُخلى حين يمتلئ التخزين قبل أن يفشل حفظ إعداد. */
 const REGENERABLE = ['vantara.anime.found.v2', 'vantara.anime.genre-art.v1', 'vantara.heroPick.v1', 'vantara.cinema.heroPick.v1', 'vantara.unified.genre-art.v1'];
@@ -50,6 +51,9 @@ export function writePreference(key, value, storage = globalThis.localStorage) {
     const stages = [
       () => trimArtCache(0, storage),
       () => { for (const k of REGENERABLE) { try { storage.removeItem(k); } catch { /* */ } } },
+      // آخر محاولة قبل حفظ الجلسة وحدها: كل كاش يُعاد جلبه (storage-relief). إعداد يضيع بعد إعادة التشغيل
+      // أسوأ من صور تُعاد (بلاغ المالك 22 نوفمبر: التأثير الزجاجي انطفأ وحده)
+      () => relieveStorage(storage),
     ];
     for (const free of stages) {
       try {

@@ -300,11 +300,11 @@ html[data-material='glass'] .v35 .rf-dock {
 }
 
 /* ── عدسة الأقسام المجزأة (bindGlassTabs في glass.js): م1 تنزلق بنابض CSS، بلون القسم ── */
-html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ul-shelves, .mw-ranges, .drawer-sections),
+html[data-material='glass'] .v35 :is(.library-tabs, .mj-filters, .mw-tabs, .uv-tabs, .sx-tabs, .ul-shelves, .mw-ranges, .ss-tabs, .drawer-sections),
 html[data-material='glass'] .v35 .cn-kinds:not(.cn-hero-alt > .cn-kinds) {
   position: relative;
 }
-html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .mj-filters, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .mw-ranges, .drawer-sections) > :not(.g-seg) {
+html[data-material='glass'] .v35 :is(.social-tabs, .library-tabs, .mj-filters, .ss-tabs, .cn-kinds, .mw-tabs, .uv-tabs, .sx-tabs, .ins-tabs, .us-seg, .ul-shelves, .mw-ranges, .drawer-sections) > :not(.g-seg) {
   position: relative;
   z-index: 1;
 }
@@ -621,4 +621,53 @@ html[data-material='glass'] .v35 .aw-menu-label {
   box-shadow: var(--g-rim);
   backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
   -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+
+/* ── ورقة السيرفرات (server-sheet.js، بلاغ المالك بصورة: «بطاقة السيرفرات ما فيها تأثير زجاجي») ──
+ * الرجوع وزر «مع أصدقائك» دائرتا زجاج، ومرشح الجودة والمصدر كبسولة، وألسنة اللغة بالعدسة، ومجموعتا السيرفرات
+ * (مباشر وتورنت) بطاقتان زجاجيتان. «شغّل الأفضل» الأبيض يبقى صلبًا (الفعل الرئيسي). */
+html[data-material='glass'] .v35 .an-pick-back::before,
+html[data-material='glass'] .v35 .ss-bar-extras .an-pick-together {
+  background: var(--g-tint);
+  box-shadow: var(--g-rim), var(--g-lift);
+  backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2c-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .ss-addon-btn:not(:disabled) {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--g-tint);
+  box-shadow: var(--g-rim);
+  backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+  -webkit-backdrop-filter: var(--g-m2p-nav, blur(12px) saturate(1.6));
+}
+html[data-material='glass'] .v35 .ss-tab.on::after {
+  display: none;
+}
+html[data-material='glass'] .v35 .an-pick .an-srv-group {
+  padding: 4px 14px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface-1) 55%, rgba(255, 255, 255, 0.04));
+  box-shadow: var(--g-rim), 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+/* ── الضغط على أزرار الزجاج (بلاغ المالك: «الضغط على الرجوع في الزجاجي جامد»). السبب: خلفية الزجاج !important
+ * تمنع خلفية الضغط (.icon-btn:active) فلا أثر للمس أبدًا. الآن كأزرار iOS 26: الزجاج ينتفخ قليلًا ويضيء،
+ * بنابض قصير. والزر داخل كبسولة يضيء مكانه فقط. ── */
+html[data-material='glass'] .v35 :is(.header .icon-btn, .page-top .icon-btn, .aw-bar > .icon-btn, .cn-detail-bar > .icon-btn, .cn-season-btn, .cn-filter-btn, .mc-icon, .mc-act:not(.is-send), .an-pick-back, .ss-bar-extras .an-pick-together, .rd-tl-btn, .aw-menu-dot, .ss-addon-btn) {
+  transition: scale 0.34s cubic-bezier(0.3, 1.6, 0.5, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+}
+html[data-material='glass'] .v35 :is(.header .icon-btn, .page-top .icon-btn, .aw-bar > .icon-btn, .cn-detail-bar > .icon-btn, .cn-season-btn, .cn-filter-btn, .mc-icon, .mc-act:not(.is-send), .an-pick-back, .ss-bar-extras .an-pick-together, .rd-tl-btn, .ss-addon-btn):active,
+html[data-material='glass'] .v35 .aw-menu-item:active .aw-menu-dot {
+  scale: 1.1;
+  background: rgba(255, 255, 255, 0.16) !important;
+  box-shadow: var(--g-rim), inset 0 0 14px rgba(255, 255, 255, 0.18), 0 10px 26px rgba(0, 0, 0, 0.3) !important;
+}
+html[data-material='glass'] .v35 :is(.header-start, .header-end, .header-actions, .page-top-left, .page-top-right, .aw-eps-tools, .cn-sf-tools) > .icon-btn:active,
+html[data-material='glass'] .v35 .aw-tools .aw-tool:active {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-material='glass'] .v35 :is(.header .icon-btn, .page-top .icon-btn, .aw-bar > .icon-btn, .cn-detail-bar > .icon-btn, .cn-season-btn, .cn-filter-btn, .mc-icon, .mc-act, .an-pick-back, .rd-tl-btn, .aw-menu-dot, .ss-addon-btn):active { scale: 1; }
 }

@@ -43,9 +43,9 @@ describe('مستوى الزجاج: بالقدرة ثم بالقياس، لا ب�
   });
   it('تقليل الشفافية يرجع للحالي، والمستوى الذي نزل إليه الجهاز لا يصعد وحده', () => {
     expect(glassTier({ appearance: { material: 'glass' }, win: win(CHROME, true), storage: memory() })).toBe('off');
-    expect(glassTier({ appearance: { material: 'glass' }, win: win(CHROME), storage: memory({ 'vantara.glass.tier.v1': 'b' }) })).toBe('b');
+    expect(glassTier({ appearance: { material: 'glass' }, win: win(CHROME), storage: memory({ 'vantara.glass.tier.v2': 'b' }) })).toBe('b');
     // جهاز بلا انكسار أصلًا لا «يصعد» إلى b بقيمة محفوظة
-    expect(glassTier({ appearance: { material: 'glass' }, win: win(SAFARI), storage: memory({ 'vantara.glass.tier.v1': 'b' }) })).toBe('c');
+    expect(glassTier({ appearance: { material: 'glass' }, win: win(SAFARI), storage: memory({ 'vantara.glass.tier.v2': 'b' }) })).toBe('c');
   });
 });
 
@@ -79,7 +79,26 @@ describe('مراقب الأداء: الميزانية من المعدل الفع
     expect(noteSession(janky, { doc: document, storage: s })).toBeNull();
     expect(noteSession(janky, { doc: document, storage: s })).toBe('b');
     expect(document.documentElement.dataset.glassTier).toBe('b');
-    expect(s.getItem('vantara.glass.tier.v1')).toBe('b');
+    expect(s.getItem('vantara.glass.tier.v2')).toBe('b');
+  });
+  it('تفاوت عادي في جوال 120Hz (لا إطارات ساقطة) لا ينزل شيئًا، مهما تكرر', () => {
+    const s = glassOn();
+    Object.defineProperty(document, 'defaultView', { value: { ...win(CHROME), dispatchEvent() {}, CustomEvent: globalThis.CustomEvent }, configurable: true });
+    syncGlass({ doc: document, storage: s });
+    const jitter = [...Array(54).fill(8.3), ...Array(6).fill(11.2)]; // النسبة 95 = 1.35 من الوسيط: كانت تُحسب سيئة
+    for (let i = 0; i < 10; i++) expect(noteSession(jitter, { doc: document, storage: s })).toBeNull();
+    expect(document.documentElement.dataset.glassTier).toBe('a');
+  });
+  it('لا ينزل تحت b أبدًا: الانكسار والتكبير يبقيان', () => {
+    const s = glassOn({ 'vantara.glass.tier.v2': 'b' });
+    Object.defineProperty(document, 'defaultView', { value: { ...win(CHROME), dispatchEvent() {}, CustomEvent: globalThis.CustomEvent }, configurable: true });
+    syncGlass({ doc: document, storage: s });
+    const janky = [...Array(50).fill(16.7), ...Array(10).fill(33.4)];
+    for (let i = 0; i < 9; i++) expect(noteSession(janky, { doc: document, storage: s })).toBeNull();
+    expect(document.documentElement.dataset.glassTier).toBe('b');
+  });
+  it('مستوى حفظته النسخة القديمة (v1) لا يُقرأ: الجهاز يرجع للمستوى الكامل', () => {
+    expect(glassTier({ appearance: { material: 'glass' }, win: win(CHROME), storage: memory({ 'vantara.glass.tier.v1': 'c' }) })).toBe('a');
   });
   it('جلسة قصيرة (أقل من 20 إطارًا) لا يُحكم منها', () => {
     expect(noteSession(Array(10).fill(50), { doc: document, storage: glassOn() })).toBeNull();

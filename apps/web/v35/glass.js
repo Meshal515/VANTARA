@@ -29,7 +29,8 @@ export const GLASS = Object.freeze({
 });
 
 const SVGNS = 'http://www.w3.org/2000/svg';
-const TIER_KEY = 'vantara.glass.tier.v1';
+// v2: النسخة الأولى من المراقب كانت تنزّل المستوى لأتفه تفاوت (تشكّى المالك: «وين تشتت الألوان»)، فما حفظته يُترك
+const TIER_KEY = 'vantara.glass.tier.v2';
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
 /**
@@ -79,21 +80,23 @@ export function syncGlass({ doc = globalThis.document, storage = globalThis.loca
 // ── مراقب الأداء: يقيس فواصل الإطارات أثناء تفاعل الزجاج وحده، وينزل مستوى عند تراجع متكرر ──
 let badSessions = 0;
 /**
- * جلسة تفاعل انتهت (سحب أو نقر حتى استقرار العدسة). الميزانية من المعدل الفعلي للجلسة نفسها (وسيط الفواصل)،
- * لا من معدل الشاشة. ثلاث جلسات متتالية نسبتها 95 فوق 1.25 من الوسيط تنزل مستوى وتحفظه للجهاز.
- * الأرقام مبدئية تضبطها المعايرة (الخطة 4.6 و5.4).
+ * جلسة تفاعل انتهت (سحب أو نقر حتى استقرار العدسة). الميزانية من المعدل الفعلي للجلسة نفسها (وسيط الفواصل).
+ * الجلسة سيئة فقط بإطارات ساقطة فعلًا: النسبة 95 ضعف الوسيط فأكثر، و10% من الإطارات متأخرة (1.5 من الوسيط).
+ * ثلاث جلسات سيئة متتالية تنزل مستوى واحدًا (a إلى b: التشتت وحده). لا ينزل المراقب تحت b أبدًا: الانكسار والتكبير
+ * هما المادة نفسها (قرار المالك: «تراجع متكرر ومتسق فقط»). كانت 1.25 بلا حد تُسقط كل شيء على جوالات 120Hz.
  * @returns {string|null} المستوى الجديد إن نزل
  */
 export function noteSession(dts, { doc = globalThis.document, storage = globalThis.localStorage } = {}) {
   const f = dts.filter((d) => d > 0 && d < 250).sort((a, b) => a - b);
   if (f.length < 20) return null;
   const median = f[Math.floor(f.length / 2)], p95 = f[Math.floor(f.length * 0.95)];
-  badSessions = p95 > median * 1.25 ? badSessions + 1 : 0;
+  const late = f.filter((d) => d > median * 1.5).length / f.length;
+  badSessions = p95 >= median * 2 && late >= 0.1 ? badSessions + 1 : 0;
   if (badSessions < 3) return null;
   badSessions = 0;
   const html = doc?.documentElement;
   const now = html?.dataset.glassTier ?? 'a';
-  const next = { a: 'b', b: 'c', c: 'off' }[now];
+  const next = { a: 'b' }[now];
   if (!next) return null;
   writePreference(TIER_KEY, next, storage);
   syncGlass({ doc, storage });
@@ -241,6 +244,7 @@ const TAB_GROUPS = Object.freeze([
   { sel: '.us-seg', item: 'button', padX: 12, h: 34 },
   { sel: '.ul-shelves', item: '.ul-shelf', padX: 12, h: 34 },
   { sel: '.mw-ranges', item: 'button', fill: true },
+  { sel: '.ss-tabs', item: '.ss-tab', padX: 12, h: 32 },
   { sel: '.drawer-sections', item: '.drawer-section', fill: true, tone: true },
 ]);
 const TAB_SEL = TAB_GROUPS.map((g) => g.sel).join(',');
