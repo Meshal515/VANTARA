@@ -15,6 +15,7 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
   const raf = (fn) => (win.requestAnimationFrame ?? globalThis.requestAnimationFrame)?.(fn) ?? 0;
   const caf = (id) => (win.cancelAnimationFrame ?? globalThis.cancelAnimationFrame)?.(id);
   const now = () => win.performance?.now?.() ?? Date.now();
+  const SUPPRESS_MS = 450; // نقرة المتصفح بعد رفع الإصبع تصل خلال إطارات قليلة
   const caps = [...bar.querySelectorAll('.dock-cap')];
   const swCap = sw.closest('.dock-cap');
   const SECS = opts.map((o) => o.dataset.arg);
@@ -56,7 +57,7 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
   // ── أربعة نوابض في إطار واحد (v9): الموضع، والارتفاع، والتمطط، والشكل ──
   let x = 0, v = 0, target = 0, pos = GLASS.pos.travel, lift = 0, lv = 0, st = 0, sv = 0, form = open ? 1 : 0, fv = 0;
   let frame = 0, lastT = 0, press = null, swPress = null, isOpen = open, sec = section, page = activePage;
-  let nearNav = null, nearOpt = -1, pendingClose = 0, pickIdx = -1, shown = false, suppress = false, dts = [], lastY = 0;
+  let nearNav = null, nearOpt = -1, pendingClose = 0, pickIdx = -1, shown = false, suppressUntil = 0, dts = [], lastY = 0;
   let geo = { ow: 100, oh: 48 };
   const formTarget = () => (isOpen ? 1 : 0);
   const step = (h) => {
@@ -194,7 +195,7 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
       bar.classList.remove('g-dragging-sec');
       if (cancel) { setNearOpt(-1); target = secCenter(Math.max(0, SECS.indexOf(sec))); kick(); return; }
       const i = p.moved ? nearestSec(secRange(localX(e))) : p.idx;
-      if (p.moved) { suppress = true; haptic(); }
+      if (p.moved) { suppressUntil = now() + SUPPRESS_MS; haptic(); }
       target = secCenter(i); setNearOpt(-1); pickIdx = i; pendingClose = now(); kick();
       return;
     }
@@ -202,14 +203,20 @@ export function createGlassLens({ bar, navs, sw, opts, centerOf, activePage = nu
     const nav = page ? navOf(page) : null;
     if (cancel) { if (nav) target = center(nav); kick(); return; }
     if (!p.moved) { kick(); return; } // نقرة: التنقل بنقرة الزر نفسها (navTo)، والعدسة تهبط عليه
-    suppress = true; // سحب: النقرة التي تليه لا تُحتسب
+    suppressUntil = now() + SUPPRESS_MS; // سحب: نقرة المتصفح التي قد تليه لا تُحتسب
     const dest = nearest(clampX(localX(e)));
     haptic();
     target = center(dest); kick();
     if (dest.dataset.page !== page) onCommit(dest.dataset.page);
   };
   const onClick = (e) => {
-    if (suppress) { suppress = false; e.stopPropagation(); e.preventDefault(); return; }
+    // بعد السحب يتجاهل نقرة المتصفح وحدها، وفي نافذة قصيرة فقط. اللمس لا يرسل نقرة بعد السحب أصلًا، فكانت العلامة
+    // تبقى معلقة وتبلع نقرة اختيار القسم البرمجية (العدسة على المانجا والقسم لا يتحول) أو أول ضغطة حقيقية بعدها.
+    if (suppressUntil) {
+      const late = now() > suppressUntil;
+      if (late || !e.isTrusted) { if (late) suppressUntil = 0; }
+      else { suppressUntil = 0; e.stopPropagation(); e.preventDefault(); return; }
+    }
     // نقرة قسم باللمس: يُختار بعد هبوط العدسة (pendingClose). لوحة المفاتيح (detail = 0) تمر فورًا
     if (isOpen && e.detail > 0 && e.target.closest?.('.dock-opt')) { e.stopPropagation(); e.preventDefault(); }
   };

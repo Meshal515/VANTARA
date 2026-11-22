@@ -779,6 +779,23 @@ html,
   touch-action: none; /* سحب الدائرة لا يصير تمريرًا للصفحة */
   user-select: none;
 }
+/* المظهر الحالي (قرار المالك 22 نوفمبر، التغيير الوحيد فيه): لتحت يصغر الشريط 80% ويشف 50%، ولفوق أو باللمس يرجع.
+ * حالة صنف (dock.js) وانتقال CSS، لا حركة إطار بإطار. في Glass يصغر 85% فقط (glass.css: g-compact، الشفافية تعزل الزجاج). */
+.v35 .dock {
+  transform-origin: 50% 100%;
+  transition: transform 0.42s cubic-bezier(0.3, 1.2, 0.5, 1), opacity 0.3s ease;
+}
+/* كالنموذج v9: translateX(-50%) ثم التصغير، فيبقى في المنتصف (خاصية scale المستقلة تُطبَّق قبل الإزاحة فتزيحه جانبًا) */
+.v35 .dock.d-compact {
+  transform: translateX(-50%) scale(0.8);
+  opacity: 0.5;
+}
+html[data-motion='off'] .v35 .dock {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .dock { transition: none; }
+}
 .v35 .dock-group {
   position: absolute; /* مجموعة الأقسام لقارئ الشاشة فقط؛ لا مكان لها في صف الكبسولات */
   width: 0;

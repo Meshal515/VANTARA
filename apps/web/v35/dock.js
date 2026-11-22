@@ -640,7 +640,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   }
   const unified = () => Boolean(bar.closest?.('[data-content="unified"]'));
   const indOf = (cap) => (cap === bar ? barInd : cap?.querySelector('.cap-ind') ?? null);
-  let open = false, section = current, dragged = false, activePage = null;
+  let open = false, section = current, dragged = 0, activePage = null;
   // Glass (خيار المظهر): العدسة السائلة (v9) ترسم التحديد وتستقبل اللمس بدل الدائرة. الحالة والتنقل هنا كما هما.
   let lens = null;
   const glassOn = () => bar.ownerDocument?.documentElement?.dataset?.material === 'glass';
@@ -883,6 +883,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     if (m.live) switchMotion = m;
   };
   const setOpen = (next, { focus = true, instant = false } = {}) => {
+    if (next) bar.classList.remove('d-compact');
     if (next === open) return;
     open = next;
     sw.setAttribute('aria-expanded', String(open));
@@ -924,7 +925,11 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   });
 
   // ── سحب الدائرة داخل كبسولتها فقط ─────────────────────────
-  let scrub = null, scrubbed = false;
+  // بعد سحب باللمس لا يرسل المتصفح نقرة غالبًا، فالعلامة كانت تبقى معلقة وتبلع أول ضغطة حقيقية بعدها
+  // (قياس glass-touch.mjs قبل Glass وبعده). الآن تتجاهل نقرة المتصفح وحدها في نافذة قصيرة بعد رفع الإصبع.
+  const TAP_AFTER_DRAG_MS = 450;
+  const nowMs = () => globalThis.performance?.now?.() ?? Date.now();
+  let scrub = null, scrubbed = 0;
   for (const cap of caps) {
     cap.addEventListener('pointerdown', (e) => {
       if (lens || open || e.button > 0 || !activePage) return; // Glass: العدسة تستقبل اللمس
@@ -932,14 +937,15 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       const zone = zoneOf(activePage);
       if (zone !== bar && zone !== cap) return;
       scrub = { cap: zone, id: e.pointerId, x: e.clientX, on: false, track: [] };
-      scrubbed = false;
+      scrubbed = 0;
     });
   }
   bar.addEventListener('pointermove', (e) => {
     if (!scrub || e.pointerId !== scrub.id) return;
     if (!scrub.on) {
       if (Math.abs(e.clientX - scrub.x) < 8) return;
-      scrub.on = scrubbed = true;
+      scrub.on = true;
+      scrubbed = Infinity; // حتى رفع الإصبع
       bar.setPointerCapture?.(e.pointerId);
       haltInd(scrub.cap);
       bar.classList.add('scrubbing');
@@ -971,13 +977,14 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     const s = scrub;
     scrub = null;
     if (!s.on) return;
+    scrubbed = nowMs() + TAP_AFTER_DRAG_MS;
     bar.classList.remove('scrubbing');
     const slots = slotsIn(s.cap);
     const center = (n) => centerIn(s.cap, n);
     for (const n of slots) n.classList.remove('near');
     if (e.type === 'pointercancel') {
       // إيماءة قطعها النظام: لا تنقّل، والدائرة ترجع لمكانها، ولا تُبتلع اللمسة التالية
-      scrubbed = false;
+      scrubbed = 0;
       const nav = navs.find((n) => n.dataset.page === activePage);
       if (nav) slide(s.cap, center(nav));
       return;
@@ -994,7 +1001,9 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   bar.addEventListener('pointercancel', endScrub);
   bar.addEventListener('click', (e) => {
     if (!scrubbed) return;
-    scrubbed = false;
+    const late = nowMs() > scrubbed;
+    if (late || !e.isTrusted) { if (late) scrubbed = 0; return; }
+    scrubbed = 0;
     e.stopPropagation();
     e.preventDefault();
   }, true);
@@ -1004,7 +1013,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   sw.addEventListener('pointerdown', (e) => {
     if (open || e.button > 0) return;
     drag = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, to: null, track: [] };
-    dragged = false;
+    dragged = 0;
     onPrepare?.();
   });
   sw.addEventListener('pointermove', (e) => {
@@ -1016,7 +1025,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
       if (!to) return;
       drag.to = to;
       drag.dir = Math.sign(dx);
-      dragged = true;
+      dragged = Infinity; // حتى رفع الإصبع
       sw.setPointerCapture?.(e.pointerId);
       onDragStart?.(to);
     }
@@ -1031,7 +1040,8 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
     const d = drag;
     drag = null;
     if (!d.to) return onDragEnd?.(null, false);
-    if (e.type === 'pointercancel') dragged = false; // لا نقرة تتبعها: لا تُبتلع اللمسة التالية
+    // نقرة المتصفح بعد السحب (إن جاءت) تصل خلال نافذة قصيرة؛ بعدها لا تُبتلع اللمسة التالية. الإلغاء لا نقرة بعده
+    dragged = e.type === 'pointercancel' ? 0 : nowMs() + TAP_AFTER_DRAG_MS;
     const [t0, x0] = d.track[0] ?? [d.t, 0];
     const [t1, x1] = d.track[d.track.length - 1] ?? [e.timeStamp, 0];
     const v = t1 > t0 ? ((x1 - x0) * d.dir) / (t1 - t0) : 0;
@@ -1056,6 +1066,7 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
 
   /** تبديل المادة (من الإعدادات أو نزول مستوى الجهاز): ينشئ العدسة أو يزيلها ويرجع الدائرة الحالية كما هي. */
   const refreshMaterial = () => {
+    if (glassOn()) bar.classList.remove('d-compact');
     if (glassOn() && !lens) {
       for (const c of caps) { haltInd(c); stateOf(c).shown = false; }
       if (barInd) { haltInd(bar); stateOf(bar).shown = false; }
@@ -1072,17 +1083,29 @@ export function createDock({ bar, scrim, current, onPrepare, onClose, onDragStar
   };
   refreshMaterial();
 
+  // تصغير المظهر الحالي بالاتجاه (قرار المالك 22 نوفمبر): لتحت يصغر ويشف، ولفوق أو عند لمسه أو فتحه يرجع.
+  // حالة صنف وانتقال CSS (core.css: .dock.d-compact)، نفس منطق عدسة Glass.
+  let lastY = 0;
+  const plainScrolled = (y) => {
+    const d = y - lastY;
+    lastY = y;
+    if (open) return;
+    if (y < 24 || d < -6) bar.classList.remove('d-compact');
+    else if (d > 4) bar.classList.add('d-compact');
+  };
+  bar.addEventListener('pointerdown', () => bar.classList.remove('d-compact'), { capture: true });
+
   return {
     refreshMaterial,
-    /** تمرير الصفحة (من مستمع shell الوحيد): حالة تصغير الشريط في Glass. */
-    scrolled: (y) => lens?.scrolled(y),
+    /** تمرير الصفحة (من مستمع shell الوحيد): تصغير الشريط بالاتجاه. Glass عند العدسة (85%)، والحالي هنا (80% وشفافية 50%). */
+    scrolled: (y) => (lens ? lens.scrolled(y) : plainScrolled(y)),
     isOpen: () => open,
     toggle: () => setOpen(!open),
     open: () => setOpen(true),
     close: (o) => setOpen(false, o),
     consumeDrag() {
-      const was = dragged;
-      dragged = false;
+      const was = dragged && nowMs() <= dragged;
+      dragged = 0;
       return was;
     },
     setSection(id) {

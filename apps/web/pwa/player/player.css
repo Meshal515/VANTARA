@@ -1376,3 +1376,17 @@ html.desktop-overlay[data-material='glass'] .pwa-player :is(.pl-close, .pl-icon,
   -webkit-backdrop-filter: none;
   background: rgba(20, 18, 28, 0.42);
 }
+
+/* الضغط على أزرار المشغّل والغرفة في Glass: ينتفخ ويضيء (كانت خلفية !important تمنع أي أثر للمس) */
+html[data-material='glass'] .pwa-player :is(.pp-icon, .pp-play, .pp-unlock, .pp-skip, .pl-close, .pl-icon, .pl-step-btn, .pl-go:not(.is-primary)) {
+  transition: scale 0.34s cubic-bezier(0.3, 1.6, 0.5, 1), background-color 0.2s ease;
+}
+html[data-material='glass'] .pwa-player :is(.pp-icon, .pp-play, .pp-unlock, .pp-skip, .pl-close, .pl-icon, .pl-step-btn, .pl-go:not(.is-primary)):active {
+  scale: 1.1;
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+html[data-material='glass'] .pwa-player :is(.pp-tools, .pp-group:not(.pp-center)) .pp-icon:active {
+  scale: 1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16) !important;
+}
