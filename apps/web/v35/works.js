@@ -13,7 +13,7 @@ import engine from '../lib/extension-engine.js';
 import { saveWithRelief } from '../lib/storage-relief.js';
 import { onEntitlementChange } from '../lib/source-entitlement.js';
 import { MIRROR_FAMILIES, canonicalIndex, chapterNumberOf, countMainChapters, gather, mirrorFamily, mergeChapters, normalizeTitle, rankListing, sourcePackage, titleTwins } from '../lib/catalog.js';
-import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt } from '../lib/manga-alias-store.js';
+import { aliasMap, canonicalRefOf, editionRef, editionWork, identityGraph, learnAliases, linkEdition, loadAliases, noteRefAliases, officialIdMap, setTwinAliases, splitSet, twinsAt, ambiguousNames } from '../lib/manga-alias-store.js';
 import { RANK, editionKey } from '../lib/work-identity.js';
 import { detailEvidence, detailNames, isPartName, listingEvidence, namesPointElsewhere, officialConflict, ownNames, pickEdition } from '../lib/work-evidence.js';
 import { twinAliases } from '../lib/manga-twins.js';
@@ -71,7 +71,7 @@ export const editionKeyOf = (edition) => editionKey(mirrorFamily(edition?.source
 /** مرجع العمل الذي رُبطت به النسخة بدليل موثَّق، أو null. */
 const editionRefOf = (edition) => editionWork(editionKeyOf(edition));
 /** خيارات الفهرس الواحدة لكل قائمة: الأسماء والمعرّفات الرسمية وفصل المستخدم وروابط الهوية. */
-const indexOptions = () => ({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet(), editionRefOf });
+const indexOptions = () => ({ aliases: aliasMap(), officialIds: officialIdMap(), separate: splitSet(), editionRefOf, ambiguous: ambiguousNames() });
 
 /**
  * فهرس الأعمال بالهوية الواحدة (ZERO DUPLICATE): نفس العمل بأسماء مختلفة بين

@@ -85,7 +85,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { canonicalRefOf, learnAliases, noteOfficialIds, noteRefAliases, refsOf, splitRefs } from '../lib/manga-alias-store.js';
+import { canonicalRefOf, learnAliases, noteAmbiguousNames, noteOfficialIds, noteRefAliases, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -988,6 +988,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // الهوية الرسمية المؤكدة تُتعلَّم (ID1، ID2): المعرّف دليل دمج، وأسماء AniList البديلة أسماء للعمل نفسه. تُستعمل في بناء
       // الفهرس التالي لا في البطاقات الظاهرة الآن (لا يتبدل شيء تحت عينك). الحارسان في matchMangaIdentity وفي الدمج نفسه
       const learnedIds = [];
+      // اسم لأكثر من عمل في AniList: لا يُدمج به بين مصدرين بعد الآن (canonicalIndex: ambiguous)
+      const ambiguousKeys = batch.filter(({ title }) => matches.get(title)?.ambiguous).map(({ title }) => normalizeTitle(title)).filter(Boolean);
+      if (ambiguousKeys.length) noteAmbiguousNames(ambiguousKeys);
       for (const { title } of batch) {
         const identity = matches.get(title)?.identity;
         if (!identity) continue;

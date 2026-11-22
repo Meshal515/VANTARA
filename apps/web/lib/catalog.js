@@ -459,7 +459,14 @@ function preparedAliases(aliases) {
 	return hit;
 }
 
-export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set(), editionRefOf = null } = {}) {
+/** مفتاح نسخة باسم مشترك: الاسم ثم بصمة قصيرة ثابتة للعائلة والرابط (يبقى مقروءًا ومرجعًا صالحًا `ext:`). */
+export function editionScopedKey(title, family, url) {
+	let h = 2166136261;
+	for (const c of `${family}|${url ?? ''}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+	return `${title} ~${h.toString(36)}`;
+}
+
+export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), separate = new Set(), editionRefOf = null, ambiguous: sharedNames = new Set() } = {}) {
 	const entries = [];
 	const rejected = [];
 	// الأسماء المحفوظة مطبَّعة مرة، وفهرس كلماتها (بالمفرد) فلا يُقارن اسم إلا بمن
@@ -733,9 +740,14 @@ export function canonicalIndex({ aliases = new Map(), officialIds = new Map(), s
 		/** يعيد `null` لما لا عنوان له، وإلا `{ key }` بمفتاح النسخة؛ البطاقة تُعرف عند `list()`. */
 		add(entry) {
 			const manga = entry?.manga;
-			const own = normalizeTitle(manga?.title);
-			if (!own) return null;
-			const names = prepareNames([...(Array.isArray(manga.altNames) ? manga.altNames : [])].filter((n) => normalizeTitle(n) !== own));
+			const title = normalizeTitle(manga?.title);
+			if (!title) return null;
+			// اسم يحمله أكثر من عمل (ولا معرّف رسمي يحسمه): مفتاح النسخة نفسها (العائلة والرابط) لا الاسم، فلا تندمج به
+			// نسخة مصدر آخر بالاسم وحده. الأسماء البديلة والأدلة الأخرى تبقى تجمعها. مقياس الهوية: 63 دمجًا خاطئًا ← صفر
+			// اسم يحمله أكثر من عمل رسمي ولا رقم له: لا يدمج نسخة بأخرى وحده (التكرار أهون من الدمج الخاطئ)
+			const shared = (n) => sharedNames.has(n) && !officialIds.has(n);
+			const own = shared(title) ? editionScopedKey(title, mirrorFamily(entry.sourceId), manga?.url) : title;
+			const names = prepareNames([...(Array.isArray(manga.altNames) ? manga.altNames : [])].filter((n) => { const k = normalizeTitle(n); return k !== title && !shared(k); }));
 			const slug = slugName(manga);
 			if (slug) names.push(...prepareNames([slug], true));
 			entries.push({ entry, own, family: mirrorFamily(entry.sourceId), names });
