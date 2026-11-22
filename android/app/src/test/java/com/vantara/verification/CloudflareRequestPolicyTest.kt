@@ -56,3 +56,18 @@ class CloudflareRequestPolicyTest {
         assertEquals(true, silentSolveAllowed(isImage = false, lastFailedAt = now - SILENT_RETRY_MS, now = now))
     }
 }
+
+class HumanChallengeOrderTest {
+    // بلاغ المالك (22 نوفمبر): تحقق المستخدم بنجاح ثم طُلب منه التحقق مرة ثانية لأن حلًّا صامتًا فشل قبله بدقائق
+    @Test fun aPassedVerificationIsTriedBeforeAnyRefusalEvenRightAfterASilentFailure() {
+        val now = 1_000_000_000L
+        assertEquals(eu.kanade.tachiyomi.network.interceptor.HumanChallengeStep.RETRY_WITH_CLEARANCE,
+            eu.kanade.tachiyomi.network.interceptor.humanChallengeFirstStep(hasClearance = true, isImage = false, lastFailedAt = now - 1_000, now = now))
+        assertEquals(eu.kanade.tachiyomi.network.interceptor.HumanChallengeStep.RETRY_WITH_CLEARANCE,
+            eu.kanade.tachiyomi.network.interceptor.humanChallengeFirstStep(hasClearance = true, isImage = true, lastFailedAt = null, now = now))
+        assertEquals(eu.kanade.tachiyomi.network.interceptor.HumanChallengeStep.NEEDS_HUMAN,
+            eu.kanade.tachiyomi.network.interceptor.humanChallengeFirstStep(hasClearance = false, isImage = false, lastFailedAt = now - 1_000, now = now))
+        assertEquals(eu.kanade.tachiyomi.network.interceptor.HumanChallengeStep.SILENT_SOLVE,
+            eu.kanade.tachiyomi.network.interceptor.humanChallengeFirstStep(hasClearance = false, isImage = false, lastFailedAt = null, now = now))
+    }
+}

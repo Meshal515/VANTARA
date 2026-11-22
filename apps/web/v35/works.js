@@ -1084,7 +1084,9 @@ export function failureOf(error) {
   return {
     state: timeout ? 'SOURCE_TIMEOUT' : 'SOURCE_ERROR',
     // الويب بلا «جسرك الخاص» والمصدر لا يسمح بالقراءة المباشرة (pwa/net/fetcher.js NEEDS_BRIDGE)
-    reason: error?.code === 'needs_bridge' || /القراءة المباشرة من المتصفح/.test(message) ? 'يحتاج «جسرك الخاص» في الويب (الإعدادات)' : error?.code === 'bridge_key' ? 'مفتاح جسرك الخاص غير صحيح' : timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
+    // الويب (pwa/net/fetcher.js `FetchError('challenge')`): المتصفح لا يحل Cloudflare لموقع آخر ولا ينقل كوكيه، فلا نافذة
+    // تحقق ولا إعادة محاولة بلا نتيجة؛ المسار المدعوم يُقال مرة: التطبيق أو «جسرك الخاص»
+    reason: error?.code === 'needs_bridge' || /القراءة المباشرة من المتصفح/.test(message) ? 'يحتاج «جسرك الخاص» في الويب (الإعدادات)' : error?.code === 'bridge_key' ? 'مفتاح جسرك الخاص غير صحيح' : error?.code === 'challenge' ? 'حماية Cloudflare: افتحه في التطبيق أو عبر «جسرك الخاص» (الإعدادات)' : timeout ? 'لم يرد في الوقت' : status === '404' ? 'العمل غير موجود فيه (404)' : status ? `ردّ بخطأ ${status}` : /cloudflare|challenge/i.test(message) ? 'حماية Cloudflare' : message ? message.slice(0, 80) : 'ردّ بخطأ',
   };
 }
 

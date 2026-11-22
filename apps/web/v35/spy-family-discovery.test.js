@@ -60,3 +60,12 @@ describe('الاسم العربي من MangaDex في الاكتشاف', () => {
     expect(found.map((e) => [e.sourceId, e.evidence])).toEqual([[AR, 'exact']]);
   });
 });
+
+describe('Cloudflare في الويب', () => {
+  it('a challenged source on the web says the supported path once, never a verification loop', async () => {
+    const { failureOf } = await import('./works.js');
+    const error = Object.assign(new Error('المصدر خلف حماية Cloudflare'), { code: 'challenge' });
+    expect(failureOf(error).reason).toBe('حماية Cloudflare: افتحه في التطبيق أو عبر «جسرك الخاص» (الإعدادات)');
+    expect(failureOf(new Error('Cloudflare wants a human check for hijala.com')).reason).toBe('حماية Cloudflare');
+  });
+});
