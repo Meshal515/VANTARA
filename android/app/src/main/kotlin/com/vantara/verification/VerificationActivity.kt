@@ -48,6 +48,12 @@ class VerificationActivity : Activity() {
     private var navigations = 0
     /** Same-site host the challenge moved to (e.g. www → ww3); its host-only cf_clearance counts too. */
     private var landed: String? = null
+    /**
+     * الصفحة نفسها فتحت بلا تحدٍّ (لا نموذج Cloudflare ولا «Just a moment»). النجاح كان يُعرف بكوكي **جديد** فقط،
+     * فإن كان عند المتصفح المعزول cf_clearance صالح من تحقق سابق فتح الموقع مباشرة وبقي المستخدم عالقًا فيه
+     * (يضغط رجوع = إلغاء = يُطلب التحقق من جديد). الآن الكوكي الصالح مع صفحة بلا تحدٍّ نجاح.
+     */
+    @Volatile private var pageReady = false
     private fun clearanceNow(origin: String): String? =
         VerificationPolicy.clearance(selectedCookies?.getCookie("$origin/"))
             ?: landed?.takeIf { it != origin }?.let { VerificationPolicy.clearance(selectedCookies?.getCookie("$it/")) }
@@ -58,7 +64,7 @@ class VerificationActivity : Activity() {
             if (completed || !resumed) return
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
-            if (clearance != null && clearance != initialClearance) {
+            if (clearance != null && (clearance != initialClearance || pageReady)) {
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
             else main.postDelayed(this, 500)
@@ -122,13 +128,14 @@ class VerificationActivity : Activity() {
             text = "أكمل التحقق في صفحة المصدر. ستعود تلقائيًا عند نجاحه."
             setTextColor(Color.DKGRAY); setPadding(dp(16), dp(4), dp(16), dp(8))
         })
-        if(runtimeProfile!=null)container.addView(Button(this).apply {
-            text="تحققت، متابعة"
+        // لكل الإضافات (كان لـCloudStream وحدها): بعد أن يفتح الموقع، المستخدم يرجع بنفسه ولا يبقى عالقًا.
+        // الكوكي الصالح يُرسَل وإن لم يتغير؛ والمضيف يعيد طلب المصدر ويتحقق منه، فإن بقي التحدي طُلب من جديد.
+        container.addView(Button(this).apply {
+            text="تم التحقق، متابعة"
             setOnClickListener {
-                // A previously valid cookie may be unchanged. Only an explicit
-                // click may submit it; the host still replays and validates the source request.
                 val value=clearanceNow(current.origin)
-                if(value!=null)complete("verified",null,value)
+                if(value!=null||pageReady)complete("verified",null,value)
+                else complete("cancelled","user_cancelled")
             }
         })
         setContentView(container)
@@ -182,6 +189,15 @@ class VerificationActivity : Activity() {
                     if (target == null || !VerificationPolicy.sameSite(current, target)) complete("failed", "navigation_blocked")
                     else if (target.host != current.host) landed = target.origin
                 }
+                override fun onPageFinished(view: WebView, url: String?) {
+                    val target = VerificationPolicy.endpoint(url.orEmpty()) ?: return
+                    if (!VerificationPolicy.sameSite(current, target)) return
+                    // صفحة بلا تحدٍّ؟ (نموذج Cloudflare أو Turnstile أو عنوان «لحظة») — تُفحص بعد كل تحميل كامل
+                    view.evaluateJavascript(CHALLENGE_PROBE) { r ->
+                        pageReady = r == "true"
+                        if (pageReady && resumed && !completed) { main.removeCallbacks(poll); main.post(poll) }
+                    }
+                }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                     handler.cancel(); complete("failed", "tls_error")
                 }
@@ -209,6 +225,11 @@ class VerificationActivity : Activity() {
         val result = Intent().putExtra("host", endpoint?.host).putExtra("token", token).putExtra("state", state)
         if (reason != null) result.putExtra("reason", reason)
         if (state == "verified" && clearance != null) result.putExtra("clearance", clearance)
+        if (state == "verified") endpoint?.let { e ->
+            // كل كوكيز الموقع (ومضيف الهبوط إن انتقل التحدي إليه) لا cf_clearance وحده
+            val all = listOfNotNull(selectedCookies?.getCookie(e.origin + "/"), landed?.takeIf { it != e.origin }?.let { selectedCookies?.getCookie("$it/") })
+            if (all.isNotEmpty()) result.putExtra("cookies", all.joinToString("; ").take(65536))
+        }
         setResult(if (state == "verified") RESULT_OK else RESULT_CANCELED, result)
         releaseBrowser()
         releaseTunnel()
@@ -243,5 +264,12 @@ class VerificationActivity : Activity() {
         super.onDestroy()
     }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-    companion object { private const val SESSION_MS = 180_000L; private var isolatedReady = false }
+    companion object {
+        private const val SESSION_MS = 180_000L; private var isolatedReady = false
+        /** صفحة التحدي: نموذج Cloudflare أو Turnstile أو عنوانه («Just a moment» / «لحظة»)، أو تحدٍّ ما زال يعمل. */
+        internal const val CHALLENGE_PROBE = "(function(){try{var d=document;if(!d.body)return false;" +
+            "if(d.querySelector('#challenge-form,#challenge-running,#cf-challenge-running,#challenge-stage,.cf-turnstile,[name=\"cf-turnstile-response\"],script[src*=\"challenge-platform\"]'))return false;" +
+            "var t=(d.title||'').toLowerCase();if(/just a moment|attention required|لحظة|one more step|checking your browser|ddos-guard/.test(t))return false;" +
+            "return d.body.innerText.length>40;}catch(e){return false;}})()"
+    }
 }

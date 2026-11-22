@@ -21,7 +21,7 @@ import { glyph, iconButton } from './icons.js';
 import { applyAppearance } from './appearance.js';
 import { readStructure } from './experience.js';
 import { countLabel } from './plural.js';
-import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, sameChapterKey, shouldAutoMark } from './reading.js';
+import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, positionFor, progressFor, shouldAutoMark } from './reading.js';
 import { editionRows, sourceLabel, sourceRank } from './works.js';
 import {
   PRIORITY,
@@ -33,6 +33,8 @@ import {
   loadSettings,
   neighbors,
   nextChapterPlan,
+  PAGES_TIMEOUT_MS,
+  withDeadline,
   readRatio,
   saveSettings,
 } from './reader-core.js';
@@ -96,7 +98,8 @@ function sharedPages(engine, row) {
   const id = chapterId(row);
   let promise = pageLists.get(id);
   if (!promise) {
-    promise = engine.pages(row.sourceId, row.chapter).then((list) => {
+    // بلا مهلة كانت «جارٍ فتح الفصل» تبقى للأبد إن علق المحرك (بلاغ المالك 16 نوفمبر)
+    promise = withDeadline(engine.pages(row.sourceId, row.chapter), PAGES_TIMEOUT_MS, 'المصدر ما ردّ بصفحات الفصل').then((list) => {
       if (!list.length) throw new Error('الفصل بلا صفحات عند المصدر');
       return list;
     });
@@ -151,6 +154,16 @@ export function openSmartReader(deps, ctx) {
     if (globalThis.navigator?.onLine !== false || typeof engine.hasLocal !== 'function') return sequence;
     const same = (a, b) => a === b || (Number.isFinite(a?.number) && a.number >= 0 && a.number === b?.number) || Boolean(a?.chapter?.url && a.chapter.url === b?.chapter?.url);
     return sequence.filter((r) => same(r, row) || engine.hasLocal(r.sourceId, r.chapter) !== false);
+  };
+  /**
+   * التالي ومعه ما تُخطّي (بلاغ المالك: «انتقال مفاجئ إلى الفصل 272»). بلا اتصال، أو حين يظن WebView ذلك لحظة،
+   * كان `reach` يجعل «التالي» أقرب فصل **محمّل** فيُلحق بالتمرير بصمت ولو كان بعد مئات الفصول. الآن التالي
+   * الحقيقي (`skipped`) يُعرف، والقفز لا يحدث إلا بضغطة صريحة على زر يقول إنه المحمّل التالي.
+   */
+  const nextOf = (row) => {
+    const { next } = neighbors(reach(row), row);
+    const real = neighbors(sequence, row).next;
+    return { next, skipped: next && real && next !== real ? real : null };
   };
   const ref = ctx.seriesRef;
   const me = () => sync.user?.userId;
@@ -410,6 +423,14 @@ export function openSmartReader(deps, ctx) {
           current = b;
         }
         b.append(el('span', 'rd-chapter-choice__number', chapterLabel(row)));
+        // RD4: «مقروء» كما في صفحة العمل (عبر كل مراجع العمل، المرحلة 1)
+        if (!active && isChapterRead(sync, ref, keyOf(row))) {
+          b.classList.add('is-read');
+          const seen = el('span', 'rd-chapter-read');
+          seen.innerHTML = glyph('check', { size: 16 });
+          seen.setAttribute('aria-label', 'مقروء');
+          b.append(seen);
+        }
         // محمّل على الجهاز: يُقرأ بلا إنترنت
         if (engine.hasLocal?.(row.sourceId, row.chapter)) { const mark = el('span', 'rd-chapter-local'); mark.innerHTML = glyph('downloaded', { size: 16 }); mark.setAttribute('aria-label', 'على الجهاز'); b.append(mark); }
         if (row.label) b.append(el('span', 'rd-chapter-choice__title', row.label));
@@ -476,12 +497,13 @@ export function openSmartReader(deps, ctx) {
    */
   function savedPage(row, pageCount) {
     const key = keyOf(row);
-    const local = readPositions()[key];
+    // بكل مراجع العمل (المرحلة 1، RD6): موضع حُفظ قبل تغيّر مفتاح البطاقة لا يضيع
+    const local = positionFor(readPositions(), ref, key);
     if (local && local.sourceId === row.sourceId && local.pages === pageCount) {
       return local.ratio >= 0.98 ? 0 : Math.min(pageCount - 1, Math.max(0, Math.floor(local.page)));
     }
     // والمفتاح القديم للفصل العشري (ذيل Float قبل #323 U-28)
-    const saved = sync.rows('progress', (r) => r.user_id === me() && sameChapterKey(r.chapter_key, key)).sort((a, b) => (b.ratio ?? 0) - (a.ratio ?? 0))[0];
+    const saved = progressFor(sync, ref, key);
     if (!saved || (saved.ratio ?? 0) >= 0.98 || !(saved.ratio > 0)) return 0;
     return Math.min(pageCount - 1, Math.max(0, Math.floor(saved.ratio * pageCount) - 1));
   }
@@ -699,8 +721,9 @@ export function openSmartReader(deps, ctx) {
    * وإعدادك وبأولوية لا تنافس ما تقرؤه. التمرير يدخل فيه بلا زرّ.
    */
   function appendNext(seg) {
-    const { next } = neighbors(reach(seg.row), seg.row);
-    if (!next || seg.next || seg.appending) return;
+    const { next, skipped } = nextOf(seg.row);
+    // لا إلحاق صامت لفصل بعيد: فصول تُخطّت (غير محمّلة بلا اتصال) = زر صريح في حد الفصل لا تمرير
+    if (!next || skipped || seg.next || seg.appending) return;
     const plan = nextChapterPlan({ mode: settings.prefetch, network: readNetwork() });
     seg.appending = true;
     seg.nextError = null;
@@ -968,7 +991,7 @@ export function openSmartReader(deps, ctx) {
    * شيء بعده — وعندها وحدها يقول «وصلت إلى آخر فصل متاح حاليًا».
    */
   function paintBoundary(seg) {
-    const { next } = neighbors(reach(seg.row), seg.row);
+    const { next, skipped } = nextOf(seg.row);
     const end = seg.end;
     end.replaceChildren();
     end.classList.toggle('rd-end--last', !next);
@@ -989,16 +1012,17 @@ export function openSmartReader(deps, ctx) {
       end.append(back);
       return;
     }
+    if (skipped) end.append(el('p', 'rd-end-state', `${chapterLabel(skipped)} غير محمّل على الجهاز`));
     const go = el('button', 'rd-end-next');
     go.type = 'button';
-    go.append(el('span', 'rd-end-kicker', 'الفصل التالي'));
+    go.append(el('span', 'rd-end-kicker', skipped ? 'التالي المحمّل' : 'الفصل التالي'));
     const no = el('bdi', 'rd-end-no', chapterShort(next));
     go.append(no);
     const name = next.chapter?.name?.trim();
     if (name && name !== chapterLabel(next) && !/^\s*(ال)?فصل\s*[\d.]+\s*$/.test(name)) go.append(el('bdi', 'rd-end-name', name));
     if (seg.nextError) {
       go.append(el('span', 'rd-end-state rd-end-state--error', 'ما تجهّز. المس لإعادة المحاولة'));
-    } else if (!seg.next) {
+    } else if (!seg.next && !skipped) {
       const wait = el('span', 'rd-end-state');
       wait.append(el('i', 'rd-spinner rd-spinner--sm'), document.createTextNode('يتجهّز…'));
       go.append(wait);
@@ -1015,8 +1039,9 @@ export function openSmartReader(deps, ctx) {
   /** «التالي» باللمس: إلى أول صفحته إن كان تحتك، وإلا يُفتح من الصفر. */
   function goNext(seg = state.seg) {
     if (!seg) return;
-    const { next } = neighbors(reach(seg.row), seg.row);
+    const { next, skipped } = nextOf(seg.row);
     if (!next) return;
+    if (skipped) toast(`${chapterLabel(skipped)} غير محمّل، فتحنا ${chapterLabel(next)} المحمّل`);
     if (seg.next) {
       seg.next.current = 0;
       scrollToFrame(seg.next.slots[0]?.frame, true);
@@ -1451,6 +1476,34 @@ export function openSmartReader(deps, ctx) {
   zoomEl.addEventListener('click', (e) => {
     if (e.target === zoomEl) closeZoom();
   });
+  // RD1: الكمبيوتر: الصفحة المكبّرة كانت فخًا بالماوس (لا سحب ولا عجلة ولا إغلاق إلا بالإصبع). السحب بالمؤشر، والعجلة
+  // تكبّر وتصغّر حول المؤشر، والنقر المزدوج يرجعك للقراءة (والتصغير للحجم الطبيعي كذلك)
+  let mouseDrag = null;
+  zoomEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || zoomEl.hidden) return;
+    mouseDrag = layerPoint(e.clientX, e.clientY);
+    zoomEl.setPointerCapture?.(e.pointerId);
+  });
+  zoomEl.addEventListener('pointermove', (e) => {
+    if (!mouseDrag || e.pointerType !== 'mouse' || zoom.scale <= 1) return;
+    const p = layerPoint(e.clientX, e.clientY);
+    zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: { x: zoom.t.x + p.x - mouseDrag.x, y: zoom.t.y + p.y - mouseDrag.y }, view: zoom.view });
+    mouseDrag = p;
+    paintZoom();
+  });
+  const endDrag = () => { mouseDrag = null; };
+  zoomEl.addEventListener('pointerup', endDrag);
+  zoomEl.addEventListener('pointercancel', endDrag);
+  zoomEl.addEventListener('wheel', (e) => {
+    if (zoomEl.hidden || !zoom.base) return;
+    e.preventDefault();
+    const at = layerPoint(e.clientX, e.clientY);
+    Object.assign(zoom, zoomAround({ base: zoom.base, scale: zoom.scale, t: zoom.t, from: at, to: at, ratio: Math.exp(-e.deltaY * 0.0015) }));
+    if (zoom.scale < 1.02) { closeZoom(); return; }
+    zoom.t = clampPan({ base: zoom.base, scale: zoom.scale, t: zoom.t, view: zoom.view });
+    paintZoom();
+  }, { passive: false });
+  zoomEl.addEventListener('dblclick', () => closeZoom());
 
   // ───────────────────────── فريم ─────────────────────────
 
@@ -1919,12 +1972,42 @@ export function openSmartReader(deps, ctx) {
     if (!t || !root.contains(t)) return;
     actions[t.dataset.act]?.(e, t);
   });
+  // RD3: «صفحة صفحة» على الكمبيوتر تقلّب بالمسافة وPageDown/PageUp وأسهم الأعلى والأسفل والعجلة، لا بالأسهم الجانبية وحدها.
+  // والكتابة في حقل (بحث، تعليق) لا تقلّب
+  const pagedStep = (e) => {
+    if (e.target?.closest?.('input, textarea, [contenteditable="true"]')) return 0;
+    if (e.key === 'ArrowLeft' || e.key === 'PageDown' || e.key === 'ArrowDown' || (e.key === ' ' && !e.shiftKey)) return 1;
+    if (e.key === 'ArrowRight' || e.key === 'PageUp' || e.key === 'ArrowUp' || (e.key === ' ' && e.shiftKey)) return -1;
+    return 0;
+  };
   const onKey = (e) => {
     if (e.key === 'Escape') handleBack();
-    if (e.key === 'ArrowLeft' && settings.mode === 'paged') jumpTo(Math.min(state.current + 1, state.slots.length - 1));
-    if (e.key === 'ArrowRight' && settings.mode === 'paged') jumpTo(Math.max(state.current - 1, 0));
+    if (settings.mode !== 'paged') return;
+    const step = pagedStep(e);
+    if (!step) return;
+    e.preventDefault();
+    jumpTo(Math.max(0, Math.min(state.current + step, state.slots.length - 1)));
   };
   document.addEventListener('keydown', onKey);
+  let wheelSum = 0;
+  let wheelQuietUntil = 0;
+  const onWheel = (e) => {
+    if (settings.mode !== 'paged' || e.ctrlKey) return;
+    e.preventDefault();
+    const now = performance.now();
+    if (now < wheelQuietUntil) return;
+    // لوحة اللمس ترسل دفعات صغيرة متتالية: صفحة لكل 60px متراكمة، ثم هدوء قصير فلا تقفز صفحات بلمسة واحدة
+    wheelSum += e.deltaY;
+    if (Math.abs(wheelSum) < 60) return;
+    const step = wheelSum > 0 ? 1 : -1;
+    wheelSum = 0;
+    wheelQuietUntil = now + 280;
+    jumpTo(Math.max(0, Math.min(state.current + step, state.slots.length - 1)));
+  };
+  scroll.addEventListener('wheel', onWheel, { passive: false });
+  // RD2: العمودي يستجيب للأسهم وPageDown والمسافة فور الفتح بلا نقرة داخله: التركيز على حاوية التمرير نفسها
+  scroll.tabIndex = -1;
+  try { scroll.focus({ preventScroll: true }); } catch { /* بيئة بلا تركيز */ }
   const onVisibility = () => {
     tickActive();
     if (document.visibilityState === 'hidden') { flushProgress(); followMotion.suspend(); }
@@ -1993,6 +2076,7 @@ export function openSmartReader(deps, ctx) {
     clearTimeout(scrollReportTimer);
     cancelAnimationFrame(scrollReportFrame);
     document.removeEventListener('keydown', onKey);
+    scroll.removeEventListener('wheel', onWheel);
     taps.reset();
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('touchmove', onZoomMove);

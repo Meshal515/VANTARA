@@ -352,6 +352,7 @@ class VSheet(private val host: FrameLayout) {
                 cornerRadii = if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
                 setStroke(dp(1), Tone.LINE)
             }
+            if (Glass.on) { val r = dp(22).toFloat(); foreground = GlassRim(ctx, if (side) floatArrayOf(r, r, r, r, r, r, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)) }
             setPadding(dp(18), dp(if (side) 16 else 8), dp(18), dp(14))
             isClickable = true
             // لمسة داخل الورقة لا تصل للمشغّل تحتها
@@ -559,3 +560,132 @@ class SeedMeter(context: Context, private val bars: Int, private val color: Int)
         fun color(s: Int) = when { s >= 20 -> Tone.OK; s >= 5 -> Tone.WARN; else -> Tone.BAD }
     }
 }
+
+/**
+ * Glass في المشغّل الأصلي (قرار المالك، 21 نوفمبر: «شكل زجاجي على أزرار المشغّل الأصلي»).
+ * الفيديو في سطح مستقل لا يقرؤه أي View، فلا ضباب ولا انكسار حقيقي فوقه: «مظهر زجاجي» كطبقة ويندوز
+ * (player.css: html.desktop-overlay) — صبغة شفافة، وحافة لامعة من أعلى، وظل ناعم. لا يلمس التشغيل ولا يكلّف إطارًا.
+ * يُفعَّل من إعداد «التأثير الزجاجي» في الويب (Launch.material)، والمظهر الحالي لا يتغير بكسلًا.
+ */
+object Glass {
+    var on = false
+        private set
+    fun use(material: String?) { on = material == "glass" }
+}
+
+/**
+ * كبسولة أو دائرة زجاجية بمواصفات زجاج الشريط السفلي في الويب (glass.css: .dock-cap) — طلب المالك: «نفس إعدادات النافيقيشن بار»:
+ * - صبغة بيضاء 4.5% (rgba(255,255,255,.045))، وتحتها ستارة خفيفة جدًا تعوّض غياب الضباب فوق الفيديو فتبقى الرموز مقروءة.
+ * - حافة لامعة مخروطية (conic-gradient من -45°): ضوء من أعلى اليسار 0.5، يخفت إلى 0.05، ويعود 0.3 في الزاوية المقابلة.
+ * - ظل الشريط (0 10px 30px rgba(0,0,0,.32)) بطبقات داخل الحدود.
+ * [ring]: حلقة 2dp زجاجية بتدرج الضوء نفسه لا بيضاء صلبة، على أزرار الوسط الثلاثة (طلب المالك: «كلهم زجاجيين»).
+ */
+class GlassDrawable(
+    ctx: Context,
+    private val ring: Boolean = false,
+    /** نصف قطر ثابت (أزرار الغرفة المستطيلة بحواف 12)، أو null = كبسولة/دائرة. */
+    private val radius: Float? = null,
+    /** 0 يحفظ مقاس الزر كما هو (الظل داخل الحدود يصغّر الشكل). */
+    shadowDp: Float = 5f,
+) : Drawable() {
+    private val shadow = ctx.dp(shadowDp).toFloat()
+    private val px = ctx.resources.displayMetrics.density
+    private val veil = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1A000000 }
+    private val tint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x0BFFFFFF }
+    private val spec = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px * 1.2f }
+    private val white = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px * 2f; color = Color.WHITE }
+    private val soft = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+    private val shape = RectF()
+    private val layer = RectF()
+
+    override fun onBoundsChange(bounds: android.graphics.Rect) {
+        shape.set(bounds.left + shadow, bounds.top + shadow * 0.5f, bounds.right - shadow, bounds.bottom - shadow * 1.5f)
+        // conic-gradient(from -45deg, .5 0°, .13 62°, .05 105°, .3 180°, .05 255°, .13 298°, .5 360°)
+        // CSS: 0° أعلى مع عقارب الساعة؛ SweepGradient: 0° يمين مع عقارب الساعة → دوران -135°
+        fun w(a: Float) = ((a * 255).toInt() shl 24) or 0x00FFFFFF
+        val sweep = android.graphics.SweepGradient(shape.centerX(), shape.centerY(),
+            intArrayOf(w(0.5f), w(0.13f), w(0.05f), w(0.3f), w(0.05f), w(0.13f), w(0.5f)),
+            floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f))
+        val turn = android.graphics.Matrix().apply { setRotate(-135f, shape.centerX(), shape.centerY()) }
+        sweep.setLocalMatrix(turn)
+        spec.shader = sweep
+        // حلقة زر التشغيل زجاجية (طلب المالك: «الخط الأبيض لو تخليه زجاجي»): نفس توزيع الضوء أقوى، لا أبيض صلب
+        if (ring) white.shader = android.graphics.SweepGradient(shape.centerX(), shape.centerY(),
+            intArrayOf(w(0.95f), w(0.5f), w(0.28f), w(0.75f), w(0.28f), w(0.5f), w(0.95f)),
+            floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f)).apply { setLocalMatrix(turn) }
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (shape.isEmpty) return
+        val r = radius ?: (shape.height() / 2f)
+        // ظل ناعم بطبقات (BlurMaskFilter لا يعمل مع تسريع العتاد قبل API 28)، أكثفه تحت الشكل كظل الشريط
+        if (shadow > 0f) for (i in 4 downTo 1) {
+            val g = shadow * i / 4f
+            layer.set(shape.left - g, shape.top - g * 0.3f, shape.right + g, shape.bottom + g * 1.7f)
+            soft.alpha = 26 - i * 5
+            canvas.drawRoundRect(layer, r + g, r + g, soft)
+        }
+        canvas.drawRoundRect(shape, r, r, veil)
+        canvas.drawRoundRect(shape, r, r, tint)
+        val h = spec.strokeWidth / 2f
+        layer.set(shape.left + h, shape.top + h, shape.right - h, shape.bottom - h)
+        canvas.drawRoundRect(layer, r - h, r - h, spec)
+        if (ring) {
+            val k = white.strokeWidth / 2f
+            layer.set(shape.left + k, shape.top + k, shape.right - k, shape.bottom - k)
+            canvas.drawRoundRect(layer, r - k, r - k, white)
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** زر وحيد في Glass: دائرة زجاجية تحت موجة الضغط. لا يفعل شيئًا في المظهر الحالي. */
+fun View.glassCircle(ring: Boolean = false) {
+    if (!Glass.on) return
+    background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), GlassDrawable(context, ring), null)
+}
+
+/**
+ * أزرار متجاورة في Glass = كبسولة واحدة (كمجموعات أزرار iOS، وملاحظة المالك على الجرس والبحث)، لا دوائر متلاصقة.
+ * الحشوة تحفظ مكان الظل وتبعد الأزرار عن حافة الكبسولة.
+ */
+fun LinearLayout.glassGroup() {
+    if (!Glass.on) return
+    background = GlassDrawable(context)
+    val s = dp(5); val e = dp(2)
+    setPadding(s + e, (s * 0.5f).toInt(), s + e, (s * 1.5f).toInt())
+}
+
+/**
+ * حافة زجاجية فقط فوق سطح معتم (الأوراق ولوحة الغرفة: قرار المالك 15 نوفمبر أن تبقى معتمة). تُركّب foreground.
+ * [radii] بترتيب GradientDrawable (8 قيم).
+ */
+class GlassRim(ctx: Context, private val radii: FloatArray) : Drawable() {
+    private val px = ctx.resources.displayMetrics.density
+    private val spec = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = px * 1.2f }
+    private val path = Path()
+    override fun onBoundsChange(bounds: android.graphics.Rect) {
+        val h = spec.strokeWidth / 2f
+        val r = RectF(bounds.left + h, bounds.top + h, bounds.right - h, bounds.bottom - h)
+        path.reset(); path.addRoundRect(r, radii, Path.Direction.CW)
+        fun w(a: Float) = ((a * 255).toInt() shl 24) or 0x00FFFFFF
+        spec.shader = android.graphics.SweepGradient(r.centerX(), r.centerY(),
+            intArrayOf(w(0.34f), w(0.1f), w(0.04f), w(0.2f), w(0.04f), w(0.1f), w(0.34f)),
+            floatArrayOf(0f, 62f / 360, 105f / 360, 180f / 360, 255f / 360, 298f / 360, 1f)).apply {
+            setLocalMatrix(android.graphics.Matrix().apply { setRotate(-135f, r.centerX(), r.centerY()) })
+        }
+    }
+    override fun draw(canvas: Canvas) { canvas.drawPath(path, spec) }
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** زر الغرفة في Glass بشكله نفسه (حواف [radiusDp] بلا ظل يغيّر مقاسه)، وإلا خلفيته الحالية. */
+fun View.glassOr(radiusDp: Float?, current: Drawable): Drawable =
+    if (Glass.on) RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), GlassDrawable(context, radius = radiusDp?.let { dp(it).toFloat() }, shadowDp = 0f), null) else current

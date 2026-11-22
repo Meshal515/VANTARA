@@ -1,6 +1,7 @@
 import { alignEpisode, identifiesEpisode, movieListing } from '../lib/episode-align.js';
 import { discoverSubtitles } from '../addons/subtitles.js';
 import { createDesktopTogetherPlayer } from './together-player.js';
+import { serverKey as serverKeyOf } from '../lib/together/lobby.js';
 import { publicUrl } from '../addons/manifest.js';
 import { parseRelease } from '../addons/release-info.js';
 
@@ -293,7 +294,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const s=sessionOf(session);
       return {title:s.playArgs?.title??'VANTARA',section:s.playArgs?.section??'anime',poster:s.playArgs?.poster??null,backdrop:s.playArgs?.backdrop??null,logo:s.playArgs?.logo??null,episode:s.context?.episode??s.episode,media:s.playArgs?.together?.session?.media??s.playArgs?.media??null,server:choices(s).find(c=>c.id===s.playArgs?.candidate)??null,candidate:s.playArgs?.candidate,position:s.progress.position??0,
         total:Number(s.playArgs?.total)||0,malId:s.playArgs?.malId??null,anilistId:s.playArgs?.section==='cinema'?null:s.playArgs?.animeId,canChangeEpisode:!s.together||s.playArgs?.together?.session?.room?.canControl===true,synced:!!s.together&&(s.playArgs?.together?.session?.room?.info?.mode??s.playArgs?.together?.session?.mode)==='sync',
-        sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0,
+        sources:[...s.candidates.values()].filter(c=>live(c)&&['READY','FAILED'].includes(s.routes.get(c.route)?.state)).map(c=>({id:c.id,key:s.routes.get(c.route)?.state==='READY'?serverKeyOf(c):null,label:[c.sourceName,c.server,c.quality?`${c.quality}p`:null,c.label].filter(Boolean).join(' · ')})),serverKey:serverKeyOf(s.candidates.get(s.playArgs?.candidate)),together:!!s.together,videoOffsetMs:s.together?.getVideoOffset()??0,
         // «رشّح الحلقة لصديق» (PlayerActivity.pickFriend): الأصدقاء كما مرّرتهم صفحة الأنمي، والسينما بلا ترشيح هنا
         canRecommend:s.playArgs?.section!=='cinema'&&!!s.playArgs?.animeId&&!!(s.playArgs?.presenceUserId??s.playArgs?.usageUserId),friends:(Array.isArray(s.playArgs?.friends)?s.playArgs.friends:[]).filter(f=>f?.userId).slice(0,200).map(f=>({userId:String(f.userId),displayName:String(f.displayName??'صديق')}))};
     },
@@ -384,7 +385,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
         s.bindTogether=(together,keepPlayingWhileRoomStarts=false)=>{
           if(!together?.session?.room)return false;
           let coordinator;
-          coordinator=createDesktopTogetherPlayer({together,keepPlayingWhileRoomStarts,initialVideoOffsetMs:previousOffset,bridge,session:s.id,episode:()=>s.context.episode??s.episode,source:()=>c.sourceName,
+          coordinator=createDesktopTogetherPlayer({together,keepPlayingWhileRoomStarts,initialVideoOffsetMs:previousOffset,bridge,session:s.id,episode:()=>s.context.episode??s.episode,source:()=>c.sourceName,server:()=>serverKeyOf(c),
             onLobby:lobby=>emit('desktopTogether',{session:s.id,...lobby,media:together.session.media}),message:message=>emit('desktopNotice',{session:s.id,message}),
             onDetach:()=>{
               if(s.together!==coordinator)return;

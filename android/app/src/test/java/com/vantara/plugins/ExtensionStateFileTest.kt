@@ -44,4 +44,24 @@ class ExtensionStateFileTest {
             dir.deleteRecursively()
         }
     }
+
+    /** ES1: الملف ونسخته تالفان: لا انهيار؛ يُنقلان جانبًا (لا يُحذفان) والقراءة التالية فارغة. */
+    @Test fun bothCopiesCorruptAreSetAsideNotDeleted() {
+        val dir = Files.createTempDirectory("extension-store-corrupt").toFile()
+        val file = File(dir, "state.json")
+        try {
+            file.writeText("bad-main")
+            File(file.path + ".bak").writeText("bad-backup")
+            val storage = ExtensionStateFile(file)
+            val decode: (String) -> String = { if (it.startsWith("bad")) throw IllegalStateException("parse failed") else it }
+            val failed = runCatching { storage.read("empty", decode) }.exceptionOrNull()
+            assertTrue(failed is IllegalStateException)
+            val kept = storage.quarantine(42L)
+            assertEquals("bad-main", kept?.readText())
+            assertEquals("bad-backup", File(file.path + ".bak.corrupt-42").readText())
+            assertEquals("empty", storage.read("empty", decode))
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

@@ -71,3 +71,15 @@ it('الملصق يضع ملصق العمل، والشريط العريض كري
   expect([...m.querySelectorAll('.cn-look-credits dt')].map((d) => d.textContent)).toEqual(['السنة', 'المدة']);
   expect(m.querySelector('.cn-seasons')).toBeNull();
 });
+
+// بلاغ المالك (20 نوفمبر): صورة مكسورة أعلى صفحة فيلم محمّل حتى مع الإنترنت
+import { readFileSync as readCinemaSource } from 'node:fs';
+it('the remembered hero never keeps a temporary blob url, and a dead one falls back and is forgotten', () => {
+  const src = readCinemaSource(new URL('./cinema.js', import.meta.url), 'utf8');
+  const pick = src.slice(src.indexOf('const heroPick = {'), src.indexOf('};', src.indexOf('const heroPick = {')));
+  expect(pick).toContain('return isDurableArtUrl(src) ? src : null;');
+  expect(pick).toContain('if (!id || !isDurableArtUrl(src)) return;');
+  expect(src).toContain("if (remembered && !unified) backdrop.addEventListener('error', () => heroPick.drop(m.id), { once: true });");
+  const anime = readCinemaSource(new URL('./anime.js', import.meta.url), 'utf8');
+  expect(anime).toContain('if (src && !isDurableArtUrl(src)) return;');
+});

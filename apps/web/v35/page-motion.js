@@ -257,15 +257,36 @@ export function veil(page, { doc = globalThis.document } = {}) {
  * ويخرج مع المغادرة. كان يظهر دفعة واحدة فوق صفحة العمل وهي ما زالت تغادر (#323، ملاحظة المالك)،
  * وقبلها كان يُخفى ~470ms ثم يقفز. خاصية scale لا transform: translate الشريط محجوز لإزاحة لوحة المفاتيح.
  */
+/**
+ * Glass (خيار المظهر): opacity على الشريط تعزل زجاجه عمّا خلفه فيصير مسطحًا طوال الانتقال (مُقاس في Chromium 153،
+ * docs/audits/GLASS_UI_PLACEMENT.md: F1 وR1). فالتلاشي نفسه بمدته ومنحناه يُطبَّق على طبقات الشريط كلٌّ وحدها:
+ * زجاج كل كبسولة وحافتها وصبغتها وظلها، والعدسة، والأيقونات. scale يبقى على الشريط لأنه لا يعزل الزجاج.
+ */
+export function glassDockLayers(nav, from, to, timing) {
+  if (nav.ownerDocument?.documentElement?.dataset?.material !== 'glass') return null;
+  const out = [];
+  for (const cap of nav.querySelectorAll('.dock-cap')) {
+    const cs = nav.ownerDocument.defaultView?.getComputedStyle?.(cap);
+    const on = { backgroundColor: cs?.backgroundColor ?? 'transparent', boxShadow: cs?.boxShadow ?? 'none' }, off = { backgroundColor: 'transparent', boxShadow: 'none' };
+    out.push(cap.animate([from ? on : off, to ? on : off], timing));
+    for (const pseudoElement of ['::before', '::after']) out.push(cap.animate([{ opacity: from }, { opacity: to }], { ...timing, pseudoElement }));
+  }
+  for (const el of nav.querySelectorAll('.g-lens, .g-glyphs')) out.push(el.animate([{ opacity: from }, { opacity: to }], timing));
+  return out;
+}
 export function dockIn(nav, { doc = globalThis.document } = {}) {
   if (!nav?.animate || motionReduced(doc)) return;
   const restore = save(nav, ['pointerEvents']);
-  track(nav, [nav.animate([{ opacity: 0, scale: String(DEPTH) }, { opacity: 1, scale: '1' }], { duration: MS, easing: EASE_IN, fill: 'backwards' })], restore);
+  const timing = { duration: MS, easing: EASE_IN, fill: 'backwards' };
+  const glass = glassDockLayers(nav, 0, 1, timing);
+  track(nav, glass ? [nav.animate([{ scale: String(DEPTH) }, { scale: '1' }], timing), ...glass] : [nav.animate([{ opacity: 0, scale: String(DEPTH) }, { opacity: 1, scale: '1' }], timing)], restore);
 }
 export function dockOut(nav, { doc = globalThis.document, onComplete = () => {} } = {}) {
   if (!nav?.animate || motionReduced(doc)) return onComplete();
-  nav.inert = true; // لا لمسة على شريط يغادر
-  track(nav, [nav.animate([{ opacity: 1, scale: '1' }, { opacity: 0, scale: String(DEPTH) }], { duration: MS, easing: EASE, fill: 'forwards' })], () => {
+  nav.inert = true; // لا لمسة على شريط يغادر (والعدسة تثبت فورًا)
+  const timing = { duration: MS, easing: EASE, fill: 'forwards' };
+  const glass = glassDockLayers(nav, 1, 0, timing);
+  track(nav, glass ? [nav.animate([{ scale: '1' }, { scale: String(DEPTH) }], timing), ...glass] : [nav.animate([{ opacity: 1, scale: '1' }, { opacity: 0, scale: String(DEPTH) }], timing)], () => {
     nav.inert = false;
     onComplete();
   });

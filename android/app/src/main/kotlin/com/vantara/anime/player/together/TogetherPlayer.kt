@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.vantara.anime.player.Glyph
 import com.vantara.anime.player.Tone
 import com.vantara.anime.player.dp
+import com.vantara.anime.player.glassOr
 import com.vantara.anime.player.label
 import com.vantara.anime.player.rounded
 import com.vantara.anime.player.swallowTouches
@@ -103,6 +104,12 @@ class TogetherPlayer(
         fun hasEpisodes(): Boolean = false
         /** «OKRU · 1080p» للسيرفر الحالي. */
         fun serverLabel(): String? = sourceName()
+        /** هوية السيرفر الحالي الثابتة بين الأجهزة («معرّف المصدر|رمز السيرفر»، بصيغة الويب وويندوز)، أو null. */
+        fun serverKey(): String? = null
+        /** السيرفرات الجاهزة عندك لهذه الحلقة: (الهوية، معرّف المرشح، الاسم). */
+        fun readyServers(): List<Triple<String, String, String>> = emptyList()
+        /** شغّل هذا المرشح من الموضع نفسه («نعم» على اقتراح سيرفر المضيف). */
+        fun useServer(candidateId: String) {}
         /** تقدّم تجهيز فيديوك الحقيقي 0..1 (مراحل المصدر والتورنت والمشغّل) لامتلاء الشعار ومراحل الغرفة. */
         fun loadProgress(): Float = 0f
         /** المضيف نقل الغرفة لعمل آخر (موسم ثانٍ): يُغلق المشغّل وتفتح الواجهة غرفة الموسم الجديد للاختيار. */
@@ -123,6 +130,8 @@ class TogetherPlayer(
     private var lobbyBar: LinearLayout? = null
     private var lobbyConn: TextView? = null
     private var lobbyMore: View? = null
+    /** إشعار اقتراح سيرفر المضيف (ثابت حتى يرد العضو). */
+    private var lobbySuggest: View? = null
     /** بطاقة «البدء» الكبيرة فوق الشريط (المضيف وحده): صورة الحلقة ودائرة تشغيل. */
     private var lobbyStart: FrameLayout? = null
     private var lobbyCount: TextView? = null
@@ -153,6 +162,16 @@ class TogetherPlayer(
     private fun counting(t: Timeline? = client.timeline) = synced && t != null && t.started && t.at - serverNow() > 400
     private var strip: LinearLayout? = null
     private var panelOpen = false
+    /** لوحة الغرفة تُبنى من جديد فقط حين يتغير ما فيها؛ الوقت والفرق يتحدثان في مكانهما، فلا تضيع لمسة (TG2). */
+    private var panelSig: String? = null
+    private val panelLive = HashMap<String, Pair<TextView, TextView>>()
+    /** التطبيق في الخلفية: الغرفة لا تشغّل فيديوك حتى ترجع (TG15). */
+    private var foreground = true
+    /** «اشتغل الفيديو عند X» مرة لكل شخص في كل حلقة، لا مع كل استئناف (WT1). */
+    private val announcedPlaying = HashSet<String>()
+    /** «طلع» بعد مهلة سماح: انقطاع لحظي ثم رجوع لا يُعلن (WT8). */
+    private val pendingLeft = HashMap<String, Runnable>()
+    private val leftGraceMs = 8_000L
     private var quiet = false
     private var connected = false
     private val images = TogetherImages(context, http)
@@ -184,7 +203,7 @@ class TogetherPlayer(
         }
         hooks.message(if (v == 0L) "بدون ديلاي" else "ديلاي فيديوك ${offsetText(v)}")
         paintLobby()
-        if (panelOpen) hooks.refreshPanel()
+        if (panelOpen) refreshPanelIfChanged()
         report(stateNow(), force = true)
     }
 
@@ -208,12 +227,26 @@ class TogetherPlayer(
 
     fun destroy() {
         main.removeCallbacksAndMessages(null)
+        pendingLeft.clear()
         report("paused", force = true)
         client.close()
         mute(false)
         images.close()
         lobby?.let { (it.parent as? ViewGroup)?.removeView(it) }
     }
+
+    /** «اطلع من الغرفة»: تخرج من الغرفة ويبقى الفيديو عندك من نفس اللحظة (قرار المالك، 19 نوفمبر). */
+    fun leave() {
+        destroy()
+        lobby = null
+        strip?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        strip = null
+        hooks.player.setPlaybackSpeed(1f)
+    }
+
+    /** الخلفية توقف فيديوك وحدك، والغرفة لا تعيد تشغيله حتى ترجع (TG15). */
+    fun onBackground() { foreground = false }
+    fun onForeground() { foreground = true; report(stateNow(), force = true) }
 
     /** الشريط العلوي: 3 أفاتارات ثم «+N». */
     fun mountStrip(into: LinearLayout) {
@@ -223,7 +256,7 @@ class TogetherPlayer(
             gravity = Gravity.CENTER_VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(context.dp(9), 0, context.dp(5), 0)
-            background = rounded(0x17FFFFFF, context.dp(18).toFloat(), context.dp(1), 0x1FFFFFFF)
+            background = glassOr(null, rounded(0x17FFFFFF, context.dp(18).toFloat(), context.dp(1), 0x1FFFFFFF))
             contentDescription = "الغرفة"
             setOnClickListener { openPanel() }
         }
@@ -319,6 +352,7 @@ class TogetherPlayer(
     // ───────────── أحداث الغرفة ─────────────
 
     override fun onWelcome() {
+        lastMode = client.mode
         // A fast local source can become ready before the WebSocket welcome.
         // Reconcile that first frame with the room instead of playing behind the lobby.
         val t = client.timeline
@@ -353,22 +387,46 @@ class TogetherPlayer(
         paintLobby()
     }
 
-    override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) hooks.refreshPanel() }
+    override fun onRoster(members: List<Member>) { paintStrip(); paintLobby(); if (panelOpen) refreshPanelIfChanged() }
+    /** «room» يصل مع كل تغيير في الغرفة (المضيف، التحكم)؛ الوضع يُعلن ويُطبّق حين يتغير فعلًا فقط. */
+    private var lastMode: String = launch.mode
     override fun onMode(mode: String) {
+        if (mode == lastMode) return
+        lastMode = mode
         hooks.message(if (mode == "sync") "صارت المشاهدة متزامنة" else "صارت المشاهدة منفصلة: كل واحد بوقته")
-        if (mode != "sync") { if (!awaitingPick) hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) } }
+        if (mode != "sync") { if (!awaitingPick) hideLobby(); withApplying { hooks.player.setPlaybackSpeed(1f) }; return }
+        // TG10/TG11: التحويل لمتزامنة يعيد خط الغرفة القديم (حالته وحلقته)، فيشتغل الفيديو والمضيف موقِف أو يرجع الكل
+        // لحلقة قديمة. المضيف يعلن حلقته وحالته لحظة التحويل، فيتبعه الجميع.
+        if (client.isHost && ready && connected) {
+            if (episodeOf(client.timeline?.mediaKey) != hooks.episode()) client.command("load", 0.0, mediaKey(), "الحلقة ${hooks.episode()}")
+            else {
+                client.command(if (hooks.player.playWhenReady) "play" else "pause", roomPos(), at = serverNow())
+                client.timeline?.let { holdIntent(it) }
+            }
+        }
     }
     override fun onStatus(userId: String, name: String, state: String, source: String?) {
         if (userId == client.me) return
         when (state) {
-            "playing" -> hooks.message("اشتغل الفيديو عند $name")
+            "playing" -> if (announcedPlaying.add("$userId|${client.timeline?.mediaKey}")) hooks.message("اشتغل الفيديو عند $name")
             "failed" -> hooks.message("تعذّر تشغيل السيرفر عند $name${source?.let { " ($it)" } ?: ""}")
             "ready" -> if (client.timeline?.started == false) hooks.message("$name جاهز")
         }
     }
     override fun onConnection(live: Boolean) { connected = live; paintLobby() }
-    override fun onJoined(name: String) = hooks.message("$name دخل")
-    override fun onLeft(name: String, kicked: Boolean) = hooks.message(if (kicked) "المضيف أخرج $name" else "$name طلع")
+    override fun onJoined(name: String) {
+        // رجع خلال مهلة السماح (تبدّل شبكة مثلًا): لا «طلع» ولا «دخل»
+        val pending = pendingLeft.remove(name)
+        if (pending != null) { main.removeCallbacks(pending); return }
+        hooks.message("$name دخل")
+    }
+    override fun onLeft(name: String, kicked: Boolean) {
+        if (kicked) { hooks.message("المضيف أخرج $name"); return }
+        pendingLeft.remove(name)?.let { main.removeCallbacks(it) }
+        val announce = Runnable { pendingLeft.remove(name); hooks.message("$name طلع") }
+        pendingLeft[name] = announce
+        main.postDelayed(announce, leftGraceMs)
+    }
     /**
      * «البدء»: الحالة تُقرأ لحظة اللمس لا لحظة رسم الزر، وكل نتيجة لها أثر: عدّ 3-2-1 عند الجميع، أو رسالة بالسبب.
      */
@@ -438,7 +496,7 @@ class TogetherPlayer(
         // أمر المتحكّم نفسه (إيقاف/تشغيل/تقديم) نُفّذ عنده فورًا: حتى يصل صداه (seq أكبر) لا يُرجعه المؤقت للحالة
         // القديمة. كان الإيقاف من الجوال يعود تشغيلًا لحظة قبل وصول البث (بلاغ المالك 14 نوفمبر).
         val pendingOwn = t != null && intentSeq == t.seq && SystemClock.elapsedRealtime() < intentUntil
-        if (t != null && !pendingOwn && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
+        if (t != null && foreground && !pendingOwn && synced && t.started && ready && client.clock.ready && at >= t.at && episodeOf(t.mediaKey) == hooks.episode()) {
             val pos = p.currentPosition.toDouble()
             val d = ctl.step(
                 t, pos, at,
@@ -459,7 +517,7 @@ class TogetherPlayer(
             seekIssuedAt = 0
         }
         if (SystemClock.elapsedRealtime() - lastReportAt >= if (synced) 2000 else 5000) report(stateNow())
-        if (panelOpen) hooks.refreshPanel()
+        if (panelOpen) refreshPanelIfChanged()
     }
 
     private fun jumpToRoom(t: Timeline, force: Boolean = false) {
@@ -477,7 +535,7 @@ class TogetherPlayer(
         val target = targetAt(t, at, offsetMs.toDouble())
         withApplying {
             if (abs(hooks.player.currentPosition - target) > if (force) 50.0 else SyncRules.HOST_CMD_SEEK_MS) { seekIssuedAt = SystemClock.elapsedRealtime(); hooks.player.seekTo(target.roundToLong()) }
-            hooks.player.playWhenReady = t.playing
+            hooks.player.playWhenReady = t.playing && foreground
         }
     }
 
@@ -509,7 +567,57 @@ class TogetherPlayer(
             durationMs = hooks.player.duration.takeIf { it > 0 },
             driftMs = drift,
             driftP95 = p95,
+            server = if (failedSource != null) null else hooks.serverKey(),
         )
+    }
+
+    /** سيرفرات المضيف التي رفضها العضو («لا»): لا يُعاد اقتراحها في هذه الغرفة. */
+    private val declinedServers = mutableSetOf<String>()
+
+    /**
+     * اقتراح سيرفر المضيف في اللوبي (قرار المالك، 19 نوفمبر): متوفر عندك جاهزًا وأنت على غيره ⇒ إشعار ثابت «نعم/لا» لا
+     * يختفي حتى ترد. «نعم» يجعله سيرفرك، و«لا» يبقيك على اختيارك. لا يُفرض. نفس قاعدة الويب (hostServerSuggestion).
+     */
+    private fun hostSuggestion(): Triple<String, String, String>? {
+        if (client.isHost || awaitingPick) return null
+        val host = client.roster.firstOrNull { it.host } ?: return null
+        val key = host.server ?: return null
+        if (key == hooks.serverKey() || key in declinedServers) return null
+        val match = hooks.readyServers().firstOrNull { it.first == key } ?: return null
+        return Triple(key, match.second, host.source ?: match.third)
+    }
+
+    private fun paintSuggestion(root: FrameLayout, portrait: Boolean) {
+        lobbySuggest?.let { root.removeView(it) }
+        lobbySuggest = null
+        val pick = hostSuggestion() ?: return
+        val card = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(context.dp(16), context.dp(14), context.dp(16), context.dp(14))
+            background = rounded(0xFF121218.toInt(), context.dp(14).toFloat(), context.dp(1), 0x40FFFFFF)
+            elevation = context.dp(8).toFloat()
+        }
+        card.addView(context.label("المضيف يشاهد على ${pick.third}، وهو متوفر عندك. تبي نفس السيرفر؟", 14f, Color.WHITE, bold = false))
+        val acts = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val yes = context.label("نعم", 14f, com.vantara.anime.player.Tone.ON_ACCENT, bold = true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(accent, context.dp(12).toFloat())
+            contentDescription = "نعم، استخدم سيرفر المضيف"
+            setOnClickListener { declinedServers.add(pick.first); lobbySig = ""; hooks.useServer(pick.second); paintLobby() }
+        }
+        val no = context.label("لا", 14f, Color.WHITE, bold = true).apply {
+            gravity = Gravity.CENTER
+            background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+            contentDescription = "لا، أبقَ على سيرفري"
+            setOnClickListener { declinedServers.add(pick.first); lobbySig = ""; paintLobby() }
+        }
+        acts.addView(yes, LinearLayout.LayoutParams(0, context.dp(44), 1f).apply { marginEnd = context.dp(8) })
+        acts.addView(no, LinearLayout.LayoutParams(0, context.dp(44), 1f))
+        card.addView(acts, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(12) })
+        lobbySuggest = card
+        root.addView(card, FrameLayout.LayoutParams(if (portrait) ViewGroup.LayoutParams.MATCH_PARENT else context.dp(400), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START).apply {
+            marginStart = context.dp(16); marginEnd = context.dp(16); bottomMargin = context.dp(if (portrait) 168 else 84)
+        })
     }
 
     private inline fun withApplying(block: () -> Unit) {
@@ -623,6 +731,8 @@ class TogetherPlayer(
     private fun openPanel() {
         panelOpen = true
         hooks.openPanel(if (synced) "مشاهدة معًا · متزامنة" else "مشاهدة معًا · منفصلة") { body ->
+            panelLive.clear()
+            panelSig = panelSignature()
             val now = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
             for (m in client.roster.sortedBy { it.joinedAt }) {
                 val row = LinearLayout(context).apply {
@@ -643,14 +753,12 @@ class TogetherPlayer(
                 names.addView(context.label(listOfNotNull(stateLabel(m.state), m.source).joinToString(" · "), 12f, stateTextColor(m.state)))
                 row.addView(names, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 val where = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-                val pos = if (m.state == "playing" && m.pos != null && m.at != null) m.pos + max(0.0, now - m.at) else m.pos
-                where.addView(context.label(clock(pos), 14f, Tone.TEXT, bold = true))
-                val tags = listOfNotNull(
-                    if (m.host) "المضيف" else null,
-                    if (m.sameVersion == false) "نسخة مختلفة" else null,
-                    if (synced && !m.host && m.driftMs != null) "فرق ${abs(m.driftMs)}ms" else null,
-                )
-                if (tags.isNotEmpty()) where.addView(context.label(tags.joinToString(" · "), 11f, Tone.TEXT_3))
+                val posLabel = context.label(clock(memberPos(m, now)), 14f, Tone.TEXT, bold = true)
+                where.addView(posLabel)
+                val tagText = memberTags(m)
+                val tagsLabel = context.label(tagText, 11f, Tone.TEXT_3).apply { visibility = if (tagText.isEmpty()) View.GONE else View.VISIBLE }
+                where.addView(tagsLabel)
+                panelLive[m.userId] = posLabel to tagsLabel
                 row.addView(where)
                 val tools = client.isHost && m.userId != client.me
                 body.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = context.dp(if (tools) 2 else 6) })
@@ -672,11 +780,43 @@ class TogetherPlayer(
             if (client.isHost) {
                 body.addView(button(if (synced) "حوّلها منفصلة" else "حوّلها متزامنة", primary = false) { client.setMode(if (synced) "free" else "sync") })
             }
-            body.addView(button("اطلع من الغرفة", primary = false) { hooks.leaveRoom() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
+            body.addView(button("اطلع من الغرفة", primary = false) { client.bye(); hooks.leaveRoom() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(8) })
         }
     }
 
-    fun panelClosed() { panelOpen = false; confirmKick = null }
+    fun panelClosed() { panelOpen = false; confirmKick = null; panelSig = null; panelLive.clear() }
+
+    private fun memberPos(m: Member, now: Double): Double? =
+        if (m.state == "playing" && m.pos != null && m.at != null) m.pos + max(0.0, now - m.at) else m.pos
+
+    private fun memberTags(m: Member): String = listOfNotNull(
+        if (m.host) "المضيف" else null,
+        if (m.sameVersion == false) "نسخة مختلفة" else null,
+        if (synced && !m.host && m.driftMs != null) "فرق ${abs(m.driftMs)}ms" else null,
+    ).joinToString(" · ")
+
+    /** ما يُرسم في اللوحة عدا الوقت والفرق (يتحدثان في مكانهما). تغيّره وحده يعيد بناء اللوحة. */
+    private fun panelSignature(): String = buildString {
+        append(synced).append('|').append(client.isHost).append('|').append(confirmKick).append('|').append(offsetMs)
+        for (m in client.roster.sortedBy { it.joinedAt }) {
+            append('|').append(m.userId).append(',').append(m.name).append(',').append(m.state).append(',').append(m.source)
+                .append(',').append(m.host).append(',').append(m.sameVersion).append(',').append(m.avatarKey)
+        }
+        for (p in pending()) append("|p:").append(p.userId)
+    }
+
+    private fun refreshPanelIfChanged() {
+        if (!panelOpen) return
+        if (panelSignature() != panelSig) { hooks.refreshPanel(); return }
+        val now = client.clock.serverNow(SystemClock.elapsedRealtime().toDouble())
+        for (m in client.roster) {
+            val labels = panelLive[m.userId] ?: continue
+            labels.first.text = clock(memberPos(m, now))
+            val text = memberTags(m)
+            if (labels.second.text.toString() != text) labels.second.text = text
+            labels.second.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
 
     private fun hostTools(m: Member): View = LinearLayout(context).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -697,26 +837,14 @@ class TogetherPlayer(
             if (confirmKick != m.userId) {
                 val id = m.userId
                 confirmKick = id
-                main.postDelayed({ if (confirmKick == id) { confirmKick = null; if (panelOpen) hooks.refreshPanel() } }, 4000)
+                main.postDelayed({ if (confirmKick == id) { confirmKick = null; refreshPanelIfChanged() } }, 4000)
             } else { confirmKick = null; client.kick(m.userId) }
-            if (panelOpen) hooks.refreshPanel()
+            refreshPanelIfChanged()
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = context.dp(8) })
     }
 
-    /**
-     * الغرفة انتقلت لحلقة أخرى: لا سيرفر يُختار تلقائيًا ولا تشغيل (قرار المالك، 15 نوفمبر). الكل يرجع لشاشة الغرفة
-     * و«اختر سيرفر» كما عند دخولها، والسيرفرات تتجهّز في الخلفية للورقة.
-     */
-    fun awaitPick() {
-        awaitingPick = true
-        ready = false
-        failedSource = null
-        progressShown = 0f
-        mute(false)
-        showLobby()
-        report("preparing", force = true)
-        paintLobby()
-    }
+    // «اختر سيرفر» عند كل حلقة (قرار 15 نوفمبر) أُلغي بقرار المالك في 19 نوفمبر: الحلقة التالية من العمل نفسه تُجهَّز
+    // مسبقًا لكل عضو بسيرفره وجودته وتكمل (PlayerActivity.switchEpisode). تغيير الموسم وحده يعيد اللوبي (handOff).
 
     /**
      * المضيف نقل الغرفة لموسم آخر: الواجهة تجهّز مشغّل الموسم الجديد تحت هذا المشغّل، وهذا يبقى ظاهرًا بشاشة الغرفة
@@ -861,9 +989,9 @@ class TogetherPlayer(
             top.addView(ImageView(context).apply {
                 setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.CLOSE, Color.WHITE))
                 setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x61000000) }
+                background = glassOr(null, GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x61000000) })
                 contentDescription = "اطلع من الغرفة"
-                setOnClickListener { hooks.leaveRoom() }
+                setOnClickListener { client.bye(); hooks.leaveRoom() }
             }, LinearLayout.LayoutParams(context.dp(40), context.dp(40)))
             root.addView(top, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP))
 
@@ -934,6 +1062,7 @@ class TogetherPlayer(
                 visibility = View.GONE
                 setPadding(context.dp(6), context.dp(6), context.dp(6), context.dp(6))
                 background = rounded(0xFF121218.toInt(), context.dp(14).toFloat(), context.dp(1), 0x1AFFFFFF)
+                if (com.vantara.anime.player.Glass.on) foreground = com.vantara.anime.player.GlassRim(context, FloatArray(8) { context.dp(14).toFloat() })
                 elevation = context.dp(8).toFloat()
             }
             lobbyMore = more
@@ -1018,6 +1147,7 @@ class TogetherPlayer(
         lobbyBar = null
         lobbyConn = null
         lobbyMore = null
+        lobbySuggest = null
         lobbyStart = null
         lobbyCount = null
         lobbySig = ""
@@ -1075,9 +1205,11 @@ class TogetherPlayer(
         val portrait = (root?.height?.takeIf { it > 0 } ?: context.resources.displayMetrics.heightPixels) >
             (root?.width?.takeIf { it > 0 } ?: context.resources.displayMetrics.widthPixels)
         val sig = listOf(connected, ready, failedSource, awaitingPick, client.isHost, hooks.serverLabel(), portrait,
-            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}" }, pending().joinToString { it.userId }, headline().first).joinToString("|")
+            client.roster.joinToString { "${it.userId}:${it.state}:${it.host}:${it.name}:${it.mediaKey}:${it.server}" }, pending().joinToString { it.userId }, headline().first,
+            hostSuggestion()?.first).joinToString("|")
         if (sig == lobbySig && bar.childCount > 0) return
         lobbySig = sig
+        root?.let { paintSuggestion(it, portrait) }
         bar.removeAllViews()
         bar.orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
         val details = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -1126,7 +1258,7 @@ class TogetherPlayer(
             setImageDrawable(com.vantara.anime.player.Glyph(com.vantara.anime.player.Glyph.Kind.MORE, Color.WHITE))
             rotation = 90f
             setPadding(context.dp(11), context.dp(11), context.dp(11), context.dp(11))
-            background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+            background = glassOr(12f, rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF))
             contentDescription = "المزيد"
             setOnClickListener {
                 val m = lobbyMore as? FrameLayout ?: return@setOnClickListener
@@ -1141,7 +1273,7 @@ class TogetherPlayer(
                 gravity = Gravity.CENTER
                 maxLines = 1
                 setPadding(context.dp(16), 0, context.dp(16), 0)
-                background = rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+                background = glassOr(12f, rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF))
                 contentDescription = "الحلقات"
                 setOnClickListener { hooks.openEpisodes() }
             }
@@ -1154,7 +1286,7 @@ class TogetherPlayer(
             setPadding(context.dp(18), 0, context.dp(18), 0)
             // الخطوة الحالية بالأزرق وحدها: قبل الاختيار هذا هو الزر الأزرق الوحيد في الشاشة
             if (!picking) textDirection = View.TEXT_DIRECTION_LTR
-            background = if (picking) rounded(accent, context.dp(12).toFloat()) else rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF)
+            background = if (picking) rounded(accent, context.dp(12).toFloat()) else glassOr(12f, rounded(0x8C0A0C14.toInt(), context.dp(12).toFloat(), context.dp(1), 0x29FFFFFF))
             contentDescription = "اختر السيرفر"
             setOnClickListener { hooks.openServers() }
         }
@@ -1182,7 +1314,7 @@ class TogetherPlayer(
     private fun paintStartCard(card: FrameLayout, canStart: Boolean) {
         card.removeAllViews()
         val radius = context.dp(10).toFloat()
-        card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF)
+        card.background = if (canStart) rounded(0xFF15171F.toInt(), radius) else card.glassOr(10f, rounded(0x8C0A0C14.toInt(), radius, context.dp(1), 0x29FFFFFF))
         card.clipToOutline = true
         card.contentDescription = "ابدأ للجميع"
         launch.episodeImage?.let { url ->

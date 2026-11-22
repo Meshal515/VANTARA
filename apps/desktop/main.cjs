@@ -3,14 +3,18 @@ const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
 const { assetPath, isAppFrame, configuredAddonUrl } = require('./security.cjs');
-const { firstPartyRequest } = require('./first-party.cjs');
+const { firstPartyRequest, serverOrigin, ORIGIN: FIRST_PARTY_ORIGIN } = require('./first-party.cjs');
 const { migratePortableProfile } = require('./profile.cjs');
 const { createVideoHost } = require('./video-host.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
 const channelInfo = require('./channel.cjs').readChannel(__dirname);
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+  // صور صفحات وأغلفة إضافات المانجا من المحرك المحلي (suwayomi-engine.cjs: مساران مسموحان فقط)
+  { scheme: 'vantara-engine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+]);
 // Debug: اسم ومعرّف مستقلان ⇒ userData وقفل نسخة واحدة ومجلد تثبيت منفصلة عن Stable.
 app.setName(channelInfo.productName);
 if (process.platform === 'win32') app.setAppUserModelId(channelInfo.appId);
@@ -24,6 +28,8 @@ const profileReady=portable?migratePortableProfile(previousProfile,portableProfi
   .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
 let window;
 let services;
+let mangaRuntime=null;
+let mangaEngine=null;
 let videoHost;
 let overlay=null;
 let overlayWindow=null;
@@ -67,6 +73,7 @@ const videoReportOption=process.argv.find(x=>x.startsWith('--native-video-smoke-
 const torrentReportOption=process.argv.find(x=>x.startsWith('--native-torrent-smoke-report='));
 const updateReportOption=process.argv.find(x=>x.startsWith('--update-smoke-report='));
 const sourceReportOption=process.argv.find(x=>x.startsWith('--source-smoke-report='));
+const mangaEngineReportOption=process.argv.find(x=>x.startsWith('--manga-engine-smoke-report='));
 app.on('second-instance', () => { if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus(); } });
 
 function publish(event) {
@@ -145,6 +152,11 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   const { createSourceBrowser, chromeUserAgent } = require('./source-browser.cjs');
   // بلا جلسات Electron (بيئة اختبار): لا متصفح مخفي، والطلبات كما كانت
   const sourceBrowser = session?.fromPartition ? createSourceBrowser({ BrowserWindow, session, net, userAgent: chromeUserAgent(process.versions.chrome), isChallenge: challengePage }) : null;
+  // إضافات Mihon (Suwayomi) تحل Cloudflare بالمتصفح نفسه عبر جسر محلي بواجهة FlareSolverr (cf-bridge.cjs)
+  const cloudflareBridge = sourceBrowser ? require('./cf-bridge.cjs').createCloudflareBridge({
+    solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent,
+    onChallenge: host => publish({ type: 'source-verification/required', host }),
+  }) : null;
   if(process.platform==='win32')videoHost=createVideoHost({
     getWindow:()=>window,
     executable:process.env.VANTARA_VIDEO_HOST_BINARY||path.join(native,'vantara-video-host.exe'),
@@ -170,6 +182,42 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     sourceUserAgent: sourceBrowser?.userAgent,
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand'], ['preview-frame', 'previewFrame']]) register(name, args => services[method](args));
+  // صفحة التحقق الظاهرة (طلب صريح من المستخدم بزر «تحقق»): مضيف عام فقط، ونجاحها يمرر طلباته بجلسة المتصفح
+  register('verify-source', async ({ host } = {}) => {
+    const name = String(host ?? '').toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(name) || name.length > 253) return { host: name, state: 'failed', reason: 'invalid_endpoint' };
+    if (!sourceBrowser) return { host: name, state: 'failed', reason: 'webview_unavailable' };
+    const result = await sourceBrowser.verify({ url: `https://${name}/`, parent: window });
+    if (result.state === 'verified') services.trustBrowserHost(name);
+    return result;
+  });
+  // إضافات Mihon في ويندوز: محرك Suwayomi محلي (127.0.0.1، مصادقة بسر عشوائي)، والثقة والمستودعات عندنا
+  {
+    const { createSuwayomiRuntime } = require('./suwayomi-runtime.cjs');
+    const { createSuwayomiEngine } = require('./suwayomi-engine.cjs');
+    const mangaRoot = path.join(app.getPath('userData'), 'suwayomi');
+    const loopback = url => /^http:\/\/127\.0\.0\.1:\d+\//.test(String(url));
+    // الشبكة الخارجية عبر Chromium (إعدادات الوكيل في النظام)؛ المحرك المحلي عبر fetch الخاص بـNode
+    const fetchFor = (url, init) => loopback(url) ? globalThis.fetch(url, init) : net.fetch(url, init);
+    const fetchBytes = async (url, limit) => {
+      if (!/^https:\/\//i.test(String(url))) throw new Error('رابط المستودع يجب أن يكون HTTPS');
+      const response = await net.fetch(url, { redirect: 'follow' });
+      if (!response.ok) throw new Error(`تعذر الوصول (HTTP ${response.status})`);
+      const declared = Number(response.headers.get('content-length'));
+      if (declared && declared > limit) throw new Error('الملف أكبر من الحد المسموح');
+      const parts = []; let size = 0;
+      for await (const chunk of response.body) { size += chunk.length; if (size > limit) throw new Error('الملف أكبر من الحد المسموح'); parts.push(Buffer.from(chunk)); }
+      return Buffer.concat(parts);
+    };
+    mangaRuntime = createSuwayomiRuntime({ root: mangaRoot, fetch: fetchFor, cloudflare: cloudflareBridge ? () => cloudflareBridge.start() : null, onProgress: p => publish({ type: 'manga-engine/progress', ...p }) });
+    mangaEngine = createSuwayomiEngine({ root: mangaRoot, runtime: mangaRuntime, fetchBytes, convert: (bytes) => mangaRuntime.convert(bytes), onEvent: publish });
+    protocol.handle('vantara-engine', request => mangaEngine.media(request.url));
+    register('manga-engine', ({ method, args } = {}) => mangaEngine.call(String(method ?? ''), args));
+    // التحديث الذاتي الآمن مرة كل يوم وقت عمل المحرك فقط (لا يُشغَّل من أجله)
+    setInterval(() => { void mangaEngine.autoUpdate().catch(() => {}); }, 60 * 60_000).unref?.();
+    // تسخين بعد أن تظهر الواجهة (لا يبطئ الإقلاع)، لمن عنده إضافات فقط؛ ثم فحص التحديث اليومي
+    if (!mangaEngineReportOption) setTimeout(() => { void mangaEngine.warmUp().then((on) => on && mangaEngine.autoUpdate()).catch(() => {}); }, 8000).unref?.();
+  }
   register('open-external', ({ url }) => openSettings(url));
   register('open-update-page', async ({ url } = {}) => {
     await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
@@ -193,7 +241,10 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     setTimeout(() => app.quit(), 50);
     return true;
   });
-  register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options)));
+  // خادم المزامنة: الأصلي، أو البديل الذي ضبطه المستخدم في الإعدادات (يُعلنه الواجهة عند الإقلاع)
+  let configuredServer = null;
+  register('first-party-origin', ({ origin } = {}) => { const o = serverOrigin(origin); configuredServer = o && o !== FIRST_PARTY_ORIGIN ? o : null; return Boolean(o); });
+  register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options),[FIRST_PARTY_ORIGIN, configuredServer].filter(Boolean)));
   register('show-app',()=>{videoHost?.hide();window.show();window.focus();return true;});
   register('show-player',()=>{videoHost?.show();window.show();window.focus();return true;});
   register('player-viewport',args=>{overlay?.viewport(args);return videoHost?.viewport(args)??false;});
@@ -264,6 +315,12 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     await require('./torrent-smoke.cjs').runEmbeddedTorrentSmoke({window,videoHost,native,fixture:fixtureOption.slice('--native-torrent-smoke-fixture='.length),reportPath:torrentReportOption.slice('--native-torrent-smoke-report='.length),publish,setServices:async replacement=>{await services.close();services=replacement;}});
     app.quit();return;
   }
+  if (mangaEngineReportOption) {
+    // إثبات إضافات Mihon في ويندوز الحقيقي: تنزيل المحرك الموثّق، تشغيله، مستودع حقيقي، تثبيت، تصفح، فصول، صورة صفحة
+    await require('./suwayomi-smoke.cjs').runMangaEngineSmoke({ engine: mangaEngine, runtime: mangaRuntime, reportPath: mangaEngineReportOption.slice('--manga-engine-smoke-report='.length) }).catch(() => {});
+    await mangaRuntime.close().catch(() => {});
+    app.quit();return;
+  }
   if (sourceReportOption) {
     // إثبات مصادر المانجا في ويندوز الحقيقي: Node ثم المتصفح المخفي عند صفحة تحقق (source-smoke.cjs)
     await require('./source-smoke.cjs').runSourceSmoke({ services, reportPath: sourceReportOption.slice('--source-smoke-report='.length) }).catch(() => {});
@@ -297,5 +354,5 @@ app.on('before-quit', event => {
   event.preventDefault(); quitting = true;
   for (const popup of settingsWindows) popup.destroy();
   overlay?.destroy();
-  Promise.resolve(services.close()).catch(() => {}).finally(() => app.quit());
+  Promise.allSettled([services.close(), mangaRuntime?.close()]).finally(() => app.quit());
 });

@@ -1,7 +1,7 @@
 /** تقييم المانجا من AniList فقط عند مطابقة عنوان العمل نفسه بثقة. */
 import { anilistFetch } from './anilist.js';
 import { normalizeTitle } from './catalog.js';
-import { adultGenre } from './adult-filter.js';
+import { adultGenre, dirtyEcchiGenre, ecchiGenre } from './adult-filter.js';
 
 
 const MANGA_GENRES = new Set(['Action','Adventure','Comedy','Drama','Ecchi','Fantasy','Horror','Mahou Shoujo','Mecha','Music','Mystery','Psychological','Romance','Sci-Fi','Slice of Life','Sports','Supernatural','Thriller']);
@@ -123,17 +123,61 @@ export function matchMangaArt(title, candidates) {
 }
 
 /**
+ * هوية العمل الرسمية (ID1، ID2): معرّف AniList وأسماؤه، فقط حين تكون المطابقة مؤكدة. الحارس: عمل واحد بالضبط يحمل هذا
+ * الاسم بين النتائج (غموض ⇒ لا دليل)، ولا رواية (رواية وأصلها لا يُدمجان: الاسم نفسه والعمل غيره).
+ * @returns {{ id: number, names: string[] }|null}
+ */
+export function matchMangaIdentity(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return null;
+  const named = (candidates ?? []).filter((m) =>
+    [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key));
+  if (named.length !== 1 || !Number.isFinite(named[0].id) || named[0].format === 'NOVEL') return null;
+  const m = named[0];
+  const names = [...new Set([m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].filter((n) => typeof n === 'string' && n.trim()))];
+  return { id: m.id, names };
+}
+
+/**
+ * اسمٌ يحمله أكثر من عمل في AniList (غير الروايات): «Naruto» السلسلة والفصل التجريبي، «Monster» لمؤلفين. الاسم وحده
+ * لا يفرّقها، فلا يُدمج به بين مصدرين (بلاغ المالك: «0% دمج خاطئ»). المقياس: 63 دمجًا خاطئًا من هذا وحده.
+ */
+export function mangaNameAmbiguous(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return false;
+  const ids = new Set((candidates ?? []).filter((m) => m?.format !== 'NOVEL' && Number.isFinite(m?.id) &&
+    [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key)).map((m) => m.id));
+  return ids.size > 1;
+}
+
+/**
+ * حكم المحتوى الرسمي لعنوان (قرار المالك، 22 نوفمبر: «ما لا يُعرف حاله لا يُعرض حتى يُتحقق منه»):
+ * `adult` عمل واحد بهذا الاسم وهو للكبار أو إيتشي بتصنيف يوحي بوساخة، `ecchi` إيتشي نظيف البقية (للبحث المقصود)،
+ * `clean` نظيف، `unknown` لا عمل بهذا الاسم أو اسم مشترك بين أعمال أحدها للكبار (لا يُحكم له).
+ */
+export function mangaContentVerdict(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return 'unknown';
+  const named = (candidates ?? []).filter((m) => m?.format !== 'NOVEL'
+    && [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key));
+  if (!named.length) return 'unknown';
+  const dirty = (m) => m.isAdult || adultGenre(m.genres) || dirtyEcchiGenre(m.genres);
+  if (named.some(dirty)) return named.length === 1 ? 'adult' : 'unknown';
+  return named.some((m) => ecchiGenre(m.genres)) ? 'ecchi' : 'clean';
+}
+
+/**
  * استعلام واحد لثمانية عناوين بدل طلب لكل بطاقة، مع مهلة واضحة: التقييم والفن الرسمي معًا، فلا طلب ثانٍ للفن.
  * @returns {Promise<Map<string, { rating: object|null, art: object|null }>>}
  */
 export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, timeoutMs = 12_000 } = {}) {
   const names = [...new Set(titles.filter(Boolean))].slice(0, 20);
-  const output = new Map(names.map((title) => [title, { rating: null, art: null }]));
+  const output = new Map(names.map((title) => [title, { rating: null, art: null, identity: null }]));
   if (!names.length) return output;
   const variables = Object.fromEntries(names.map((name, i) => [`q${i}`, name]));
   const args = names.map((_, i) => `$q${i}: String!`).join(', ');
   // بلا isAdult:false: عمل للكبار يجب أن يُعرف فيُحجب، لا أن يختفي من البحث فيبقى في القائمة
-  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id title { romaji english native } synonyms averageScore isAdult genres coverImage { extraLarge large color } bannerImage } }`).join(' ');
+  const pages = names.map((_, i) => `p${i}: Page(perPage: 5) { media(search: $q${i}, type: MANGA) { id format title { romaji english native } synonyms averageScore isAdult genres coverImage { extraLarge large color } bannerImage } }`).join(' ');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -146,7 +190,7 @@ export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, time
     if (!body?.data) throw new Error('anilist_no_data');
     names.forEach((title, i) => {
       const media = body.data[`p${i}`]?.media;
-      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media) });
+      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media), identity: matchMangaIdentity(title, media), ambiguous: mangaNameAmbiguous(title, media), verdict: mangaContentVerdict(title, media) });
     });
     return output;
   } finally {
@@ -158,4 +202,75 @@ export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, time
 export async function fetchMangaRatings(titles, options = {}) {
   const found = await fetchMangaMatches(titles, options);
   return new Map([...found].map(([title, m]) => [title, m.rating]));
+}
+
+/**
+ * هوية عمل باسمه العربي من MangaDex (مهمة التكرار، 22 نوفمبر): AniList لا يعرف الأسماء العربية، وMangaDex يعرفها
+ * (altTitles بالعربي) ويربط عمله برقم AniList (`links.al`). الحارس كحارس AniList: عمل واحد بالضبط يحمل هذا الاسم بعد
+ * التطبيع، وله رقم، وليس للكبار. وإلا لا دليل.
+ * @returns {Promise<{ id: number, names: string[] }|null>}
+ */
+export async function fetchMangaDexIdentity(title, { fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
+  const key = normalizeTitle(title);
+  if (!key || typeof fetchImpl !== 'function') return null;
+  const url = new URL('https://api.mangadex.org/manga');
+  url.searchParams.set('title', String(title).trim());
+  url.searchParams.set('limit', '10');
+  for (const r of ['safe', 'suggestive']) url.searchParams.append('contentRating[]', r);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => controller?.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url.toString(), { signal: controller?.signal, headers: { Accept: 'application/json' } });
+    if (!res?.ok) return null;
+    const data = await res.json();
+    const named = (data?.data ?? []).map((m) => {
+      const a = m?.attributes ?? {};
+      const names = [...Object.values(a.title ?? {}), ...(a.altTitles ?? []).flatMap((t) => Object.values(t ?? {}))].filter((n) => typeof n === 'string' && n.trim());
+      const al = Number(a.links?.al);
+      const tags = (a.tags ?? []).map((t) => t?.attributes?.name?.en ?? '');
+      return { names, al: Number.isSafeInteger(al) && al > 0 ? al : null, adult: adultGenre(tags) || dirtyEcchiGenre(tags) };
+    }).filter((m) => m.names.some((n) => normalizeTitle(n) === key));
+    if (named.length !== 1 || !named[0].al || named[0].adult) return null;
+    return { id: named[0].al, names: [...new Set(named[0].names)] };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * الأسماء العربية لعمل نعرفه بالإنجليزي (مهمة الإضافات في البطاقة العامة، 22 نوفمبر): المصدر العربي يُسأل بالإنجليزي
+ * فقط إن لم نعرف للعمل اسمًا عربيًا، وكثير منها يسمّيه بالعربي. MangaDex يعرف الاسم العربي، والحارس رقم AniList للعمل
+ * (`links.al` = رقمه) أو، بلا رقم، عمل واحد بالضبط بهذا الاسم. للكبار لا شيء.
+ * @returns {Promise<string[]>}
+ */
+export async function fetchMangaDexArabicNames(title, { officialId = null, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
+  const key = normalizeTitle(title);
+  if (!key || typeof fetchImpl !== 'function') return [];
+  const url = new URL('https://api.mangadex.org/manga');
+  url.searchParams.set('title', String(title).trim());
+  url.searchParams.set('limit', '10');
+  for (const r of ['safe', 'suggestive']) url.searchParams.append('contentRating[]', r);
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => controller?.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url.toString(), { signal: controller?.signal, headers: { Accept: 'application/json' } });
+    if (!res?.ok) return [];
+    const all = ((await res.json())?.data ?? []).map((m) => {
+      const a = m?.attributes ?? {};
+      const names = [...Object.values(a.title ?? {}), ...(a.altTitles ?? []).flatMap((t) => Object.values(t ?? {}))].filter((n) => typeof n === 'string' && n.trim());
+      const tags = (a.tags ?? []).map((t) => t?.attributes?.name?.en ?? '');
+      return { names, al: Number(a.links?.al) || null, adult: adultGenre(tags) || dirtyEcchiGenre(tags) };
+    });
+    const pick = Number.isSafeInteger(officialId)
+      ? all.filter((m) => m.al === officialId)
+      : all.filter((m) => m.names.some((n) => normalizeTitle(n) === key));
+    if (pick.length !== 1 || pick[0].adult) return [];
+    return [...new Set(pick[0].names.filter((n) => /[؀-ۿ]/.test(n)).map((n) => n.trim()))];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }

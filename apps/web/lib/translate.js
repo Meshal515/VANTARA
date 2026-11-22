@@ -736,7 +736,7 @@ async function acceptRefinement(event) {
   refinementTargets.delete(event.previewPath);
   const current = (await readKv(CACHE_PREFIX + target.hash))?.value;
   if (!current || current.image !== convertedPath(event.previewPath) || current.at !== target.value.at) return;
-  const saved = writePageCache(target.hash,target.meta,{...current,image:convertedPath(event.path)});
+  const saved = writePageCache(target.hash,target.meta,{...current,image:convertedPath(event.path),refining:false});
   if ((await saved.written).every(key => typeof key === 'string')) target.deps.onRepaired?.({...saved.stored,hash:target.hash,cacheKey:saved.cacheKey,from:'device',saved:true});
 }
 
@@ -757,6 +757,8 @@ export function publicationValue(result, at = Date.now()) {
     translated: incomplete ? 0 : (result?.translated ?? 0),
     engine: result?.engine ?? null,
     incomplete,
+    // RT2: نسخة حُلِّلت مصغّرة (صفحة أطول من 4096) والكاملة تُرسم في الخلفية: أقصر من الأصل عن قصد، لا معطوبة
+    refining: !incomplete && Boolean(result?.refinementPath),
     at,
     tries: 0,
   };

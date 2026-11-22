@@ -92,6 +92,9 @@ class ExtensionEnginePlugin : Plugin() {
     private val builtinSpecs by lazy { BuiltinSourceRefresh(java.io.File(context.filesDir, "extensions/builtin-refresh.json")) }
     private val builtinVisibility by lazy { BuiltinVisibility(java.io.File(context.filesDir, "extensions/builtin-visible.json")) }
 
+    /** حزمة مدمجة سابقًا صارت إضافة (رُحّلت أو ثُبّتت/حُذفت كإضافة): مسار المدمجة لها مغلق (BuiltinMigration). */
+    private fun builtinClosed(pkg: String): Boolean = runCatching { pkg in userStore.state.formerBuiltins }.getOrDefault(false)
+
     /** نسخة الحزمة موجودة على الجهاز (متحقَّق منها) أو داخل التطبيق: تحميلها لا يلمس الشبكة. */
     private fun hasLocalCopy(pkg: String): Boolean {
         val spec = packageSpec(pkg)?.let { builtinSpecs.current(it) } ?: return false
@@ -127,22 +130,25 @@ class ExtensionEnginePlugin : Plugin() {
         // محلّل الأسماء الاحتياطي (DNS عبر HTTPS) للمانجا من أول لحظة: كان يُركَّب عند تشغيل محرك الأنمي فقط،
         // فمن يفتح المانجا مباشرة يبقى على DNS مزوّده، ومواقع يحجبها بالـDNS تفشل («تعذّر الوصول لاسم الموقع»).
         // النظام أولًا كما هو، وDoH فقط حين يفشل أو يعيد عنوان حجب؛ محرك الأنمي يستبدله بنسخته لاحقًا.
-        if (eu.kanade.tachiyomi.network.HostRouting.dns == null) eu.kanade.tachiyomi.network.HostRouting.dns = com.vantara.anime.net.AnimeDns({ false })
+        if (eu.kanade.tachiyomi.network.HostRouting.dns == null) eu.kanade.tachiyomi.network.HostRouting.dns = com.vantara.anime.net.AnimeDns(eu.kanade.tachiyomi.network.HostRouting::isSourceHost)
         // المصادر تُحمَّل من أول لحظة لا عند أول طلب: الصفحة الرئيسية والأغلفة
         // والقارئ يجدونها جاهزة، ولا يسبق مصدرٌ غيره لأنه حُمِّل أولًا
         scope.launch {
-            // المصادر المدمجة سابقًا: ما أضافه الحساب الحالي فقط (تبلّغه الواجهة بـsetVisibleBuiltins)،
-            // وقبل أول تبليغ ما له نسخة على الجهاز فقط — فلا يُنزّل حساب جديد حزمًا لم يضفها.
-            val visible = builtinVisibility.read()
-            fun eager(pkg: String) = visible?.contains(pkg) ?: hasLocalCopy(pkg)
+            // المصادر المدمجة سابقًا: ما أضافه الحساب الحالي فقط (تبلّغه الواجهة بـsetVisibleBuiltins). قبل أول تبليغ
+            // لا شيء (EE1): حساب جديد = صفر مصادر، والحساب الموجود تُجهَّز مصادره عند تبليغ اختياره (stageVisible).
+            // يُقرأ الاختيار الحالي في كل نداء: التحديث اليومي بعد دقيقة يرى ما بلّغته الواجهة في الأثناء.
+            fun eager(pkg: String) = !builtinClosed(pkg) && (builtinVisibility.read()?.contains(pkg) ?: false)
             for (spec in SPIKE_SOURCES) {
                 if (spec.blockedReason != null || !eager(spec.pkg)) continue
                 launch { runCatching { obtain(spec.pkg) } }
             }
             // التكملة الإنجليزية بعد العربي: لا تسبقه على خانات التحميل الأربع
             for (filler in FILLER_SOURCES) if (eager(filler.pkg)) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
-            for (ext in userStore.state.extensions) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
+            // ES1: حالة تالفة لا تُسقط الإقلاع من هذا المسار (الخطأ يظهر في نداءات الواجهة حيث يُلتقط)
+            for (ext in runCatching { userStore.state.extensions }.getOrDefault(emptyList())) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
             launch { runCatching { refreshBuiltinsDaily(::eager) } }
+            // SE3: إضافات المستخدم تتحدث وحدها، بشرط أن يعمل الإصدار الجديد فعلًا (MangaSelfUpdate)
+            launch { runCatching { autoUpdateUserExtensionsDaily() } }
         }
     }
 
@@ -173,8 +179,14 @@ class ExtensionEnginePlugin : Plugin() {
                     if (!artifacts.containsKey(base.pkg)) artifacts[base.pkg] = localArtifactSpec(base)
                     return artifacts[base.pkg]
                 }
+                // قراءة الصيغتين (LegacySourceIds): مصدر حزمة مدمجة سابقًا مثبّتة من مستودع يظهر بمعرّفه القديم، مرة واحدة
+                fun visibleIds(ext: UserExtension): List<Pair<UserSource, String>> {
+                    val entries = ext.sources.map { LegacySourceIds.Entry(it.id, it.lang) }
+                    return ext.sources.map { it to LegacySourceIds.visibleId(ext.pkg, LegacySourceIds.Entry(it.id, it.lang), entries) }
+                }
+                val takenByInstalled = st.extensions.flatMap { ext -> visibleIds(ext).map { it.second } }.filter { '#' !in it }.toSet()
                 for (spec in SPIKE_SOURCES) {
-                    if (spec.blockedReason != null) continue
+                    if (spec.blockedReason != null || spec.pkg in takenByInstalled || spec.pkg in st.formerBuiltins) continue
                     val installed = artifact(spec)
                     list.put(
                         JSObject()
@@ -197,6 +209,7 @@ class ExtensionEnginePlugin : Plugin() {
                 for (filler in FILLER_SOURCES) {
                     val spec = packageSpec(filler.pkg)?.takeIf { it.blockedReason == null } ?: continue
                     val id = "${filler.pkg}@${filler.lang}"
+                    if (id in takenByInstalled || filler.pkg in st.formerBuiltins) continue
                     val installed = artifact(spec)
                     list.put(
                         JSObject()
@@ -220,8 +233,7 @@ class ExtensionEnginePlugin : Plugin() {
                 for (ext in st.extensions) {
                     val icon = NativeExtensionIcons.iconUrl(context, "extensions", ext.pkg, ext.sha256)
                         ?: RepoIndex.iconUrl(ext.iconUrl, ext.repoUrl) ?: RepoIndex.legacyIconUrl(ext.repoUrl, ext.pkg)
-                    for (src in ext.sources) {
-                        val id = "${ext.pkg}#${src.id}"
+                    for ((src, id) in visibleIds(ext)) {
                         list.put(
                             JSObject()
                                 .put("id", id)
@@ -242,7 +254,8 @@ class ExtensionEnginePlugin : Plugin() {
                         )
                     }
                 }
-                call.resolve(JSObject().put("sources", list))
+                // ES1: حالة الإضافات كانت تالفة فنُقلت جانبًا عند الإقلاع: الواجهة تقولها مرة (لا انهيار ولا صمت)
+                call.resolve(JSObject().put("sources", list).put("stateRecovered", userStore.quarantined != null))
             } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
         }
     }
@@ -275,12 +288,53 @@ class ExtensionEnginePlugin : Plugin() {
         scope.launch(Dispatchers.IO) {
             try {
                 forget(pkg)
-                loaded.keys.removeAll { splitSourceId(it.substringBefore('#')).first == pkg }
+                loaded.keys.removeAll { ownedBy(it, pkg) }
                 staged.remove(pkg)
                 builtinSpecs.reset(pkg)
                 loader.prune(pkg, emptySet())
                 call.resolve()
             } catch (t: Throwable) { call.reject(t.message ?: t.readable()) }
+        }
+    }
+
+    /**
+     * المرحلة 2 من «صفر مصادر مدمجة» (BuiltinMigration): الحزم المدمجة الظاهرة لهذا الحساب (قرار الواجهة من المزامنة،
+     * lib/source-entitlement.js) تصير إضافات مثبّتة بالنسخة نفسها التي على الجهاز. لا شبكة ولا تحميل كود: السجل يشير
+     * إلى البصمة الحالية، والنسخة تُقرأ أو تُنزَّل موثّقة بها عند أول طلب كما كانت. `keepRepository`: الحساب القديم
+     * و«بلا حساب» يُحفظ لهما مستودع Keiyoushi (قرار المالك 21 نوفمبر). فشل حزمة لا يوقف غيرها ولا يخفيها: تبقى مدمجة
+     * وتُعاد في التبليغ التالي.
+     */
+    @PluginMethod
+    fun migrateBuiltins(call: PluginCall) {
+        val array = call.getArray("pkgs") ?: return call.reject("pkgs مطلوبة")
+        val keepRepository = call.getBoolean("keepRepository", false) == true
+        val pkgs = (0 until array.length()).mapNotNull { array.optString(it).takeIf { pkg -> packageSpec(pkg) != null && packageSpec(pkg)?.blockedReason == null } }.distinct()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val failed = JSArray()
+                val records = pkgs.mapNotNull { pkg ->
+                    runCatching {
+                        val base = packageSpec(pkg)!!
+                        val current = localArtifactSpec(base) ?: builtinSpecs.current(base)
+                        val previous = builtinSpecs.previousOf(base)?.takeIf { loader.readVerifiedCache(it) != null }
+                        val loadedSources = packages[pkg]?.map { UserSource(it.id.toString(), it.name, it.lang) }
+                        BuiltinMigration.record(base, current, previous, BuiltinMigration.sourcesOf(pkg, loadedSources))
+                            .takeIf { it.sources.isNotEmpty() } ?: error("no declared source")
+                    }.onFailure {
+                        if (it is CancellationException) throw it
+                        failed.put(pkg)
+                        android.util.Log.w("ExtensionEngine", "BUILTIN_MIGRATION_DEFERRED:$pkg ${it.javaClass.simpleName}")
+                    }.getOrNull()
+                }
+                var outcome: BuiltinMigration.Outcome? = null
+                userStore.update { st -> BuiltinMigration.apply(st, records, keepRepository).also { outcome = it }.state }
+                val done = outcome!!
+                if (done.migrated.isNotEmpty()) android.util.Log.i("ExtensionEngine", "BUILTIN_MIGRATED:${done.migrated.joinToString(",")}")
+                call.resolve(JSObject().put("migrated", JSArray(done.migrated)).put("skipped", JSArray(done.skipped)).put("failed", failed))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                call.reject(t.message ?: t.readable())
+            }
         }
     }
 
@@ -309,7 +363,8 @@ class ExtensionEnginePlugin : Plugin() {
     // ───────────────────────── مستودعات المستخدم ─────────────────────────
 
     private fun JSObject.withIcon(iconUrl: String?) = apply { iconUrl?.let { put("iconUrl", it) } }
-    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
+    // البصمة علنية (مفتاح توقيع المستودع): مزامنة الإضافات بين الأجهزة تثبّتها فلا يُقبل مستودع غيّر مفتاحه
+    private fun repoJson(repo: UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).put("fingerprint", repo.fingerprint).withIcon(repo.iconUrl)
 
     @PluginMethod
     fun repos(call: PluginCall) {
@@ -339,6 +394,10 @@ class ExtensionEnginePlugin : Plugin() {
             try {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
                 val (meta, list) = repoClient.read(base)
+                // من مزامنة الحساب: المفتاح الذي عرفه جهازك الآخر شرط، فمستودع غيّر مفتاحه لا يُضاف هنا بصمت
+                call.getString("fingerprint")?.takeIf { it.isNotBlank() }?.let { expected ->
+                    if (!expected.equals(meta.fingerprint, ignoreCase = true)) return@launch call.reject("مفتاح توقيع المستودع لا يطابق ما في حسابك؛ لم يُضف.", "MANGA_REPOSITORY_KEY_MISMATCH")
+                }
                 val count = list.size
                 val repo = UserRepo(base, meta.name, meta.fingerprint, meta.iconUrl)
                 userStore.registerRepository(repo)
@@ -362,10 +421,9 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
-    /** Debug's old catalogue is optional. Unlinking it must never uninstall packages. */
+    /** «مصادر جاهزة» قائمة اختيارية في القناتين بعد فصل Stable (RS2). إخفاؤها لا يزيل حزمة ولا مصدرًا. */
     @PluginMethod
     fun removeReadySources(call: PluginCall) {
-        if (!com.vantara.app.BuildConfig.DEBUG) return call.reject("هذه العملية متاحة في Debug فقط")
         try {
             userStore.dismissReadyCatalogue()
             call.resolve()
@@ -391,7 +449,7 @@ class ExtensionEnginePlugin : Plugin() {
                             .put("nsfw", ext.nsfw)
                             .put("anime", ext.anime)
                             .put("arabic", ext.sources.any { it.lang.equals("ar", ignoreCase = true) })
-                            .put("builtin", packageSpec(ext.pkg) != null)
+                            .put("builtin", packageSpec(ext.pkg) != null && mine == null && !builtinClosed(ext.pkg))
                             .put("installed", mine?.versionName)
                             .put("update", mine != null && mine.versionName != ext.version)
                             .put("sources", JSArray(RepoIndex.visibleSources(ext).map { it.name }))
@@ -411,63 +469,202 @@ class ExtensionEnginePlugin : Plugin() {
      * تنزيل ⇒ التحقق من توقيع المستودع ⇒ تثبيت البصمة ⇒ تحميل تجريبي. لا يُحفظ شيء
      * إن لم تُحمَّل الحزمة فعلًا وتُخرج مصادرها.
      */
+    /** تثبيت أو تحديث مُجهَّز: نُزّل ووُقّع وحُمّل تجريبيًا، ولم يُفعَّل بعد. */
+    private class StagedInstall(
+        val token: UserExtensionStore.InstallToken, val user: UserExtension, val all: List<CatalogueSource>,
+        val sourceIds: List<String>, val ids: List<String>, val entry: RepoIndex.Extension,
+    )
+
+    /**
+     * تنزيل ⇒ التحقق من توقيع المستودع ⇒ تثبيت البصمة ⇒ تحميل تجريبي. لا يُحفظ شيء هنا: [commitStaged] يفعّله.
+     * التحديث لا يمس الإصدار العامل حتى يثبت الجديد: يُكتب بجانبه في المخزن ويُحمَّل تجريبيًا، وإن فشل بقي القديم
+     * محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم).
+     */
+    private suspend fun stageInstall(base: String, pkg: String): StagedInstall {
+        val token = userStore.beginInstall(pkg, base)
+        val repo = token.repository
+        val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
+        require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
+        // لا رجوع لإصدار أقدم من المستودع: فهرس قديم أو متلاعب به لا يعيد ثغرة أُصلحت (أسلوب TUF)
+        token.previous?.let { mine ->
+            require(ext.versionCode <= 0 || ext.versionCode >= mine.versionCode) { "${ext.name}: الإصدار في المستودع (${ext.version}) أقدم من المثبت عندك (${mine.versionName})؛ لا نرجع لإصدار أقدم" }
+        }
+        val apkUrl = ext.apkUrl
+        val bytes = repoClient.downloadSigned(apkUrl, repo.fingerprint)
+        val visible = RepoIndex.visibleSources(ext)
+        val fresh = UserExtension(
+            repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
+            versionName = ext.version, lib = ext.lib, lang = ext.lang, nsfw = ext.nsfw,
+            sources = visible.map { UserSource(it.id, it.name, it.lang) }, versionCode = ext.versionCode, iconUrl = ext.iconUrl,
+        )
+        val user = token.previous?.upgradedTo(fresh) ?: fresh
+        val all = when (val result = loader.load(user.spec(), bytes)) {
+            is FileExtensionLoader.Result.Fail -> error("${ext.name}: ${result.stage} — ${result.reason}")
+            is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
+        }
+        val sourceIds = all.map { it.id.toString() }
+        require(visible.any { it.id in sourceIds }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
+        return StagedInstall(token, user, all, sourceIds, visible.map { "$pkg#${it.id}" }, ext)
+    }
+
+    private fun commitStaged(staged: StagedInstall) {
+        val pkg = staged.user.pkg
+        userStore.commitInstall(staged.token, staged.user, this@ExtensionEnginePlugin,
+            validate = { validateSourceIds(pkg, staged.sourceIds) }) {
+            publishSourceIds(pkg, staged.sourceIds)
+            forget(pkg)
+            packages[pkg] = staged.all
+            // No later install/uninstall may race an old version's cleanup.
+            try { loader.prune(pkg, setOfNotNull(staged.user.sha256, staged.user.previous?.sha256)) }
+            catch (cleanup: Exception) {
+                if (cleanup is CancellationException) throw cleanup
+                // Optional garbage collection cannot turn an activated install into a false failure.
+                android.util.Log.w("ExtensionEngine", "MANGA_PRUNE_DEFERRED:$pkg ${cleanup.javaClass.simpleName}")
+            }
+        }
+    }
+
     @PluginMethod
     fun installExtension(call: PluginCall) {
         scope.launch {
             try {
                 val base = RepoIndex.base(call.getString("repo") ?: error("المستودع مطلوب"))
                 val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
-                require(packageSpec(pkg) == null) { "هذه الإضافة مدمجة في التطبيق أصلًا" }
-                val token = userStore.beginInstall(pkg, base)
-                val repo = token.repository
-                val ext = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg } ?: error("الإضافة لم تعد في المستودع")
-                require(!ext.anime) { "إضافات الأنمي (Aniyomi) غير مدعومة بعد" }
-                // لا رجوع لإصدار أقدم من المستودع: فهرس قديم أو متلاعب به لا يعيد ثغرة أُصلحت (أسلوب TUF)
-                token.previous?.let { mine ->
-                    require(ext.versionCode <= 0 || ext.versionCode >= mine.versionCode) { "${ext.name}: الإصدار في المستودع (${ext.version}) أقدم من المثبت عندك (${mine.versionName})؛ لا نرجع لإصدار أقدم" }
-                }
-                val apkUrl = ext.apkUrl
-                val bytes = repoClient.downloadSigned(apkUrl, repo.fingerprint)
-                val visible = RepoIndex.visibleSources(ext)
-                val fresh = UserExtension(
-                    repoUrl = base, name = ext.name, pkg = pkg, apkUrl = apkUrl, sha256 = sha256Hex(bytes),
-                    versionName = ext.version, lib = ext.lib, lang = ext.lang, nsfw = ext.nsfw,
-                    sources = visible.map { UserSource(it.id, it.name, it.lang) }, versionCode = ext.versionCode, iconUrl = ext.iconUrl,
-                )
-                // التحديث لا يمس الإصدار العامل حتى يثبت الجديد: يُكتب بجانبه في المخزن ويُحمَّل تجريبيًا،
-                // وإن فشل بقي القديم محمَّلًا ومثبّتًا كما هو (كان يُحذف أولًا فيضيع آخر إصدار سليم)
-                val user = token.previous?.upgradedTo(fresh) ?: fresh
-                val all = when (val result = loader.load(user.spec(), bytes)) {
-                    is FileExtensionLoader.Result.Fail -> error("${ext.name}: ${result.stage} — ${result.reason}")
-                    is FileExtensionLoader.Result.Ok -> result.loaded.sources.filterIsInstance<CatalogueSource>()
-                }
-                val sourceIds = all.map { it.id.toString() }
-                require(visible.any { it.id in sourceIds }) { "${ext.name}: الحزمة لا تحوي المصادر التي أعلنها المستودع" }
-                userStore.commitInstall(token, user, this@ExtensionEnginePlugin,
-                    validate = { validateSourceIds(pkg, sourceIds) }) {
-                    publishSourceIds(pkg, sourceIds)
-                    forget(pkg)
-                    packages[pkg] = all
-                    // No later install/uninstall may race an old version's cleanup.
-                    try { loader.prune(pkg, setOfNotNull(user.sha256, user.previous?.sha256)) }
-                    catch (cleanup: Exception) {
-                        if (cleanup is CancellationException) throw cleanup
-                        // Optional garbage collection cannot turn an activated install into a false failure.
-                        android.util.Log.w("ExtensionEngine", "MANGA_PRUNE_DEFERRED:$pkg ${cleanup.javaClass.simpleName}")
-                    }
-                }
-                call.resolve(JSObject().put("ids", JSArray(visible.map { "$pkg#${it.id}" })))
+                val staged = stageInstall(base, pkg)
+                commitStaged(staged)
+                // تحديث يدوي: المستخدم اختار هذا الإصدار، فيُرفع أي تثبيت على إصدار سابق رجع إليه
+                updateHolds.edit().remove(pkg).apply()
+                call.resolve(JSObject().put("ids", JSArray(staged.ids)))
             } catch (t: Throwable) {
                 rejectMangaMutation(call, t)
             }
         }
     }
 
+    // ───────────────────────── التحديث الذاتي الآمن (MangaSelfUpdate) ─────────────────────────
+
+    /** الإصدار الذي رجع منه المستخدم يدويًا لكل حزمة: التلقائي لا يعود إليه، ويُحدَّث فقط إلى أحدث منه. */
+    private val updateHolds by lazy { context.getSharedPreferences("vantara_manga_update_holds", android.content.Context.MODE_PRIVATE) }
+    /** آخر نتيجة تحديث تلقائي لكل حزمة (للواجهة: «حُدّثت تلقائيًا» أو «الإصدار الجديد لم يعمل فبقي الحالي»). */
+    private val autoUpdateLog by lazy { context.getSharedPreferences("vantara_manga_auto_updates", android.content.Context.MODE_PRIVATE) }
+    private val failureChecks = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** هل يعمل الإصدار المجهَّز فعلًا؟ مصدر واحد يرجع أعمالًا من الرائج (أو آخر التحديثات) يكفي. */
+    private suspend fun preflight(staged: StagedInstall): UpdatePreflight.Verdict {
+        val wanted = staged.user.sources.map { it.id }.toSet()
+        val candidates = staged.all.filter { it.id.toString() in wanted }.ifEmpty { staged.all }.take(3)
+        val outcomes = candidates.map { source ->
+            try {
+                kotlinx.coroutines.withTimeout(UpdatePreflight.PER_SOURCE_MS) {
+                    val page = runCatching { source.getPopularManga(1) }.getOrElse { source.getLatestUpdates(1) }
+                    if (page.mangas.isNotEmpty()) UpdatePreflight.Outcome.Passed
+                    else UpdatePreflight.Outcome.Failed(IllegalStateException("CANDIDATE_CATALOGUE_EMPTY"))
+                }
+            } catch (failure: Throwable) {
+                if (failure is CancellationException && failure !is kotlinx.coroutines.TimeoutCancellationException) throw failure
+                UpdatePreflight.Outcome.Failed(failure)
+            }
+        }
+        return UpdatePreflight.decide(outcomes)
+    }
+
+    /** فحص إضافة واحدة: إصدار أحدث، غير مثبَّت عنه، ويعمل فعلًا ⇒ يُفعَّل. يعيد القرار. */
+    private suspend fun autoUpdate(ext: UserExtension, entry: RepoIndex.Extension): MangaSelfUpdate.Action {
+        val newer = MangaSelfUpdate.newer(ext.versionCode, ext.versionName, entry.versionCode, entry.version)
+        val held = updateHolds.getLong(ext.pkg, -1L).takeIf { it >= 0 }
+        val early = MangaSelfUpdate.decide(newer, held, entry.versionCode, UpdatePreflight.Verdict(true, "RUNTIME_UPDATE_VERIFIED"))
+        if (early != MangaSelfUpdate.Action.APPLY) return early
+        val staged = runCatching { stageInstall(ext.repoUrl, ext.pkg) }
+            .onFailure { if (it is CancellationException) throw it }.getOrNull()
+        val verdict = staged?.let { preflight(it) }
+        val action = MangaSelfUpdate.decide(newer, held, entry.versionCode, verdict)
+        if (action == MangaSelfUpdate.Action.APPLY) commitStaged(staged!!)
+        else if (staged != null) runCatching { loader.prune(ext.pkg, setOfNotNull(ext.sha256, ext.previous?.sha256)) }
+        autoUpdateLog.edit().putString(ext.pkg, "${action.name}|${entry.version}|${verdict?.code ?: "STAGE_FAILED"}|${System.currentTimeMillis()}").apply()
+        android.util.Log.i("ExtensionEngine", "MANGA_AUTO_UPDATE:${ext.pkg} ${entry.version} ${action.name} ${verdict?.code}")
+        return action
+    }
+
+    /** فحص يومي لإضافات المستخدم (SE3): بعد دقيقة ونصف من الإقلاع، مرة كل 24 ساعة، ومستودع كل إضافة يُقرأ مرة. */
+    private suspend fun autoUpdateUserExtensionsDaily() {
+        val stamp = java.io.File(context.filesDir, "extensions/user-update-at")
+        val last = runCatching { stamp.readText().trim().toLong() }.getOrDefault(0L)
+        if (System.currentTimeMillis() - last < MangaSelfUpdate.DAILY_MS) return
+        kotlinx.coroutines.delay(90_000)
+        val mine = runCatching { userStore.state.extensions }.getOrDefault(emptyList())
+        for ((repoUrl, exts) in mine.groupBy { it.repoUrl }) {
+            val repo = userStore.state.repos.firstOrNull { it.url == repoUrl } ?: continue
+            val index = runCatching { repoClient.readTrusted(repo) }.getOrNull() ?: continue
+            for (ext in exts) {
+                val entry = index.firstOrNull { it.pkg == ext.pkg && !it.anime } ?: continue
+                runCatching { autoUpdate(ext, entry) }.onFailure { if (it is CancellationException) throw it }
+            }
+        }
+        runCatching { stamp.parentFile?.mkdirs(); stamp.writeText(System.currentTimeMillis().toString()) }
+    }
+
+    /** EF1: فشل يعني أن الموقع تغيّر ⇒ فحص تحديث فوري لتلك الإضافة (مرة كل 6 ساعات على الأكثر). */
+    private fun checkUpdateAfterFailure(sourceId: String?, code: String) {
+        if (sourceId.isNullOrBlank() || !MangaSelfUpdate.suggestsUpdate(code)) return
+        // المعرّف القديم لحزمة مثبّتة من مستودع يُفحص أيضًا (بلا إضافة مثبّتة يعود أدناه كما كان)
+        val pkg = if ('#' in sourceId) sourceId.substringBefore('#') else splitSourceId(sourceId).first
+        val now = System.currentTimeMillis()
+        if (now - (failureChecks[pkg] ?: 0L) < MangaSelfUpdate.FAILURE_CHECK_GAP_MS) return
+        failureChecks[pkg] = now
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val ext = userStore.extension(pkg) ?: return@runCatching
+                val repo = userStore.state.repos.firstOrNull { it.url == ext.repoUrl } ?: return@runCatching
+                val entry = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg && !it.anime } ?: return@runCatching
+                autoUpdate(ext, entry)
+            }.onFailure { if (it is CancellationException) throw it }
+        }
+    }
+
+    /** «ارجع للإصدار السابق»: آخر إصدار سليم محفوظ على الجهاز يصير الحالي، ويُثبَّت عليه فلا يعيده التلقائي. */
+    @PluginMethod
+    fun rollbackExtension(call: PluginCall) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val pkg = call.getString("pkg") ?: error("الإضافة مطلوبة")
+                val user = userStore.extension(pkg) ?: error("الإضافة غير مثبتة")
+                val previous = user.previousSpec() ?: error("لا إصدار سابق محفوظ لهذه الإضافة")
+                loader.readVerifiedCache(previous) ?: error("نسخة الإصدار السابق لم تعد على الجهاز")
+                val back = user.rolledBack() ?: error("لا إصدار سابق محفوظ لهذه الإضافة")
+                userStore.update { st -> st.copy(extensions = st.extensions.map { if (it.pkg == pkg) back else it }) }
+                forget(pkg)
+                if (user.versionCode > 0) updateHolds.edit().putLong(pkg, user.versionCode).apply()
+                call.resolve(JSObject().put("version", back.versionName).put("from", user.versionName))
+            } catch (t: Throwable) {
+                rejectMangaMutation(call, t)
+            }
+        }
+    }
+
+    /** حالة التحديث لإضافة مثبتة: هل لها إصدار سابق للرجوع، وآخر نتيجة تلقائية. */
+    @PluginMethod
+    fun updateState(call: PluginCall) {
+        val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
+        val user = userStore.extension(pkg)
+        val last = autoUpdateLog.getString(pkg, null)?.split('|')
+        call.resolve(
+            JSObject()
+                .put("installed", user?.versionName)
+                .put("previous", user?.previous?.versionName)
+                .put("held", updateHolds.getLong(pkg, -1L).takeIf { it >= 0 })
+                .put("lastAction", last?.getOrNull(0))
+                .put("lastVersion", last?.getOrNull(1))
+                .put("lastCode", last?.getOrNull(2))
+                .put("lastAt", last?.getOrNull(3)?.toLongOrNull()),
+        )
+    }
+
     @PluginMethod
     fun uninstallExtension(call: PluginCall) {
         val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
-        if (packageSpec(pkg) != null) return call.reject("احذف هذه الإضافة من قائمة مصادرها السابقة")
         try {
+            // EE2: الحزمة المدمجة سابقًا تُحذف كأي إضافة، ولا تعود مدمجة بعدها (BuiltinMigration)
+            if (packageSpec(pkg) != null) userStore.update { st -> if (pkg in st.formerBuiltins) st else st.copy(formerBuiltins = st.formerBuiltins + pkg) }
             userStore.uninstall(pkg, this@ExtensionEnginePlugin, {
                 forget(pkg)
                 owners.values.removeAll { it == pkg }
@@ -494,8 +691,15 @@ class ExtensionEnginePlugin : Plugin() {
     /** يُخرج الحزمة من الذاكرة فقط؛ ملفاتها في المخزن تبقى (الحذف بـ[FileExtensionLoader.erase]). */
     private fun forget(pkg: String) {
         packages.remove(pkg)
-        loaded.keys.removeAll { it.startsWith("$pkg#") }
+        loaded.keys.removeAll { ownedBy(it, pkg) }
+        // SE2: إصدار جديد (تحديث، رجوع، حذف) = حقبة جديدة لكاش صفحاته؛ صورة «تحذير» قديمة بتوقيع صورة سليم لا تبقى
+        runCatching { cacheEpochs.edit().putLong(pkg, System.currentTimeMillis()).apply() }
     }
+
+    /** حقبة كاش صفحات الحزمة (0 = لم تُحدَّث منذ وُجد الكاش، فيبقى مفتاحه القديم صالحًا). */
+    private val cacheEpochs by lazy { context.getSharedPreferences("vantara_page_cache_epochs", android.content.Context.MODE_PRIVATE) }
+    private fun pageCacheKey(sourceId: String, url: String): String =
+        pageCacheKeyOf(cacheEpochs.getLong(splitSourceId(sourceId.substringBefore('#')).first, 0L), url)
 
     /** مالك كل معرّف مصدر محمَّل: حزمتان بمعرّف واحد تتشاركان تفضيلات `source_<id>` وكوكيزه. */
     private val owners = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -716,14 +920,16 @@ class ExtensionEnginePlugin : Plugin() {
     fun image(call: PluginCall) {
         scope.launch {
             try {
-                val source = obtain(requireSourceId(call))
+                val sourceId = requireSourceId(call)
+                val source = obtain(sourceId)
                 val asHttp = source as? HttpSource
                 val page = pageFrom(call.getObject("page"))
                 val url = page.imageUrl
                     ?: asHttp?.let { runCatching { it.getImageUrl(page) }.getOrNull() }
                     ?: throw PageImageException("page carries no imageUrl", noImageUrl = true)
 
-                val hit = withContext(Dispatchers.IO) { cacheHit(url) }
+                val cacheKey = pageCacheKey(sourceId, url)
+                val hit = withContext(Dispatchers.IO) { cacheHit(cacheKey) }
                 val file: java.io.File
                 val bytes: ByteArray
                 val type: String
@@ -753,7 +959,8 @@ class ExtensionEnginePlugin : Plugin() {
                             }
                         }
                     }
-                    bytes = fetched.first
+                    // IP1: HEIC لا يفكه WebView: يُحوَّل JPEG هنا (أندرويد 9+ يفكه)، وإلا سبب واضح لا صفحة فارغة
+                    bytes = if (ImagePayloadPolicy.sniffType(fetched.first) == "image/heic") heicToJpeg(fetched.first) else fetched.first
                     // حاجزٌ يفصل صورةً عن صفحة حجبٍ تُردّ بـ200: التوقيع هو الحكم (لا الحجم: صفحة فاصلة
                     // بيضاء PNG أقل من كيلوبايت صورة صحيحة، وكانت تُرفض فيفشل الفصل كله). يُفحص قبل الكاش
                     val verdict = ImagePayloadPolicy.validate(fetched.second, bytes)
@@ -762,7 +969,7 @@ class ExtensionEnginePlugin : Plugin() {
                     type = ImagePayloadPolicy.sniffType(bytes) ?: fetched.second?.substringBefore(';')?.trim()?.takeIf {
                         it.startsWith("image/")
                     } ?: typeForUrl(url)
-                    file = cacheFile(url, extensionForType(type))
+                    file = cacheFile(cacheKey, extensionForType(type))
                     // كتابة ذرّية: القارئ والترجمة المقدّمة قد يطلبان الصفحة نفسها معًا، وملفٌ
                     // نصف مكتوب كان يُقرأ «موجودًا» فتُحلَّل صفحة مبتورة. مؤقت ثم إعادة تسمية
                     // كاش الصفحات كان بلا سقف: كل صفحة قُرئت تبقى للأبد (جيجابايتات). يُسقَّف كل 150 صفحة جديدة
@@ -818,15 +1025,37 @@ class ExtensionEnginePlugin : Plugin() {
                 val sourceId = call.getString("sourceId")
                 val source = sourceId?.let { runCatching { obtain(it) }.getOrNull() } as? HttpSource
                 val client = source?.client ?: network.client
-                val request = Request.Builder().url(url).apply {
-                    runCatching { source?.headers }.getOrNull()?.let { headers(it) }
-                }.build()
-                val (bytes, contentType) = withContext(Dispatchers.IO) {
-                    client.newCall(request).execute().use { res ->
-                        require(res.isSuccessful) { "cover HTTP ${res.code}" }
-                        res.body.bytes() to res.header("content-type")
-                    }
+                val sourceHeaders = runCatching { source?.headers }.getOrNull()
+                // مصدر الغلاف غير مثبت أو رُفض الطلب: Referer من موقع الصورة قبل الاستسلام (CoverReferers)
+                var lastError: Throwable? = null
+                var fetched: Pair<ByteArray, String?>? = null
+                // سقف واحد للغلاف كله (callTimeout يلغي الطلب الجاري فعلًا، لا يتركه في الخلفية)
+                val deadline = System.currentTimeMillis() + CoverReferers.budget(call.getLong("budgetMs"))
+                for (attempt in CoverReferers.attempts(url, sourceHeaders != null)) {
+                    val left = deadline - System.currentTimeMillis()
+                    if (left <= 0) break
+                    val request = Request.Builder().url(url).apply {
+                        when (attempt) {
+                            CoverReferers.SOURCE_HEADERS -> sourceHeaders?.let { headers(it) }
+                            CoverReferers.NO_REFERER -> Unit
+                            else -> header("Referer", attempt)
+                        }
+                    }.build()
+                    var status: Int? = null
+                    val got = runCatching {
+                        withContext(Dispatchers.IO) {
+                            client.newCall(request).also { it.timeout().timeout(left, java.util.concurrent.TimeUnit.MILLISECONDS) }.execute().use { res ->
+                                status = res.code
+                                require(res.isSuccessful) { "cover HTTP ${res.code}" }
+                                res.body.bytes() to res.header("content-type")
+                            }
+                        }
+                    }.onFailure { lastError = it }.getOrNull()
+                    fetched = got?.takeIf { it.first.size > 256 && ImagePayloadPolicy.validate(it.second, it.first).accepted }
+                    if (fetched != null) break
+                    if (!CoverReferers.worthNextAttempt(status, gotNonImage = got != null)) break
                 }
+                val (bytes, contentType) = fetched ?: throw (lastError ?: IllegalStateException("cover not an image"))
                 require(bytes.size > 256) { "cover too small: ${bytes.size} bytes" }
                 val verdict = ImagePayloadPolicy.validate(contentType, bytes)
                 require(verdict.accepted) { "not an image: ${verdict.reason}" }
@@ -878,6 +1107,17 @@ class ExtensionEnginePlugin : Plugin() {
             }
             call.resolve(JSObject().put("freedBytes", freed))
         }
+    }
+
+    private fun heicToJpeg(heic: ByteArray): ByteArray {
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(heic, 0, heic.size)
+            ?: throw PageImageException("HEIC page image cannot be decoded on this Android version")
+        return try {
+            java.io.ByteArrayOutputStream().use { out ->
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
+                out.toByteArray()
+            }
+        } finally { bitmap.recycle() }
     }
 
     @Volatile private var pageWrites = 0
@@ -998,7 +1238,19 @@ class ExtensionEnginePlugin : Plugin() {
         if ('#' in sourceId) {
             val userPkg = sourceId.substringBefore('#')
             val sid = sourceId.substringAfter('#')
-            val ext = userStore.extension(userPkg) ?: error("unknown sourceId: $sourceId")
+            val ext = userStore.extension(userPkg)
+            if (ext == null) {
+                // قراءة الصيغتين (LegacySourceIds): pkg#id لحزمة مدمجة غير مثبّتة من مستودع يُحمَّل من المدمجة نفسها
+                if (builtinClosed(userPkg)) error(NOT_INSTALLED)
+                val base = packageSpec(userPkg) ?: error("unknown sourceId: $sourceId")
+                val spec = builtinSpecs.current(base)
+                spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
+                val all = packages[userPkg] ?: loadPackage(spec).also { packages[userPkg] = it }
+                val source = all.firstOrNull { it.id.toString() == sid } ?: error("${spec.label}: المصدر غير موجود في الحزمة")
+                loaded[sourceId] = source
+                noteHost(source)
+                return source
+            }
             val all = packages[userPkg] ?: loadPackage(ext.spec()).also { packages[userPkg] = it }
             // المعرّف المحفوظ في المكتبة قد يكون قديمًا: يُتبع جدول الترحيل إلى المصدر الحالي
             val current = userStore.extension(userPkg) ?: ext
@@ -1006,9 +1258,22 @@ class ExtensionEnginePlugin : Plugin() {
                 ?: all.firstOrNull { it.id.toString() == current.resolve(sid) }
                 ?: error("${ext.name}: المصدر غير موجود في الحزمة")
             loaded[sourceId] = source
+            noteHost(source)
             return source
         }
         val (pkg, lang) = splitSourceId(sourceId)
+        // قراءة الصيغتين (LegacySourceIds): الحزمة مثبّتة من مستودع ⇒ المعرّف القديم يعني مصدرها نفسه في الإضافة المثبّتة
+        userStore.extension(pkg)?.let { ext ->
+            val all = packages[pkg] ?: loadPackage(ext.spec()).also { packages[pkg] = it }
+            val sid = LegacySourceIds.sourceIdFor(sourceId, all.map { LegacySourceIds.Entry(it.id.toString(), it.lang) })
+                ?: error("${ext.name}: لا مصدر يطابق $sourceId في الحزمة")
+            val source = all.first { it.id.toString() == sid }
+            loaded[sourceId] = source
+            noteHost(source)
+            return source
+        }
+        // رُحّلت ثم حُذفت: لا تعود مدمجة
+        if (builtinClosed(pkg)) error(NOT_INSTALLED)
         // المواصفة المضمّنة، أو آخر إصدار رسمي نُزّل من مستودع Keiyoushi وتحقق توقيعه (معرّف المصدر نفسه)
         val spec = builtinSpecs.current(packageSpec(pkg) ?: error("unknown sourceId: $sourceId"))
         spec.blockedReason?.let { error("${spec.label}: محظور بالسياسة — $it") }
@@ -1027,7 +1292,13 @@ class ExtensionEnginePlugin : Plugin() {
                 ?: error("${spec.label}: لا مصدر بلغة $lang في الحزمة")
         }
         loaded[sourceId] = source
+        noteHost(source)
         return source
+    }
+
+    /** DNS1: مضيف المصدر يأخذ DoH أولًا كمصادر الأنمي (HostRouting.isSourceHost). */
+    private fun noteHost(source: CatalogueSource) {
+        eu.kanade.tachiyomi.network.HostRouting.noteSourceHost(runCatching { (source as? HttpSource)?.baseUrl }.getOrNull())
     }
 
     /**
@@ -1219,6 +1490,8 @@ class ExtensionEnginePlugin : Plugin() {
         android.util.Log.w("ExtensionEngine", "${verdict.code}:${verdict.owner} <- ${t.readable()}")
         // عطل من كود الإضافة أو عدم توافقها: إصدار رسمي أحدث قد يصلحه (الموقع تغيّر والإضافة المثبّتة قديمة)
         if (verdict.owner == ExtensionFailure.Owner.EXTENSION || verdict.code == "ENGINE_INCOMPATIBLE") refreshBuiltin(call.getString("sourceId"))
+        // EF1: إضافة من مستودع المستخدم والموقع تغيّر (صفحة اختفت، قراءة فشلت): فحص تحديث آمن فوري لها
+        runCatching { checkUpdateAfterFailure(call.getString("sourceId"), verdict.code) }
         call.reject(verdict.message, verdict.code, t as? Exception, JSObject().put("owner", verdict.owner.name.lowercase()))
     }
 
@@ -1271,7 +1544,7 @@ class ExtensionEnginePlugin : Plugin() {
         kotlinx.coroutines.delay(60_000)
         val index = runCatching { repoClient.read(BuiltinSourceRefresh.KEIYOUSHI_BASE) }.getOrNull() ?: return
         for (base in SPIKE_SOURCES + FILLER_PACKAGES) {
-            if (base.blockedReason != null || !eager(base.pkg) || userStore.extension(base.pkg) != null) continue
+            if (base.blockedReason != null || !eager(base.pkg) || userStore.extension(base.pkg) != null || builtinClosed(base.pkg)) continue
             runCatching { updateBuiltin(base, index) }
         }
         runCatching { stamp.parentFile?.mkdirs(); stamp.writeText(System.currentTimeMillis().toString()) }
@@ -1313,6 +1586,8 @@ class ExtensionEnginePlugin : Plugin() {
 
     private companion object {
         const val MAX_COVERS = 2000
+        /** مصدر حزمة رُحّلت ثم حُذفت: الواجهة تقول «ثبّته» لا خطأ مصدر. */
+        const val NOT_INSTALLED = "هذا المصدر غير مثبّت؛ ثبّته من صفحة الإضافات"
         val CACHE_EXTENSIONS = listOf("jpg", "webp", "png", "gif", "avif")
     }
 }

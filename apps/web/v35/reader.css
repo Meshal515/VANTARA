@@ -28,6 +28,7 @@
   /* ما فوقك يتحمّل ويكبر فلا تقفز الصفحة تحت إصبعك */
   overflow-anchor: auto;
 }
+.v35 .rd-scroll:focus { outline: none; } /* RD2: التركيز للوحة المفاتيح لا يرسم إطارًا */
 .v35 .rd-scroll::-webkit-scrollbar {
   display: none;
 }
@@ -332,6 +333,9 @@
 .v35 .rd-chapter-choice.is-current { background: var(--accent-soft); color: var(--accent-text); border-radius: 10px; }
 .v35 .rd-chapter-choice__number { font-weight: 650; flex: none; }
 .v35 .rd-chapter-choice__title { color: var(--text-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* RD4: الفصل المقروء في ورقة القارئ: رقمه خافت وعلامة صح، كصفحة العمل */
+.v35 .rd-chapter-choice.is-read .rd-chapter-choice__number { color: var(--text-3); }
+.v35 .rd-chapter-read { display: inline-flex; color: var(--text-3); margin-inline-start: 6px; flex: none; }
 .v35 .rd-titles strong {
   font-size: var(--fs-body);
   font-weight: 700;

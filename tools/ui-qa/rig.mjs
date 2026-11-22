@@ -17,6 +17,7 @@ const art = (w, h, fill, mark = '#ffffff') =>
   `<rect x="${w * 0.12}" y="${h * 0.78}" width="${w * 0.76}" height="${h * 0.06}" fill="${mark}" fill-opacity="0.35"/></svg>`;
 const IMAGES = {
   '/__art/cover.svg': art(460, 690, '#5b3a8f'),
+  '/__art/cover-07.svg': art(483, 690, '#5b3a8f'), // نسبة 0.7: غلاف حقيقي ليس 2:3 تمامًا (cold-gate)
   '/__art/banner.svg': art(1900, 600, '#2a3550'),
   '/__art/wide.svg': art(1920, 1080, '#3a2a2a'),
   '/__art/still.svg': art(640, 360, '#24463a'),
@@ -39,7 +40,7 @@ async function __realLoadWork(`;
 
 const ep = (n, o) => ({ title: `Episode ${n} - Story ${n}`, thumbnail: `${o}/__art/still.svg`, url: null, site: 'x' });
 /** ردّ AniList ثابت لأي استعلام: عمل واحد بمعرّف الطلب، ولصفحات القوائم 12 عملًا. */
-function anilistFixture(body, o) {
+export function anilistFixture(body, o) {
   let vars = {};
   let query = '';
   try { const j = JSON.parse(body ?? '{}'); vars = j.variables ?? {}; query = j.query ?? ''; } catch { /* */ }

@@ -498,12 +498,16 @@ export function renderSourceMode({
             if (!official && addon.sourceId && (addon.bundled || addon.protocol === "native") && (addon.contentTypes ?? []).includes("manga")) {
               // Same source client, cookies, headers and persistent cover cache as the library.
               // A failed native request must stay in that pipeline (including verification).
-              void nativeCover(url, addon.sourceId).then(local => {
-                if (closed || !root.contains(art)) return;
-                if (!local) return imageFailed();
-                img.src = local;
-                art.append(img);
-              });
+              // غلاف فشل في الدفعة الأولى (مهلة ست ثوانٍ وشبكة كاملة تُطلب معًا) يُعاد مرة بصبر قبل «—»: كان يبقى
+              // فارغًا للأبد في صفحة المصدر وهو يظهر في Mihon (بلاغ المالك: أغلفة أغلب إضافات المانجا فارغة)
+              void nativeCover(url, addon.sourceId)
+                .then((local) => local || (closed || !root.contains(art) ? null : nativeCover(url, addon.sourceId, { patient: true })))
+                .then(local => {
+                  if (closed || !root.contains(art)) return;
+                  if (!local) return imageFailed();
+                  img.src = local;
+                  art.append(img);
+                });
             } else {
               img.src = url;
               art.append(img);
@@ -533,7 +537,7 @@ export function renderSourceMode({
             art.replaceChildren();
             adopt(identity);
           };
-          void resolveSourceIdentity(work, addon).then(settle);
+          void resolveSourceIdentity(work, addon).then(settle, () => settle(null));
           setTimeout(() => settle(null), 3000);
         }
         card.append(art, title);

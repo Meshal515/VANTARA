@@ -58,6 +58,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 class CloudflareInterceptor(
     private val context: Context,
@@ -77,7 +79,7 @@ class CloudflareInterceptor(
     fun silentClearance(url: String, userAgent: String): String? {
         val target = url.toHttpUrlOrNull() ?: return null
         val request = Request.Builder().url(target).header("User-Agent", userAgent).build()
-        val outcome = synchronized(solveLock) { solveClearance(request) }
+        val outcome = solveLock.withLock { solveClearance(request) }
         if (outcome != SolveOutcome.SOLVED) return null
         return cookieManager.get(target).firstOrNull { it.name == "cf_clearance" }?.value
     }
@@ -88,9 +90,12 @@ class CloudflareInterceptor(
     // visible challenge through CloudflareInteractionMode.
 
     /** Serializes WebView work and remembers what we've learned per host. */
-    private val solveLock = Any()
+    private val solveLock = ReentrantLock()
     private var lastSolvedHost: String? = null
     private var lastSolvedAt = 0L
+
+    /** آخر حل صامت فشل لكل مضيف أمام تحدٍّ يطلب إنسانًا (CFI1): لا يُعاد قبل SILENT_RETRY_MS. */
+    private val silentFailedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** فحص الخلفية لا يعيد فتح تحدّي تفاعلي لنفس المضيف مع كل سيرفر. */
     private val passiveChallengeUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -107,15 +112,13 @@ class CloudflareInterceptor(
         }
 
         Log.i(TAG, "Cloudflare challenge detected for ${request.url.host}")
-        // A background request may report a challenge, never start a human UI.
-        // The coordinator opens its isolated browser only after an explicit tap.
         if (classifyCloudflareRequest(response.code, response.header("Server"), response.header("cf-mitigated"), request.isImageRequest()) == CloudflareRequestKind.HUMAN_CHALLENGE) {
             response.close()
-            throw interactiveError(request)
+            return humanChallenge(chain, request)
         }
         response.close()
 
-        synchronized(solveLock) {
+        solveLock.withLock {
             val host = request.url.host
 
             // A concurrent/earlier solve may have already cleared this host.
@@ -169,6 +172,61 @@ class CloudflareInterceptor(
                 return fetched
             }
             throw cloudflareError(request)
+        }
+    }
+
+    /**
+     * CFI1 بلا تعليق (تراجع Debug 0.0.3192، 16 نوفمبر): التحدي الذي يطلب إنسانًا يُجرَّب له الحل الصامت **مرة واحدة
+     * لكل مضيف** في SILENT_RETRY_MS، ولا يُجرَّب لصورة ولا وراء حل جارٍ. كان كل طلب كهذا (والأغلفة منها) يدخل
+     * القفل العام وينشئ WebView مخفيًا على الخيط الرئيسي حتى 20 ثانية، و«جُرِّب مؤخرًا» يتذكر آخر مضيف وحده،
+     * فأغلفة «آخر التحديثات» من مواقع محمية عدّة كانت تعيد الحل مع كل طلب: تعليق في السكرول، وطابور يؤخر كل
+     * طلب بعده، وأغلفة تنتهي مهلتها فتظهر حروفًا. ما لا يُجرَّب يُرفض فورًا «تحتاج تحقق» كما قبل CFI1.
+     */
+    private fun humanChallenge(chain: Interceptor.Chain, request: Request): Response {
+        val host = request.url.host
+        // حلقة «تحتاج تحقق» بعد النجاح (بلاغ المالك 22 نوفمبر). سببان: (1) حل صامت فشل قبل التحقق كان يرفض كل طلب
+        // للمضيف عشر دقائق دون أن ينظر هل تحقق المستخدم بعده، فيُطلب التحقق مرة ثانية وثالثة. (2) مضيف يرفض OkHttp
+        // ببصمة الاتصال ولو حمل الكوكي، فيُطلب إنسان من جديد. الآن: كوكي المضيف (تحقق ناجح) يُجرَّب أولًا قبل أي رفض،
+        // وإن بقي OkHttp مرفوضًا جُلب الطلب عبر محرك المتصفح الذي نجح فيه التحقق. لا تحقق جديد إلا إن فشل هذا أيضًا
+        // (الكوكي انتهى فعلًا).
+        if (humanChallengeFirstStep(hasClearance(request.url), request.isImageRequest(), silentFailedAt[host], System.currentTimeMillis()) == HumanChallengeStep.RETRY_WITH_CLEARANCE) {
+            val retry = chain.proceed(request)
+            if (!retry.isChallenge()) {
+                silentFailedAt.remove(host)
+                return retry
+            }
+            retry.close()
+            byteFetchResponse(request)?.let {
+                byteFetchHosts.add(host)
+                silentFailedAt.remove(host)
+                return it
+            }
+        }
+        if (!silentSolveAllowed(request.isImageRequest(), silentFailedAt[host], System.currentTimeMillis())) {
+            throw interactiveError(request)
+        }
+        // لا طابور خلف حل جارٍ: طلب ينتظر إنسانًا لا يحجز بقية الشبكة
+        if (!solveLock.tryLock()) throw interactiveError(request)
+        try {
+            if (hasClearance(request.url)) {
+                val retry = chain.proceed(request)
+                if (!retry.isChallenge()) return retry
+                retry.close()
+            }
+            val outcome = solveClearance(request)
+            if (outcome == SolveOutcome.SOLVED) {
+                val retry = chain.proceed(request)
+                if (!retry.isChallenge()) {
+                    silentFailedAt.remove(host)
+                    return retry
+                }
+                retry.close()
+            }
+            silentFailedAt[host] = System.currentTimeMillis()
+            if (outcome == SolveOutcome.RENDERER_GONE) throw rendererGoneError(request)
+            throw interactiveError(request)
+        } finally {
+            solveLock.unlock()
         }
     }
 

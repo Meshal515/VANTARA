@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = 'b510710cb0e3c8b30fe1591d0eb8c012ea26cde62cd9e358468bdb486cdca71f';
+const SHELL_DIGEST = '877741baff4e9d2d94b1c50590fcfd7efdc72e98857efd70a6c3f66de59c4b50';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -132,10 +132,14 @@ const SHELL = [
   '/lib/chapter-access.js',
   '/lib/manga-aliases.js',
   '/lib/manga-alias-store.js',
+  '/lib/work-identity.js',
+  '/lib/work-evidence.js',
   '/lib/manga-cover.js',
   '/lib/unified-identity.js',
   '/lib/manga-twins.js',
   '/lib/adult-filter.js',
+  '/lib/source-policy.js',
+  '/lib/manga-verdict.js',
   '/lib/removed-works.js',
   '/lib/manga-evidence.js',
   '/data/manga-aliases.json',
@@ -269,6 +273,9 @@ const SHELL = [
   '/v35/unified-look.css',
   '/v35/desktop-browse.css',
   '/v35/desktop-work.css',
+  '/v35/glass.css',
+  '/v35/glass.js',
+  '/v35/glass-lens.js',
   '/v35/unified-view.js',
   '/v35/unified-library.css',
   '/v35/unified-library.js',
@@ -322,6 +329,11 @@ const SHELL = [
   '/lib/source-states.js',
   '/lib/update-engine.js',
   '/lib/follow-time.js',
+  '/lib/watch-position.js',
+  '/lib/storage-relief.js',
+  '/lib/extensions-transfer.js',
+  '/lib/extension-sync.js',
+  '/lib/backup.js',
   '/lib/release.js',
   '/lib/capabilities.js',
   '/lib/migrations.js',
@@ -424,7 +436,7 @@ self.addEventListener('fetch', (event) => {
   // كل ما هو مصادَق عليه يمر إلى الشبكة ولا يُلمس
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/health')) return;
 
-  // صور المصادر في الـPWA: من الكاش أولًا، وإلا عبر جالب الويب ثم تُحفظ
+  // صور المصادر في الـPWA: من الكاش أولًا، وإلا مباشرة من المصدر، والجالب احتياطي فقط
   if (url.pathname === '/__img') {
     event.respondWith(sourceImage(url));
     return;
@@ -484,7 +496,7 @@ self.addEventListener('fetch', (event) => {
 //
 // الواجهة تضع `<img src="/__img?u=…&r=…">` (pwa/cache/images.js). هنا:
 //   - موجودة في كاش الصور ⇒ تُرد فورًا، بلا شبكة (وتعمل دون اتصال).
-//   - غير موجودة ⇒ تُجلب من جالب الويب بالإذن المحفوظ، وتُحفظ إن كانت صورة.
+//   - غير موجودة ⇒ مباشرة من المصدر إن ثبت طريق مضيفها، وإلا عبر الجالب (انظر «الجلب المباشر أولًا»).
 //   - الكاش محدود: أكثر من MAX_IMAGES أو تجاوز نصف حصة الموقع ⇒ يُحذف الأقل استعمالًا.
 // المفتاح رابط الصورة الأصلي وحده (بلا الإذن ولا المرجع)، فتجديد الإذن لا يفرغه.
 
@@ -513,35 +525,163 @@ async function sourceImage(url) {
     if (Date.now() - (Number(hit.headers.get(USED_HEADER)) || 0) > TOUCH_MS) void touchImage(cache, key, hit.clone());
     return hit;
   }
+  if (!/^https?:\/\//.test(source)) return new Response(null, { status: 503 });
 
   const config = await pwaConfig();
-  if (!config?.fetchBase || !config?.grant || !/^https?:\/\//.test(source)) return new Response(null, { status: 503 });
+  const referer = url.searchParams.get('r');
+  const host = new URL(source).host;
+  const edge = () => edgeImage(source, referer, config);
+
+  // طريق المضيف: مباشر أولًا ما دام مثبتًا، والجالب احتياطي فقط
+  const routes = await imageRoutes();
+  let route = routes.get(host);
+  if (!route || (route.via === 'edge' && Date.now() - route.at > EDGE_RETRY_MS)) {
+    const pending = probes.get(host);
+    if (pending) route = await pending; // طلبات المضيف نفسه تنتظر قرارًا واحدًا لا تكرره
+    else {
+      const probe = proveDirect(source, edge);
+      probes.set(host, probe.then(({ via }) => routes.get(host) ?? { via }));
+      try {
+        const out = await probe;
+        if (out.via) await setRoute(host, out.via);
+        if (out.image) return store(cache, key, out.image);
+        return out.raw ?? new Response(null, { status: 504 });
+      } finally {
+        probes.delete(host);
+      }
+    }
+  }
+
+  if (route?.via === 'direct') {
+    const direct = await directImage(source);
+    if (direct) return store(cache, key, direct);
+    // المباشر سقط لهذا المضيف: الجالب، ويُخفض المضيف إن نجح الجالب وحده (بلا اتصال يسقط الاثنان فلا يتغير شيء)
+    const out = await edge();
+    if (out.image) {
+      await setRoute(host, 'edge');
+      return store(cache, key, out.image);
+    }
+    return out.raw ?? new Response(null, { status: 504 });
+  }
+  const out = await edge();
+  return out.image ? store(cache, key, out.image) : (out.raw ?? new Response(null, { status: 504 }));
+}
+
+// ───── الجلب المباشر أولًا (المرحلة الثالثة، 16 نوفمبر) ─────
+//
+// كانت كل صورة مانجا في الويب تمر بالجالب (Cloudflare Worker). الآن لكل مضيف صور طريق محفوظ:
+//   - أول صورة من مضيف مجهول تُجلب مباشرة **وعبر الجالب معًا**، ويُعتمد المباشر فقط إن أعاد البايتات
+//     نفسها. مضيف يحمي صوره يعيد للمتصفح صورة بديلة سليمة الترويسة (hotlink placeholder)، فنجاح
+//     الاستجابة وحده ليس دليلًا. والمستخدم يرى صورة الجالب في هذه المرة، فلا يرى بديلًا خاطئًا أبدًا.
+//   - المضيف المثبت مباشرًا يُجلب مباشرة وحده. ويسقط إلى الجالب إن فشل وينخفض طريقه.
+//   - المضيف الذي يرفض (CORS أو 403 أو بايتات مختلفة) يبقى على الجالب، ويُعاد اختباره بعد EDGE_RETRY_MS.
+//   - الطريق محفوظ في كاش الإعداد، فلا تتكرر المحاولة مع كل صفحة ولا بعد إعادة فتح التطبيق.
+// الصورة «تُعرض فعلًا» = نوعها image/ وحجمها غير صفر، وتُفك فعلًا (createImageBitmap) حيث يتاح ذلك.
+
+const ROUTES_KEY = '/__pwa/img-routes';
+const EDGE_RETRY_MS = 3 * 86_400_000;
+const DIRECT_TIMEOUT_MS = 8000;
+const probes = new Map();
+let routeMap = null;
+
+async function imageRoutes() {
+  if (routeMap) return routeMap;
+  routeMap = new Map();
+  try {
+    const hit = await (await caches.open(PWA_CONFIG_CACHE)).match(ROUTES_KEY);
+    const saved = hit ? await hit.json() : null;
+    for (const [host, route] of Object.entries(saved ?? {})) {
+      if ((route?.via === 'direct' || route?.via === 'edge') && Number.isFinite(route.at)) routeMap.set(host, route);
+    }
+  } catch {
+    // كاش تالف أو محجوب: نبدأ من جديد، والجالب يبقى يعمل
+  }
+  return routeMap;
+}
+
+async function setRoute(host, via) {
+  const routes = await imageRoutes();
+  if (routes.get(host)?.via === via && via === 'direct') return;
+  routes.set(host, { via, at: Date.now() });
+  try {
+    await (await caches.open(PWA_CONFIG_CACHE)).put(ROUTES_KEY, new Response(JSON.stringify(Object.fromEntries(routes)), { headers: { 'content-type': 'application/json' } }));
+  } catch {
+    // يبقى في الذاكرة لهذه الجلسة
+  }
+}
+
+async function readImage(response) {
+  const type = response?.headers.get('content-type') ?? '';
+  if (!response?.ok || !type.startsWith('image/')) return null;
+  const blob = await response.blob();
+  if (!blob.size) return null;
+  if (typeof self.createImageBitmap === 'function') {
+    try {
+      (await self.createImageBitmap(blob)).close?.();
+    } catch {
+      return null; // بايتات لا تُفك: ليست صورة تُعرض
+    }
+  }
+  return { blob, type };
+}
+
+async function directImage(source) {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), DIRECT_TIMEOUT_MS);
+  try {
+    return await readImage(await fetch(source, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', signal: abort.signal }));
+  } catch {
+    return null; // CORS أو شبكة أو مهلة: لا مباشر لهذه الصورة
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function edgeImage(source, referer, config) {
+  if (!config?.fetchBase || !config?.grant) return { image: null, raw: new Response(null, { status: 503 }) };
   const remote = new URL('/v1/media', config.fetchBase);
   remote.searchParams.set('u', source);
-  const referer = url.searchParams.get('r');
   if (referer) remote.searchParams.set('r', referer);
   remote.searchParams.set('g', config.grant);
-
   let response;
   try {
     response = await fetch(remote.toString(), { mode: 'cors', credentials: 'omit' });
   } catch {
-    return new Response(null, { status: 504 });
+    return { image: null, raw: new Response(null, { status: 504 }) };
   }
-  const type = response.headers.get('content-type') ?? '';
-  if (response.ok && type.startsWith('image/')) {
-    const body = await response.blob();
-    const stored = new Response(body, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000', [USED_HEADER]: String(Date.now()) } });
-    try {
-      await cache.put(key, stored.clone());
-    } catch {
-      // القرص ممتلئ: نكنس بقوة، والصورة تُعرض على كل حال
-      lastTrim = 0;
-    }
-    void trimImages();
-    return stored;
+  const image = await readImage(response.clone()).catch(() => null);
+  return { image, raw: image ? null : response };
+}
+
+async function sameBytes(a, b) {
+  if (a.size !== b.size) return false;
+  const [x, y] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
+  const u = new Uint8Array(x), v = new Uint8Array(y);
+  for (let i = 0; i < u.length; i++) if (u[i] !== v[i]) return false;
+  return true;
+}
+
+/** أول صورة من مضيف: المباشر والجالب معًا، ويُعتمد المباشر إن طابق الجالب بايتًا ببايت. */
+async function proveDirect(source, edge) {
+  const [direct, viaEdge] = await Promise.all([directImage(source), edge()]);
+  if (!viaEdge.image) {
+    // الجالب غير متاح (بلا إذن أو ساقط): الصورة المباشرة تُعرض، ولا يُحفظ طريق لم يُثبت
+    return direct ? { image: direct, via: null } : { image: null, raw: viaEdge.raw, via: null };
   }
-  return response;
+  const proven = Boolean(direct) && (await sameBytes(direct.blob, viaEdge.image.blob));
+  return { image: viaEdge.image, via: proven ? 'direct' : 'edge' };
+}
+
+async function store(cache, key, { blob, type }) {
+  const stored = new Response(blob, { status: 200, headers: { 'content-type': type, 'cache-control': 'max-age=31536000', [USED_HEADER]: String(Date.now()) } });
+  try {
+    await cache.put(key, stored.clone());
+  } catch {
+    // القرص ممتلئ: نكنس بقوة، والصورة تُعرض على كل حال
+    lastTrim = 0;
+  }
+  void trimImages();
+  return stored;
 }
 
 const USED_HEADER = 'x-vantara-used';

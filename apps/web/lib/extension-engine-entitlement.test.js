@@ -58,6 +58,23 @@ it('حساب جديد: لا مصادر مدمجة، ولا يصل طلبها إ�
   expect(plugin.prepare).not.toHaveBeenCalled();
 });
 
+it('يمرّر معرّف مانجا ليك ومعرّف الإضافة المثبّتة كما هما إلى عمليات المحرّك', async () => {
+  await load(EXISTING);
+  const mangalek = 'eu.kanade.tachiyomi.extension.ar.mangalek';
+  const million = 'eu.kanade.tachiyomi.extension.all.mangamillion#8929911308540155494';
+  plugin.sources.mockResolvedValue({ sources: [{ id: mangalek, lang: 'ar' }, { id: million, lang: 'all', user: true, filler: true }] });
+  plugin.latest = vi.fn(async () => ({ mangas: [], hasNextPage: false }));
+  expect((await engine.sources()).map((source) => source.id)).toEqual([mangalek, million]);
+  for (const id of [mangalek, million]) {
+    await engine.prepare(id);
+    await engine.latest(id);
+    await engine.search(id, 'Spy x Family');
+    expect(plugin.prepare).toHaveBeenLastCalledWith({ sourceId: id });
+    expect(plugin.latest).toHaveBeenLastCalledWith({ sourceId: id, page: 1 });
+    expect(plugin.search).toHaveBeenLastCalledWith({ sourceId: id, query: 'Spy x Family', page: 1 });
+  }
+});
+
 it('«مصادر جاهزة»: الإضافة تُظهر المصدر بمعرّفه القديم، والإزالة تخفيه دون تثبيت أو حذف ملفات', async () => {
   await load(NEW);
   const ready = engine.readySources();

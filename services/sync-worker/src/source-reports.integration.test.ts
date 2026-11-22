@@ -24,6 +24,17 @@ describe('source reports', () => {
     expect(rows.find((r) => r.outcome === 'ok')).toMatchObject({ count: 3, ms_sum: 2700, reason: '' });
   });
 
+  it('accepts installed repository extensions (pkg#id from older apps, pkg.id from current ones)', async () => {
+    const e = env();
+    const ev = { section: 'manga', stage: 'cover', outcome: 'timeout', reason: 'timeout', ms: 6000 };
+    await handleSourceReportPost(post({ platform: 'apk', appVersion: '0.0.99', events: [
+      { ...ev, sourceId: 'eu.kanade.tachiyomi.extension.all.mangamillion#8929911308540155494' },
+      { ...ev, sourceId: 'eu.kanade.tachiyomi.extension.ar.hizomanga.77' },
+    ] }), e, NOW);
+    const { rows } = await get(e);
+    expect(rows.map((r) => r.source_id).sort()).toEqual(['eu.kanade.tachiyomi.extension.all.mangamillion#8929911308540155494', 'eu.kanade.tachiyomi.extension.ar.hizomanga.77']);
+  });
+
   it('rejects anything outside the contract and strips urls/ids from reasons', async () => {
     const e = env();
     const out = await (await handleSourceReportPost(post({ platform: 'apk', events: [

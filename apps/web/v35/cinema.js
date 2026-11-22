@@ -1,3 +1,4 @@
+import { localCinemaResume } from '../lib/downloads/model.js';
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 /**
  * VANTARA CINEMA — أفلام ومسلسلات عالمية مترجمة.
@@ -16,6 +17,8 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  */
 
 import { nativeFollowTime, flushFollowTime } from '../lib/follow-time.js';
+import { isDurableArtUrl } from '../lib/art.js';
+import { cinemaPositionKey, createPositionSync, overlayAllPositions } from '../lib/watch-position.js';
 import { isNative } from '../pwa/platform.js';
 import { addonName, createServerSheet } from './server-sheet.js';
 import { isChecking, isUnavailable, isValid, validity } from '../lib/route-validity.js';
@@ -24,7 +27,7 @@ import { glyph, iconButton } from './icons.js';
 import { pop, progressFill, reduced, revealIn, stripIn } from './motion.js';
 import * as engine from '../lib/anime-engine.js';
 import { GENRES_AR, TYPE_AR, castKey, castPhotos, catalog, displayTitle, resolveWork, search as searchMeta } from '../lib/cinema-meta.js';
-import { isRemovedAny } from '../lib/removed-works.js';
+import { isRemovedAny, tagWork } from '../lib/removed-works.js';
 import { explainCopies, namesScore, pickCopies, queriesFor, readTitle } from '../lib/cinema-match.js';
 import { REJECT_AR, STATE, STATE_AR, playState, routeFailureMessage, searchState } from '../lib/source-states.js';
 import { reportSource } from '../lib/source-report.js';
@@ -210,13 +213,23 @@ export function createCinema(deps) {
 
   // ───────────── التخزين المحلي ─────────────
 
-  const watchAll = () => readJson(userKey('watch', currentUser()), {});
+  // سجل الجهاز، وفوقه موضع التوقف الأحدث من أجهزتك الأخرى (ANX1). الكتابة دائمًا في سجل الجهاز نفسه.
+  const watchAll = () => overlayAllPositions(readJson(userKey('watch', currentUser()), {}), deps.sync, 'cinema');
+  const positions = createPositionSync(deps.sync);
+  const positionClock = new Map();
   // خلفية صفحة العمل التي ظهرت فعلًا لكل عمل: الفتح التالي يرسمها من أول إطار (لا ملصق ثم خلفية)
   const HERO_PICK_KEY = 'vantara.cinema.heroPick.v1';
+  // يُحفظ رابط ويب حقيقي فقط، ويُتجاهل عند القراءة ما سواه (رابط blob: من عمل محمّل كان يُحفظ فيموت بإغلاق التطبيق)
   const heroPick = {
-    get: (id) => readJson(HERO_PICK_KEY, {})[id] ?? null,
+    get: (id) => { const src = readJson(HERO_PICK_KEY, {})[id] ?? null; return isDurableArtUrl(src) ? src : null; },
+    drop(id) {
+      const all = readJson(HERO_PICK_KEY, {});
+      if (!(id in all)) return;
+      delete all[id];
+      writeJson(HERO_PICK_KEY, all);
+    },
     set(id, src) {
-      if (!id || !src) return;
+      if (!id || !isDurableArtUrl(src)) return;
       const all = readJson(HERO_PICK_KEY, {});
       if (all[id] === src) return;
       all[id] = src;
@@ -229,10 +242,12 @@ export function createCinema(deps) {
     const all = watchAll();
     const w = all[m.id] ?? { ...slim(m), episodes: {} };
     Object.assign(w, slim(m));
+    delete w._remoteOnly; // شُغّل هنا فعلًا: سجل جهاز كامل
     const ep = `${season ?? 0}:${n}`;
     const was = Boolean(w.episodes[ep]?.done);
     const done = was || (duration > 0 && position / duration >= 0.9);
-    w.episodes[ep] = { ...w.episodes[ep], position, duration, done };
+    // `at` لكل حلقة: وقت القياس هنا، فيُقارن بموضع الحساب (الأحدث يفوز، ANX1)
+    w.episodes[ep] = { ...w.episodes[ep], position, duration, done, at: Date.now() };
     // اكتمال التشغيل علامة «شوهدت» في الحساب أيضًا (تتغلّب على إلغاء قديم من جهاز آخر)
     if (done && !was) markAccount(m, [[season ?? 0, n]], true);
     w.season = season;
@@ -375,6 +390,7 @@ export function createCinema(deps) {
       const resume = Boolean(e && !e.done && e.position > 5000);
       return { season: null, episode: 1, position: resume ? e.position : 0, resume, record: e ?? null };
     }
+    if (state.local?.ref === refOf(m.id)) return localCinemaResume(m.seasons ?? [], state.season, w);
     const first = m.seasons?.find((s) => s.n !== 0);
     if (!w?.episode) return { season: first?.n ?? 1, episode: first?.episodes[0]?.n ?? 1, position: 0, resume: false, record: null };
     const e = w.episodes?.[`${w.season}:${w.episode}`];
@@ -573,7 +589,7 @@ export function createCinema(deps) {
 
   /** ملصق: الصورة نظيفة بلا شارات فوقها، والمعلومة تحتها. */
   function posterCard(m) {
-    const c = el('button', 'cn-poster');
+    const c = tagWork(el('button', 'cn-poster'), refOf(m.id));
     c.type = 'button';
     c.setAttribute('aria-label', displayTitle(m));
     const art = el('span', 'cn-poster-art');
@@ -591,6 +607,7 @@ export function createCinema(deps) {
     const ratio = e.duration ? Math.min(1, e.position / e.duration) : 0;
     const c = asButton(el('div', 'cn-wide'), displayTitle(w));
     c.dataset.ref = refOf(w.id);
+    tagWork(c, refOf(w.id));
     const art = el('span', 'cn-wide-art');
     // البطاقة عريضة: الخلفية العريضة دائمًا، لا الملصق الطولي مضغوطًا (ملاحظة المالك). الأعمال الآتية من الحساب
     // بلا خلفية محفوظة تأخذ خلفية IMDb الرسمية بمعرّفها، والملصق آخر بديل
@@ -1578,7 +1595,7 @@ export function createCinema(deps) {
     // محذوف من التطبيق: لا يُفتح (ولا من رابط أو سجل قديم)، بلا ذكر لسبب
     if (removed(m)) { toast('هذا العمل غير متاح'); return; }
     // نوع مؤكد سابقًا (resolveWork) يغلب نوع البطاقة: بطاقة «أكمل المشاهدة» حُفظت أحيانًا بنوع رد خاطئ
-    if (types[m.id] && types[m.id] !== m.type) m = { ...m, type: types[m.id] };
+    if (!local && types[m.id] && types[m.id] !== m.type) m = { ...m, type: types[m.id] };
     const token = ++state.token;
     // «على الجهاز»: الصفحة نفسها ببياناتها المحفوظة ومواسم/حلقات المحمّل وحده، والتشغيل من الملف
     state.local = local;
@@ -1745,7 +1762,7 @@ export function createCinema(deps) {
       const found = h.pinned ? await h.first : await engine.firstAvailableCopies(h.first, engine.withAddonCopies([], identityFor(season, 1)));
       return { copies: found.copies ?? [], pinned: Boolean(h.pinned) };
     };
-    const firstSeason = movie ? undefined : point?.season ?? seasons[0]?.n;
+    const firstSeason = movie ? undefined : state.season ?? point?.season ?? seasons[0]?.n;
     dl.open({
       section: 'cinema',
       kind: movie ? 'movie' : 'episode',
@@ -1754,7 +1771,7 @@ export function createCinema(deps) {
       units,
       seasons: movie ? undefined : seasons.map((s) => ({ n: s.n, label: `الموسم ${s.n}` })),
       season: firstSeason,
-      current: movie ? 'movie' : `s${point?.season ?? firstSeason}e${point?.episode ?? 1}`,
+      current: movie ? 'movie' : `s${firstSeason}e${point && point.season === firstSeason ? point.episode : 1}`,
       sources: async () => (await copiesFor(firstSeason)).copies.map((c) => ({ id: c.sourceId, name: c.sourceId.startsWith('addon|') ? addonName(c.sourceId) : SOURCE_NAMES[c.sourceId] ?? c.sourceName ?? c.sourceId })),
       build: async (list, choice) => {
         const bySeason = new Map();
@@ -1936,7 +1953,9 @@ export function createCinema(deps) {
     } else if (want) {
       backdrop = unified
         ? image(want, 'cn-img', { eager: true, fallback: [m.poster && m.poster.replace(/(metahub\.space\/poster)\/small\//, '$1/medium/'), m.poster].filter((u) => u && u !== want) })
-        : image(want, 'cn-img', { eager: true, hero: !remembered });
+        : image(want, 'cn-img', { eager: true, hero: !remembered, ...(remembered ? { fallback: [m.background, m.poster].filter((u) => u && u !== want) } : {}) });
+      // الخلفية المحفوظة لم تُحمَّل (رابط مات): تُنسى، والبدائل أعلاه (خلفية العمل ثم ملصقه) تظهر مكانها
+      if (remembered && !unified) backdrop.addEventListener('error', () => heroPick.drop(m.id), { once: true });
       backdrop.dataset.want = want;
       backdrop.addEventListener('load', () => {
         if (!unified && (!partial || remembered)) heroPick.set(m.id, backdrop.currentSrc || backdrop.src);
@@ -2073,7 +2092,7 @@ export function createCinema(deps) {
       hostOf: (h) => h?.closest('.cn-detail'), spanOf: () => (unified ? art.offsetHeight || 300 : Math.max(1, art.offsetHeight - bar.offsetHeight)),
       active: () => deps.currentPage() === 'cinema' && state.detail?.id === m.id,
     });
-    if (!partial) {
+    if (!partial && state.local?.ref !== refOf(m.id)) {
       startWarm(m);
       void paintSources(m, m.type === 'series' ? state.season : null);
       void arabize(m, m.type === 'series' ? state.season : null);
@@ -2352,7 +2371,8 @@ export function createCinema(deps) {
         resume: position > 5000 ? `تكمل من ${engine.clock(position)}` : null,
       };
       const extraFoot = [];
-      if (hub && !hub.matches(togetherRef, togetherEp)) {
+      // داخل أي غرفة: لا «شاهد مع أصدقائك» ثانية (كانت تنشئ غرفة جديدة وتخرجك من الأولى بصمت، TG18)
+      if (hub && !hub.session) {
         const withFriends = button('an-pick-together', `${glyph('users', { size: 20 })}<span>شاهد مع أصدقائك</span>`, () => {
           hub.openInvite({
             kind: 'cinema',
@@ -2600,6 +2620,14 @@ export function createCinema(deps) {
   engine.on('playback', (p) => {
     const cur = state.playing;
     if (!cur || String(p.animeId ?? '') !== cur.key || cur.userId !== currentUser()) return;
+    // ANX1: زمن التشغيل الفعلي لهذه الحلقة في الجلسة؛ الرفع لا يبدأ قبل 30 ث منه
+    {
+      const ep = cur.m.type === 'series' && Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
+      const key = cinemaPositionKey(cur.m.id, cur.m.type === 'series' ? cur.season : 0, ep);
+      const last = positionClock.get(key);
+      if (Number.isFinite(p.position) && last != null) positions.played(key, p.position - last);
+      if (Number.isFinite(p.position)) positionClock.set(key, p.position);
+    }
     if (!nativeFollowTime() && Number.isFinite(p.position)) {
       const now = Date.now();
       const d = clock.pos === null ? 0 : p.position - clock.pos;
@@ -2612,6 +2640,9 @@ export function createCinema(deps) {
     const n = cur.m.type === 'series' && Number.isFinite(p.episode) && p.episode > 0 ? p.episode : cur.n;
     if (p.duration > 0) {
       recordWatch(cur.m, cur.m.type === 'series' ? cur.season : 0, n, p.position, p.duration);
+      // الرقم وحده إلى حسابك: الجهاز الآخر يكمل من الدقيقة نفسها (ANX1)
+      positions.record(`cinema:${cur.m.id}`, cinemaPositionKey(cur.m.id, cur.m.type === 'series' ? cur.season : 0, n), p.position, p.duration, { final: Boolean(p.final) });
+      if (p.final) { positions.end(cinemaPositionKey(cur.m.id, cur.m.type === 'series' ? cur.season : 0, n)); positionClock.clear(); }
       // «أنهى S02E03» / «أنهى فيلم» للأصدقاء (حسب خصوصيتك في الخادم)، مرة لكل حلقة
       const ratio = p.watchedRatio ?? (nativeFollowTime() ? 0 : p.position / p.duration);
       if (ratio >= 0.9) completeOnce(cur.m, cur.m.type === 'series' ? cur.season : null, n);

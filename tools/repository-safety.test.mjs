@@ -1220,30 +1220,15 @@ test('the reader app runs the exact engine the spike proved on device', () => {
   assert.doesNotMatch(explore, /engine\.popular\(/);
 });
 
-test('every source extension ships inside the app and matches its pinned hash', () => {
-  // keiyoushi يحذف إصداراته القديمة مع كل بناء للفهرس: التنزيل وحده أسقط
-  // المصادر الستة عشر كلها (HTTP 404). فكل إضافة مضمّنة في التطبيق، وبصمتها
-  // هي نفسها المثبّتة في GeneratedSources.kt — لا نسخة قديمة تبقى بلا أن يُعرف.
+test('every former built-in keeps its pinned identity and loads without a bundled copy', () => {
+  // فصل Stable بأمر المالك (16 نوفمبر 2026): لا نسخة مضمّنة في أي قناة. الهوية (اسم الحزمة وبصمتها) تبقى مثبّتة في
+  // GeneratedSources.kt وFillerSources.kt، فمعرّفات المصادر وحسابات من أضافها لا تتغير. keiyoushi يحذف إصداراته
+  // القديمة، فالسلسلة بلا نسخة مضمّنة: المخزن ← الرابط المثبّت ← آخر سليم ← الإصدار الرسمي الموقّع.
   const pinned = (file) => [...read(file).matchAll(/pkg = "([^"]+)",[\s\S]*?sha256 = "([0-9a-f]{64})"/g)].map((m) => ({ pkg: m[1], sha: m[2] }));
-  const arabic = pinned('android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt');
-  assert.ok(arabic.length >= 10, 'GeneratedSources.kt must list the Arabic sources');
-  // والإنجليزية المستقلة (تكملة) بنفس القاعدة: مضمّنة ومطابقة لبصمتها
-  const english = pinned('android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt');
-  assert.ok(english.length >= 5, 'FillerSources.kt must pin the English filler extensions');
-  const specs = [...arabic, ...english];
-  const dir = 'android/app/src/release/assets/extensions';
-  const tracked = trackedFiles().filter((p) => p.startsWith(`${dir}/`));
-  const onDisk = readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk'));
-  for (const { pkg, sha } of specs) {
-    const path = `${dir}/${pkg}.apk`;
-    assert.ok(onDisk.includes(`${pkg}.apk`), `${path} is missing — run node tools/bundle-extensions.mjs`);
-    const actual = createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
-    assert.equal(actual, sha, `${path} does not match its pinned sha256`);
-  }
-  assert.equal(onDisk.length, specs.length, 'no stale extension APKs may remain in the bundle');
-  if (tracked.length) assert.equal(tracked.length, specs.length, 'every bundled extension must be tracked');
+  assert.ok(pinned('android/app/src/main/kotlin/dev/vantara/spike/GeneratedSources.kt').length >= 10, 'GeneratedSources.kt must keep the Arabic identities');
+  assert.ok(pinned('android/app/src/main/kotlin/com/vantara/plugins/FillerSources.kt').length >= 5, 'FillerSources.kt must keep the English identities');
   const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
-  assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?readBundled\(spec\)[\s\S]*?download\(spec\)/, 'the engine must prefer the bundled copy over downloading');
+  assert.match(plugin, /readVerifiedCache\(spec\)[\s\S]*?download\(spec\)/, 'the device vault is read before any download');
 });
 
 test('Debug is separated from the bundled manga sources while keeping their recovery chain', () => {
@@ -1252,7 +1237,7 @@ test('Debug is separated from the bundled manga sources while keeping their reco
   const onDisk = (dir) => { try { return readdirSync(resolve(ROOT, dir)).filter((n) => n.endsWith('.apk')); } catch { return []; } };
   assert.equal(onDisk('android/app/src/main/assets/extensions').length, 0, 'the shared source set must not bundle manga extensions');
   assert.equal(onDisk('android/app/src/debug/assets/extensions').length, 0, 'Debug must not bundle manga extensions');
-  assert.ok(onDisk('android/app/src/release/assets/extensions').length >= 15, 'Stable keeps its bundled copies until its own separation release');
+  assert.equal(onDisk('android/app/src/release/assets/extensions').length, 0, 'Stable is separated too (owner, 16 Nov 2026): no bundled manga extensions');
   const plugin = read('android/app/src/main/kotlin/com/vantara/plugins/ExtensionEnginePlugin.kt');
   const chain = plugin.slice(plugin.indexOf('private suspend fun loadPackage'), plugin.indexOf('private fun readBundled'));
   assert.match(chain, /readVerifiedCache\(spec\)[\s\S]*?download\(spec\)[\s\S]*?previousOf[\s\S]*?fromRepository\(base, repoClient\)/,
@@ -1260,7 +1245,10 @@ test('Debug is separated from the bundled manga sources while keeping their reco
   assert.match(read('android/app/src/main/kotlin/com/vantara/plugins/BuiltinSourceRefresh.kt'), /require\(meta\.fingerprint == KEIYOUSHI_KEY\)/,
     'the official release is accepted only under the pinned Keiyoushi key');
   // المصادر الظاهرة للحساب تُجهَّز في الخلفية عند الإقلاع (تُنزّل إلى المخزن مرة)، والتحديث اليومي والذاتي باقيان
-  assert.match(plugin, /fun eager\(pkg: String\) = visible\?\.contains\(pkg\) \?: hasLocalCopy\(pkg\)/);
+  // EE1: قبل أول تبليغ من الواجهة لا تحميل مسبق (حساب جديد = صفر)، والاختيار يُقرأ حيًّا في كل نداء
+  // المرحلة 2 (صفر مصادر مدمجة): الحزمة المرحّلة أو المحذوفة كإضافة مسارها المدمج مغلق، فلا تُحمَّل مدمجة ولا تعود وحدها
+  assert.match(plugin, /fun eager\(pkg: String\) = !builtinClosed\(pkg\) && \(builtinVisibility\.read\(\)\?\.contains\(pkg\) \?: false\)/);
+  assert.match(plugin, /if \(builtinClosed\(pkg\)\) error\(NOT_INSTALLED\)/);
   assert.match(plugin, /refreshBuiltinsDaily\(::eager\)/);
   assert.match(plugin, /refreshBuiltin\(call\.getString\("sourceId"\)\)/);
 });
@@ -1290,7 +1278,6 @@ test('hybrid updates: web bundles only on matching native code, APKs only if off
   ]) {
     assert.ok(inputs.includes(path), `native fingerprint must cover ${path}`);
   }
-  assert.ok(inputs.some((p) => p.startsWith('android/app/src/release/assets/extensions/')), 'bundled source extensions are native');
   assert.ok(!inputs.some((p) => p.startsWith('apps/') || p.includes('assets/public/')), 'web files must not change the native fingerprint');
   assert.ok(capacitorVersions(read('pnpm-lock.yaml')).length >= 3, 'installed @capacitor versions are part of the fingerprint');
 

@@ -81,9 +81,14 @@ export interface Report {
   pos: number;
   /** لحظة الخادم التي قيس عندها pos (الجهاز يحوّلها بساعته المشتركة). */
   at: number;
-  /** preparing: جاري التجهيز · ready: جاهز · failed: تعذّر السيرفر عنده (لا يوقف أحدًا). */
+  /**
+   * preparing: جاري التجهيز · ready: جاهز · failed: تعذّر السيرفر عنده. جاهزية الدخول إلزامية (قرار المالك، 19 نوفمبر):
+   * من تعذّر سيرفره في اللوبي يبقى «غير جاهز» حتى يختار سيرفرًا آخر، فلا يبدأ المضيف بدونه.
+   */
   state: MemberState;
   source: string | null;
+  /** هوية السيرفر الثابتة بين الأجهزة («معرّف المصدر|رمز السيرفر»): بها يُقترح سيرفر المضيف على الأعضاء. */
+  server: string | null;
   mediaKey: string | null;
   version: Version | null;
   driftMs: number | null;
@@ -130,6 +135,13 @@ export function parseMedia(raw: unknown): MediaRef | null {
   const kind = r['kind'];
   if (!key || (kind !== 'anime' && kind !== 'cinema' && kind !== 'manga')) return null;
   return { key, kind, label: text(r['label'], 200) ?? key };
+}
+
+/** العمل من مفتاح الحلقة («anime:21#5» ← «anime:21»): الحلقة التالية من العمل نفسه لا تُعيد اللوبي. */
+export function seriesOf(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const i = key.lastIndexOf('#');
+  return i > 0 ? key.slice(0, i) : null;
 }
 
 /** الموقع المرجعي عند لحظة الخادم t. */
@@ -323,6 +335,9 @@ export class RoomCore {
         if (!userId || userId === this.settings.hostUserId || userId.length > 80) return [];
         return this.kick(userId, now);
       }
+      case 'bye':
+        // «اطلع من الغرفة» صريحًا (لا انقطاع لحظي ولا انتقال موسم): الاستضافة تنتقل فورًا لأقدم حاضر
+        return this.goodbye(member, now);
       case 'host': {
         if (!this.isHost(conn)) return this.denied(conn);
         const target = typeof msg['userId'] === 'string' ? this.byUser(msg['userId']) : undefined;
@@ -364,8 +379,10 @@ export class RoomCore {
     } else if (op === 'load') {
       const media = parseMedia(msg['media']);
       if (!media) return [];
-      // الحلقة التالية في نفس الغرفة: الكل يرجع «جاري التجهيز»، وتبدأ وحدها حين يجهزون
-      next = { ...t, media, started: false, autoStart: false, playing: false, pos: Math.max(0, given ?? 0), at };
+      // الحلقة التالية من العمل نفسه (قرار المالك، 19 نوفمبر): لا تُعاد جاهزية الدخول؛ كل عضو يجهّز حلقته بجودته
+      // ويلحق، و«ابدأ» لا تنتظر أحدًا. عمل آخر (موسم آخر) لوبي جديد: الكل يختار سيرفره ويجهز من جديد
+      const sameWork = t.started && seriesOf(t.media?.key) != null && seriesOf(t.media?.key) === seriesOf(media.key);
+      next = { ...t, media, started: sameWork, autoStart: false, playing: false, pos: Math.max(0, given ?? 0), at };
       for (const m of this.members.values()) if (m.report) m.report = { ...m.report, state: 'preparing', mediaKey: null, version: null };
     } else return [];
     next.seq = t.seq + 1;
@@ -374,6 +391,13 @@ export class RoomCore {
     const out: Out[] = [{ to: 'all', msg: { t: 'state', state: next, by: this.members.get(conn)?.userId ?? null } }];
     if (op === 'load') out.push(this.rosterOut(now));
     return out;
+  }
+
+  /** خروج صريح: إن كان المضيف والغرفة فيها غيره تنتقل الاستضافة لأقدم حاضر الآن، لا بعد مهلة الغياب. */
+  private goodbye(member: Member, now: number): Out[] {
+    if (member.userId !== this.settings.hostUserId) return [];
+    const oldest = [...this.members.values()].filter((m) => m.userId !== member.userId).sort((a, b) => a.joinedAt - b.joinedAt)[0];
+    return oldest ? this.transferHost(oldest.userId, now) : [];
   }
 
   private anchorToHost(now: number): void {
@@ -397,6 +421,7 @@ export class RoomCore {
       at: Math.min(now + 1000, Math.max(now - 30_000, finite(msg['at']) ?? now)),
       state: MEMBER_STATES.includes(state as MemberState) ? (state as MemberState) : state === 'loading' ? 'preparing' : state === 'error' ? 'failed' : 'paused',
       source: text(msg['source'], 80),
+      server: text(msg['server'], 160),
       mediaKey: text(msg['mediaKey'], 200),
       version: v && typeof v === 'object' ? { durationMs: finite(v['durationMs']), pages: finite(v['pages']) } : null,
       driftMs: finite(msg['driftMs']),
@@ -491,6 +516,7 @@ export class RoomCore {
         at: m.report?.at ?? null,
         state: m.report?.state ?? 'preparing',
         source: m.report?.source ?? null,
+        server: m.report?.server ?? null,
         mediaKey: m.report?.mediaKey ?? null,
         driftMs: m.report?.driftMs ?? null,
         driftP95: m.report?.driftP95 ?? null,

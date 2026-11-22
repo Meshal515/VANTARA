@@ -6,7 +6,58 @@
  */
 
 const SIZES = { cover: 360, banner: 1080, logo: 600 };
+/** رابط مؤقت أو محلي (blob:، ملف التطبيق): يموت بإغلاق التطبيق أو بمسح الكاش، فلا يُجلب منه ولا يُحفظ. */
+const LOCAL_URL = /^(blob|data|file|content):|_capacitor_file_/i;
+export const durableUrl = (u) => typeof u === 'string' && /^https?:\/\//i.test(u) && !LOCAL_URL.test(u);
+
+/**
+ * نسخة من تفاصيل العمل بلا روابط مؤقتة (بلاغ المالك، 20 نوفمبر): صفحة فُتحت من «على الجهاز» صورها blob:، فإن حُفظت
+ * تفاصيلها كما هي ظهرت صور مكسورة لاحقًا حتى مع الإنترنت. كل نص رابطه مؤقت يصير null فيُستعمل البديل الحقيقي.
+ */
+export function withoutLocalUrls(value) {
+  if (typeof value === 'string') return LOCAL_URL.test(value) ? null : value;
+  if (Array.isArray(value)) return value.map(withoutLocalUrls);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = withoutLocalUrls(v);
+    return out;
+  }
+  return value;
+}
 const urls = new Map();
+const pending = new WeakMap();
+const retryTimers = new WeakMap();
+const RETRY_MS = [15_000, 120_000, 1_800_000];
+
+/** مؤقت مستقل لكل صورة: محاولة أثناء تشغيل الواجهة، وتُستعاد من retryAt عند زيارة العمل بعد إعادة فتح التطبيق. */
+function scheduleArtRetry(store, work, kind, src, options, retryAt) {
+  let tasks = retryTimers.get(store);
+  if (!tasks) retryTimers.set(store, tasks = new Map());
+  const key = `${work.ref}|${kind}`;
+  const current = tasks.get(key);
+  if (current) current.timers.clearTimeout?.(current.id);
+  tasks.delete(key);
+  if (!Number.isFinite(retryAt)) return;
+  const timers = options.timers ?? globalThis;
+  const request = Object.hasOwn(SIZES, kind) ? { ref: work.ref, [kind]: src } : { ref: work.ref };
+  const extras = Object.hasOwn(SIZES, kind) ? {} : { [kind]: src };
+  const task = { timers, id: null };
+  task.id = timers.setTimeout?.(async () => {
+    if (tasks.get(key) !== task) return;
+    tasks.delete(key);
+    if (globalThis.navigator?.onLine === false) return scheduleArtRetry(store, work, kind, src, options, Date.now() + 60_000);
+    await saveWorkArt(store, request, { ...options, extras });
+  }, Math.max(0, retryAt - Date.now()));
+  task.id?.unref?.(); // اختبارات Node لا تبقى معلقة بسبب مؤقت الفن
+  if (task.id != null) tasks.set(key, task);
+}
+
+function clearArtRetry(store, key) {
+  const tasks = retryTimers.get(store);
+  const task = tasks?.get(key);
+  if (task) task.timers.clearTimeout?.(task.id);
+  tasks?.delete(key);
+}
 
 async function shrink(blob, maxWidth) {
   try {
@@ -31,8 +82,8 @@ async function shrink(blob, maxWidth) {
 }
 
 async function imageBlob(src, fetchImpl) {
-  const res = await fetchImpl(src);
-  if (!res.ok) return null;
+  const res = await fetchImpl(src, { signal: globalThis.AbortSignal?.timeout?.(12_000) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
   return blob?.size && /^image\//.test(blob.type) ? blob : null;
 }
@@ -42,30 +93,55 @@ async function imageBlob(src, fetchImpl) {
  * `local(src)`: نسخة محلية بمحرّك المصدر (غلاف المانجا: الموقع يحتاج Referer/كوكي ولا يرسل CORS، فطلب
  * الواجهة المباشر يفشل دائمًا — لذلك غابت أغلفة المانجا وحدها عن «على الجهاز»). يرجع عدد الصور المحفوظة.
  */
-export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, local = null } = {}) {
+export async function saveWorkArt(store, work, { fetchImpl = globalThis.fetch, local = null, extras = {}, timers = globalThis } = {}) {
   if (!store?.putArt || !work?.ref) return 0;
-  let saved = 0;
-  for (const kind of ['cover', 'banner', 'logo']) {
-    const src = work[kind];
-    if (!src || typeof src !== 'string') continue;
-    const key = `${work.ref}|${kind}`;
-    try {
-      if (await store.getArt(key)) continue;
-      let blob = await imageBlob(src, fetchImpl).catch(() => null);
-      if (!blob && local) {
-        const copy = await Promise.resolve(local(src, kind)).catch(() => null);
-        if (copy) blob = await imageBlob(copy, fetchImpl).catch(() => null);
-      }
-      if (!blob) continue;
-      blob = await shrink(blob, SIZES[kind]);
-      if (!blob?.size || !/^image\//.test(blob.type)) continue;
-      await store.putArt(key, { type: blob.type, data: await blob.arrayBuffer(), at: Date.now() });
-      saved++;
-    } catch {
-      /* صورة واحدة فشلت لا تمنع البقية */
+  let inflight = pending.get(store);
+  if (!inflight) pending.set(store, inflight = new Map());
+  const previous = inflight.get(work.ref);
+  const saving = (async () => {
+    // دفعة لاحقة لنفس العمل قد تحمل صور حلقات أخرى أو غلافًا وصل حديثًا.
+    if (previous) await previous;
+    let saved = 0;
+    for (const [kind, src] of [...Object.keys(SIZES).map((kind) => [kind, work[kind]]), ...Object.entries(extras)]) {
+      // رابط مؤقت (صفحة فُتحت من «على الجهاز»): لا يُجلب منه ولا يحل محل الرابط الحقيقي المحفوظ للمحاولة
+      if (!durableUrl(src)) continue;
+      const key = `${work.ref}|${kind}`;
+      try {
+        const existing = await store.getArt(key);
+        if (existing?.data) { clearArtRetry(store, key); continue; }
+        if (existing?.src === src && existing.retryAt > Date.now()) {
+          scheduleArtRetry(store, work, kind, src, { fetchImpl, local, timers }, existing.retryAt);
+          continue;
+        }
+        try {
+          let fetchError;
+          let blob = await imageBlob(src, fetchImpl).catch((error) => { fetchError = error; return null; });
+          if (!blob && local) {
+            const copy = await local(src, kind);
+            if (copy) blob = await imageBlob(copy, fetchImpl);
+          }
+          if (!blob) throw fetchError ?? new Error('لم يصل ملف صورة صالح');
+          blob = await shrink(blob, SIZES[kind] ?? 480);
+          if (!blob?.size || !/^image\//.test(blob.type)) throw new Error('ملف الصورة غير صالح');
+          await store.putArt(key, { type: blob.type, data: await blob.arrayBuffer(), at: Date.now() });
+          clearArtRetry(store, key);
+          saved++;
+        } catch (error) {
+          const attempts = (existing?.src === src ? existing.attempts ?? 0 : 0) + 1;
+          const retryAt = Date.now() + RETRY_MS[Math.min(attempts - 1, RETRY_MS.length - 1)];
+          await store.putArt(key, { src, attempts, retryAt, error: error?.message ?? 'تعذّر حفظ الصورة' });
+          scheduleArtRetry(store, work, kind, src, { fetchImpl, local, timers }, retryAt);
+        }
+      } catch { /* عطل في مخزن الصور: ملف الوسائط مستقل عنه */ }
     }
+    return saved;
+  })();
+  inflight.set(work.ref, saving);
+  try {
+    return await saving;
+  } finally {
+    if (inflight.get(work.ref) === saving) inflight.delete(work.ref);
   }
-  return saved;
 }
 
 /** رابط محلي لصورة محفوظة (يُعاد استعماله)، أو null. */
@@ -79,12 +155,26 @@ export async function artUrl(store, ref, kind) {
   return url;
 }
 
+/**
+ * الصورة المحفوظة كنص data: (للمشغّل الأصلي: لا يرى روابط blob: في الواجهة)، أو null. الشعار والبنر صغيران بعد
+ * التصغير (600px و1080px)، فيعبران الجسر بلا عبء. بلاغ المالك (20 نوفمبر): مشغّل التحميلات يعرض اسم العمل بدل شعاره.
+ */
+export async function artDataUrl(store, ref, kind) {
+  const art = await store?.getArt?.(`${ref}|${kind}`).catch?.(() => null);
+  if (!art?.data) return null;
+  const bytes = new Uint8Array(art.data);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${art.type || 'image/png'};base64,${btoa(binary)}`;
+}
+
 /** حُذف العمل كله: صوره وروابطها. */
 export async function dropWorkArt(store, ref) {
-  for (const kind of Object.keys(SIZES)) {
-    const key = `${ref}|${kind}`;
-    const url = urls.get(key);
-    if (url) URL.revokeObjectURL(url);
+  await pending.get(store)?.get(ref);
+  for (const key of [...(retryTimers.get(store)?.keys() ?? [])]) if (key.startsWith(`${ref}|`)) clearArtRetry(store, key);
+  for (const [key, url] of urls) {
+    if (!key.startsWith(`${ref}|`)) continue;
+    URL.revokeObjectURL(url);
     urls.delete(key);
   }
   await store?.deleteArt?.(`${ref}|`).catch?.(() => {});

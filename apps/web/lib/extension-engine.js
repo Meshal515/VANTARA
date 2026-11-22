@@ -16,20 +16,73 @@ import { webPlugin, desktopPlugin } from '../pwa/platform.js';
 import { assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
 
 /**
+ * تغيّر المصادر (تثبيت، حذف، تحديث، رجوع، ترحيل، موقع ويب): من يحفظ قائمتها يمسحها فورًا (works.js). كانت قائمة
+ * المصادر تُحفظ للجلسة، فإضافة ثُبّتت والتطبيق مفتوح لا تظهر في مصادر أي عمل حتى إعادة التشغيل (بلاغ المالك 21 نوفمبر).
+ */
+const sourcesListeners = new Set();
+export function onSourcesChanged(fn) {
+	sourcesListeners.add(fn);
+	return () => sourcesListeners.delete(fn);
+}
+function sourcesChanged() {
+	for (const fn of sourcesListeners) { try { fn(); } catch { /* مستمع معطوب لا يوقف الباقي */ } }
+	try { globalThis.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed')); } catch { /* بيئة بلا أحداث */ }
+}
+/**
+ * ما فعله المستخدم بيده على هذا الجهاز (تثبيت/حذف إضافة، إضافة/إزالة مستودع): مزامنة الحساب تكتبه
+ * (lib/extension-sync.js). ما تفعله المزامنة نفسها لا يمر من هنا، فلا يرتد.
+ */
+const localListeners = new Set();
+export function onLocalExtensionChange(fn) {
+	localListeners.add(fn);
+	return () => localListeners.delete(fn);
+}
+function localChange(change) {
+	for (const fn of localListeners) { try { fn(change); } catch { /* مستمع معطوب لا يوقف الباقي */ } }
+}
+/** نداء يغيّر المصادر: يُبلَّغ بعد نجاحه فقط. */
+const changing = (fn) => async (...args) => { const out = await fn(...args); sourcesChanged(); return out; };
+
+/** حزم مثبّتة كإضافات على هذا الجهاز (`user` في بيان المحرك)، من آخر قراءة للبيان. */
+const installedPackages = new Set();
+function noteInstalled(list) {
+	installedPackages.clear();
+	for (const source of list ?? []) if (source?.user) installedPackages.add(packageOf(source.id));
+}
+
+/**
  * المحرك الأصلي يحمّل عند الإقلاع حزم المصادر الظاهرة لهذا الحساب فقط، فلا يُنزّل حساب جديد
  * حزمًا لم يضفها. تلميح أداء لا قرار ملكية: القرار يبقى هنا (`forSource`).
  */
 onEntitlementChange(async (decision) => {
 	const plugin = globalThis.Capacitor?.Plugins?.ExtensionEngine;
-	if (decision.state === 'unknown' || typeof plugin?.setVisibleBuiltins !== 'function') return;
+	if (!plugin) return;
 	try {
 		const { sources: list } = await plugin.sources();
+		noteInstalled(list);
 		if (entitlement() !== decision) return;
-		await plugin.setVisibleBuiltins({ pkgs: visiblePackages(list ?? [], decision) });
+		const pkgs = visiblePackages(list ?? [], decision);
+		if (decision.state !== 'unknown' && typeof plugin.setVisibleBuiltins === 'function') await plugin.setVisibleBuiltins({ pkgs });
+		await migrateBuiltins(plugin, decision, pkgs);
 	} catch {
-		// التلميح يُعاد عند التغيير التالي؛ غيابه يعني تحميلًا عند أول طلب فقط
+		// التلميح والترحيل يُعادان عند التغيير التالي؛ غيابهما يعني تحميلًا عند أول طلب فقط
 	}
 });
+
+/**
+ * المرحلة 2 من «صفر مصادر مدمجة» (docs/audits/ZERO_BUILTIN_MIGRATION_PLAN.md): ما يراه الحساب من المدمجة يصير
+ * إضافات مثبّتة على الجهاز (BuiltinMigration.kt)، مرة واحدة وبالمعرّفات نفسها. فقط لفوج معروف: الحساب القديم
+ * والجديد و«بلا حساب». حساب لم يصل صفه بعد لا يُرحَّل (يبقى كما هو حتى يصل)، فتأخر المزامنة لا يخفي شيئًا.
+ * الحساب القديم و«بلا حساب» يُحفظ لهما مستودع Keiyoushi فيستمر التحديث؛ الجديد لا (قرار المالك 21 نوفمبر).
+ */
+export async function migrateBuiltins(plugin, decision, pkgs) {
+	if (typeof plugin?.migrateBuiltins !== 'function' || !pkgs.length) return null;
+	if (decision.state === 'unknown' && !decision.standalone) return null;
+	const out = await plugin.migrateBuiltins({ pkgs, keepRepository: decision.state === 'legacy' || decision.standalone === true });
+	for (const pkg of out?.migrated ?? []) installedPackages.add(String(pkg));
+	if (out?.migrated?.length) sourcesChanged();
+	return out;
+}
 
 /** الجسر الأصلي، أو جسر الـPWA في المتصفح، أو `null`. يُقرأ عند كل نداء. */
 function bridge() {
@@ -46,9 +99,11 @@ export function isAvailable() {
  * يُرمى خطأ «أضف مصدرًا» (`SOURCE_NOT_ADDED`) قبل أي شبكة أو تنزيل حزمة.
  */
 function forSource(sourceId) {
-	assertVisible({ id: sourceId });
+	// مصدر حزمة مثبّتة كإضافة (رُحّلت أو ثُبّتت من مستودع) يظهر بمعرّفه القديم: التثبيت نفسه هو الإذن
+	if (!installedPackages.has(packageOf(sourceId))) assertVisible({ id: sourceId });
 	return required();
 }
+
 
 function required() {
 	const plugin = bridge();
@@ -65,8 +120,15 @@ function required() {
  * `warning` تصنيف الفهرس كما هو: `SAFE` أو `MIXED` (MangaDex). المحظور
  * بالسياسة لا يصل إلى هنا أصلًا.
  */
+let recoveredSaid = false;
 export async function sources() {
-	const { sources: list } = await required().sources();
+	const { sources: list, stateRecovered } = await required().sources();
+	noteInstalled(list);
+	// ES1: ملف الإضافات كان تالفًا فنُقل جانبًا والتطبيق أقلع بحالة فارغة: يُقال مرة في الجلسة
+	if (stateRecovered && !recoveredSaid) {
+		recoveredSaid = true;
+		try { globalThis.dispatchEvent?.(new CustomEvent('vantara:extensions-recovered')); } catch { /* بيئة بلا أحداث */ }
+	}
 	return (list ?? []).filter((source) => visible(source));
 }
 
@@ -136,15 +198,17 @@ function sense(sourceId, manga, list) {
 	}
 }
 
-export async function series(sourceId, manga) {
-	const out = await forSource(sourceId).series({ sourceId, manga });
+// WB1: `fresh` = فتح صريح من المستخدم: الويب وويندوز يتجاوزان كاش قائمة الفصول (30 دقيقة) فيظهر الفصل الجديد. المحرك
+// الأصلي (الـAPK) يتجاهل الحقل كما يتجاهل أي حقل لا يعرفه.
+export async function series(sourceId, manga, { fresh = false } = {}) {
+	const out = await forSource(sourceId).series({ sourceId, manga, ...(fresh ? { fresh: true } : {}) });
 	sense(sourceId, out.manga ?? manga, out.chapters ?? []);
 	return { manga: out.manga, chapters: out.chapters ?? [] };
 }
 
 /** فصول عمل. نفس قاعدة `memo`: مرّر كائن العمل كما جاءك من البحث أو الرائج. */
-export async function chapters(sourceId, manga) {
-	const { chapters: list } = await forSource(sourceId).chapters({ sourceId, manga });
+export async function chapters(sourceId, manga, { fresh = false } = {}) {
+	const { chapters: list } = await forSource(sourceId).chapters({ sourceId, manga, ...(fresh ? { fresh: true } : {}) });
 	sense(sourceId, manga, list ?? []);
 	return list ?? [];
 }
@@ -177,8 +241,9 @@ export async function pageImage(sourceId, page) {
  * غلاف عمل بعميل مصدره، محفوظ على الجهاز. يرجع رابطًا يقرؤه `<img>`.
  * `sourceId` اختياري: بدونه يُجلب بعميل عام (أفضل من لا شيء).
  */
-export async function cover(sourceId, url) {
-	const result = await required().cover({ sourceId: sourceId ?? null, url });
+export async function cover(sourceId, url, { budgetMs = null } = {}) {
+	// `budgetMs`: مهلة أطول لمحاولة صبورة بعد فشل (covers.js)؛ المحرك يحصرها بين ست ثوانٍ وعشرين
+	const result = await required().cover({ sourceId: sourceId ?? null, url, ...(Number.isFinite(budgetMs) ? { budgetMs } : {}) });
 	const convert = globalThis.Capacitor?.convertFileSrc;
 	return convert ? convert(result.path) : result.path;
 }
@@ -214,8 +279,16 @@ export function repositories() {
 	const formerlyBundled = new Set();
 	return {
 		list: () => plugin.repos(),
-		add: (url) => plugin.addRepo({ url }),
-		remove: (url) => plugin.removeRepo({ url }),
+		add: async (url) => {
+			const out = await plugin.addRepo({ url });
+			if (out?.repo?.url) localChange({ type: 'repo', on: true, url: out.repo.url, name: out.repo.name, fingerprint: out.repo.fingerprint ?? null });
+			return out;
+		},
+		remove: async (url) => {
+			const out = await plugin.removeRepo({ url });
+			localChange({ type: 'repo', on: false, url });
+			return out;
+		},
 		extensions: async (url) => {
 			const extensions = (await plugin.repoIndex({ url })).extensions ?? [];
 			const list = extensions.some(ext => ext?.builtin) ? (await plugin.sources()).sources ?? [] : [];
@@ -226,8 +299,21 @@ export function repositories() {
 				return { ...ext, builtin: false, formerlyBundled: true, ...legacyInstallation(source, visible({ id: ext.pkg })), update: false };
 			});
 		},
-		install: (repo, pkg) => formerlyBundled.has(pkg) ? installFormer(plugin, pkg) : plugin.installExtension({ repo, pkg }),
-		uninstall: (pkg) => formerlyBundled.has(pkg) ? removeFormer(plugin, pkg) : plugin.uninstallExtension({ pkg }),
+		install: changing(async (repo, pkg) => {
+			if (formerlyBundled.has(pkg)) return installFormer(plugin, pkg);
+			const out = await plugin.installExtension({ repo, pkg });
+			localChange({ type: 'ext', on: true, pkg, repo });
+			return out;
+		}),
+		uninstall: changing(async (pkg) => {
+			if (formerlyBundled.has(pkg)) return removeFormer(plugin, pkg);
+			const out = await plugin.uninstallExtension({ pkg });
+			localChange({ type: 'ext', on: false, pkg });
+			return out;
+		}),
+		// التحديث الذاتي الآمن (قرار المالك 20 نوفمبر): حالة التحديث، والرجوع لآخر إصدار سليم محفوظ على الجهاز
+		updateState: typeof plugin.updateState === 'function' ? (pkg) => plugin.updateState({ pkg }) : null,
+		rollback: typeof plugin.rollbackExtension === 'function' ? changing((pkg) => plugin.rollbackExtension({ pkg })) : null,
 	};
 }
 
@@ -255,6 +341,22 @@ async function installFormer(plugin, pkg) {
 async function removeFormer(plugin, pkg) {
 	await choosePackage(pkg, false);
 	if (typeof plugin.removeBuiltin === 'function') await plugin.removeBuiltin({ pkg });
+}
+
+/**
+ * منفّذ مزامنة قائمة الإضافات (lib/extension-sync.js): نداءات المحرك نفسها، تبلّغ صفحات الأعمال بتغيّر المصادر، ولا
+ * تمر بـonLocalExtensionChange (ما تطبّقه المزامنة لا يُكتب للحساب من جديد). `null` حيث لا مستودعات (الويب).
+ */
+export function syncTarget() {
+	const plugin = bridge();
+	if (typeof plugin?.addRepo !== 'function' || typeof plugin?.installExtension !== 'function' || typeof plugin?.repos !== 'function') return null;
+	return {
+		list: () => plugin.repos(),
+		addRepo: ({ url, fingerprint = null }) => plugin.addRepo({ url, ...(fingerprint ? { fingerprint } : {}) }),
+		removeRepo: ({ url }) => plugin.removeRepo({ url }),
+		install: changing(({ pkg, repo }) => plugin.installExtension({ repo, pkg })),
+		uninstall: changing(({ pkg }) => plugin.uninstallExtension({ pkg })),
+	};
 }
 
 export const READY_REPOSITORY = 'vantara:ready-sources';
@@ -291,13 +393,13 @@ export function readySources() {
 		remove: async (url) => {
 			if (url !== READY_REPOSITORY) throw new Error('معرّف القائمة غير صالح');
 			const plugin = required();
-			if (typeof plugin.removeReadySources !== 'function') throw new Error('حدّث نسخة Debug لإزالة هذه القائمة');
+			if (typeof plugin.removeReadySources !== 'function') throw new Error('حدّث التطبيق لإزالة هذه القائمة');
 			await plugin.removeReadySources();
 		},
 		extensions: () => items(),
 		// مثل مستودعها الأصلي: التثبيت يُنزّل ويحمّل فعلًا، والحذف يمحو نسختها من الجهاز
-		install: (_repo, pkg) => installFormer(required(), pkg),
-		uninstall: (pkg) => removeFormer(required(), pkg),
+		install: changing((_repo, pkg) => installFormer(required(), pkg)),
+		uninstall: changing((pkg) => removeFormer(required(), pkg)),
 	};
 }
 
@@ -310,12 +412,15 @@ export function sites() {
 	if (typeof plugin?.addSite !== 'function') return null;
 	return {
 		list: async () => (await plugin.sites()).sites ?? [],
-		add: (url) => plugin.addSite({ url }),
-		remove: (id) => plugin.removeSite({ id }),
+		add: changing((url) => plugin.addSite({ url })),
+		remove: changing((id) => plugin.removeSite({ id })),
 	};
 }
 
 export default {
+	onSourcesChanged,
+	onLocalExtensionChange,
+	syncTarget,
 	cover,
 	repositories,
 	readySources,

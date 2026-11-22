@@ -16,7 +16,7 @@ function writeOffset(key, ms) {
 }
 
 /** Bind the existing HTML video to the same millisecond room protocol as Android. */
-export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, source, onEpisode, onLobby, message }) {
+export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, source, server = () => null, onEpisode, onLobby, message }) {
   const controller = createDriftController();
   let prepared = false;
   let failed = false;
@@ -46,7 +46,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
     const state = stateNow();
     if (!force && state === lastState && now - lastReport < 2000) return;
     lastState = state; lastReport = now;
-    room.report({ pos: position(), at: now, state, source: source(), mediaKey: mediaKey(),
+    room.report({ pos: position(), at: now, state, source: source(), server: server(), mediaKey: mediaKey(),
       version: { durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null },
       driftMs: synced() && prepared && room.timeline?.started ? Math.round(localPosition() - localTarget(room.timeline, now)) : null, driftP95: controller.stats().p95 });
   }
@@ -113,6 +113,25 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   }
   // أمر المتحكّم: يُنفَّذ عنده فورًا ويُرسل بلحظة ضغطه بساعة الغرفة (الخادم يختمه بها؛ لا انتظار مصطنع)
   let intent = null;
+  // TG10/TG11: التحويل من منفصلة إلى متزامنة يعيد خط الغرفة القديم (حالته وحلقته)، فيشتغل الفيديو والمضيف موقِف
+  // أو يرجع الكل لحلقة قديمة. المضيف يعلن حلقته وحالته لحظة التحويل، فيتبعه الجميع.
+  let lastMode = synced() ? 'sync' : 'free';
+  function onRoom() {
+    const mode = synced() ? 'sync' : 'free';
+    const switched = mode === 'sync' && lastMode !== 'sync';
+    lastMode = mode;
+    if (!synced()) { video.playbackRate = 1; paintLobby(); return; }
+    if (switched && room.isHost && prepared && live() && room.instant) {
+      if (room.timeline?.media?.key !== mediaKey()) {
+        room.command('load', { media: { key: mediaKey(), kind: room.timeline?.media?.kind ?? 'anime', label: `الحلقة ${episode()}` }, pos: 0 });
+      } else {
+        hostCommand(video.paused ? 'pause' : 'play', position());
+      }
+      paintLobby();
+      return;
+    }
+    align(true); paintLobby();
+  }
   function hostCommand(op, roomPos) {
     const at = room.clock.serverNow();
     room.command(op, { pos: roomPos, at });
@@ -121,7 +140,7 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   // رفض الخادم (ليس المضيف عنده أو لا يملك التحكم) كان يمر بلا أثر: الزر «لا يستجيب» (15 نوفمبر)
   const offs = [room.on('denied', (d) => message(deniedText(d))), room.on('state', receive), room.on('welcome', () => { receive({ state: room.timeline }); }),
     room.on('roster', paintLobby), room.on('connection', () => { paintLobby(); if (live()) { align(true); report(true); } }),
-    room.on('room', () => { if (!synced()) video.playbackRate = 1; else align(true); paintLobby(); })];
+    room.on('room', onRoom)];
   const timer = setInterval(() => {
     align();
     if (seekingAt != null && video.readyState >= 3) { controller.seeked(room.clock.serverNow() - seekingAt); seekingAt = null; }
@@ -130,6 +149,8 @@ export function createTogetherPlayer({ room, mode, mediaPrefix, video, episode, 
   const api = {
     // Welcome can arrive while the shell is preparing the invitation's source.
     ready() { if (destroyed) return; prepared = true; failed = false; loadingEpisode = null; receive({ state: room.timeline }); },
+    /** إعادة رسم الغرفة (بعد ردّ العضو على اقتراح سيرفر المضيف). */
+    refreshLobby() { paintLobby(); },
     preparing() { if (destroyed) return; prepared = false; failed = false; report(true); paintLobby(); },
     failed() { if (destroyed) return; prepared = false; failed = true; report(true); paintLobby(); },
     /** الغرفة المتزامنة لم تبدأ بعد: التجهيز يتم بصمت ويقف عند البداية. */

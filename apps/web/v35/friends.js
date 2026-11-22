@@ -15,6 +15,7 @@
  */
 
 import { createFeedSnapshot } from './feed-snapshot.js';
+import { tagWork } from '../lib/removed-works.js';
 import { glyph } from './icons.js';
 import { displayTitle, refForTitle } from './work-ref.js';
 import { actionList, dayLabel, el, motion, nameNode, onLongPress, parse, people, presenceState, pressable, roomInitial, shortAgo } from './social-kit.js';
@@ -145,6 +146,8 @@ export function createFriends(ctx) {
         row.append(el('span', 'sx-now-live'), text);
       } else {
         const work = workOf(p.seriesRef, p.seriesTitle);
+        // DL5: عمل حذفه المالك لا يظهر هنا أيضًا (حارس الحذف الواحد على جذر التطبيق يقرأ data-work)
+        tagWork(row, p.seriesRef, work?.id);
         const cover = el('span', 'sx-cover sx-cover--sm');
         void ctx.mountImage(cover, work);
         const title = el('bdi', 'sx-now-title', p.seriesTitle);
@@ -286,6 +289,7 @@ export function createFriends(ctx) {
     };
     onLongPress(main, () => openRowActions(e, row, work));
     row.append(main);
+    if (work) tagWork(row, r.series_ref, work.id);
     return row;
   }
 

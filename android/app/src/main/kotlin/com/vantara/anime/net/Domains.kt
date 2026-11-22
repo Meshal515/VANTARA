@@ -34,6 +34,16 @@ data class DomainPlan(
     val limits: List<RateLimit> = emptyList(),
 ) {
     val currentUrl: HttpUrl? get() = current.toHttpUrlOrNull()
+
+    /**
+     * DM1: دومين اعتمده المحرك سابقًا (تحويل مقبول، محفوظ في الصحة) يصير الحالي بعد إعادة التشغيل، والحالي القديم
+     * يصير «قديمًا» يُعاد كتابته. بلا هذا تعود إضافة المستخدم لدومينها الميت مع كل إقلاع.
+     */
+    fun adopt(learned: String?): DomainPlan {
+        val url = learned?.toHttpUrlOrNull()?.takeIf { it.scheme == "https" || it.scheme == "http" } ?: return this
+        if (url.host == currentHost) return this
+        return copy(current = "${url.scheme}://${url.host}", legacy = legacy + current)
+    }
     val currentHost: String? get() = currentUrl?.host
 
     /** كل المضيفات التي نعرفها لهذا المصدر. */
@@ -107,7 +117,19 @@ object DomainPolicy {
         return b.build().takeIf { it != url }
     }
 
-    enum class Verdict { SAME, KNOWN, SAME_SITE, FINGERPRINT_OK, FOREIGN }
+    enum class Verdict { SAME, KNOWN, SAME_SITE, FINGERPRINT_OK, LEARNED_OK, FOREIGN }
+
+    /** اسم الموقع بلا امتداده: `witanime.cyou` و`witanime.pics` ← `witanime`. */
+    fun brand(host: String): String = siteOf(host).substringBefore('.')
+
+    /** هوية الموقع من صفحته: og:site_name، وإلا آخر مقطع في العنوان («الحلقة 5 - WitAnime» ← WitAnime). */
+    fun identityOf(html: String?): String? {
+        if (html == null) return null
+        val og = Regex("<meta[^>]+property=[\"']og:site_name[\"'][^>]+content=[\"']([^\"']{3,60})", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
+            ?: Regex("<meta[^>]+content=[\"']([^\"']{3,60})[\"'][^>]+property=[\"']og:site_name", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
+        val title = pageTitle(html)?.split(Regex("\\s[-|–—:]\\s"))?.lastOrNull()?.trim()
+        return (og ?: title)?.trim()?.takeIf { it.length in 3..60 }
+    }
 
     /**
      * حكم على تحويل من [from] إلى [to]:
@@ -115,7 +137,7 @@ object DomainPolicy {
      *  - FINGERPRINT_OK: موقع مختلف لكن الصفحة تحمل البصمة.
      *  - FOREIGN: موقع مختلف بلا بصمة ← مرفوض (موقف أو تحويل إعلاني أو مزيّف).
      */
-    fun judge(from: HttpUrl, to: HttpUrl, plan: DomainPlan, html: String?): Verdict {
+    fun judge(from: HttpUrl, to: HttpUrl, plan: DomainPlan, html: String?, learned: String? = null): Verdict {
         if (from.host == to.host) return Verdict.SAME
         if (to.host in plan.knownHosts()) return Verdict.KNOWN
         // مرآة مكتوبة كموقع (`b2cima.click`) تقبل نطاقاتها الفرعية المتبدّلة (`wwr433.b2cima.click`)
@@ -123,6 +145,10 @@ object DomainPolicy {
         if (siteOf(from.host) == siteOf(to.host)) return Verdict.SAME_SITE
         val fp = plan.fingerprint
         if (fp != null && html != null && Regex(fp, RegexOption.IGNORE_CASE).containsMatchIn(html)) return Verdict.FINGERPRINT_OK
+        // DM1: بلا بصمة في البيان (كل إضافات المستخدم): الاسم نفسه بامتداد آخر، والصفحة تحمل هوية الموقع التي تعلّمها
+        // المحرك منه وهو سليم. اسم مطابق وحده لا يكفي (witanime.net كانت صفحة Blogger مزيّفة).
+        if (fp == null && learned != null && html != null && brand(from.host) == brand(to.host) &&
+            identityOf(html)?.equals(learned, ignoreCase = true) == true) return Verdict.LEARNED_OK
         return Verdict.FOREIGN
     }
 }
@@ -152,6 +178,8 @@ class DomainInterceptor(
 ) : Interceptor {
 
     private val active = AtomicReference<HttpUrl?>(plan.currentUrl)
+    /** هوية الموقع كما تعلّمها المحرك من صفحاته السليمة (DM1). */
+    private val identity = AtomicReference<String?>(null)
 
     fun activeBase(): String? = active.get()?.let { "${it.scheme}://${it.host}" }
 
@@ -173,7 +201,14 @@ class DomainInterceptor(
         }
         val response = chain.proceed(request)
         val finalUrl = response.request.url
-        if (finalUrl.host == request.url.host) return response
+        if (finalUrl.host == request.url.host) {
+            // تعلّم هوية الموقع من صفحة سليمة على دومينه النشط (مرة)، لتمييز انتقاله الحقيقي لاحقًا عن صفحة مزيّفة
+            if (identity.get() == null && response.isSuccessful && finalUrl.host == active.get()?.host &&
+                response.header("Content-Type")?.contains("html", true) == true) {
+                DomainPolicy.identityOf(runCatching { response.peekBody(64_000).string() }.getOrNull())?.let { identity.compareAndSet(null, it) }
+            }
+            return response
+        }
         // سيرفرات الفيديو (dood → d000d…) تتحوّل كثيرًا ولا تخص دومين المصدر
         val siteHosts = plan.knownHosts() + listOfNotNull(active.get()?.host)
         if (request.url.host !in siteHosts) return response
@@ -181,7 +216,7 @@ class DomainInterceptor(
         // الطلب تحوّل لمضيف آخر: هل هو المصدر نفسه في بيت جديد؟
         val isHtml = response.header("Content-Type")?.contains("html", true) == true
         val html = if (isHtml) runCatching { response.peekBody(96_000).string() }.getOrNull() else null
-        return when (DomainPolicy.judge(request.url, finalUrl, plan, html)) {
+        return when (DomainPolicy.judge(request.url, finalUrl, plan, html, identity.get())) {
             DomainPolicy.Verdict.FOREIGN -> {
                 // As Aniyomi itself does: the extension gets the page it was redirected to. A site that really
                 // moved (egydead.space → a1.egydead.media) then works; a parked or fake page fails in the

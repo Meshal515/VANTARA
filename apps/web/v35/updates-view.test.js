@@ -64,7 +64,7 @@ describe('آخر التحديثات', () => {
     const groups = groupEvents([
       { id: '1', section: 'manga', work: 'ext:don 039 t breathe', kind: 'chapter', number: 12, at: NOW, title: 'Don&#039;t Breathe', sources: [{ s: 'teamx' }] },
       { id: '2', section: 'manga', work: 'ext:don t breathe', kind: 'chapter', number: 12, at: NOW - M, title: "Don't Breathe", sources: [{ s: 'other' }] },
-      { id: '3', section: 'manga', work: 'ext:don t breathe', kind: 'chapter', number: 11, at: NOW - 2 * M, title: "Don't Breathe", sources: [] },
+      { id: '3', section: 'manga', work: 'ext:don t breathe', kind: 'chapter', number: 11, at: NOW - 2 * M, title: "Don't Breathe", sources: [{ s: 'teamx' }] },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ work: 'ext:don t breathe', title: "Don't Breathe", high: 12, low: 11 });
@@ -91,9 +91,9 @@ describe('آخر التحديثات: الهوية الواحدة', () => {
   it('حدثان لعمل واحد باسمين يصيران بطاقة واحدة بالمفتاح القانوني', async () => {
     const { groupEvents } = await import('./updates-view.js');
     const events = [
-      { id: 'a', section: 'manga', work: 'ext:demonic emperor', title: 'Demonic Emperor', kind: 'chapter', number: 920, at: 3 },
-      { id: 'b', section: 'manga', work: 'ext:magic emperor', title: 'Magic emperor', kind: 'chapter', number: 919, at: 2 },
-      { id: 'c', section: 'manga', work: 'ext:solo leveling', title: 'Solo Leveling', kind: 'chapter', number: 200, at: 1 },
+      { id: 'a', section: 'manga', work: 'ext:demonic emperor', title: 'Demonic Emperor', kind: 'chapter', number: 920, at: 3, sources: [{ s: 'teamx' }] },
+      { id: 'b', section: 'manga', work: 'ext:magic emperor', title: 'Magic emperor', kind: 'chapter', number: 919, at: 2, sources: [{ s: 'teamx' }] },
+      { id: 'c', section: 'manga', work: 'ext:solo leveling', title: 'Solo Leveling', kind: 'chapter', number: 200, at: 1, sources: [{ s: 'teamx' }] },
     ];
     const canonical = new Map([['ext:demonic emperor', 'ext:magic emperor'], ['ext:magic emperor', 'ext:magic emperor']]);
     const groups = groupEvents(events, canonical);

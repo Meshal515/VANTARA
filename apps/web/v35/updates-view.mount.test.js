@@ -8,7 +8,7 @@ import { loadAliases } from '../lib/manga-alias-store.js';
 import { mountTimeline, paintWithScrollAnchor } from './updates-view.js';
 
 let document, host, api;
-const event = (id, work = id) => ({ id, work, section: 'manga', title: work, kind: 'chapter', number: Number(id) || 1, at: Date.now(), publishedAt: Date.now(), cover: '/cover.jpg', sources: [] });
+const event = (id, work = id) => ({ id, work, section: 'manga', title: work, kind: 'chapter', number: Number(id) || 1, at: Date.now(), publishedAt: Date.now(), cover: '/cover.jpg', sources: [{ s: 'teamx' }] });
 const page = (events, next = null) => ({ events, next, snapshotAt: Date.now() });
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
 const mount = (options = {}) => (api = mountTimeline(host, { section: 'manga', el, open: () => {}, empty: () => el('p', '', 'empty'), image: () => el('img'), ...options }));
@@ -29,6 +29,32 @@ it('releases loading after a thrown request and allows a successful retry', asyn
   expect(await api.refresh()).toBe(true);
   expect(host.querySelectorAll('.up-card')).toHaveLength(1);
   expect(host.querySelector('.up-load-more').disabled).toBe(false);
+});
+// بلاغ المالك (صورة 16 نوفمبر): بعد الرجوع للتطبيق يبقى «تعذّر جلب آخر التحديثات» حتى «تحديث» باليد
+it('a failed first load recovers by itself: on returning to the app, and on the periodic tick', async () => {
+  let tick;
+  vi.spyOn(globalThis, 'setInterval').mockImplementation((fn) => { tick = fn; return 0; });
+  timeline.mockRejectedValueOnce(new Error('aborted in background'))
+    .mockResolvedValueOnce(page([event('1')]))
+    .mockRejectedValueOnce(new Error('again'))
+    .mockResolvedValueOnce(page([event('2')]));
+  mount();
+  await vi.waitFor(() => expect(host.querySelector('.up-error')).not.toBeNull());
+  document.dispatchEvent(new document.defaultView.Event('visibilitychange'));
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
+  expect(host.querySelector('.up-error')).toBeNull();
+  // ثانية: يفشل، ثم الاستطلاع الدوري يعيده بعد المهلة (لا يحتاج ضغطة)
+  api.dispose();
+  timeline.mockClear();
+  const now = vi.spyOn(Date, 'now');
+  now.mockReturnValue(1_000_000);
+  mount();
+  await vi.waitFor(() => expect(host.querySelector('.up-error')).not.toBeNull());
+  await tick();
+  expect(timeline).toHaveBeenCalledTimes(1); // داخل المهلة: لا إلحاح
+  now.mockReturnValue(1_000_000 + 16_000);
+  await tick();
+  await vi.waitFor(() => expect(host.querySelectorAll('.up-card')).toHaveLength(1));
 });
 it('discards an earlier poll that resolves after a newer manual refresh',async()=>{
   let poll,release;

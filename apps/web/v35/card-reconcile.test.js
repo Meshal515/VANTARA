@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { reconcileCardNodes } from './card-reconcile.js';
 
@@ -26,5 +27,17 @@ describe('manga cards across source updates', () => {
     expect(target.children[1].dataset.workId).toBe('c');
     expect(target.moves).toBe(4);
     expect(b.cover).toBeDefined();
+  });
+});
+
+describe('a card blocked after it appeared (AF2)', () => {
+  const shell = readFileSync(new URL('./shell.js', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./manga.css', import.meta.url), 'utf8');
+  it('keeps its slot hidden instead of removing it, so the grid does not jump', () => {
+    const line = shell.split('\n').find((l) => l.includes('rated.adult'));
+    expect(line).toContain('hideBlockedCard(a)');
+    expect(line).not.toContain('a.remove()');
+    expect(shell).toMatch(/function hideBlockedCard\(a\) \{[^}]*a\.inert = true/);
+    expect(css).toMatch(/\[data-blocked\] \{ visibility: hidden;/);
   });
 });

@@ -674,6 +674,9 @@ export async function open(args) {
     const [{ liveAccent }, { readStructure }] = await Promise.all([import('../v35/appearance.js'), import('../v35/experience.js')]);
     args = { ...args, accent: liveAccent(args.section === 'cinema' ? 'cinema' : 'anime', { unified: readStructure().unifyContent }) };
   } catch { /* اللون تحسين لا شرط */ }
+  // التأثير الزجاجي كما يطبّقه الويب فعلًا (syncGlass يزيله مع «تقليل الشفافية» أو الدرجة off): المشغّل الأصلي يلبس
+  // أزراره «مظهرًا زجاجيًا» (Ui.kt: Glass)، وغيره يبقى كما هو
+  if (globalThis.document?.documentElement?.dataset?.material === 'glass') args = { ...args, material: 'glass' };
   await plugin.play(args);
   return true;
 }

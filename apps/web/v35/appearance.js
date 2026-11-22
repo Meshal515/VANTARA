@@ -8,6 +8,8 @@
  */
 
 import { trimArtCache } from '../lib/together/art.js';
+import { relieveStorage } from '../lib/storage-relief.js';
+import { appVersion, buildChannel } from '../lib/config.js';
 
 /** كاشات تُعاد من الشبكة بلا فقد: تُخلى حين يمتلئ التخزين قبل أن يفشل حفظ إعداد. */
 const REGENERABLE = ['vantara.anime.found.v2', 'vantara.anime.genre-art.v1', 'vantara.heroPick.v1', 'vantara.cinema.heroPick.v1', 'vantara.unified.genre-art.v1'];
@@ -50,6 +52,9 @@ export function writePreference(key, value, storage = globalThis.localStorage) {
     const stages = [
       () => trimArtCache(0, storage),
       () => { for (const k of REGENERABLE) { try { storage.removeItem(k); } catch { /* */ } } },
+      // آخر محاولة قبل حفظ الجلسة وحدها: كل كاش يُعاد جلبه (storage-relief). إعداد يضيع بعد إعادة التشغيل
+      // أسوأ من صور تُعاد (بلاغ المالك 22 نوفمبر: التأثير الزجاجي انطفأ وحده)
+      () => relieveStorage(storage),
     ];
     for (const free of stages) {
       try {
@@ -150,7 +155,7 @@ export const ACCENTS = Object.freeze([
 const SECTIONS = ['manga', 'anime', 'cinema'];
 
 function blank() {
-  return { style: {}, accent: {}, pureBlack: false, unifiedLook: false };
+  return { style: {}, accent: {}, pureBlack: false, unifiedLook: false, material: 'current' };
 }
 
 export function readAppearance(storage = globalThis.localStorage) {
@@ -162,6 +167,8 @@ export function readAppearance(storage = globalThis.localStorage) {
       accent: v.accent && typeof v.accent === 'object' ? v.accent : {},
       pureBlack: v.pureBlack === true,
       unifiedLook: v.unifiedLook === true,
+      // المادة (قرار المالك، 21 نوفمبر): «الحالي» الافتراضي، وGlass خيار مستقل (docs/audits/GLASS_UI_PLACEMENT.md)
+      material: v.material === 'glass' ? 'glass' : 'current',
     };
   } catch {
     return blank();
@@ -173,6 +180,15 @@ export function readAppearance(storage = globalThis.localStorage) {
  * ومتاح دائمًا. حين يُفعَّل يتقدّم على نمط كل قسم في صفحة العمل وحدها.
  */
 export const unifiedLookOn = (a = readAppearance()) => a?.unifiedLook === true;
+/**
+ * التأثير الزجاجي متاح؟ قرار المالك (22 نوفمبر): Glass قيد التطوير، **مقفل في Stable نهائيًا**، ومفتوح في Debug وحده
+ * (والتطوير المحلي). المظهر العادي كما هو في الاثنين. القفل هنا لا في الواجهة وحدها: كل من يقرأ المادة (الواجهة، مشغّل الويب
+ * وويندوز، مشغّل أندرويد عبر سمة الصفحة) يتبعه، ومن اختاره في نسخة أخرى يرى المظهر العادي.
+ */
+// «تطوير» = نسخة لم يُختم فيها رقم إصدار (الاختبارات وأدوات tools/ui-qa محليًا). كل نسخة تُشحن تُختم برقمها، فـStable مقفل
+export const glassAvailable = ({ channel = buildChannel(), development = appVersion() === null } = {}) => channel === 'debug' || development;
+/** هل اختار المستخدم التأثير الزجاجي، وهو متاح في هذا البناء؟ (ما يُرسم فعلًا يقرره مستوى الجهاز في glass.js) */
+export const glassChosen = (a = readAppearance(), available = glassAvailable()) => available && a?.material === 'glass';
 
 export function writeAppearance(next, storage = globalThis.localStorage) {
   writePreference(KEY, JSON.stringify(next), storage);

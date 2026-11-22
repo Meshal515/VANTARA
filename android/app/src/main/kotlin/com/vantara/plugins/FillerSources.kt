@@ -103,6 +103,16 @@ fun splitSourceId(sourceId: String): Pair<String, String?> {
     return if (at <= 0) sourceId to null else sourceId.substring(0, at) to sourceId.substring(at + 1).ifEmpty { null }
 }
 
+/**
+ * هل معرّف المصدر المحمَّل ملك هذه الحزمة؟ الأشكال الثلاثة: الحزمة نفسها (المدمج سابقًا)، و`pkg@lang`، و`pkg#<id>`
+ * (إضافات المستخدم). SE1: الطرد كان يقارن `pkg#` وحده، فبقي الإصدار القديم من المدمج سابقًا في الذاكرة بعد التحديث
+ * والرجوع، و`obtain()` يعيده.
+ */
+fun ownedBy(sourceId: String, pkg: String): Boolean = splitSourceId(sourceId.substringBefore('#')).first == pkg
+
 /** بيان الحزمة: من لقطة المصادر العربية، أو من الإضافات الإنجليزية المستقلة. */
 fun packageSpec(pkg: String): SourceSpec? =
     dev.vantara.spike.SPIKE_SOURCES.firstOrNull { it.pkg == pkg } ?: FILLER_PACKAGES.firstOrNull { it.pkg == pkg }
+
+/** مفتاح كاش صفحة: الرابط وحده لحزمة لم تُحدَّث (الكاش الموجود يبقى صالحًا)، وبحقبتها بعد أي تحديث (SE2). */
+fun pageCacheKeyOf(epoch: Long, url: String): String = if (epoch == 0L) url else "$epoch|$url"

@@ -29,9 +29,43 @@ describe('محتوى الكبار لا يظهر في VANTARA', () => {
     expect(isBlockedKey('another work')).toBe(false);
   });
   it('removes adult works from latest updates', () => {
-    const ev = (work, title) => ({ id: `${work}|c:1`, work, title, section: 'manga', kind: 'chapter', number: 1, at: 1 });
+    const ev = (work, title) => ({ id: `${work}|c:1`, work, title, section: 'manga', kind: 'chapter', number: 1, at: 1, sources: [{ s: 'teamx' }] });
     blockKey('ext:hidden by page');
     const groups = groupEvents([ev('ext:clean', 'Clean Work'), ev('ext:x', 'Night [NSFW]'), ev('ext:hidden by page', 'Hidden By Page')]);
     expect(groups.map((g) => g.title)).toEqual(['Clean Work']);
+  });
+});
+
+import { adultSource as _adultSource, adultGenre as _adultGenre } from './adult-filter.js';
+import { describe as _d, it as _it, expect as _e } from 'vitest';
+_d('owner rule 16 Nov: specialized adult sources vanish, general ones stay', () => {
+  _it('specialized by name or package', () => {
+    for (const s of [{ name: 'NHentai' }, { name: 'HentaiRead' }, { pkg: 'eu.kanade.tachiyomi.extension.all.hitomi' }, { name: 'Manhwa18' }, { name: 'Toonily' }, { label: 'مانجا هنتاي' }])
+      _e(_adultSource(s), JSON.stringify(s)).toBe(true);
+  });
+  _it('general sources flagged NSFW in their repository stay', () => {
+    for (const s of [{ name: 'MangaDex', nsfw: 1 }, { name: 'Team X' }, { name: 'MangaFire', nsfw: 1 }, { pkg: 'eu.kanade.tachiyomi.extension.en.weebcentral' }])
+      _e(_adultSource(s), JSON.stringify(s)).toBe(false);
+  });
+  _it('nudity hides a work; ecchi alone does not', () => {
+    _e(_adultGenre('Action, Ecchi, Nudity')).toBe(true);
+    _e(_adultGenre('Fantasy, Ecchi, Isekai')).toBe(false);
+  });
+});
+
+import { dirtyEcchiGenre, ecchiGenre, ecchiManga } from './adult-filter.js';
+_d('الإيتشي (قرار المالك، 22 نوفمبر)', () => {
+  _it('ecchi alone is recognised, and ecchi with harem or infidelity counts as adult everywhere', () => {
+    _e(ecchiGenre('Comedy, Ecchi, School Life')).toBe(true);
+    _e(dirtyEcchiGenre('Comedy, Ecchi, School Life')).toBe(false);
+    _e(dirtyEcchiGenre(['Ecchi', 'Harem'])).toBe(true);
+    _e(adultManga({ title: 'Some Work', genre: 'Ecchi, Harem, Romance' })).toBe(true);
+    _e(adultManga({ title: 'Some Work', genre: 'Ecchi, Slice of Life' })).toBe(false);
+    _e(ecchiManga({ title: 'Some Work', genre: 'Ecchi, Slice of Life' })).toBe(true);
+  });
+  _it('MangaDex explicit content ratings are adult; Suggestive is treated as ecchi', () => {
+    _e(adultManga({ title: 'X', genre: 'Action, Content rating: Erotica' })).toBe(true);
+    _e(adultManga({ title: 'X', genre: 'Action, Content rating: Suggestive' })).toBe(false);
+    _e(ecchiManga({ title: 'X', genre: 'Action, Content rating: Suggestive, Japanese' })).toBe(true);
   });
 });

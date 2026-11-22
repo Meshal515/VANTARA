@@ -732,6 +732,21 @@ describe('server-authoritative mirror recovery after APK 177', () => {
     expect(storage.getItem('vantara.mirror.audit.v1')).toBeNull();
   });
 
+  it('a pull round with no new rows does not rewrite the mirror (SY1: was 3 full saves on the main thread every 60s)', async () => {
+    storage.setItem('vantara.cursor', '40');
+    storage.setItem('vantara.mirror', JSON.stringify({ work_views: { 'u1/a': { user_id: 'u1', series_ref: 'a', rev: 40 } } }));
+    const sync = await loadSync({ storage, fetchImpl: vi.fn(async () => jsonResponse({ reset: false, cursor: 40, more: false, changes: {} })) });
+    await sync.pull();
+    let writes = 0;
+    const set = storage.setItem;
+    storage.setItem = (key, value) => { if (key === 'vantara.mirror') writes++; return set(key, value); };
+    await sync.pull();
+    await sync.pull();
+    expect(writes).toBe(0);
+    // صف جديد يُحفظ كما كان، والمؤشر بعد الحفظ
+    sync.dispose();
+  });
+
   it('never advances a persisted cursor when writing the mirror fails', async () => {
     let outOfSpace = false;
     const limited = fakeStorage({ failOn: (key) => outOfSpace && key === 'vantara.mirror' });
@@ -840,7 +855,8 @@ describe('independent account persistence under localStorage quota', () => {
     await sync.pull();
     await vi.waitFor(() => expect(sync.rows('library')).toHaveLength(1));
     expect(sync.health().lastError?.code).not.toBe('mirror_audit_storage_full');
-    expect(limited.getItem('vantara.mirror')).not.toContain('historic');
+    // SY2: المرآة في IndexedDB، ونسخة localStorage المشتركة تُحذف لتحرير مساحتها للمواضع والأغلفة وسجل الدمج
+    expect(limited.getItem('vantara.mirror')).toBeNull();
     sync.dispose();
     const reopened = await loadSync({ storage: limited, fetchImpl: async () => { throw new Error('offline'); } });
     await reopened.pull();
@@ -939,4 +955,21 @@ it('never labels a new account delta snapshot with the previous account full-aud
   expect(snapshots.find((row) => row.userId === 'u2')).toMatchObject({ userId: 'u2', auditedAt: null, cursor: 7 });
   expect(JSON.parse(storage.getItem('vantara.mirror.audit.v1')).userId).toBe('u1');
   vi.unstubAllGlobals();
+});
+
+// ANX1: عملية جديدة لا تُرسل لخادم أقدم (كان سيعزلها فتضيع)؛ الخادم يعلن ما يدعمه في /v1/sync
+describe('server features', () => {
+  it('learns supported ops from the sync response, keeps them, and stores playback positions apart from manga progress', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      cursor: 5, more: false, features: ['position.set'],
+      changes: { playback_positions: [{ user_id: 'u1', media_key: 'anime:21#ep:3', series_ref: 'anime:21', position_ms: 600_000, duration_ms: 1_440_000, watched_at: 10, rev: 5 }] },
+    }));
+    const sync = await loadSync({ storage, fetchImpl });
+    expect(sync.supports('position.set')).toBe(false);
+    await sync.pull();
+    expect(sync.supports('position.set')).toBe(true);
+    expect(sync.rows('playback_positions').map((r) => r.media_key)).toEqual(['anime:21#ep:3']);
+    expect(sync.rows('progress')).toEqual([]);
+    expect(JSON.parse(storage.getItem('vantara.sync.features'))).toEqual(['position.set']);
+  });
 });

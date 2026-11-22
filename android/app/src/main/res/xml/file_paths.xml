@@ -12,4 +12,6 @@
     <cache-path name="page_cache" path="pages/" />
     <!-- مقاطع «الكاميرا» في المشغّل: ملف مؤقت واحد يُشارك عبر ACTION_SEND -->
     <cache-path name="clips" path="clips/" />
+    <!-- «إضافاتي»: ملف تصدير واحد يُشارك عبر ACTION_SEND ثم يُستبدل في التصدير التالي -->
+    <cache-path name="exports" path="exports/" />
 </paths>

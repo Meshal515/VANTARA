@@ -69,10 +69,11 @@ class DownloadService : Service() {
      * المتوقف والفاشل والمكتمل لا يُمس: قرار المستخدم أو سبب ظاهر.
      */
     private fun restoreQueue() {
+        val now = System.currentTimeMillis()
         val saved = runCatching { store(this).all() }.getOrDefault(emptyList())
-            .filter { it.state == "queued" || it.state == "downloading" || it.state == "verifying" || it.state == "reconnecting" }
+            .filter { needsResume(it, now) }
             .sortedBy { it.createdAt }
-        for (job in saved) enqueue(job.copy(state = "queued"))
+        for (job in saved) enqueue(if (job.state == "ready") job else job.copy(state = "queued"))
     }
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -122,6 +123,8 @@ class DownloadService : Service() {
      */
     private fun idle() {
         if (!foreground) return
+        // DN1: الإشعار «اكتمل» فورًا (بلا أيقونة متحركة ولا شريط)، والخدمة تبقى خاملة دقيقتين كما كانت (DS1)
+        runCatching { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(ONGOING_ID, notification(this)) }
         main.removeCallbacks(lingerStop)
         main.postDelayed(lingerStop, IDLE_LINGER_MS)
     }
@@ -145,7 +148,9 @@ class DownloadService : Service() {
         running[job.id] = handle
         handle.job = scope.launch {
             try {
-                runner.run(job) { emit(it) }
+                if (job.state == "ready" && job.verified && !job.resourcesComplete)
+                    runner.retrySidecars(job) { emit(it) }
+                else runner.run(job) { emit(it) }
             } catch (e: Transfers.Cancelled) {
                 val reason = handle.reason
                 if (reason == "cancel") {
@@ -158,7 +163,10 @@ class DownloadService : Service() {
                     emit(paused)
                 }
             } catch (e: DownloadFailure) {
-                val saved = (store.read(job.id) ?: job).copy(state = if (e.code == "EXPIRED") "expired" else "failed", error = e.code, message = e.message)
+                val old = store.read(job.id) ?: job
+                val saved = if (job.state == "ready" && job.verified)
+                    old.copy(state = "ready", resourcesComplete = false, resourcesRetryAt = System.currentTimeMillis() + 30 * 60_000L, message = "تعذّر استئناف الموارد الخارجية")
+                else old.copy(state = if (e.code == "EXPIRED") "expired" else "failed", error = e.code, message = e.message)
                 store.write(saved)
                 emit(saved)
             } catch (t: Throwable) {
@@ -231,6 +239,7 @@ class DownloadService : Service() {
     }
 
     internal fun emit(job: DownloadJob) {
+        if (job.state == "ready" && progress[job.id]?.state != "ready") noteCompleted()
         progress[job.id] = job
         listeners.forEach { runCatching { it(job) } }
         updateNotification()
@@ -301,6 +310,11 @@ class DownloadService : Service() {
                 plainMedia = job.sourceId.startsWith(com.vantara.anime.AnimeEngine.RUNTIME_SOURCE_PREFIX)) else base
         }
 
+        /** تُعاد الموارد الخارجية عند استئناف التطبيق، ولا يدخل الفيديو المكتمل تنزيلًا ثانيًا. */
+        private fun needsResume(job: DownloadJob, now: Long): Boolean =
+            job.state in setOf("queued", "downloading", "verifying", "reconnecting") ||
+                (job.state == "ready" && job.verified && !job.resourcesComplete && job.resourcesRetryAt <= now)
+
         private fun enqueue(job: DownloadJob) {
             if (running.containsKey(job.id) || pending.any { it.id == job.id }) return
             pending.add(job)
@@ -320,8 +334,15 @@ class DownloadService : Service() {
 
         /** عودة التطبيق للمقدمة: يكمل ما سُلِّم والخدمة متوقفة (رفض بدئها من الخلفية، أو قُتلت العملية). */
         fun resumeQueued(context: Context) {
-            if (instance != null) return
-            val waiting = pending.isNotEmpty() || runCatching { store(context).all().any { it.state == "queued" || it.state == "downloading" || it.state == "verifying" || it.state == "reconnecting" } }.getOrDefault(false)
+            val now = System.currentTimeMillis()
+            val service = instance
+            if (service != null) {
+                for (job in runCatching { store(context).all().filter { needsResume(it, now) } }.getOrDefault(emptyList()))
+                    enqueue(job)
+                service.drainPending()
+                return
+            }
+            val waiting = pending.isNotEmpty() || runCatching { store(context).all().any { needsResume(it, now) } }.getOrDefault(false)
             if (waiting) runCatching { ContextCompat.startForegroundService(context, Intent(context, DownloadService::class.java)) }
         }
 
@@ -351,27 +372,36 @@ class DownloadService : Service() {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "التنزيلات", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
         }
 
+        /** آخر عيّنة لكل عنصر لحساب السرعة (بايت، وقت). */
+        private val samples = ConcurrentHashMap<String, Pair<Long, Long>>()
+        /** عدد ما اكتمل منذ آخر خمول: «اكتمل تنزيل 3 عناصر». */
+        @Volatile private var completedSinceIdle = 0
+        fun noteCompleted() { completedSinceIdle++ }
+
+        private fun speedOf(job: DownloadJob, now: Long): Long? {
+            val prev = samples.put(job.id, job.bytes to now) ?: return null
+            val dt = now - prev.second
+            return if (dt in 500..60_000 && job.bytes >= prev.first) (job.bytes - prev.first) * 1000 / dt else null
+        }
+
         private fun notification(context: Context): Notification {
-            val active = running.keys.mapNotNull { progress[it] }
-            val title = when (active.size) {
-                0 -> if (pending.isEmpty()) holds.values.firstOrNull() ?: "يجهّز التنزيل" else if (wifiOnly) "${pending.size} في الانتظار حتى Wi‑Fi" else "${pending.size} في الانتظار"
-                1 -> active[0].let { listOf(it.title, it.label).filter(String::isNotBlank).joinToString(" — ") }
-                else -> "${active.size} تنزيلات جارية"
-            }
-            val done = active.sumOf { it.bytes }
-            val total = active.sumOf { if (it.total > 0) it.total else 0 }
-            val known = active.isNotEmpty() && active.all { it.total > 0 }
+            val now = android.os.SystemClock.elapsedRealtime()
+            val active = running.keys.mapNotNull { progress[it] }.map { NoticeItem(it.title, it.label, it.bytes, it.total, speedOf(it, now)) }
+            samples.keys.retainAll(running.keys)
+            val c = DownloadNotice.of(active, pending.size, holds.values.toList(), wifiOnly, completedSinceIdle)
+            if (!c.done && active.isEmpty() && pending.isEmpty()) completedSinceIdle = 0
             val open = context.packageManager.getLaunchIntentForPackage(context.packageName)
                 ?.let { PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
-            return NotificationCompat.Builder(context, CHANNEL)
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle(title)
-                .setContentText(if (known) "${done * 100 / total.coerceAtLeast(1)}%" else "VANTARA")
-                .setOnlyAlertOnce(true).setOngoing(true).setSilent(true)
-                .setProgress(100, if (known) (done * 100 / total.coerceAtLeast(1)).toInt() else 0, !known)
+            val b = NotificationCompat.Builder(context, CHANNEL)
+                .setSmallIcon(if (c.done) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_sys_download)
+                .setContentTitle(c.title)
+                .setContentText(c.text)
+                .setOnlyAlertOnce(true).setOngoing(c.ongoing).setSilent(true).setAutoCancel(c.done)
                 .setContentIntent(open)
                 .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-                .build()
+            if (c.percent != null || c.indeterminate && !c.done) b.setProgress(100, c.percent ?: 0, c.indeterminate)
+            if (c.lines.isNotEmpty()) b.setStyle(NotificationCompat.InboxStyle().also { s -> c.lines.forEach(s::addLine) })
+            return b.build()
         }
     }
 }

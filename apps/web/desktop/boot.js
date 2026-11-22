@@ -5,6 +5,7 @@ import { startDesktopDefaultAddons } from './default-addons.js';
 import { installFirstPartyTransport } from './first-party.js';
 import { startDesktopUpdateWatch } from './update-check.js';
 import { installDesktopPlayer } from './player.js';
+import { desktopChallenges } from './source-fetcher.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
 function element(document, tag, text, cls) {
@@ -38,6 +39,32 @@ export async function renderInstallPreview({ document = globalThis.document, reg
   return panel;
 }
 
+/**
+ * إضافة «التحقق» في ويندوز بشكل إضافة الـAPK (lib/source-verification.js): required/state، وpending، وbegin. الواجهة
+ * نفسها («تحتاج تحقق» وزر «تحقق») تعمل كما في الجوال، والصفحة الظاهرة من العملية الرئيسية (source-browser.cjs).
+ */
+export function createDesktopVerification(bridge, challenges = desktopChallenges) {
+  const listeners = { required: new Set(), state: new Set() };
+  const emit = (name, item) => { for (const fn of listeners[name] ?? []) { try { fn(item); } catch { /* */ } } };
+  challenges.subscribe((item) => emit('required', item));
+  return Object.freeze({
+    async addListener(name, fn) {
+      const set = listeners[name];
+      if (!set || typeof fn !== 'function') return { remove: async () => {} };
+      set.add(fn);
+      return { remove: async () => { set.delete(fn); } };
+    },
+    async pending() { return { pending: challenges.pending() }; },
+    async begin({ host } = {}) {
+      if (typeof bridge?.verifySource !== 'function') return { host, state: 'failed', reason: 'webview_unavailable' };
+      const result = await bridge.verifySource({ host }).catch(() => ({ host, state: 'failed', reason: 'launch_failed' }));
+      if (result?.state === 'verified') challenges.clear(host);
+      emit('state', result);
+      return result;
+    },
+  });
+}
+
 export function installDesktopBridges(g = globalThis) {
   if (!isDesktop(g)) return null;
   if (g.VantaraDesktopBridges) return g.VantaraDesktopBridges;
@@ -46,7 +73,17 @@ export function installDesktopBridges(g = globalThis) {
   const engine = createDesktopEngine({ bridge: g.VantaraDesktop, getRuntime });
   installDesktopPlayer({g,bridge:g.VantaraDesktop,engine});
   let modules;
-  const ExtensionEngine=new Proxy({}, {get(_,method){if(method==='then')return undefined;return async args=>{
+  // الجسر يعلن ما يملكه فقط: كان يرد «موجودة» على أي اسم، فظنت الواجهة أن ويندوز يدير مستودعات Mihon وإضافاتها
+  // (addRepo/installExtension) فتظهر للتثبيت ثم تفشل بـ«وظيفة المصدر غير متاحة».
+  // ويندوز اليوم يشغّل إضافات Mihon بمحرك Suwayomi المحلي (apps/desktop/suwayomi-engine.cjs) حين يعلنه التطبيق
+  // (`VantaraDesktop.mangaEngine`): المستودعات والتثبيت عبره، ومصادره `pkg#id` (معرّفات الـAPK نفسها) تُوجَّه إليه.
+  const WEB_METHODS=['sources','prepare','popular','latest','catalogue','search','genre','series','chapters','pages','image','cover','sites','addSite','removeSite','clearImageCache'];
+  const REPO_METHODS=['repos','addRepo','removeRepo','repoIndex','installExtension','uninstallExtension','updateState','rollbackExtension','engineState'];
+  const native=typeof g.VantaraDesktop?.mangaEngine==='function'?(method,args)=>g.VantaraDesktop.mangaEngine({method,args}):null;
+  const MANGA_METHODS=new Set([...WEB_METHODS,...(native?REPO_METHODS:[])]);
+  const engineSource=id=>/^[A-Za-z][\w]*(?:\.[\w]+)+#-?\d{1,20}$/.test(String(id??''));
+  const engineMedia=url=>/^vantara-engine:\/\/suwayomi\//.test(String(url??''));
+  const webCall=async(method,args)=>{
     const runtime=getRuntime();await runtime.ready;await runtime.addons.ready;
     if(['image','cover'].includes(method)){
       const source=runtime.addons.sources.source(args.sourceId);
@@ -59,8 +96,21 @@ export function installDesktopBridges(g = globalThis) {
     const plugin=(await(modules??=loadDesktopSources(g))).MangaEngine;
     if(typeof plugin[method]!=='function')throw new Error('وظيفة المصدر غير متاحة');
     return plugin[method](args);
+  };
+  const ExtensionEngine=new Proxy({}, {has(_,method){return MANGA_METHODS.has(method);},get(_,method){if(method==='then'||!MANGA_METHODS.has(method))return undefined;return async (args={})=>{
+    if(native&&REPO_METHODS.includes(method))return native(method,args);
+    if(native&&method==='sources'){
+      // مصادر الويب ومصادر المحرك معًا؛ تعذّر أحدهما لا يُخفي الآخر
+      const [web,mine]=await Promise.allSettled([webCall('sources',args),native('sources',args)]);
+      if(web.status==='rejected'&&mine.status==='rejected')throw web.reason;
+      return {sources:[...(web.value?.sources??[]),...(mine.value?.sources??[])],stateRecovered:mine.value?.stateRecovered===true};
+    }
+    if(native&&method==='image'&&engineMedia(args.page?.imageUrl))return native('image',args);
+    if(native&&method==='cover'&&engineMedia(args.url))return {path:args.url};
+    if(native&&engineSource(args.sourceId))return native(method,args);
+    return webCall(method,args);
   };}});
-  g.VantaraDesktopBridges = Object.freeze({ AnimeEngine:engine,ExtensionEngine,SourceRuntime:{getRuntime},AddonFabric:{runtime:async()=>({getRuntime})} });
+  g.VantaraDesktopBridges = Object.freeze({ AnimeEngine:engine,ExtensionEngine,Verification:createDesktopVerification(g.VantaraDesktop),SourceRuntime:{getRuntime},AddonFabric:{runtime:async()=>({getRuntime})} });
   if(g.document&&g.location?.protocol==='vantara:'){
     const defaults=startDesktopDefaultAddons({runtime:getRuntime(),onStatus:()=>g.document.dispatchEvent(new CustomEvent('vantara:addons-changed'))});
     g.VantaraDesktopDefaults=defaults;
@@ -94,6 +144,17 @@ export function installDesktopBridges(g = globalThis) {
       }
       if (event.type === 'playback/closed' && status) { status.hidden = true; activeSession = null; }
     }
+    // محرك إضافات المانجا يُجهَّز مرة (تنزيل موثّق ~330MB ثم فك ثم تشغيل): يُقال ما يحدث بدل انتظار صامت
+    if (event.type === 'manga-engine/progress') {
+      const mb = n => Math.round((Number(n) || 0) / 1048576);
+      if (event.stage === 'download') show(event.total ? `يجهّز محرك إضافات المانجا لأول مرة… ${mb(event.received)} من ${mb(event.total)}MB` : 'يجهّز محرك إضافات المانجا لأول مرة…');
+      else if (event.stage === 'extract') show('يفك محرك إضافات المانجا…');
+      else if (event.stage === 'installed' || event.stage === 'starting') show('يشغّل محرك إضافات المانجا…');
+      else if (event.stage === 'running' && status) status.hidden = true;
+    }
+    if (event.type === 'manga-extensions/changed') g.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed'));
+    // إضافة Mihon طلب موقعها تحققًا بيد إنسان (جسر Cloudflare في المحرك): «تحتاج تحقق» وزر «تحقق» كالمصادر المدمجة
+    if (event.type === 'source-verification/required' && typeof event.host === 'string') desktopChallenges.report(event.host);
     if (event.type === 'addon/install') void (async () => {
       if (!g.document?.body) return;
       const addons = getRuntime().addons; await addons.ready;

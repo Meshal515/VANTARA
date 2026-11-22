@@ -603,6 +603,16 @@ html,
 }
 .v35 .work-score .icon { width: 11px; height: 11px; color: var(--gold); }
 .v35 .work-score[hidden] { display: none; }
+/* وسم لغة عمل بلا نسخة عربية: نص صغير هادئ بجانب التقييم، لا شارة ملوّنة */
+.v35 .work-lang {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 10px;
+  line-height: 1.5;
+}
 .v35 .work-card:active .poster {
   transform: scale(0.97);
 }
@@ -721,6 +731,14 @@ html,
   width: 60%;
   margin-top: 6px;
 }
+/* هيكل في السطر (شرائح المصادر ونطاقات الفصول قبل وصولها): يأخذ مقاس صنفه ومكانه في سطره. لا يرث
+ * absolute + inset:0 من .skeleton (صُممت لتغطي إطار الغلاف)، وإلا التصق بأقرب أب موضوع: كبسولة سوداء أعلى
+ * الصفحة، ولوح أسود بطولها في الكلاسيكي (VI1). */
+.v35 .skeleton-inline {
+  position: relative;
+  pointer-events: none;
+  animation: v35-pulse 1.6s ease-in-out infinite;
+}
 @keyframes v35-pulse {
   50% {
     opacity: 0.6;
@@ -760,6 +778,23 @@ html,
   -webkit-tap-highlight-color: transparent;
   touch-action: none; /* سحب الدائرة لا يصير تمريرًا للصفحة */
   user-select: none;
+}
+/* المظهر الحالي (قرار المالك 22 نوفمبر): لتحت يشف الشريط 50% **بحجمه ومكانه**، ولفوق أو باللمس أو بالانتقال لقسم آخر يرجع.
+ * كان يصغر 80% أيضًا: الأزرار تتحرك تحت الإصبع حين يكبر عند اللمس، فتصل النقرة للأب لا للزر ولا ينتقل («اكتشف» لا
+ * يفتح)، والأهداف أصغر. الآن الشفافية وحدها، بانتقال هادئ بلا ارتداد ذهابًا ورجوعًا. حالة صنف (dock.js)، لا حركة إطار بإطار.
+ * Glass له تصغيره الخاص (glass.css: g-compact). */
+.v35 .dock {
+  transition: opacity 0.32s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.v35 .dock.d-compact {
+  opacity: 0.5;
+  transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+html[data-motion='off'] .v35 .dock {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .dock { transition: none; }
 }
 .v35 .dock-group {
   position: absolute; /* مجموعة الأقسام لقارئ الشاشة فقط؛ لا مكان لها في صف الكبسولات */
@@ -3831,3 +3866,7 @@ html[data-motion='off'] .v35 .sheet-backdrop > .sheet { transform: none !importa
 .v35 .ins-pav { transition: left .7s cubic-bezier(.22,.8,.2,1), top .7s cubic-bezier(.22,.8,.2,1), opacity .3s ease, scale .3s ease; }
 .v35 .ins-pav--gone { opacity: 0; scale: .6; pointer-events: none; }
 .v35 .ins-row-gone { opacity: 0; transform: translateY(-4px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }
+
+/* «جسرك الخاص» (الإعدادات، الويب): خطوات النشر مرقّمة وواضحة */
+.v35 .bridge-steps { margin: 10px 0 14px; padding-inline-start: 22px; display: grid; gap: 8px; font-size: 14px; line-height: 1.7; color: var(--text-2, #c9c2d8); }
+.v35 .bridge-steps li::marker { color: var(--accent, #c2b0ff); font-weight: 800; }

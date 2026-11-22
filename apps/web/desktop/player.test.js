@@ -24,6 +24,51 @@ it('ignores events from an old session, reports errors, and closes native playba
  f.event({type:'playback/error',session:'two',message:'تعذر الإطار'});expect(f.document.querySelector('.desktop-player').textContent).toContain('تعذر الإطار');
  f.document.querySelector('[data-action="close"]').click();await Promise.resolve();expect(f.engine.closeSession).toHaveBeenCalledWith({session:'two'});expect(f.bridge.stopPlayback).toHaveBeenCalledWith({session:'two'});expect(f.document.querySelector('.desktop-player')).toBeNull();
 });
+it('زر التشغيل يعيد فتح المصدر عند بقاء المشغل بعد خطأ التشغيل',async()=>{
+ const f=fixture({overlay:true});
+ f.engine.retryPlayback=vi.fn(async()=>{});
+ f.event({type:'playback/preparing',session:'one'});
+ await Promise.resolve();
+ f.event({type:'playback/ready',session:'one'});
+ f.event({type:'playback/error',session:'one',message:'توقف تقدم الفيديو'});
+ f.event({type:'playback/closed',session:'one'});
+ f.overlay({session:'one',name:'pause',value:true});
+ f.overlay({session:'one',name:'pause',value:true});
+ await Promise.resolve();
+ expect(f.engine.retryPlayback).toHaveBeenCalledExactlyOnceWith({session:'one'});
+ expect(f.commands).toEqual([]);
+ f.player.dispose();
+});
+it('يطلب صورة جديدة عند نفس موضع المعاينة بعد تبديل مصدر البث',async()=>{
+ const f=fixture({overlay:true});
+ const request=f.bridge.previewFrame=vi.fn(async ({positionMs})=>({
+  available:true,positionMs,src:'data:image/jpeg;base64,AA==',
+ }));
+ f.event({type:'playback/preparing',session:'one'});
+ await Promise.resolve();
+ f.event({type:'playback/ready',session:'one'});
+ f.overlay({session:'one',name:'thumb',value:90000});
+ await Promise.resolve();
+ f.event({type:'playback/preparing',session:'one'});
+ f.event({type:'playback/ready',session:'one'});
+ f.overlay({session:'one',name:'thumb',value:90000});
+ expect(request).toHaveBeenCalledTimes(2);
+ f.player.dispose();
+});
+it('يهمل صورة معاينة تصل من مصدر سابق يحمل معرّف الجلسة نفسه',async()=>{
+ const f=fixture({overlay:true});
+ let finish;
+ f.bridge.previewFrame=vi.fn(()=>new Promise(resolve=>{finish=resolve;}));
+ f.event({type:'playback/preparing',session:'one'});
+ await Promise.resolve();
+ f.event({type:'playback/ready',session:'one'});
+ f.overlay({session:'one',name:'thumb',value:90000});
+ f.event({type:'playback/preparing',session:'one'});
+ finish({available:true,positionMs:90000,src:'data:image/jpeg;base64,AA=='});
+ await Promise.resolve();
+ expect(f.bridge.playerOverlay.mock.calls.map(([value])=>value.thumb).filter(Boolean)).toEqual([]);
+ f.player.dispose();
+});
 it('audio, subtitle, delay and fullscreen controls use only constrained bridge commands',async()=>{
  const f=fixture();f.event({type:'playback/preparing',session:'one'});f.event({type:'playback/ready',session:'one',embedded:true});
  f.event({type:'playback/audio',session:'one',tracks:[{id:2,label:'ياباني',selected:true}]});f.event({type:'playback/subtitles',session:'one',tracks:[{id:3,label:'عربية',selected:true}]});

@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createSourceLatest } from './source-latest.js';
+import { _pending } from '../lib/source-report.js';
 
 it('reuses a source feed fetched by another device without calling its extension again', async () => {
   const snapshots = new Map();
@@ -32,4 +33,32 @@ it('does not silently call an expired shared snapshot a successful refresh', asy
   const sync = { latestSnapshots: async () => ({ sources: [{ sourceId: 's', fetchedAt: 1, value: { mangas: [] } }] }), claimLatest: async () => { throw new Error('sync offline'); } };
   const latest = createSourceLatest(sync, { now: () => 100_000 });
   await expect(latest('s', async () => { throw new Error('source offline'); })).rejects.toThrow('source offline');
+});
+
+it('a stalled snapshot transport leaves the source its own request budget', async () => {
+  vi.useFakeTimers();
+  try {
+    const sync = { latestSnapshots: () => new Promise(() => {}) };
+    const latest = createSourceLatest(sync);
+    const request = latest('extension.installed#123', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 16_000));
+      return { mangas: [{ title: 'Spy x Family' }] };
+    });
+    let value;
+    request.then((result) => { value = result; });
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(value).toEqual({ mangas: [{ title: 'Spy x Family' }] });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('reports a rejected source id even when the local extension returns its listing', async () => {
+  const latest = createSourceLatest({
+    latestSnapshots: async () => ({ sources: [] }),
+    claimLatest: async () => { throw Object.assign(new Error('http_400'), { translationError: 'source' }); },
+  });
+  const mangas = [{ title: 'Spy x Family' }];
+  expect(await latest('extension.mangamillion#123', async () => ({ mangas }))).toEqual({ mangas });
+  expect(_pending()).toContainEqual(expect.objectContaining({ sourceId: 'extension.mangamillion.123', stage: 'snapshot_claim', outcome: 'error', reason: 'source_id_rejected' }));
 });

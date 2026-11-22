@@ -38,6 +38,7 @@ data class DownloadJob(
     val main: String? = null,
     val container: String? = null,
     val verified: Boolean = false,
+    val mainBytes: Long? = null,
     val error: String? = null,
     val message: String? = null,
     /** التورنت: البصمة ورقم الملف والرابط بمتتبّعاته — يكفي لإعادة الإضافة والاستئناف بعد إعادة التشغيل. */
@@ -50,6 +51,10 @@ data class DownloadJob(
     val subtitleProviders: String? = null,
     val episode: Float = 1f,
     val addonSubtitlesDone: Boolean = false,
+    /** الفيديو قابل للتشغيل حتى إن فشل مورد خارجي، لكن الحزمة لا تُعدّ مكتملة حتى تُحفظ الموارد المطلوبة. */
+    val resourcesComplete: Boolean = true,
+    val resourcesRetryAt: Long = 0L,
+    val resourcesRetryCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val finishedAt: Long? = null,
 )

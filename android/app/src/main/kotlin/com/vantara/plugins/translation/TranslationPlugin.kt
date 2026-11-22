@@ -469,13 +469,13 @@ class TranslationPlugin : Plugin() {
     /** الترجمة المقدّمة: يبدأ الخدمة الأمامية أو يحدّث إشعار التقدّم. */
     @PluginMethod
     fun jobProgress(call: PluginCall) {
-        TranslationJobService.update(context, call.getString("title") ?: "VANTARA", call.getString("text") ?: "", call.getInt("done") ?: 0, call.getInt("total") ?: 0)
-        call.resolve()
+        val foreground = TranslationJobService.update(context, call.getString("title") ?: "VANTARA", call.getString("text") ?: "", call.getInt("done") ?: 0, call.getInt("total") ?: 0)
+        call.resolve(com.getcapacitor.JSObject().put("foreground", foreground))
     }
 
     @PluginMethod
     fun jobFinished(call: PluginCall) {
-        TranslationJobService.finished(context, call.getString("title") ?: "VANTARA", call.getString("text") ?: "")
+        TranslationJobService.finished(context, call.getString("title") ?: "VANTARA", call.getString("text") ?: "", call.getBoolean("keepRunning", false) == true)
         call.resolve()
     }
 

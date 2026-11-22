@@ -33,24 +33,58 @@ class DownloadRunner(
     fun run(start: DownloadJob, listener: Listener): DownloadJob {
         var job = save(start.copy(state = "downloading", error = null, message = null), listener)
         val dir = store.dir(job.id)
-        job = when (job.kind) {
+        val savedMain = job.main?.let { File(dir, it) }
+        // FILE وTORRENT يكتبان الاسم النهائي عند اكتمال النقل. بعد إغلاق التطبيق أثناء الترجمات
+        // نتحقق من الملف نفسه بدل بدء النقل ثانية، أو مقارنته بحجم الحزمة شاملًا ملفات الترجمة.
+        val expectedMainBytes = job.mainBytes ?: job.total
+        val hasCompleteFile = job.kind != "HLS" && savedMain?.isFile == true &&
+            expectedMainBytes > 0 && savedMain.length() == expectedMainBytes
+        job = if (hasCompleteFile) job else when (job.kind) {
             "HLS" -> hls(job, dir, listener)
             "TORRENT" -> torrentFile(job, dir, listener)
             else -> file(job, dir, listener)
         }
         // الملف كامل: «يتحقق» من الآن، لا «يحمّل 100%» طوال جلب الترجمات والصوت الخارجي
-        job = save(job.copy(state = "verifying"), listener)
-        job = sidecars(job, dir, listener)
         val main = job.main?.let { File(dir, it) }
+        job = save(job.copy(state = "verifying", mainBytes = main?.length()), listener)
         if (main == null || !main.isFile || main.length() <= 0) throw DownloadFailure("VERIFY", "الملف الرئيسي غير موجود بعد التنزيل")
-        if (job.kind == "FILE") {
+        if (job.kind != "HLS") {
             val head = main.inputStream().use { s -> ByteArray(512).let { b -> val n = s.read(b); b.copyOf(maxOf(n, 0)) } }
             val sniffed = Signatures.sniff(head)
             if (sniffed == "PAGE" || sniffed == "HLS" || sniffed == "UNKNOWN") throw DownloadFailure("VERIFY", "المحفوظ ليس ملف فيديو ($sniffed)")
-            if (job.total > 0 && main.length() != job.total) throw DownloadFailure("VERIFY", "حجم الملف ${main.length()} لا يطابق ${job.total}")
+            if (job.mainBytes != (if (hasCompleteFile) expectedMainBytes else job.total)) throw DownloadFailure("VERIFY", "حجم الملف لا يطابق النقل المكتمل")
+        }
+        return finishResources(job, dir, listener)
+    }
+
+    /** إعادة محاولة الموارد وحدها: لا تلمس ملف الفيديو ولا تنزع منه حالة ready أثناء المحاولة. */
+    fun retrySidecars(start: DownloadJob, listener: Listener): DownloadJob {
+        val dir = store.dir(start.id)
+        val main = start.main?.let { File(dir, it) }
+        if (!start.verified || main?.isFile != true || main.length() <= 0L)
+            throw DownloadFailure("VERIFY", "الملف الرئيسي لم يعد صالحًا")
+        return finishResources(start, dir, listener)
+    }
+
+    private fun finishResources(start: DownloadJob, dir: File, listener: Listener): DownloadJob {
+        val job = sidecars(start, dir, listener)
+        val allSaved = (job.subtitles + job.audio).all { track ->
+            // مسار HLS الصوتي جزء من القائمة المحلية نفسها، ولا يُنزّل كملف منفصل.
+            (track.kind == "audio" && runCatching { java.net.URI(track.url).path.orEmpty() }.getOrDefault("").endsWith(".m3u8", true)) ||
+                (track.file?.let { File(dir, it).takeIf { f -> f.isFile && f.length() > 0L } } != null)
+        } && (job.subtitleProviders == null || job.addonSubtitlesDone)
+        val failures = if (allSaved) 0 else (job.resourcesRetryCount + 1).coerceAtMost(20)
+        val wait = when {
+            failures <= 1 -> 60_000L
+            failures == 2 -> 5 * 60_000L
+            failures == 3 -> 30 * 60_000L
+            else -> 6 * 60 * 60_000L
         }
         val size = store.sizeOnDisk(job.id)
-        return save(job.copy(state = "ready", verified = true, bytes = size, total = size, finishedAt = System.currentTimeMillis()), listener)
+        return save(job.copy(state = "ready", verified = true, resourcesComplete = allSaved,
+            resourcesRetryAt = if (allSaved) 0L else System.currentTimeMillis() + wait,
+            resourcesRetryCount = failures, bytes = size, total = size,
+            finishedAt = job.finishedAt ?: System.currentTimeMillis()), listener)
     }
 
     /** التورنت: الملف كاملًا في مجلد العنصر، وكل قطعة متحقق من بصمتها قبل عدّها. */
@@ -75,6 +109,10 @@ class DownloadRunner(
         job = job.copy(etag = etag ?: job.etag, lastModified = modified ?: job.lastModified, bytes = size, total = size)
         val head = part.inputStream().use { s -> ByteArray(512).let { b -> val n = s.read(b); b.copyOf(maxOf(n, 0)) } }
         val container = Signatures.sniff(head)
+        if (container in setOf("PAGE", "HLS", "UNKNOWN")) {
+            part.delete()
+            throw DownloadFailure("VERIFY", "المستلم ليس ملف فيديو ($container)")
+        }
         val name = "video.${Signatures.extension(container)}"
         val dest = File(dir, name)
         if (!part.renameTo(dest)) {
@@ -194,27 +232,33 @@ class DownloadRunner(
             return if (e in setOf("srt", "vtt", "ass", "ssa", "ttml", "m4a", "aac", "mp3", "opus", "ogg", "mka", "m3u8")) e else fallback
         }
         val subs = job.subtitles.mapIndexed { i, s ->
-            if (s.file != null && File(dir, s.file).isFile) return@mapIndexed s
+            if (s.file != null && File(dir, s.file).length() > 0) return@mapIndexed s
             val name = "sub-$i.${ext(s.url, "vtt")}"
-            runCatching { transfers.whole(s.url, job.headers, File(dir, name)) }.fold({ s.copy(file = name) }, { s })
+            runCatching { transfers.whole(s.url, job.headers, File(dir, name)); if (File(dir, name).length() == 0L) throw DownloadFailure("VERIFY", "ملف الترجمة فارغ") }.fold({ s.copy(file = name) }, { if (it is Transfers.Cancelled) throw it else s.copy(file = null) })
         }
         val audio = job.audio.mapIndexed { i, a ->
-            if (a.file != null && File(dir, a.file).isFile) return@mapIndexed a
+            if (a.file != null && File(dir, a.file).length() > 0) return@mapIndexed a
             val e = ext(a.url, "m4a")
             if (e == "m3u8") return@mapIndexed a // صوت HLS خارجي: يبقى في القائمة الرئيسية إن كان منها، ولا يُخترع ملف
             val name = "audio-$i.$e"
-            runCatching { transfers.whole(a.url, job.headers, File(dir, name)) }.fold({ a.copy(file = name) }, { a })
+            runCatching { transfers.whole(a.url, job.headers, File(dir, name)); if (File(dir, name).length() == 0L) throw DownloadFailure("VERIFY", "ملف الصوت فارغ") }.fold({ a.copy(file = name) }, { if (it is Transfers.Cancelled) throw it else a.copy(file = null) })
         }
         job = job.copy(subtitles = subs, audio = audio)
         // ترجمات الإضافات (OpenSubtitles وغيرها): نص UTF-8 بجانب الفيديو، فلا ينكسر ترميز العربية بلا إنترنت
         val fetchSubtitles = addonSubtitles
         if (!job.addonSubtitlesDone && fetchSubtitles != null && job.subtitleProviders != null) {
-            val fetched = runCatching { fetchSubtitles(job) }.getOrDefault(emptyList())
-            val saved = fetched.mapIndexedNotNull { i, sub ->
-                val name = "addon-$i-${sub.lang}.${sub.ext}"
-                runCatching { File(dir, name).writeText(sub.text, Charsets.UTF_8) }.getOrNull()?.let { Sidecar(url = "addon:$i", lang = sub.lang, file = name, label = sub.provider) }
+            val result = runCatching { fetchSubtitles(job) }
+            if (result.isSuccess) {
+                val fetched = result.getOrThrow()
+                val saved = fetched.mapIndexedNotNull { i, sub ->
+                    val name = "addon-$i-${sub.lang}.${sub.ext}"
+                    runCatching { File(dir, name).writeText(sub.text, Charsets.UTF_8) }
+                        .getOrNull()?.takeIf { File(dir, name).length() > 0L }
+                        ?.let { Sidecar(url = "addon:$i", lang = sub.lang, file = name, label = sub.provider) }
+                }
+                // إن لم تُكتب كل الملفات فلا نعلن اكتمال إضافات الترجمة، وتُعاد المحاولة لاحقًا.
+                job = job.copy(subtitles = job.subtitles + saved, addonSubtitlesDone = saved.size == fetched.size)
             }
-            job = job.copy(subtitles = job.subtitles + saved, addonSubtitlesDone = true)
         }
         store.write(job)
         listener.on(job)

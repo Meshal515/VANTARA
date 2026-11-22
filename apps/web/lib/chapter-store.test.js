@@ -37,3 +37,21 @@ describe('chapter caches survive canonical manga regrouping', () => {
     expect(cached.detail.description).toBe('Saved');
   });
 });
+
+it('CST1: pruning keeps the newest 200 works and never loads every stored work at once', async () => {
+  const { IDBFactory } = await import('fake-indexeddb');
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.resetModules();
+  const store = await import('./chapter-store.js');
+  const now = vi.spyOn(Date, 'now');
+  for (let i = 0; i < 230; i++) { now.mockReturnValue(1_000 + i); await store.writeWork(`ext:w${i}`, { editions: [] }); }
+  now.mockRestore();
+  const { IDBObjectStore } = await import('fake-indexeddb');
+  const getAll = vi.spyOn(IDBObjectStore.prototype, 'getAll');
+  await store.prune();
+  expect(getAll).not.toHaveBeenCalled();
+  expect(await store.readWork('ext:w0')).toBeNull();
+  expect(await store.readWork('ext:w229')).not.toBeNull();
+  getAll.mockRestore();
+  vi.unstubAllGlobals();
+});

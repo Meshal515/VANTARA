@@ -175,8 +175,11 @@ class PlaybackSession(
     fun next(): Candidate? = synchronized(this) { queue.firstOrNull(acceptsCandidate)?.also { queue.remove(it); tried += it } }
 
     /** اختيار المستخدم من ورقة السيرفرات: هذا المرشّح الآن، والباقي احتياط. */
-    fun take(id: String): Candidate? = synchronized(this) {
-        val c = queue.firstOrNull { it.id == id } ?: tried.firstOrNull { it.id == id && it.id !in failedIds } ?: return null
+    // [manual]: اختيار المستخدم بيده يعيد حتى سيرفرًا فشل في الجلسة (TS1: التورنت الأول تعطّل عند موضع بعد قفزة فلم يعد
+    // يُختار حتى تُغلق الجلسة). الاختيار الآلي لا يعيد فاشلًا.
+    fun take(id: String, manual: Boolean = false): Candidate? = synchronized(this) {
+        val c = queue.firstOrNull { it.id == id } ?: tried.firstOrNull { it.id == id && (manual || it.id !in failedIds) } ?: return null
+        if (manual) failedIds -= c.id
         queue.remove(c)
         if (c !in tried) tried += c
         c
