@@ -142,6 +142,8 @@ describe('plan B, end to end on 1911 real works', () => {
   let detailCalls = 0;
   const pages = [];
   beforeAll(async () => {
+    // بلا شبكة حقيقية في المقياس: أسئلة MangaDex (الأسماء العربية) تردّ «لا شيء» فورًا
+    vi.stubGlobal('fetch', async () => ({ ok: false, json: async () => ({}) }));
     model = sourcesModel();
     const ids = [...model.catalog.keys()];
     // المحاكاة تعامل كل مصادرها (ومنها MangaDex) مصادر عربية آمنة: المقياس للهوية وحدها، لا لسياسة المصادر
@@ -236,7 +238,9 @@ describe('plan B, end to end on 1911 real works', () => {
     expect(wrong).toBe(0);
     // المتجانسات (اسم واحد لعملين) لا تفرّقها الأسماء: تُعدّ ولا يُسمح بزيادتها
     expect(homonyms).toBeLessThanOrEqual(68);
-    expect(found).toBeGreaterThanOrEqual(3608);
+    // نسبة لا عدد: دمج المكرر (رقم MangaDex للنسخة، 22 نوفمبر) يقلّل صفحات الأعمال فيقلّ المقام. كانت 3608/3733 (96.7%)
+    expect(found / expected).toBeGreaterThanOrEqual(0.967);
+    expect(found).toBeGreaterThanOrEqual(3550);
   });
 
   it('verification costs little: about one detail request per opened work, not one per source', () => {

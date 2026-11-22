@@ -67,7 +67,7 @@ import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
 import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
-import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
+import { fetchMangaDexIdentity, fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
 import { artRatio, createArtStore, isLocalArt } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
 import { adultManga, blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
@@ -85,7 +85,7 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
-import { canonicalRefOf, learnAliases, noteOfficialIds, noteRefAliases, refsOf, splitRefs } from '../lib/manga-alias-store.js';
+import { ambiguousNames, canonicalRefOf, learnAliases, noteAmbiguousNames, noteOfficialIds, noteRefAliases, officialIdMap, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
 import { onChapters } from '../lib/extension-engine.js';
@@ -970,6 +970,52 @@ export function mountV35(deps, { page = 'home' } = {}) {
     matchFor(title);
     return artPromises.get(title);
   }
+  /**
+   * تغطية المرساة (مهمة التكرار، 22 نوفمبر): كانت هوية AniList تُتعلَّم لعنوان البطاقة وحده، فنسخها بأسماء أخرى (روماجي،
+   * عربي) تبقى بلا رقم ولا تجتمع في القوائم التالية. أسماء نسخ البطاقة الظاهرة تدخل الدفعة نفسها (20 عنوانًا للطلب)،
+   * إلا ما عُرف رقمه أو غموضه من قبل، وأربعة على الأكثر للبطاقة.
+   */
+  function learnEditionIdentities(work) {
+    const known = officialIdMap();
+    const shared = ambiguousNames();
+    const titles = [...new Set((work?._work?.editions ?? []).map((e) => e?.manga?.title).filter((t) => typeof t === 'string' && t.trim()))];
+    let queued = 0;
+    for (const title of titles) {
+      const key = normalizeTitle(title);
+      if (!key || known.has(key) || shared.has(key) || ratingPromises.has(title)) continue;
+      // الاسم العربي لا يعرفه AniList: هويته من MangaDex (links.al) بطابور هادئ
+      if (/[؀-ۿ]/.test(title)) { queueDexIdentity(title, key); continue; }
+      matchFor(title);
+      if (++queued >= 4) break;
+    }
+  }
+  // MangaDex: حدّه خمسة طلبات في الثانية للجميع. طلب كل 400ms، والاسم يُسأل مرة كل أسبوعين على الجهاز
+  const DEX_TRIED_KEY = 'vantara.mangadex.arabicIdentity.v1';
+  const DEX_RETRY_MS = 14 * 86_400_000;
+  const dexTried = (() => { try { return JSON.parse(localStorage.getItem(DEX_TRIED_KEY) ?? '{}') ?? {}; } catch { return {}; } })();
+  const dexQueue = new Map();
+  let dexRunning = false;
+  function queueDexIdentity(title, key) {
+    if (dexQueue.has(key) || Date.now() - (dexTried[key] ?? 0) < DEX_RETRY_MS || dexQueue.size >= 40) return;
+    dexQueue.set(key, title);
+    void runDexIdentity();
+  }
+  async function runDexIdentity() {
+    if (dexRunning) return;
+    dexRunning = true;
+    try {
+      for (const [key, title] of dexQueue) {
+        dexQueue.delete(key);
+        const identity = await fetchMangaDexIdentity(title).catch(() => null);
+        dexTried[key] = Date.now();
+        if (identity) { noteOfficialIds([[key, identity.id]]); learnAliases(key, identity.names); }
+        try { localStorage.setItem(DEX_TRIED_KEY, JSON.stringify(Object.fromEntries(Object.entries(dexTried).slice(-3000)))); } catch { /* تخزين ممتلئ */ }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    } finally {
+      dexRunning = false;
+    }
+  }
   // مطابقة AniList (التقييم والغلاف والبنر الرسمي) لكل ما ظهر من أعمال في طلب واحد: 20 عنوانًا في الطلب وطلبان في
   // آنٍ على الأكثر، بلا انتظار بين الدفعات. القياس الحي: 30 عنوانًا بطلب واحد 170ms، وبدفعات 8 ينتظر بينها 750ms
   // كانت 2.7 ثانية، فتنتظر أغلفة القائمة كلها خلفها.
@@ -988,6 +1034,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // الهوية الرسمية المؤكدة تُتعلَّم (ID1، ID2): المعرّف دليل دمج، وأسماء AniList البديلة أسماء للعمل نفسه. تُستعمل في بناء
       // الفهرس التالي لا في البطاقات الظاهرة الآن (لا يتبدل شيء تحت عينك). الحارسان في matchMangaIdentity وفي الدمج نفسه
       const learnedIds = [];
+      // اسم لأكثر من عمل في AniList: لا يُدمج به بين مصدرين بعد الآن (canonicalIndex: ambiguous)
+      const ambiguousKeys = batch.filter(({ title }) => matches.get(title)?.ambiguous).map(({ title }) => normalizeTitle(title)).filter(Boolean);
+      if (ambiguousKeys.length) noteAmbiguousNames(ambiguousKeys);
       for (const { title } of batch) {
         const identity = matches.get(title)?.identity;
         if (!identity) continue;
@@ -1081,6 +1130,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     onLongPress(a, () => openCardActions(a._work));
     void nearViewport(a).then(async () => {
       if (!a.isConnected) return;
+      learnEditionIdentities(work);
       void ratingFor(work._work?.title || work.title?.english || titleOf(work)).then((rated) => {
         if (!a.isConnected || !rated) return;
         // AniList يعرف العمل للكبار (هنتاي، إيتشي…): يُحجب ويختفي من هنا ومن كل قائمة بعدها

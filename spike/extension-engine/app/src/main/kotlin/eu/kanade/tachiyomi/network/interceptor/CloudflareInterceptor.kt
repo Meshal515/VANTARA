@@ -184,6 +184,24 @@ class CloudflareInterceptor(
      */
     private fun humanChallenge(chain: Interceptor.Chain, request: Request): Response {
         val host = request.url.host
+        // حلقة «تحتاج تحقق» بعد النجاح (بلاغ المالك 22 نوفمبر). سببان: (1) حل صامت فشل قبل التحقق كان يرفض كل طلب
+        // للمضيف عشر دقائق دون أن ينظر هل تحقق المستخدم بعده، فيُطلب التحقق مرة ثانية وثالثة. (2) مضيف يرفض OkHttp
+        // ببصمة الاتصال ولو حمل الكوكي، فيُطلب إنسان من جديد. الآن: كوكي المضيف (تحقق ناجح) يُجرَّب أولًا قبل أي رفض،
+        // وإن بقي OkHttp مرفوضًا جُلب الطلب عبر محرك المتصفح الذي نجح فيه التحقق. لا تحقق جديد إلا إن فشل هذا أيضًا
+        // (الكوكي انتهى فعلًا).
+        if (humanChallengeFirstStep(hasClearance(request.url), request.isImageRequest(), silentFailedAt[host], System.currentTimeMillis()) == HumanChallengeStep.RETRY_WITH_CLEARANCE) {
+            val retry = chain.proceed(request)
+            if (!retry.isChallenge()) {
+                silentFailedAt.remove(host)
+                return retry
+            }
+            retry.close()
+            byteFetchResponse(request)?.let {
+                byteFetchHosts.add(host)
+                silentFailedAt.remove(host)
+                return it
+            }
+        }
         if (!silentSolveAllowed(request.isImageRequest(), silentFailedAt[host], System.currentTimeMillis())) {
             throw interactiveError(request)
         }

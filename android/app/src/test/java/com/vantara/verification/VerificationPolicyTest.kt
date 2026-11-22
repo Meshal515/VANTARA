@@ -117,4 +117,15 @@ class VerificationPolicyTest {
         assertTrue("still within the user's own session", ledger.expire(150).isEmpty())
         assertEquals(active.token, ledger.finish("example.org", active.token)?.token)
     }
+
+    @Test fun allSiteCookiesAreImportedBoundedAndWithoutHeaderInjection() {
+        // بلاغ المالك 22 نوفمبر: التحقق ينجح ثم يُطلب ثانية؛ كان cf_clearance وحده يُنقل وتضيع بقية كوكيز الموقع
+        assertEquals(listOf("cf_clearance" to "abc", "__cf_bm" to "x.y-z", "PHPSESSID" to "s1"),
+            VerificationPolicy.cookiePairs("cf_clearance=abc; __cf_bm=x.y-z; PHPSESSID=s1"))
+        assertTrue(VerificationPolicy.cookiePairs("a=1\r\nSet-Cookie: evil=1").isEmpty())
+        assertEquals(listOf("ok" to "1"), VerificationPolicy.cookiePairs("bad name=1; ok=1; semi=a,b; sp=a b"))
+        assertEquals(40, VerificationPolicy.cookiePairs((1..60).joinToString("; ") { "c$it=v" }).size)
+        assertEquals(listOf("dup" to "1"), VerificationPolicy.cookiePairs("dup=1; dup=2"))
+        assertTrue(VerificationPolicy.cookiePairs(null).isEmpty())
+    }
 }

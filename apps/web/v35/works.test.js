@@ -303,3 +303,26 @@ describe('SY4: saved works are read once, not parsed on every workFromRef', () =
     expect(reads).toBe(1);
   });
 });
+
+describe('البحث: صيغ الاستعلام وقرب النتيجة (بلاغ المالك 22 نوفمبر)', async () => {
+  const { searchVariants, searchScore } = await import('./works.js');
+  it('الفاصلة المنحنية: صيغة بفاصلة مستقيمة ثم بلا علامات، والأصل أولًا', () => {
+    expect(searchVariants('The Savior’s Bucket List')).toEqual(["The Savior’s Bucket List", "The Savior's Bucket List", 'The Saviors Bucket List']);
+    expect(searchVariants('  ون بيس  ')).toEqual(['ون بيس']);
+    expect(searchVariants('Re:Zero')).toEqual(['Re:Zero', 'Re Zero']);
+    expect(searchVariants('')).toEqual([]);
+  });
+  const work = (title, altNames = []) => ({ title, editions: [{ manga: { title, altNames } }] });
+  it('الأقرب أولًا: مطابق تمامًا، ثم بلا مسافات، ثم يبدأ به، ثم فيه كل كلماته', () => {
+    const q = 'solo leveling';
+    expect(searchScore(work('Solo Leveling'), q)).toBe(4);
+    expect(searchScore(work('SoloLeveling'), q)).toBe(3);
+    expect(searchScore(work('Solo Leveling: Ragnarok'), q)).toBe(2);
+    expect(searchScore(work('Leveling Up Solo Again'), q)).toBe(1);
+    expect(searchScore(work('Solo Camping'), q)).toBeLessThan(1);
+  });
+  it('الأسماء البديلة تُحسب: الاسم العربي لعمل عنوانه إنجليزي', () => {
+    expect(searchScore(work('The Beginning After the End', ['البداية بعد النهاية']), 'البدايه بعد النهايه')).toBe(4);
+    expect(searchScore(work('The Savior’s Bucket List'), "The Savior's Bucket List")).toBe(4);
+  });
+});
