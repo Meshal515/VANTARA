@@ -2,6 +2,10 @@
 export function adultGenre(genre: unknown): boolean;
 export function adultTitle(title: unknown): boolean;
 export function adultManga(manga: unknown): boolean;
+export function ecchiGenre(genre: unknown): boolean;
+export function dirtyEcchiGenre(genre: unknown): boolean;
+export function ecchiManga(manga: unknown): boolean;
+export function adultSource(source: unknown): boolean;
 export function isBlockedKey(key: unknown): boolean;
 export function blockKey(key: unknown): void;
 export function setHiddenUser(userOf: (() => string | null | undefined) | string | null): void;

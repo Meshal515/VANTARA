@@ -1,7 +1,7 @@
 /** تقييم المانجا من AniList فقط عند مطابقة عنوان العمل نفسه بثقة. */
 import { anilistFetch } from './anilist.js';
 import { normalizeTitle } from './catalog.js';
-import { adultGenre } from './adult-filter.js';
+import { adultGenre, dirtyEcchiGenre, ecchiGenre } from './adult-filter.js';
 
 
 const MANGA_GENRES = new Set(['Action','Adventure','Comedy','Drama','Ecchi','Fantasy','Horror','Mahou Shoujo','Mecha','Music','Mystery','Psychological','Romance','Sci-Fi','Slice of Life','Sports','Supernatural','Thriller']);
@@ -151,6 +151,22 @@ export function mangaNameAmbiguous(title, candidates) {
 }
 
 /**
+ * حكم المحتوى الرسمي لعنوان (قرار المالك، 22 نوفمبر: «ما لا يُعرف حاله لا يُعرض حتى يُتحقق منه»):
+ * `adult` عمل واحد بهذا الاسم وهو للكبار أو إيتشي بتصنيف يوحي بوساخة، `ecchi` إيتشي نظيف البقية (للبحث المقصود)،
+ * `clean` نظيف، `unknown` لا عمل بهذا الاسم أو اسم مشترك بين أعمال أحدها للكبار (لا يُحكم له).
+ */
+export function mangaContentVerdict(title, candidates) {
+  const key = normalizeTitle(title);
+  if (!key) return 'unknown';
+  const named = (candidates ?? []).filter((m) => m?.format !== 'NOVEL'
+    && [m.title?.romaji, m.title?.english, m.title?.native, ...(m.synonyms ?? [])].some((c) => normalizeTitle(c) === key));
+  if (!named.length) return 'unknown';
+  const dirty = (m) => m.isAdult || adultGenre(m.genres) || dirtyEcchiGenre(m.genres);
+  if (named.some(dirty)) return named.length === 1 ? 'adult' : 'unknown';
+  return named.some((m) => ecchiGenre(m.genres)) ? 'ecchi' : 'clean';
+}
+
+/**
  * استعلام واحد لثمانية عناوين بدل طلب لكل بطاقة، مع مهلة واضحة: التقييم والفن الرسمي معًا، فلا طلب ثانٍ للفن.
  * @returns {Promise<Map<string, { rating: object|null, art: object|null }>>}
  */
@@ -174,7 +190,7 @@ export async function fetchMangaMatches(titles, { fetchImpl = anilistFetch, time
     if (!body?.data) throw new Error('anilist_no_data');
     names.forEach((title, i) => {
       const media = body.data[`p${i}`]?.media;
-      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media), identity: matchMangaIdentity(title, media), ambiguous: mangaNameAmbiguous(title, media) });
+      output.set(title, { rating: matchMangaRating(title, media), art: matchMangaArt(title, media), identity: matchMangaIdentity(title, media), ambiguous: mangaNameAmbiguous(title, media), verdict: mangaContentVerdict(title, media) });
     });
     return output;
   } finally {
