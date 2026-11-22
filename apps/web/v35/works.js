@@ -23,7 +23,10 @@ import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
 import { noteListed, topChapters } from '../lib/update-engine.js';
-import { adultManga, adultSource, blockKey, isBlockedKey } from '../lib/adult-filter.js';
+import { adultManga, adultSource, blockKey, ecchiManga, isBlockedKey } from '../lib/adult-filter.js';
+import { buildsLibrary, enrichOnly, noteSourceTiers, searchable } from '../lib/source-policy.js';
+import { needsVerdict, noteVerdicts, workVerdict } from '../lib/manga-verdict.js';
+import { fetchMangaMatches } from '../lib/manga-meta.js';
 
 /** حالات `SManga` في tachiyomi إلى حالات v35. */
 export const STATUS_BY_SMANGA = {
@@ -193,6 +196,8 @@ function sources() {
     // المتخصص في الإباحية يختفي؛ العام «المختلط» يبقى وأعماله تُفلتر بـisAdult (قرار المالك، 16 نوفمبر). كان كل مصدر
     // مختلط ثبّته المستخدم (MangaDex مثلًا) يُستبعد كله
     const clean = (list ?? []).filter((s) => !adultSource(s));
+    // سياسة المصادر (قرار المالك، 22 نوفمبر): عربي آمن يبني المكتبة، وأجنبي آمن للبحث، ومختلط للإثراء فقط
+    noteSourceTiers(clean);
     for (const s of clean) {
       if (s.filler) fillerIds.add(String(s.id));
       if (s.lang) langById.set(String(s.id), String(s.lang).toLowerCase());
@@ -427,7 +432,7 @@ function recentWorks(entries) {
     if (!hit) continue;
     if (!observed.has(hit.key) || observedAt > observed.get(hit.key).at) observed.set(hit.key, { chapter, at: observedAt });
   }
-  const works = index.list().filter((w) => !isWestern(w) && !isAdult(w));
+  const works = index.list().filter((w) => !isWestern(w) && !isAdult(w) && surfaceAllows(w));
   // ما رُصد لكل نسخة يصير للبطاقة التي انضمت إليها (الأحدث يفوز)
   for (const [own, seen] of [...observed]) {
     const key = index.keyOf(own);
@@ -580,13 +585,45 @@ export function collapseMirrors(list) {
     return f === String(s.id) || best.get(f) === s;
   });
 }
-const listingSources = async ({ query = '', includeFillers = false } = {}) => {
+/**
+ * مصادر القائمة (قرار المالك، 22 نوفمبر، يحلّ محل قرار 16 نوفمبر «الأجنبي في كل مكان» الذي أغرق «آخر التحديثات»):
+ * الرئيسية و«آخر التحديثات» والأقسام من المصدر العربي الآمن وحده، والبحث المقصود (`query`) من العربي والأجنبي الآمن.
+ * المختلط لا يُسأل عن قائمة ولا بحث أبدًا: يُثري الأعمال الموجودة فقط (discoverEditions).
+ */
+const listingSources = async ({ query = '' } = {}) => {
   const all = await sources();
-  void query;
-  // قرار المالك (16 نوفمبر): أعمال الإضافات غير العربية تظهر في كل مكان بوسم لغتها؛ includeFillers باقٍ للتوافق
-  void includeFillers;
-  return collapseMirrors(all);
+  const search = Boolean(String(query ?? '').trim());
+  return collapseMirrors(all.filter((s) => (search ? searchable(s.id) : buildsLibrary(s.id))));
 };
+
+/**
+ * بوابة العرض الأخيرة لكل بطاقة في قائمة أو بحث، فوق اختيار المصادر (بطاقة من الفهرس المحفوظ قد تحمل نسخًا قديمة):
+ * - المكتبة: نسخة عربية آمنة واحدة على الأقل، ولا إيتشي (الإيتشي للبحث المقصود وحده).
+ * - البحث: نسخة آمنة (عربية أو أجنبية). وعمل بلا نسخة عربية لا يظهر حتى يحكم له AniList بالنظافة (المجهول لا يُعرض).
+ */
+export function surfaceAllows(work, { search = false } = {}) {
+  const editions = work?.editions ?? [];
+  if (!search) return editions.some((e) => buildsLibrary(e.sourceId)) && !editions.some((e) => ecchiManga(e.manga));
+  if (!editions.some((e) => searchable(e.sourceId))) return false;
+  if (editions.some((e) => buildsLibrary(e.sourceId))) return true;
+  const verdict = workVerdict(editions.map((e) => e.manga?.title).filter(Boolean));
+  return verdict === 'clean' || verdict === 'ecchi';
+}
+const foreignOnly = (work) => !(work?.editions ?? []).some((e) => buildsLibrary(e.sourceId));
+
+/**
+ * يسأل AniList عن حكم عناوين الأعمال الأجنبية في نتائج البحث (20 عنوانًا للطلب، مرة لكل عنوان؛ المجهول يُعاد بعد أيام).
+ * عنوان حكمه «للكبار» يُحجب مفتاح عمله في كل مكان.
+ */
+export async function verifyForeignWorks(works, { fetchMatches = fetchMangaMatches, limit = 40 } = {}) {
+  const titles = [...new Set(works.filter(foreignOnly).flatMap((w) => (w.editions ?? []).map((e) => e.manga?.title)).filter((t) => t && needsVerdict(t)))].slice(0, limit);
+  for (let i = 0; i < titles.length; i += 20) {
+    let found;
+    try { found = await fetchMatches(titles.slice(i, i + 20)); } catch { return; }
+    noteVerdicts([...found].map(([title, m]) => [title, m?.verdict ?? 'unknown']));
+  }
+  for (const w of works) if (workVerdict((w.editions ?? []).map((e) => e.manga?.title).filter(Boolean)) === 'adult') for (const k of [w.key, ...(w.keys ?? [])]) blockKey(k);
+}
 /**
  * فصول التكملة تُعرض كأي فصل: «الفصل 23» لا «Chapter 23»، وبلا اسم مصدرها.
  * القارئ لا يرى لغتين؛ والترجمة تعرف الفصل الإنجليزي من `sourceId`.
@@ -672,7 +709,7 @@ export const isAdult = (work) => isBlockedKey(work?.key) || (work?.keys ?? []).s
  */
 export async function browse({ kind = 'catalogue', page = 1, query = '', genre = null, keepWestern = false } = {}) {
   await loadAliases(); // The first page must use the shipped aliases.
-  const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
+  const list = await listingSources({ query });
   const { ok } = await gather(list, (source) => listingPage(source, { kind, page, query, genre }));
   const index = workIndex();
   const positions = new Map();
@@ -683,7 +720,9 @@ export async function browse({ kind = 'catalogue', page = 1, query = '', genre =
     hasNextPage ||= Boolean(value?.hasNextPage);
     addPage(index, positions, source, value);
   }
-  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern }).map(toV35Work), hasNextPage, page };
+  // البحث: الأعمال الأجنبية تنتظر حكم AniList قبل أن تظهر (المجهول لا يُعرض)
+  if (query) await verifyForeignWorks(index.list());
+  return { items: ranked(index, positions, query || genre ? 'search' : kind, { keepWestern, query }).map(toV35Work), hasNextPage, page };
 }
 
 function addPage(index, positions, source, value) {
@@ -697,11 +736,12 @@ function addPage(index, positions, source, value) {
     positions.set(hit.key, list);
   });
 }
-function ranked(index, positions, kind, { keepWestern = false } = {}) {
+function ranked(index, positions, kind, { keepWestern = false, query = '' } = {}) {
   // `keepWestern`: البحث عن عملٍ في مكتبتك بعنوانه يجده ولو كان كوميكس
   // قرار المالك (16 نوفمبر، UE10): عمل نسخه كلها من إضافة غير عربية يظهر في كل مكان، وبطاقته تحمل وسم لغته
   // (foreignLang). ترتيب النسخ يبقي العربي أولًا داخل كل عمل
-  const works = index.list().filter((w) => (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w));
+  const search = Boolean(String(query ?? '').trim());
+  const works = index.list().filter((w) => (keepWestern || !isWestern(w)) && !isAdult(w) && !isEmptyWork(w) && surfaceAllows(w, { search }));
   const byWork = new Map();
   for (const [own, list] of positions) {
     const key = index.keyOf(own);
@@ -850,7 +890,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   concurrency = Infinity, shouldContinue = () => true,
 } = {}) {
   await loadAliases(); // Streaming first paint must resolve canonical names too.
-  const list = await listingSources({ query, includeFillers: kind === 'latest' || kind === 'latestListing' });
+  const list = await listingSources({ query });
   const index = workIndex();
   const positions = new Map();
   const mode = query || genre ? 'search' : kind === 'latestListing' ? 'latest' : kind;
@@ -860,7 +900,7 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   const flush = () => {
     clearTimeout(timer);
     timer = null;
-    onUpdate({ items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page });
+    onUpdate({ items: ranked(index, positions, mode, { query }).map(toV35Work), hasNextPage, page });
   };
   let cursor = 0;
   const worker = async () => {
@@ -886,13 +926,18 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
   flush();
-  return { items: ranked(index, positions, mode).map(toV35Work), hasNextPage, page };
+  // البحث: العربي ظهر فورًا، والأجنبي يظهر بعد حكم AniList بنظافته (المجهول لا يُعرض)
+  if (query && shouldContinue()) {
+    await verifyForeignWorks(index.list());
+    flush();
+  }
+  return { items: ranked(index, positions, mode, { query }).map(toV35Work), hasNextPage, page };
 }
 
 /** التحقق من الفصول منفصل عن عرض قوائم latest، وبتوازي محدود. */
 export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldContinue = () => true } = {}) {
   // Every available source participates; each source has its own resumable cursor.
-  const list = await listingSources({ includeFillers: true });
+  const list = await listingSources();
   const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
   const { entries, known } = await collectLatestChapters(list, 1, {
     known: prior,
@@ -1623,6 +1668,13 @@ export function discoverEditions(v35work, { refresh = false, arabicOnly = false,
       // ون بيس، ولو حمل الجهاز اسمًا متعلَّمًا يجمعهما)
       if (hit.ev === 'alias') hit = await verify(hit.manga);
       if (!hit) return reject('details_unconfirmed');
+      // المختلط (قرار المالك، 22 نوفمبر): يُثري عملًا موجودًا من مصدر آمن فقط، بعد أن تؤكد صفحة تفاصيله أنه العمل نفسه
+      // وأنه نظيف. لا يُقبل بدليل القائمة وحده، ونسخة للكبار تُرفض ولا تُلصق
+      if (enrichOnly(source.id)) {
+        if (hit.ev !== 'detail') hit = await verify(hit.manga);
+        if (!hit) return reject('mixed_details_unconfirmed');
+      }
+      if (adultManga(hit.manga)) return reject('adult');
       // الربط في الهوية: النسخة صارت لهذا العمل في كل قائمة. نسخة لعمل آخر لا يتعارض معه تجمعهما (لا تكرار)،
       // والمتعارض يُرفض فلا تُلصق
       const link = linkEdition(editionKeyOf({ sourceId: source.id, manga: hit.manga }), workRef, { rank: RANK.SOURCE, why: `بحث صفحة العمل: ${hit.ev}` });
