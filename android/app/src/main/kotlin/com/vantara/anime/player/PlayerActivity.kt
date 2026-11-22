@@ -1459,7 +1459,7 @@ class PlayerActivity : Activity() {
 
         val center = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         // قرار المالك (14 نوفمبر): دائرة التشغيل/الإيقاف وزرّا ±10 في منتصف الشاشة لا في الصف السفلي، وأكبر قليلًا
-        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) }.apply { glassCircle() })
+        center.addView(iconButton(Glyph.Kind.REWIND10, iconDp = 32, boxDp = 60, desc = "رجوع 10 ثوانٍ") { seekBy(-1) }.apply { glassCircle(ring = true) })
         playButton = iconButton(Glyph.Kind.PAUSE, iconDp = 30, boxDp = 72, desc = "إيقاف مؤقت") { togglePlay() }.apply {
             background = android.graphics.drawable.RippleDrawable(
                 android.content.res.ColorStateList.valueOf(0x33FFFFFF),
@@ -1469,7 +1469,7 @@ class PlayerActivity : Activity() {
             glassCircle(ring = true)
         }
         center.addView(playButton, LinearLayout.LayoutParams(dp(72), dp(72)).apply { leftMargin = dp(40); rightMargin = dp(40) })
-        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) }.apply { glassCircle() })
+        center.addView(iconButton(Glyph.Kind.FORWARD10, iconDp = 32, boxDp = 60, desc = "تقديم 10 ثوانٍ") { seekBy(1) }.apply { glassCircle(ring = true) })
         controls.addView(center, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
 
         val right = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
