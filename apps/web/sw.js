@@ -138,6 +138,8 @@ const SHELL = [
   '/lib/unified-identity.js',
   '/lib/manga-twins.js',
   '/lib/adult-filter.js',
+  '/lib/source-policy.js',
+  '/lib/manga-verdict.js',
   '/lib/removed-works.js',
   '/lib/manga-evidence.js',
   '/data/manga-aliases.json',

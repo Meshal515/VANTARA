@@ -32,7 +32,7 @@ import { sourceWorkModel, restoreSourceWork } from '../addons/work-view.js';
 import { chapterGroups, detailMarkup, groupIndexOf, isNewChapter, isWideMangaArtwork, mangaLook, matchChapters, monthOf, releaseBeat, rowsForMark, rowsInGroup, TABBED_LOOKS } from './manga-work.js';
 import { mountDepth } from './depth.js';
 import { glyph, iconButton } from './icons.js';
-import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, createSavedWorks, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
+import { CHECK_STEPS, available, browse, browseLive, cachedSpan, chapterSpan, checkAllSources, describe, displayName, editionRows, sourceRank, loadWork, loadWorkOnce, mangaSourceTier, prewarm, resetSources, isFiller, isAdult, scanLatestChapterUpdates, seriesRefOf, createSavedWorks, setSharedLatest, canonicalEventWorks, mergeWorkPages, matchingWork, withUpdateSources, requestedChapterRow } from './works.js';
 import { readKv, writeKv } from '../lib/chapter-store.js';
 import { warmChapter } from './reader.js';
 import { readerEngine } from '../lib/reader-engine.js';
@@ -70,7 +70,7 @@ import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
 import { artRatio, createArtStore, isLocalArt } from '../lib/art.js';
 import { kitsuArt } from '../lib/kitsu-art.js';
-import { blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
+import { adultManga, blockKey, hideWork, hiddenWorks, restoreWork, setHiddenUser } from '../lib/adult-filter.js';
 import { installRemovedGate, isRemovedAny, removeWorkEverywhere, removedChanged, restoreRemovedWork, setRemovedSource, tagWork } from '../lib/removed-works.js';
 import { heroSlideIn, stripIn } from './motion.js';
 import { afterMotion, motionActive, bindTabMotion, fadeIn, finishPageMotion, handoffSurface, pageMotionState, pageIn as pageMotionIn, pageOut, dockIn, dockOut, glassDockLayers, readyGate, settleIn, veil } from './page-motion.js';
@@ -5421,12 +5421,16 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
       const latestOf = async (addon) => {
         if (!addon.bundled || !addon.sourceId) return [];
+        // معاينة مصدر مانجا: المختلط لا تُعرض أعماله أبدًا، ولا عمل للكبار من أي مصدر (قرار المالك، 22 نوفمبر)
+        const manga = addon.contentTypes?.includes('manga');
+        if (manga && !['arabic', 'foreign'].includes(await mangaSourceTier(addon.sourceId))) return [];
         // لقطة مشتركة أولًا؛ مصدر بلا لقطة (إضافة ثبّتها المستخدم للتو) يُسأل مباشرة
         const value = (await shots).get(addon.sourceId) ?? await addons.sourceLatest?.(addon.sourceId).catch(() => null);
         const list = value?.mangas ?? value?.items ?? (Array.isArray(value) ? value : []);
         const out = [];
         for (const item of list) {
           if (out.length >= 5) break;
+          if (manga && adultManga(item)) continue;
           try { out.push({ work: sourceWorkModel(item, { addon, episodes: [] }) }); } catch { /* عمل بلا نوع مؤكد */ }
         }
         return out;
@@ -5483,6 +5487,15 @@ export function mountV35(deps, { page = 'home' } = {}) {
     if(!active())return;
     sourceSnapshot=addons.registry.snapshot();
     addonSourcePending=false;
+    // مصدر مانجا مختلط (أو محظور): لا يُتصفح مباشرة. وظيفته إثراء الأعمال الموجودة من المصادر الآمنة فقط (قرار المالك، 22 نوفمبر)
+    if(addon.sourceId && addon.contentTypes?.includes('manga') && !addon.contentTypes.some(t=>t!=='manga')){
+      const tier=await mangaSourceTier(addon.sourceId);
+      if(!active())return;
+      if(tier!=='arabic'&&tier!=='foreign'){
+        q('utilityBody').replaceChildren(el('p','work-meta',tier==='blocked'?'هذا المصدر غير متاح في VANTARA.':'هذا مصدر مختلط: لا يُتصفّح مباشرة. يُستعمل لإكمال فصول الأعمال الموجودة من المصادر الآمنة، وتظهر فصوله داخل بطاقة العمل.'));
+        return;
+      }
+    }
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
     const openSelectedWork = async function openSelectedWork(item) {
       if(!active())return;

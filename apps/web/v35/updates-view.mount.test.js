@@ -8,7 +8,7 @@ import { loadAliases } from '../lib/manga-alias-store.js';
 import { mountTimeline, paintWithScrollAnchor } from './updates-view.js';
 
 let document, host, api;
-const event = (id, work = id) => ({ id, work, section: 'manga', title: work, kind: 'chapter', number: Number(id) || 1, at: Date.now(), publishedAt: Date.now(), cover: '/cover.jpg', sources: [] });
+const event = (id, work = id) => ({ id, work, section: 'manga', title: work, kind: 'chapter', number: Number(id) || 1, at: Date.now(), publishedAt: Date.now(), cover: '/cover.jpg', sources: [{ s: 'teamx' }] });
 const page = (events, next = null) => ({ events, next, snapshotAt: Date.now() });
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text) n.textContent = text; return n; };
 const mount = (options = {}) => (api = mountTimeline(host, { section: 'manga', el, open: () => {}, empty: () => el('p', '', 'empty'), image: () => el('img'), ...options }));
