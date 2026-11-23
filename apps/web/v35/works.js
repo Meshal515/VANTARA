@@ -1324,6 +1324,32 @@ function noteOwnEditions(v35work) {
   }
 }
 
+/** نسخٌ فُتحت على هذا الجهاز من داخل مصدر، بمرجع مختلف عن مرجع البطاقة العامة. */
+function matchLocalSourceEditions(v35work, list, runnable, title) {
+  const workOfficial = workOfficialOf(v35work);
+  const ambiguous = ambiguousNames().has(title);
+  const graph = identityGraph();
+  const bySource = new Map();
+  for (const edition of list) {
+    const { sourceId, manga } = edition;
+    if (!runnable?.has(String(sourceId)) || !manga?.url || adultManga(manga)) continue;
+    if (enrichOnly(sourceId) && edition.evidence !== 'detail') continue;
+    const providerId = Number(manga.officialId ?? manga.externalIds?.anilist);
+    const officialId = Number.isSafeInteger(providerId) && providerId > 0 ? providerId : null;
+    if (officialId !== null && Number.isSafeInteger(workOfficial) && officialId !== workOfficial) continue;
+    if (ambiguous && (officialId === null || officialId !== workOfficial)) continue;
+    const linked = editionRef(editionKeyOf(edition));
+    if (linked && !graph.sameClass(linked, String(v35work.id))) continue;
+    if (!bySource.has(sourceId)) bySource.set(sourceId, []);
+    const verified = officialId === null ? edition : { ...edition, manga: { ...manga, officialId } };
+    bySource.get(sourceId).push({ manga, ev: 'exact', edition: verified });
+  }
+  return [...bySource.values()].flatMap((candidates) => {
+    const match = pickEdition(candidates);
+    return match ? [{ ...match.edition, localOnly: true }] : [];
+  });
+}
+
 /**
  * يفتح عملًا كـVANTARA: فورًا مما حُفظ، ثم يكبر مع كل مصدر يردّ.
  *
@@ -1338,7 +1364,8 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   // مصدر محدد: نسخته وحدها، ولا اكتشاف في بقية المصادر (المعرّف قد يكون مشتركًا بهوية AniList/MangaDex)
   if (pinnedSource) discover = false;
   const scoped = (list) => (pinnedSource ? (list ?? []).filter((e) => e?.sourceId === pinnedSource) : list);
-  const stored = await readWork(id);
+  const sourceTitle = pinnedSource ? '' : normalizeTitle(v35work._work?.title ?? v35work.title?.english);
+  const stored = await readWork(id, { sourceTitle });
   // الخطة ب: نسخة محفوظة من فتحة سابقة تُراجع قبل أن تُعرض. نسخة مربوطة بعمل آخر يتعارض معه، أو بمعرّف رسمي مختلف،
   // أو اسمها اسم السلسلة الأم بلا دليل من المصدر (فصول ون بيس في قصة زورو)، لا تبقى في هذا العمل. لا يُحذف شيء: سجلها
   // في عملها باقٍ، ومصدرها يُسأل من جديد بالقواعد الجديدة
@@ -1353,6 +1380,21 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   );
   noteOwnEditions(v35work);
   if (pinnedSource) editions = scoped(editions);
+  const localSourceEditions = stored?.localSourceEditions ?? [];
+  const deviceEdition = (e) => e.localOnly || String(e.sourceId).includes('#');
+  let unavailableEditions = [];
+  if (localSourceEditions.length || editions.some(deviceEdition)) {
+    const runnable = await runnableSources();
+    if (runnable) {
+      const known = new Set(editions.filter((e) => e.chapters?.length).map((e) => e.sourceId));
+      const local = matchLocalSourceEditions(v35work, localSourceEditions, runnable, sourceTitle)
+        .filter((e) => !known.has(e.sourceId));
+      editions = unionEditions(editions, local);
+      const unavailable = (e) => deviceEdition(e) && !runnable.has(String(e.sourceId));
+      unavailableEditions = editions.filter(unavailable);
+      editions = editions.filter((e) => !unavailable(e));
+    }
+  }
   let detail = cached?.detail ?? null;
   const failed = new Map();
   let last = null;
@@ -1370,7 +1412,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
     onUpdate(full, { settled });
     return full;
   };
-  if (cached?.editions?.some((e) => e.chapters?.length)) emit();
+  if (editions.some((e) => e.chapters?.length)) emit();
 
   let readingDetail = false;
   let firstDetails = null;
@@ -1422,7 +1464,9 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
             const request = fetchDetail(edition, source);
             if (!fromDiscovery) firstDetails = request;
             const out = await request;
-            edition = { ...edition, manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
+            const ownTitle = normalizeTitle(edition.manga?.title);
+            const evidence = pinnedSource && ownTitle && detailEvidence(out.manga, new Set([ownTitle]));
+            edition = { ...edition, ...(evidence ? { evidence } : {}), manga: { ...edition.manga, ...out.manga }, chapters: out.chapters };
           } else {
             edition = { ...edition, chapters: await requestSource(source, () => engine.chapters(edition.sourceId, edition.manga, ...listOpts), CHAPTERS_TIMEOUT_MS) };
           }
@@ -1515,7 +1559,7 @@ export async function loadWork(v35work, { onUpdate = () => {}, discover = true, 
   for (const sid of unansweredNow) retries[sid] = now + UNANSWERED_RETRY_MS;
   await writeWork(id, {
     // المصدر المحدد يحدّث نسخته فقط، ولا يمحو نسخ المصادر الأخرى المحفوظة لنفس العمل
-    editions: pinnedSource ? unionEditions(stored?.editions, editions) : editions,
+    editions: unionEditions(pinnedSource ? stored?.editions : unavailableEditions, editions),
     detail,
     discoveredAt: discoveredNow && interval ? now : cached?.discoveredAt ?? 0,
     discoveryVersion: discoveredNow && interval ? DISCOVERY_VERSION : cached?.discoveryVersion,
