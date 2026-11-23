@@ -12,6 +12,8 @@
 import { chapterNumberOf, normalizeTitle } from './catalog.js';
 import { adultManga, ecchiManga, isBlockedKey } from './adult-filter.js';
 import { buildsLibrary } from './source-policy.js';
+import { isLocalEdition } from './config.js';
+import { canonicalRefOf } from './manga-alias-store.js';
 
 const FLUSH_MS = 4000;
 const MAX_UNITS = 40;
@@ -43,6 +45,63 @@ const keyOf = (r) => `${r.work}|${r.kind}|${r.source?.s ?? ''}`;
 const unitKey = (u) => `${u.season ?? 0}:${u.number}`;
 const order = (a, b) => (b.season ?? 0) - (a.season ?? 0) || b.number - a.number;
 const store = () => globalThis.localStorage ?? null;
+const local = isLocalEdition();
+let discovery;
+function discoveryStore() {
+  discovery ??= import('./discovery-store.js').then(({ createDiscoveryStore, createSqliteDiscoveryStore }) => {
+    const android = globalThis.Capacitor?.Plugins?.LocalDiscovery;
+    const desktop = globalThis.VantaraDesktop;
+    if (android?.request) return createSqliteDiscoveryStore((input) => android.request(input));
+    if (desktop?.localDiscovery) return createSqliteDiscoveryStore((input) => desktop.localDiscovery(input));
+    if (globalThis.Capacitor?.getPlatform?.() === 'android' || desktop?.platform === 'windows') {
+      throw new Error('local_discovery_bridge_unavailable');
+    }
+    return createDiscoveryStore();
+  }).catch((error) => { discovery = null; throw error; });
+  return discovery;
+}
+const pendingLocal = [];
+let localWrite = null;
+
+function scheduleLocal() {
+  if (!timer) timer = setTimeout(() => void flush(), 250);
+}
+
+function enqueueLocal(row) {
+  if (pendingLocal.length >= MAX_QUEUE_WORKS) {
+    dropped += row.units?.length ?? 1;
+    scheduleLocal();
+    return false;
+  }
+  pendingLocal.push({ ...row, work: canonicalRefOf(row.work) });
+  scheduleLocal();
+  return true;
+}
+
+export async function knownLocalEditions(sourceId, options) {
+  return local ? (await discoveryStore()).knownEditions(sourceId, options) : [];
+}
+
+async function flushLocal() {
+  if (localWrite) return localWrite;
+  clearTimeout(timer);
+  timer = null;
+  if (!pendingLocal.length) return;
+  const count = Math.min(pendingLocal.length, MAX_BATCH);
+  localWrite = (async () => {
+    try {
+      await (await discoveryStore()).record(pendingLocal.slice(0, count));
+      pendingLocal.splice(0, count);
+      storageFailed = false;
+    } catch {
+      storageFailed = true;
+    }
+  })();
+  try { await localWrite; } finally {
+    localWrite = null;
+    if (!storageFailed && pendingLocal.length) scheduleLocal();
+  }
+}
 
 function account(key, entry) {
   const old = sizes.get(key);
@@ -84,7 +143,7 @@ function deleteEntry(key) {
   account(key, null);
   persistEntry(key, null, true);
 }
-try {
+if (!local) try {
   const ls = store();
   const add = (row) => {
     if (queue.size < MAX_QUEUE_WORKS && row?.work && row?.title && Array.isArray(row.units)) { queue.set(keyOf(row), row); account(keyOf(row), row); }
@@ -102,11 +161,13 @@ try {
 } catch { storageFailed = true; }
 
 export function updateReportStatus() {
+  if (local) return { pendingWorks: pendingLocal.length, dropped, storageFailed, sending: false };
   return { pendingWorks: queue.size, pendingUnits: totalUnits, dropped, storageFailed, sending: Boolean(inFlight) };
 }
 
 /** `send(path, {method, body})` → `{status, body}` (نفس `sync.translation`). */
 export function connectUpdates(send) {
+  if (local) return;
   transport = send;
   if (queue.size) schedule();
 }
@@ -116,6 +177,7 @@ function schedule() {
 }
 
 export async function flush() {
+  if (local) return flushLocal();
   if (inFlight) return inFlight;
   clearTimeout(timer);
   timer = null;
@@ -155,6 +217,10 @@ export async function flush() {
 /** يضيف تقريرًا (يدمج وحداته مع ما ينتظر للعمل نفسه من نفس المصدر). */
 export function report(r) {
   if (!r?.work || !r.title || (r.kind !== 'movie' && !r.units?.length)) return;
+  if (local) {
+    if (r.section === 'manga' && !buildsLibrary(r.source?.s)) return false;
+    return enqueueLocal(r);
+  }
   const key = keyOf(r);
   const prev = queue.get(key);
   const units = new Map((prev?.units ?? []).map((u) => [unitKey(u), u]));
@@ -201,6 +267,24 @@ function takeListed(sourceId, manga) {
   return hint && Date.now() - hint.at <= LISTED_TTL_MS ? hint.since : null;
 }
 
+function mangaReport(sourceId, manga, key) {
+  return {
+    work: `ext:${key}`, section: 'manga', kind: 'chapter', title: manga.title, cover: manga.thumbnailUrl ?? null,
+    source: { s: sourceId, ...(manga.url ? { u: manga.url } : {}), t: manga.title,
+      ...(typeof manga.memo === 'string' && manga.memo ? { m: manga.memo } : {}) },
+  };
+}
+
+/** يستفيد من نتيجة بحث أو كتالوج وصلت بالفعل، دون إنشاء حدث نشر. */
+export function recordLocalListings(sourceId, mangas) {
+  if (!local || !buildsLibrary(sourceId)) return;
+  for (const manga of mangas ?? []) {
+    const key = normalizeTitle(manga?.title);
+    if (!key || !manga?.url || adultManga(manga) || ecchiManga(manga) || isBlockedKey(`ext:${key}`)) continue;
+    enqueueLocal({ ...mangaReport(sourceId, manga, key), units: [] });
+  }
+}
+
 /** المانجا: كل ما يجلبه محرك الإضافات من فصول (أي مسار). */
 export function observeMangaChapters(sourceId, manga, chapters) {
   const key = normalizeTitle(manga?.title);
@@ -217,12 +301,7 @@ export function observeMangaChapters(sourceId, manga, chapters) {
   );
   if (!units.length) return;
   report({
-    work: `ext:${key}`,
-    section: 'manga',
-    kind: 'chapter',
-    title: manga.title,
-    cover: manga.thumbnailUrl ?? null,
-    source: { s: sourceId, ...(manga.url ? { u: manga.url } : {}), ...(manga.title ? { t: manga.title } : {}), ...(typeof manga.memo === 'string' && manga.memo ? { m: manga.memo } : {}) },
+    ...mangaReport(sourceId, manga, key),
     units,
     ...(listed ? { listed } : {}),
   });
@@ -237,6 +316,7 @@ export async function topChapters() {
 
 /** الخط الزمني من ذاكرة VANTARA: الأحدث أولًا، بمؤشر ثابت للصفحات التالية. */
 export async function timeline(section, { before = null, limit = 40 } = {}) {
+  if (local) return (await discoveryStore()).timeline(section, { before, limit });
   if (!transport) return null;
   const q = new URLSearchParams({ section, limit: String(limit), ...(before ? { before } : {}) });
   const res = await transport(`/v1/updates?${q}`).catch(() => null);

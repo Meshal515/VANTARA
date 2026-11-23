@@ -14,18 +14,19 @@ const makensis = argument('makensis', 'makensis');
 const nsisdir = argument('nsisdir', process.env.NSISDIR);
 // القناة: stable (الافتراضي) أو debug. Debug هوية ومجلد ومثبّت وبيان تحديث مستقلة (apps/desktop/channel.cjs).
 const channel = argument('channel', 'stable');
-if (!['stable', 'debug'].includes(channel)) throw new Error(`Unknown Windows channel: ${channel}`);
+if (!['stable', 'debug', 'local'].includes(channel)) throw new Error(`Unknown Windows channel: ${channel}`);
 const debug = channel === 'debug';
+const local = channel === 'local';
 const buildNumber = argument('build') == null ? null : Number(argument('build'));
 if (buildNumber != null && (!Number.isSafeInteger(buildNumber) || buildNumber <= 0)) throw new Error('--build must be a positive integer');
-if (debug && buildNumber == null) throw new Error('A Debug build needs --build=N (monotonic build number)');
-const productName = debug ? 'VANTARA Debug' : 'VANTARA';
-const filePrefix = debug ? 'VANTARA-Debug' : 'VANTARA';
+if ((debug || local) && buildNumber == null) throw new Error('An experimental build needs --build=N (monotonic build number)');
+const productName = local ? 'VANTARA Local' : debug ? 'VANTARA Debug' : 'VANTARA';
+const filePrefix = productName.replace(' ', '-');
 const torrentHost = argument('torrent-host');
 // نسخة libtorrent الفعلية كما يطبعها المحرك على ويندوز (`vantara-torrent.exe --version`)، تُسجَّل في BUILD-MANIFEST
 const torrentHostVersion = argument('torrent-host-version');
 if (torrentHostVersion != null && !/^vantara-torrent [\w.]+ libtorrent [\d.]+$/.test(torrentHostVersion)) throw new Error('--torrent-host-version must be the engine --version line');
-const portable = path.join(output, debug ? 'VANTARA-Debug-Windows-x64' : 'VANTARA-Windows-x64');
+const portable = path.join(output, `${filePrefix}-Windows-x64`);
 const app = path.join(portable, 'resources', 'app');
 const native = path.join(app, 'native');
 const videoHost = path.resolve(argument('video-host',path.join(repo,'apps/desktop/native/vantara-video-host.exe')));
@@ -35,7 +36,7 @@ const icon = path.join(repo, debug ? 'apps/desktop/assets/vantara-debug.ico' : '
 // an external mpv window when CI forgot its Windows-compiled companion.
 await fs.access(videoHost).catch(()=>{throw new Error('Missing native video host: compile tools/build-video-host.ps1 on Windows and supply --video-host=path');});
 const version = argument('version', JSON.parse(await fs.readFile(path.join(repo, 'apps/desktop/package.json'), 'utf8')).version);
-if (debug && !version.endsWith(`.${buildNumber}`)) throw new Error('Debug version must end with its build number (e.g. 0.4.N)');
+if ((debug || local) && !version.endsWith(`.${buildNumber}`)) throw new Error('Version must end with its build number');
 const artifacts = [
   { name: 'electron-v44.7.2-win32-x64.zip', url: 'https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip', sha256: '10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4', source: 'https://github.com/electron/electron/tree/v44.7.2' },
   { name: 'rqbit.exe', url: 'https://github.com/ikatson/rqbit/releases/download/v9.0.1/rqbit.exe', sha256: '2ed683203beca628e0c45f62f99feeef4242cecc3444c8422dfe5b1b6aa38cea', source: 'https://github.com/ikatson/rqbit/tree/v9.0.1' },
@@ -150,7 +151,10 @@ await fs.writeFile(path.join(portable, 'THIRD-PARTY-NOTICES.txt'), `VANTARA Wind
 await fs.writeFile(path.join(portable, 'ابدأ-هنا.txt'), `VANTARA لويندوز — نسخة معاينة ${version}\n\nشغّل VANTARA.exe من هذا المجلد؛ لا تنقل الملف التنفيذي وحده. النسخة المحمولة تحفظ بياناتها وملفات التورنت في VANTARA-data بجوار البرنامج، لذلك فكها على القرص ذي المساحة الكافية مثل E.\nمن الإضافات أضف رابط Torrentio المعدّ. يمكن إكمال الإعداد داخل نافذة التطبيق؛ زر تثبيت Stremio يعيد رابط الإضافة إلى VANTARA.\nاختر الفيلم أو الحلقة ثم اختر مصدر التشغيل بنفسك.\nمحرك التورنت والمشغل مرفقان؛ لا يلزم تثبيت برامج منفصلة.\nيفحص VANTARA الأقراص الثابتة القابلة للكتابة ويختار القرص صاحب المساحة الفارغة الأكبر لكاش التورنت تلقائيًا. الكاش نافذة متحركة: يحمّل قدّام بقدر المساحة الحرة، ويبقي 50 ثانية ورا فقط ويفرّغ ما قبلها من القرص، ويوقف التنزيل مؤقتًا إذا اقتربت المساحة من الحد ثم يستأنف مع تقدّم المشاهدة. الرجوع لجزء مفرَّغ يعيد تنزيله من نفس اللحظة. كل ملفات الجلسة تُحذف بعد إغلاق المشغل. فيلم 40GB لا يحتاج 40GB فاضية.\nالمكتبة والحسابات متاحة من قائمة VANTARA، والدخول يتبع اقتران الجهاز الحالي.\nالرفيق والترجمة بالذكاء الاصطناعي خارج نسخة ويندوز؛ ترجمات الفيديو العادية مدعومة. استخدم واجهة الغرفة الأصلية للمشاهدة المشتركة واختيار مصدرك؛ وجود مزود لا يضمن توفر كل حلقة.\nهذه حزمة معاينة غير موقعة، ولم يدع الفريق تجربة جهاز ويندوز دون دليل مرفق.\n`);
 const configFile=path.join(app,'web/lib/config.js');
 // القناة تُختم من بناء ويندوز نفسه: debug تفتح ما هو قيد التطوير (Glass)، وstable تبقيه مقفلًا (apps/web/lib/config.js)
-await fs.writeFile(configFile,(await fs.readFile(configFile,'utf8')).replace('__VANTARA_VERSION__',version).replace('__VANTARA_CHANNEL__',debug?'debug':'stable'));
+await fs.writeFile(configFile, (await fs.readFile(configFile, 'utf8'))
+  .replace('__VANTARA_VERSION__', version)
+  .replace('__VANTARA_CHANNEL__', debug || local ? 'debug' : 'stable')
+  .replace('__VANTARA_EDITION__', local ? 'local' : 'default'));
 await fs.writeFile(path.join(portable, 'BUILD-MANIFEST.json'), JSON.stringify({ product: productName, channel, build: buildNumber, version, sourceSha, platform: 'win32-x64', builtAt, torrentEngines: torrentHost ? ['libtorrent', 'rqbit'] : ['rqbit'], torrentEngineVersions: { ...(torrentHost ? { libtorrent: torrentHostVersion?.split('libtorrent ')[1] ?? null } : {}), rqbit: '9.0.1' }, signed: false, artifacts, binaries, icon: { source: 'apps/web/icons/icon-512.png', sha256: sha256(await fs.readFile(icon)), ...iconProof }, sources: sourceDownloads, runtimeVerifiedOnWindows: false }, null, 2) + '\n');
 const zip = path.join(output, `${filePrefix}-${version}-Windows-x64.zip`);
 run('python3', ['-c', 'import sys,zipfile,pathlib; root=pathlib.Path(sys.argv[1]); z=zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED,compresslevel=6); [z.write(p, str(pathlib.Path(root.name)/p.relative_to(root))) for p in sorted(root.rglob("*")) if p.is_file()]; z.close()', portable, zip]);

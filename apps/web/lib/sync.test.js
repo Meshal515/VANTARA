@@ -973,3 +973,15 @@ describe('server features', () => {
     expect(JSON.parse(storage.getItem('vantara.sync.features'))).toEqual(['position.set']);
   });
 });
+
+it('leaves first-party requests off the network when the Local build has no sync endpoint', async () => {
+  globalThis.localStorage = fakeStorage();
+  globalThis.fetch = vi.fn(async () => jsonResponse({ content: [] }));
+  const { createSync } = await import('./sync.js');
+  const sync = createSync({ baseUrl: '' });
+  live.push(sync);
+  await sync.ready;
+  await expect(sync.accounts()).rejects.toMatchObject({ code: 'sync_disabled' });
+  expect((await sync.translation('/v1/updates')).status).toBe(401);
+  expect(globalThis.fetch).not.toHaveBeenCalled();
+});

@@ -54,7 +54,7 @@ import { rankFriendsReading } from './friends-reading.js';
 import { createFeedSnapshot } from './feed-snapshot.js';
 import { createRoom } from './majlis-chat.js';
 import { prepareRoomAvatar } from './media-encode.js';
-import { endpoints } from '../lib/config.js';
+import { endpoints, isLocalEdition } from '../lib/config.js';
 import { compactEditions, describesMore, displayTitle, mergeEditions, serverEditions } from './work-ref.js';
 import { createProfile } from './profile.js';
 import { openShareSheet } from './share.js';
@@ -251,10 +251,11 @@ export function promptSourceWorkType(work, addon, { el, openSheet, closeSheet, s
 export function mountV35(deps, { page = 'home' } = {}) {
   void diagnosticsUi.initialize();
   const { sync } = deps;
-  setSharedLatest(createSourceLatest(sync));
+  const localEdition = isLocalEdition();
+  setSharedLatest(localEdition ? null : createSourceLatest(sync));
   // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
   connectUpdates((path, opts) => sync.translation(path, opts));
-  connectSourceReports((path, opts) => sync.translation(path, opts));
+  connectSourceReports(localEdition ? null : (path, opts) => sync.translation(path, opts));
   onChapters(observeMangaChapters);
   // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد
   try { trimArtCache(); } catch { /* اختياري */ }
@@ -4783,7 +4784,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
         emptyState(box, {
           icon: 'clock',
           title: 'VANTARA يراقب المصادر',
-          text: 'أول ما يظهر جديد في أي مصدر — من قائمته أو صفحة العمل أو البحث — يُسجَّل هنا بوقته الحقيقي ويبقى.',
+          text: localEdition ? 'يحفظ فانتارا التحديثات التي يجدها في مصادرك على هذا الجهاز.'
+            : 'أول ما يظهر جديد في أي مصدر — من قائمته أو صفحة العمل أو البحث — يُسجَّل هنا بوقته الحقيقي ويبقى.',
           action: section === 'manga' ? { label: 'في المصادر الآن', icon: 'flame', run: () => void openCollection('sourcesNow') } : null,
         });
         return box;
@@ -5468,7 +5470,8 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(sync.user?.userId ?? "local"); await addons.reloadSources?.();
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
       // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
-      const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
+      const shots = localEdition ? Promise.resolve(new Map())
+        : sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
       const latestOf = async (addon) => {
         if (!addon.bundled || !addon.sourceId) return [];
         // معاينة مصدر مانجا: المختلط لا تُعرض أعماله أبدًا، ولا عمل للكبار من أي مصدر (قرار المالك، 22 نوفمبر)
@@ -8018,7 +8021,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // كان لا يعمل إلا في سكون رئيسية المانجا ويتوقف بمجرد مغادرتها (حتى بفتح «آخر
   // التحديثات» نفسها) ومرة كل 20 دقيقة، فلا يكتمل. المسح الآن تفاضلي رخيص: يعمل
   // ما دام التطبيق ظاهرًا خارج القارئ، كل 10 دقائق، وعند فتح «آخر التحديثات».
-  const sweepable = () => !document.hidden && root.isConnected;
+  const sweepable = () => !document.hidden && root.isConnected && (!localEdition || ['home', 'collection'].includes(currentPage()));
   let sweptAt = 0;
   let sweeping = null;
   function sweepLatest({ minGap = 10 * 60_000 } = {}) {

@@ -11,9 +11,11 @@ import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
 import { loadAliases } from '../lib/manga-alias-store.js';
 import { adultSource, adultTitle, isBlockedKey } from '../lib/adult-filter.js';
 import { ARABIC, tierFromId, tierOf } from '../lib/source-policy.js';
+import { isLocalEdition } from '../lib/config.js';
 
 /** مصدر يبني «آخر التحديثات» العامة: عربي آمن بحكم الخادم (المعرّف) وبحكم هذا الجهاز إن عرفه. */
-const publicMangaSource = (id) => tierFromId(id) === ARABIC && tierOf(id) === ARABIC && !adultSource({ id });
+const publicMangaSource = (id) => Boolean(id) && !adultSource({ id }) &&
+  (isLocalEdition() || (tierFromId(id) === ARABIC && tierOf(id) === ARABIC));
 import { tagWork } from '../lib/removed-works.js';
 
 const MIN = 60_000;
@@ -89,7 +91,7 @@ export function paintWithScrollAnchor(list, paint, view = list.ownerDocument?.de
 const mounted = new WeakMap();
 const groupKey = g => `${g.section ?? ''}|${g.work}`;
 const eventTime = (g, now = Date.now()) => Number.isFinite(g.publishedAt) && g.publishedAt > 0
-  ? agoAr(g.at, now) : `رُصد ${agoAr(g.at, now)}`;
+  ? agoAr(g.publishedAt, now) : `رُصد ${agoAr(g.firstSeenAt ?? g.at, now)}`;
 
 /** «الآن»، «قبل دقيقتين»، «قبل 3 ساعات»، «أمس»… */
 export function agoAr(at, now = Date.now()) {
@@ -190,6 +192,8 @@ export function unitLabel(g) {
  * `empty()` ما يُعرض قبل أن يسجّل VANTARA أي تحديث لهذا القسم.
  */
 export function mountTimeline(host, { section, el, open, empty, image, mountCover, canonical = null, visible = () => host.isConnected, include = () => true }) {
+  const local = isLocalEdition();
+  let localPending = false;
   mounted.get(host)?.dispose();
   const state = { events: [], next: null, bridgeNext: null, bridgeKnown: null, loading: false, refreshing: false, done: false, token: {}, enteredAt: Date.now(), polled: false };
   const token = state.token, active = () => token === state.token;
@@ -214,7 +218,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
     refresh.disabled = state.loading || state.refreshing;
     older.disabled = state.loading || state.refreshing;
     older.hidden = (state.done && !state.bridgeNext) || !state.polled;
-    refresh.textContent = state.refreshing ? 'جارٍ التحديث…' : 'تحديث';
+    refresh.textContent = state.refreshing ? 'جارٍ التحديث…' : localPending ? 'تحديثات جديدة' : 'تحديث';
     older.textContent = state.loading ? 'جارٍ التحميل…' : 'تحميل المزيد';
   }
   // كل ضغطة لها جواب ظاهر: «تحديث» بلا جديد أو «تحميل المزيد» عند النهاية كانا يمرّان بصمت فيبدو الزر معطلًا
@@ -347,6 +351,12 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
       const page = await timeline(section, { limit: 100, ...(requestedCursor ? { before: requestedCursor } : {}) });
       if (!active() || revision!==headRevision || !page || !Array.isArray(page.events)) return;
       if (requestedCursor && page.next === requestedCursor) return;
+      if (local) {
+        const visibleHead = state.events.slice(0, 100);
+        localPending = page.events.some((event, index) => visibleHead[index]?.id !== event.id || visibleHead[index]?.updatedAt !== event.updatedAt);
+        controls();
+        return;
+      }
       const previous = new Set(state.events.map(e => e.id));
       if (requestedCursor) {
         if (!page.next || page.events.some(e => state.bridgeKnown?.has(e.id))) { state.bridgeNext = null; state.bridgeKnown = null; }
@@ -381,6 +391,7 @@ export function mountTimeline(host, { section, el, open, empty, image, mountCove
         }
         const known = new Set(state.events.map(e => e.id));
         state.events = reconcileTimelineRefresh(state.events, page.events, page.snapshotAt ?? Date.now());
+        localPending = false;
         const fresh = state.events.filter(e => !known.has(e.id)).length;
         if (known.size) note(fresh ? `وصل ${fresh} جديد` : 'لا جديد الآن — أنت على آخر تحديث');
         if (!state.polled) { state.enteredAt = page.snapshotAt ?? state.enteredAt; state.polled = true; }

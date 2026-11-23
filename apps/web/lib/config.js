@@ -38,6 +38,11 @@ const BAKED_VERSION = '__VANTARA_VERSION__';
  * يُختم = null: ما هو «قيد التطوير» يبقى مقفلًا ما لم يُختم Debug صراحة، فنسيان مسار يقفل لا يفتح.
  */
 const BAKED_CHANNEL = '__VANTARA_CHANNEL__';
+const BAKED_EDITION = '__VANTARA_EDITION__';
+
+export function isLocalEdition() {
+  return BAKED_EDITION === 'local' || globalThis.VantaraDesktop?.channel === 'local';
+}
 
 /**
  * خادم المزامنة الحقيقي، لأي بناء لم يُخبز فيه عنوان (بناء debug، أو APK
@@ -64,6 +69,7 @@ function trimSlash(url) {
 }
 
 export function endpoints() {
+  if (isLocalEdition()) return { sync: '', api: '', updates: '' };
   const override = stored();
   return {
     sync: trimSlash(override.sync || (unreplaced(BAKED.sync) ? PRODUCTION_SYNC : BAKED.sync)),
@@ -79,6 +85,7 @@ export function appVersion() {
 
 /** `debug` في بناء Debug، وإلا null. */
 export function buildChannel() {
+  if (isLocalEdition()) return 'debug';
   return unreplaced(BAKED_CHANNEL) ? null : BAKED_CHANNEL;
 }
 

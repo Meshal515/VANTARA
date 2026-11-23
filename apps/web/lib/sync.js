@@ -214,6 +214,11 @@ async function deviceProof(deviceIdProvider) {
 }
 
 export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId }) {
+  // With no configured endpoint, relative /v1 calls must not fall through to the app origin.
+  const serverFetch = async (url, options) => {
+    if (!baseUrl) throw Object.assign(new Error('sync_disabled'), { code: 'sync_disabled' });
+    return globalThis.fetch(url, options);
+  };
   const listeners = new Set();
   const sessionStore = createSessionStore();
   let currentSession = storedSession();
@@ -513,7 +518,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     let proof;
     try { proof = await deviceProof(deviceIdProvider); }
     catch (error) { throw Object.assign(error, { code: 'device_storage_unavailable' }); }
-    const response = await fetch(`${baseUrl}/v1/session`, {
+    const response = await serverFetch(`${baseUrl}/v1/session`, {
       signal,
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -553,7 +558,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   /** جهاز جديد يطلب الاعتماد: رمز يُعرض على الشاشة ويعتمده المالك. */
   async function requestDevice() {
-    const response = await fetch(`${baseUrl}/v1/device/request`, {
+    const response = await serverFetch(`${baseUrl}/v1/device/request`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await deviceProof(deviceIdProvider)),
@@ -564,7 +569,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   /** هل اعتُمد؟ `{ paired, pending }`. عند الاعتماد يصير الجهاز موثوقًا للحسابات كلها. */
   async function claimDevice() {
-    const response = await fetch(`${baseUrl}/v1/device/claim`, {
+    const response = await serverFetch(`${baseUrl}/v1/device/claim`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await deviceProof(deviceIdProvider)),
@@ -595,7 +600,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   /** يعيد تدوير السر بعد reinstall فقط إن كان Android نفسه موثوقًا من قبل. */
   async function recoverDevice() {
-    const response = await fetch(`${baseUrl}/v1/device/recover`, {
+    const response = await serverFetch(`${baseUrl}/v1/device/recover`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await deviceProof(deviceIdProvider)),
@@ -700,7 +705,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     const headers = { ...(options.headers ?? {}) };
     if (requestToken) headers.authorization = `Bearer ${requestToken}`;
     if (options.body) headers['content-type'] = 'application/json';
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await serverFetch(`${baseUrl}${path}`, {
       ...options,
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
@@ -771,7 +776,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   // ───────────────────────── الجلسة ─────────────────────────
 
   async function pairDevice(pairingToken) {
-    const response = await fetch(`${baseUrl}/v1/device/pair`, {
+    const response = await serverFetch(`${baseUrl}/v1/device/pair`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ pairingToken, ...(await deviceProof(deviceIdProvider)) }),
@@ -839,7 +844,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
   /** قائمة الحسابات للشاشة الأولى. بلا توكن: تُطلب بعد pairing إن وُجد. */
   async function accounts() {
     await consumePairingFromUrl();
-    const response = await fetch(`${baseUrl}/v1/accounts`);
+    const response = await serverFetch(`${baseUrl}/v1/accounts`);
     if (!response.ok) throw new Error(`http_${response.status}`);
     const body = await response.json();
     accountsLimit = Number(body.limit) || 10;
@@ -859,7 +864,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     if (!checkedUserId || !checkedToken) return 'unknown';
     const stillCurrent = () => user?.userId === checkedUserId && token === checkedToken && sessionGeneration === checkedGeneration;
     try {
-      const response = await fetch(`${baseUrl}/v1/accounts`, { cache: 'no-store' });
+      const response = await serverFetch(`${baseUrl}/v1/accounts`, { cache: 'no-store' });
       if (!response.ok) return 'unknown';
       const body = await response.json();
       if (!Array.isArray(body?.content) || !stillCurrent()) return 'unknown';
@@ -877,7 +882,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
       }
       // An absent account may also be PENDING_DELETE. The public list alone is
       // insufficient to assert permanent deletion or discard local writes.
-      const probe = await fetch(`${baseUrl}/v1/pulse`, {
+      const probe = await serverFetch(`${baseUrl}/v1/pulse`, {
         headers: { authorization: `Bearer ${checkedToken}` },
         cache: 'no-store',
       });
@@ -1582,14 +1587,14 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
     const headers = { 'content-type': 'application/json' };
     if (token && !withDevice) headers.authorization = `Bearer ${token}`;
     const payload = withDevice ? { ...body, ...(await deviceProof(deviceIdProvider)) } : body;
-    let response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(payload ?? {}) });
+    let response = await serverFetch(`${baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(payload ?? {}) });
     if (response.status === 401 && !withDevice && user?.userId) {
       // توكن انتهى (15 دقيقة): جدّد مرة ثم أعد
       const data = await response.clone().json().catch(() => null);
       if (data?.error === 'unauthorized') {
         await refreshSession().catch(() => {});
         if (token) headers.authorization = `Bearer ${token}`;
-        response = await fetch(`${baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(payload ?? {}) });
+        response = await serverFetch(`${baseUrl}${path}`, { method: 'POST', headers, body: JSON.stringify(payload ?? {}) });
       }
     }
     const data = await response.json().catch(() => null);
@@ -1598,7 +1603,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
 
   /** لوحة المالك (/v1/admin/*): الشارة يفحصها الخادم؛ هنا النقل وتجديد الجلسة فقط. */
   async function adminCall(path, body = null, method = body ? 'POST' : 'GET') {
-    const send = () => fetch(`${baseUrl}/v1/admin/${path}`, {
+    const send = () => serverFetch(`${baseUrl}/v1/admin/${path}`, {
       method,
       headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
       ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
@@ -1694,7 +1699,7 @@ export function createSync({ baseUrl, deviceIdProvider = nativeStableDeviceId })
    */
   async function uploadMedia(blob, attempt = 0) {
     if (!token) throw Object.assign(new Error('unauthorized'), { status: 401 });
-    const response = await fetch(`${baseUrl}/v1/media`, {
+    const response = await serverFetch(`${baseUrl}/v1/media`, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': blob.type || 'application/octet-stream' },
       body: blob,

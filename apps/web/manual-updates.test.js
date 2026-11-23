@@ -10,7 +10,7 @@ function handlers(over = {}) {
     reportHealthy: vi.fn(async () => ({ confirmed: true })),
     showToast: vi.fn(), checkDesktopUpdate: vi.fn(),
     findUpdate: vi.fn(async () => null), stageWeb: vi.fn(async () => true), activateStaged: vi.fn(async () => true),
-    supports: () => false, document: { addEventListener: vi.fn() }, setInterval: vi.fn(),
+    supports: () => false, isLocalEdition: () => false, document: { addEventListener: vi.fn() }, setInterval: vi.fn(),
     appVersion: () => '1.0.0', ...over,
   };
   const context = vm.createContext(deps);
@@ -43,5 +43,11 @@ describe('updates require the Settings action', () => {
     expect(app.findUpdate).toHaveBeenCalledWith({ force: true });
     expect(app.stageWeb).toHaveBeenCalledWith(web);
     expect(app.activateStaged).toHaveBeenCalledTimes(1);
+  });
+  it('Local Settings does not request a Debug or Stable bundle', async () => {
+    const app = handlers({ isLocalEdition: () => true });
+    expect(await app.checkUpdates({ force: true })).toBeNull();
+    expect(app.findUpdate).not.toHaveBeenCalled();
+    expect(app.checkDesktopUpdate).not.toHaveBeenCalled();
   });
 });

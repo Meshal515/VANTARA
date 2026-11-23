@@ -9,6 +9,7 @@ const { createVideoHost } = require('./video-host.cjs');
 const { createWindowFullscreen } = require('./fullscreen.cjs');
 const updater = require('./updater.cjs');
 const channelInfo = require('./channel.cjs').readChannel(__dirname);
+const localEdition = channelInfo.channel === 'local';
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'vantara', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
@@ -22,7 +23,7 @@ if (!app.requestSingleInstanceLock()) app.exit(0);
 const previousProfile=app.getPath('userData');
 const executableFolder=path.dirname(app.getPath('exe'));
 const portable=process.platform==='win32'&&app.isPackaged&&!require('node:fs').existsSync(path.join(executableFolder,'Uninstall.exe'));
-const portableProfile=path.join(executableFolder,channelInfo.channel==='debug'?'VANTARA-Debug-data':'VANTARA-data');
+const portableProfile = path.join(executableFolder, channelInfo.productName.replace(' ', '-') + '-data');
 // يكتمل النقل قبل اختيار userData وقبل أول session/BrowserWindow.
 const profileReady=portable?migratePortableProfile(previousProfile,portableProfile)
   .then(()=>app.setPath('userData',portableProfile)):Promise.resolve();
@@ -219,13 +220,19 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if (!mangaEngineReportOption) setTimeout(() => { void mangaEngine.warmUp().then((on) => on && mangaEngine.autoUpdate()).catch(() => {}); }, 8000).unref?.();
   }
   register('open-external', ({ url }) => openSettings(url));
+  if (localEdition) {
+    const { createDiscoveryWorker } = require('./discovery-store.cjs');
+    const discover = createDiscoveryWorker(path.join(app.getPath('userData'), 'vantara-local-discovery.sqlite'));
+    register('local-discovery', discover);
+  }
   register('open-update-page', async ({ url } = {}) => {
+    if (localEdition) return false;
     await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
     return true;
   });
   // النسخة المحمولة (ZIP) لا مثبّت لها: تبقى على فتح صفحة التنزيل
   register('download-update', async (update) => {
-    if (portable || process.platform !== 'win32') return { ready: false, manual: true };
+    if (localEdition || portable || process.platform !== 'win32') return { ready: false, manual: true };
     if (pendingUpdate?.version === update?.version) return { ready: true, version: pendingUpdate.version };
     const file = await updater.downloadUpdate({
       update, dir: path.join(app.getPath('userData'), 'updates'),
@@ -243,8 +250,14 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   });
   // خادم المزامنة: الأصلي، أو البديل الذي ضبطه المستخدم في الإعدادات (يُعلنه الواجهة عند الإقلاع)
   let configuredServer = null;
-  register('first-party-origin', ({ origin } = {}) => { const o = serverOrigin(origin); configuredServer = o && o !== FIRST_PARTY_ORIGIN ? o : null; return Boolean(o); });
-  register('request-first-party', args => firstPartyRequest(args,(url,options)=>net.fetch(url,options),[FIRST_PARTY_ORIGIN, configuredServer].filter(Boolean)));
+  register('first-party-origin', ({ origin } = {}) => {
+    if (localEdition) return false;
+    const o = serverOrigin(origin);
+    configuredServer = o && o !== FIRST_PARTY_ORIGIN ? o : null;
+    return Boolean(o);
+  });
+  register('request-first-party', args => firstPartyRequest(args, (url, options) => net.fetch(url, options),
+    localEdition ? [] : [FIRST_PARTY_ORIGIN, configuredServer].filter(Boolean)));
   register('show-app',()=>{videoHost?.hide();window.show();window.focus();return true;});
   register('show-player',()=>{videoHost?.show();window.show();window.focus();return true;});
   register('player-viewport',args=>{overlay?.viewport(args);return videoHost?.viewport(args)??false;});

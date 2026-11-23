@@ -21,6 +21,10 @@ const CHANNELS = Object.freeze({
     channel: 'debug', productName: 'VANTARA Debug', appId: 'com.vantara.desktop.debug', title: 'VANTARA Debug · ويندوز',
     manifestUrl: 'https://github.com/Meshal515/VANTARA/releases/download/windows-debug-channel/desktop-debug.json',
   }),
+  local: Object.freeze({
+    channel: 'local', productName: 'VANTARA Local', appId: 'com.vantara.desktop.local', title: 'VANTARA Local · ويندوز',
+    manifestUrl: null,
+  }),
 });
 
 /** يقرأ ويتحقق من channel.json؛ غيابه يعني Stable بلا رقم بناء (بناء محلي أو قديم). */

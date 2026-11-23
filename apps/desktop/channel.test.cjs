@@ -17,3 +17,11 @@ test('missing or hostile channel.json falls back to Stable without a build numbe
     if(raw?.channel!=='debug')assert.equal(info.channel,'stable');
   }
 });
+
+test('Local has its own Windows identity and no Stable or Debug manifest', () => {
+  const local = parseChannel({ channel: 'local', build: 1 });
+  assert.equal(local.productName, 'VANTARA Local');
+  assert.equal(local.appId, 'com.vantara.desktop.local');
+  assert.equal(local.manifestUrl, null);
+  assert.ok(rendererArguments(local, '0.1.1').includes('--vantara-channel=local'));
+});

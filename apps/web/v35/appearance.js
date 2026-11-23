@@ -9,7 +9,7 @@
 
 import { trimArtCache } from '../lib/together/art.js';
 import { relieveStorage } from '../lib/storage-relief.js';
-import { appVersion, buildChannel } from '../lib/config.js';
+import { appVersion, buildChannel, isLocalEdition } from '../lib/config.js';
 
 /** كاشات تُعاد من الشبكة بلا فقد: تُخلى حين يمتلئ التخزين قبل أن يفشل حفظ إعداد. */
 const REGENERABLE = ['vantara.anime.found.v2', 'vantara.anime.genre-art.v1', 'vantara.heroPick.v1', 'vantara.cinema.heroPick.v1', 'vantara.unified.genre-art.v1'];
@@ -126,7 +126,7 @@ const STYLE_SETS = { manga: MANGA_WORK_STYLES, anime: WORK_STYLES, cinema: CINEM
 export const stylesOf = (section) => STYLE_SETS[section] ?? WORK_STYLES;
 
 /** لون علامة VANTARA الافتراضي: البنفسجي، مستقل عن ألوان الأقسام. */
-export const BRAND_DEFAULT = '#8f5cff';
+export const BRAND_DEFAULT = isLocalEdition() ? '#e5484d' : '#8f5cff';
 
 /** ألوان هادئة غير فاقعة؛ أولها ألوان الأقسام الثلاثة ثم الأبيض. */
 export const ACCENTS = Object.freeze([

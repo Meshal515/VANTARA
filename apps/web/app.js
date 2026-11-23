@@ -20,7 +20,7 @@ import { RELEASE, releaseNotesFor } from './lib/release.js';
 import { createPageLoader, createProgressSaver, createTapDetector, zoneOf } from './reader.js';
 import { createSync } from './lib/sync.js';
 import { requestContent } from './lib/content-api.js';
-import { appVersion, endpoints, setEndpoints, syncConfigured } from './lib/config.js';
+import { appVersion, endpoints, isLocalEdition, setEndpoints, syncConfigured } from './lib/config.js';
 import { screenAccounts } from './screens/accounts.js';
 import { canManageDangerZone } from './lib/identity.js';
 import { pinPad } from './screens/pin-pad.js';
@@ -82,7 +82,7 @@ const sync = createSync({ baseUrl: config.sync });
 globalThis.VantaraWeb?.attachAuth?.({ header: () => sync.authorizationHeader, refresh: () => sync.refreshSession() });
 // Capacitor injects native plugins before user JS. On normal web this is
 // undefined, so the bridge is a no-op without requiring a browser npm import.
-const nativeLinksReady = sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
+const nativeLinksReady = isLocalEdition() ? Promise.resolve() : sync.attachNativeLinkBridge(globalThis.Capacitor?.Plugins?.App);
 
 /**
  * من يرى مصادر المانجا التي كانت مدمجة في التطبيق (lib/source-entitlement.js): القرار من صف
@@ -142,6 +142,7 @@ function mount(node) {
  * لكل شيء.
  */
 async function api(path, options = {}) {
+  if (isLocalEdition()) throw Object.assign(new Error('content_api_disabled'), { code: 'content_api_disabled' });
   return requestContent({ baseUrl: config.api, sync, path, options });
 }
 
@@ -1596,6 +1597,7 @@ function screenV35(page) {
           },
         },
         switchAccount: () => {
+          if (isLocalEdition()) return showToast({ title: 'المزامنة غير مفعّلة في هذه التجربة' });
           void switchToAccountGate();
         },
       },
@@ -2061,7 +2063,7 @@ async function startUpdates() {
 
 /** `force`: من «تحديث التطبيق» في الإعدادات — الواجهة الجديدة تُطبَّق فورًا. */
 async function checkUpdates({ force = false } = {}) {
-  if (!force) return null;
+  if (!force || isLocalEdition()) return null;
   if (supports('webUpdate')) {
     const { checkForUpdates } = await import('./pwa/update.js');
     try {
@@ -2558,6 +2560,8 @@ async function boot() {
   // رابط قديم أو bridge native معطوب لا يجوز أن يمنع واجهة التطبيق من الإقلاع.
   await nativeLinksReady.catch(() => {});
   await sync.ready;
+
+  if (isLocalEdition()) return go({ name: 'home' });
 
   if (!syncConfigured()) {
     // بلا عنوان مزامنة لا حسابات ولا أصدقاء.

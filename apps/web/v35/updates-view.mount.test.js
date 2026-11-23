@@ -162,3 +162,23 @@ it('every press gets a visible answer: nothing new, or the end of the feed', asy
   await api.loadMore();
   expect(host.querySelector('.up-status').textContent).toBe('وصلت لآخر التحديثات');
 });
+
+it('keeps the Local timeline in place until the user accepts newly discovered releases', async () => {
+  vi.stubGlobal('VantaraDesktop', { channel: 'local' });
+  let pulse;
+  vi.spyOn(globalThis, 'setInterval').mockImplementation((callback) => { pulse = callback; return 0; });
+  const now = Date.now();
+  const saved = { ...event('1', 'Saved'), at: now - 8 * 86_400_000, publishedAt: now - 8 * 86_400_000 };
+  const caughtUp = { ...event('2', 'Caught up'), at: now - 3 * 86_400_000, publishedAt: now - 3 * 86_400_000 };
+  timeline.mockResolvedValueOnce(page([saved])).mockResolvedValue(page([caughtUp, saved]));
+  mount();
+  await vi.waitFor(() => expect(host.querySelector('.up-card')).not.toBeNull());
+  const card = host.querySelector('.up-card');
+  await pulse();
+  expect(host.querySelector('.up-card')).toBe(card);
+  expect(host.querySelectorAll('.up-card')).toHaveLength(1);
+  expect(host.textContent).toContain('تحديثات جديدة');
+  await api.refresh();
+  expect([...host.querySelectorAll('.up-title')].map((node) => node.textContent)).toEqual(['Caught up', 'Saved']);
+  expect(host.querySelectorAll('.up-card')[1]).toBe(card);
+});

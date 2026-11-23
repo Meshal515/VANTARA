@@ -462,6 +462,23 @@ for (const path of ["apps/web/lib/source-policy.js", "apps/web/lib/source-policy
 for (const path of ["apps/web/lib/edition-official.test.js", "apps/web/v35/manga-search-bench.test.js", "apps/web/v35/search-names.test.js", "apps/web/v35/spy-family-discovery.test.js", "apps/web/lib/work-evidence.js", "apps/web/lib/manga-evidence.js", "apps/web/lib/manga-meta.js", "apps/web/lib/fixtures/manga-identity-sim.js", "apps/web/lib/manga-identity-bench.test.js", "apps/web/lib/catalog.js", "apps/web/v35/works.js", "apps/web/v35/shell.js", "android/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareRequestPolicy.kt", "spike/extension-engine/app/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareRequestPolicy.kt", "android/app/src/test/java/com/vantara/verification/CloudflareRequestPolicyTest.kt", "android/app/src/main/kotlin/com/vantara/verification/VerificationActivity.kt", "android/app/src/main/kotlin/com/vantara/verification/VerificationPlugin.kt", "android/app/src/main/kotlin/com/vantara/verification/VerificationPolicy.kt", "android/app/src/test/java/com/vantara/verification/VerificationPolicyTest.kt"]) seams.add(path);
 // نسخ إضافات المانجا التي اكتشفها الجهاز في البطاقة العامة.
 for (const path of ['apps/web/v35/work-local-editions.test.js', 'apps/web/v35/work-ref.js']) seams.add(path);
+// ملفات قناة VANTARA Local والتجارب المستقلة لهوية التطبيق وسجل الاكتشاف.
+for (const path of [
+  'android/app/build.gradle', 'android/app/src/main/AndroidManifest.xml',
+  'android/app/src/main/java/com/vantara/app/MainActivity.java',
+  'android/app/src/main/kotlin/com/vantara/plugins/LocalDiscoveryPlugin.kt',
+  'android/app/src/debug/res/drawable/ic_launcher_local.xml',
+  'android/app/src/debug/res/values/vantara_local.xml',
+  'apps/desktop/channel.cjs', 'apps/desktop/channel.test.cjs', 'apps/desktop/main.cjs', 'apps/desktop/preload.cjs',
+  'apps/desktop/discovery-store.cjs', 'apps/desktop/discovery-store.test.cjs',
+  'apps/web/app.js', 'apps/web/manual-updates.test.js', 'apps/web/desktop/boot.js', 'apps/web/lib/config.js',
+  'apps/web/lib/discovery-scan.js', 'apps/web/lib/discovery-scan.test.js',
+  'apps/web/lib/discovery-store.js', 'apps/web/lib/discovery-store.test.js',
+  'apps/web/lib/sync.js', 'apps/web/lib/sync.test.js', 'apps/web/lib/update-engine.js', 'apps/web/lib/update-engine.test.js',
+  'apps/web/sw.js', 'apps/web/v35/appearance.js', 'apps/web/v35/shell.js',
+  'apps/web/v35/updates-view.js', 'apps/web/v35/works.js',
+  'docs/audits/VANTARA_LOCAL_ARCHITECTURE.md', 'tools/build-android-local.sh', 'tools/build-windows.mjs',
+]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);

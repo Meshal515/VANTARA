@@ -69,7 +69,7 @@ export function installDesktopBridges(g = globalThis) {
   if (!isDesktop(g)) return null;
   if (g.VantaraDesktopBridges) return g.VantaraDesktopBridges;
   const getRuntime = () => runtimeFor(g);
-  installFirstPartyTransport(g);
+  if (g.VantaraDesktop?.channel !== 'local') installFirstPartyTransport(g);
   const engine = createDesktopEngine({ bridge: g.VantaraDesktop, getRuntime });
   installDesktopPlayer({g,bridge:g.VantaraDesktop,engine});
   let modules;
@@ -163,7 +163,9 @@ export function installDesktopBridges(g = globalThis) {
       g.document.body.append(panel);
     })().catch(error => show(message(error), true));
   });
-  g.VantaraDesktopUpdates = startDesktopUpdateWatch({ bridge: g.VantaraDesktop, doc: g.document });
+  if (g.VantaraDesktop?.channel !== 'local') {
+    g.VantaraDesktopUpdates = startDesktopUpdateWatch({ bridge: g.VantaraDesktop, doc: g.document });
+  }
   return g.VantaraDesktopBridges;
 }
 installDesktopBridges();

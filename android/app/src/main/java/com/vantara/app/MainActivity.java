@@ -23,6 +23,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(com.vantara.anime.bridge.AnimeEnginePlugin.class);
         registerPlugin(com.vantara.downloads.DownloadsPlugin.class);
         registerPlugin(com.vantara.plugins.StoragePlugin.class);
+        if (BuildConfig.APPLICATION_ID.equals("com.vantara.app.local")) {
+            registerPlugin(com.vantara.plugins.LocalDiscoveryPlugin.class);
+        }
         registerPlugin(com.vantara.usage.UsagePlugin.class);
         registerPlugin(com.vantara.verification.VerificationPlugin.class);
         registerPlugin(com.vantara.notify.NotifyPlugin.class);

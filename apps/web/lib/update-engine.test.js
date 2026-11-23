@@ -149,3 +149,38 @@ it('UQ2: the pending reports never hold more than 1MB of shared localStorage', a
   expect(updateReportStatus().dropped).toBeGreaterThan(0);
   vi.unstubAllGlobals();
 });
+
+it('keeps Local catalogues and chapter observations in IndexedDB without using the cloud or localStorage', async () => {
+  vi.resetModules();
+  const { IDBFactory, IDBKeyRange } = await import('fake-indexeddb');
+  vi.stubGlobal('VantaraDesktop', { channel: 'local' });
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('IDBKeyRange', IDBKeyRange);
+  const storage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
+  vi.stubGlobal('localStorage', storage);
+  try {
+    const source = 'eu.kanade.tachiyomi.extension.ar.sample#8929911308540155494';
+    const { noteSourceTiers } = await import('./source-policy.js');
+    noteSourceTiers([{ id: source, lang: 'ar', warning: 'SAFE' }]);
+    const updates = await import('./update-engine.js');
+    const send = vi.fn();
+    updates.connectUpdates(send);
+    updates.recordLocalListings(source, [{ title: 'Sample', url: '/sample' }]);
+    await updates.flush();
+    expect(await updates.knownLocalEditions(source)).toMatchObject([
+      { sourceId: source, source: { u: '/sample' }, lastChapterCheckAt: 0 },
+    ]);
+    expect((await updates.timeline('manga')).events).toEqual([]);
+    const publishedAt = Date.now() - 60_000;
+    updates.observeMangaChapters(source, { title: 'Sample', url: '/sample' }, [{ chapterNumber: 17, dateUpload: publishedAt }]);
+    await updates.flush();
+    expect((await updates.timeline('manga')).events).toMatchObject([{ number: 17, publishedAt, sources: [{ s: source }] }]);
+    expect(await updates.topChapters()).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+    expect(storage.getItem.mock.calls.some(([key]) => key.startsWith('vantara.update-reports.'))).toBe(false);
+    expect(storage.setItem).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  }
+});

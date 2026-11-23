@@ -33,6 +33,7 @@ def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
 // الـAPK الذي يحمل بصمتها نفسها. «dev» للبناء المحلي: لا تحديثات تلقائية.
 def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
 def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
+def localEdition = providers.gradleProperty('vantaraLocal').orNull == 'true'
 
 /**
  * CloudStream runtime (Debug and Stable): every OkHttpClient.Builder.build() first calls NetworkBridge.adopt (extensions/runtime-android).
@@ -84,6 +85,7 @@ android {
 
     defaultConfig {
         applicationId "com.vantara.app"
+        manifestPlaceholders = [launcherIcon: '@mipmap/ic_launcher', launcherRoundIcon: '@mipmap/ic_launcher_round']
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // يرتفع مع كل إصدار: أندرويد يرفض تثبيت تحديث برقم أقل أو مساوٍ،
@@ -104,11 +106,15 @@ android {
     buildTypes {
         debug {
             // نسخة الاختبار تعيش بجانب النسخة الموقعة الأساسية على نفس الهاتف.
-            applicationIdSuffix '.debug'
-            resValue 'string', 'app_name', 'VANTARA اختبار'
+            applicationIdSuffix localEdition ? '.local' : '.debug'
+            resValue 'string', 'app_name', localEdition ? 'VANTARA Local' : 'VANTARA اختبار'
+            if (localEdition) {
+                resValue 'string', 'title_activity_main', 'VANTARA Local'
+                manifestPlaceholders = [launcherIcon: '@drawable/ic_launcher_local', launcherRoundIcon: '@drawable/ic_launcher_local']
+            }
             // Only the protected opt-in debug channel has a persistent signature.
             // Ordinary local/debug CI builds keep the standard Android debug key.
-            if (System.getenv('VANTARA_SIGN_DEBUG_CHANNEL') == 'true') {
+            if (localEdition || System.getenv('VANTARA_SIGN_DEBUG_CHANNEL') == 'true') {
                 if (!keystorePath || !keystorePassword) {
                     throw new GradleException('Upgradeable debug channel requires the persistent signing key')
                 }
@@ -128,7 +134,9 @@ android {
     // اسم ثابت للخرج: الرابط الذي يُرسل للأصدقاء لا يتغير مع كل إصدار
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
-            if (variant.buildType.name == 'release') {
+            if (localEdition && variant.buildType.name == 'debug') {
+                outputFileName = 'VANTARA-Local.apk'
+            } else if (variant.buildType.name == 'release') {
                 outputFileName = 'VANTARA-release.apk'
             }
         }

@@ -22,7 +22,8 @@ import { aliasesFromText } from '../lib/manga-aliases.js';
 import { knownEmpty, noteEditionChapters, withMangaDexNames } from '../lib/manga-evidence.js';
 import { outcomeOf, reportSource } from '../lib/source-report.js';
 import { readKv, readWork, writeKv, writeWork } from '../lib/chapter-store.js';
-import { noteListed, topChapters } from '../lib/update-engine.js';
+import { knownLocalEditions, noteListed, recordLocalListings, topChapters } from '../lib/update-engine.js';
+import { isLocalEdition } from '../lib/config.js';
 import { adultManga, adultSource, blockKey, ecchiManga, isBlockedKey } from '../lib/adult-filter.js';
 import { buildsLibrary, enrichOnly, noteSourceTiers, searchable, tierOf } from '../lib/source-policy.js';
 import { needsVerdict, noteVerdicts, workVerdict } from '../lib/manga-verdict.js';
@@ -341,6 +342,10 @@ function listingPage(source, { kind = 'catalogue', page, query, genre }) {
   if (page === 1 && sharedLatest && !query && !genre && (kind === 'latest' || kind === 'latestListing')) {
     return sharedLatest(source.id, request);
   }
+  if (isLocalEdition()) return request().then((result) => {
+    recordLocalListings(source.id, result?.mangas);
+    return result;
+  });
   return request();
 }
 
@@ -1063,6 +1068,20 @@ export async function browseLive({ kind = 'catalogue', page = 1, query = '', gen
 export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldContinue = () => true } = {}) {
   // Every available source participates; each source has its own resumable cursor.
   const list = await listingSources();
+  if (isLocalEdition()) {
+    const { scanDiscovery } = await import('../lib/discovery-scan.js');
+    const stateKey = (key) => 'local-discovery:' + key;
+    await scanDiscovery(list, {
+      catalogue: (source, page) => listingPage(source, { kind: 'catalogue', page }),
+      latest: (source) => listingPage(source, { kind: 'latest', page: 1 }),
+      chapters: (source, manga) => requestSource(source, () => engine.chapters(source.id, manga), LISTING_TIMEOUT_MS),
+      knownEditions: knownLocalEditions,
+      readState: async (key) => (await readKv(stateKey(key)))?.value,
+      writeState: (key, value) => writeKv(stateKey(key), value),
+      shouldContinue,
+    });
+    return [];
+  }
   const prior = (await readKv(CHAPTER_UPDATES_KEY))?.value;
   const { entries, known } = await collectLatestChapters(list, 1, {
     known: prior,

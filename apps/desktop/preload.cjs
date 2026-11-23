@@ -6,12 +6,13 @@ const build = Number(argument('build', /^[1-9]\d{0,8}$/));
 contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   platform: 'windows',
   version: argument('version', /^\d+\.\d+\.\d+$/)??'0.0.0',
-  channel: argument('channel', /^(?:stable|debug)$/)??'stable',
+  channel: argument('channel', /^(?:stable|debug|local)$/)??'stable',
   build: Number.isSafeInteger(build)&&build>0?build:null,
   sourceSha: argument('source', /^[0-9a-f]{7,40}$/),
   builtAt: argument('built', /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/),
   requestResource: call('request-resource'),
   requestFirstParty: call('request-first-party'),
+  localDiscovery: call('local-discovery'),
   setFirstPartyOrigin: call('first-party-origin'),
   verifySource: call('verify-source'),
   // محرك إضافات المانجا (Suwayomi محليًا): دالة واحدة بأسماء معروفة فقط تُفحص في العملية الرئيسية
