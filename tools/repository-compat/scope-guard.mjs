@@ -464,6 +464,7 @@ for (const path of ["apps/web/lib/edition-official.test.js", "apps/web/v35/manga
 for (const path of ['apps/web/v35/work-local-editions.test.js', 'apps/web/v35/work-ref.js']) seams.add(path);
 // ملفات قناة VANTARA Local والتجارب المستقلة لهوية التطبيق وسجل الاكتشاف.
 for (const path of [
+  '.github/workflows/vantara-local-android.yml',
   'android/app/build.gradle', 'android/app/src/main/AndroidManifest.xml',
   'android/app/src/main/java/com/vantara/app/MainActivity.java',
   'android/app/src/main/kotlin/com/vantara/plugins/LocalDiscoveryPlugin.kt',
