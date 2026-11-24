@@ -97,3 +97,48 @@ test('نافذة Windows تقلع الواجهة الأصلية مع sandbox و�
   assert.ok(!JSON.stringify(report).includes('token=keep'));
   await fs.rm(reportDir,{recursive:true,force:true});
 });
+
+test('Local starts without a Chromium source session and reports source verification unavailable', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'vantara-local-source-test-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  t.after(() => { delete require.cache[require.resolve('./main.cjs')]; });
+  const channel = require('./channel.cjs');
+  const handlers = new Map();
+  const partitions = [];
+  const frame = { url: 'vantara://app/index.html' };
+  const webContents = { mainFrame: frame, setWindowOpenHandler() {}, on() {} };
+  const { promise: loaded, resolve, reject } = Promise.withResolvers();
+  const electron = {
+    app: { setName() {}, setAppUserModelId() {}, requestSingleInstanceLock: () => true, on() {}, whenReady: async () => {},
+      getPath: () => dir, exit: code => reject(new Error(`exit ${code}`)) },
+    protocol: { registerSchemesAsPrivileged() {}, handle() {} },
+    ipcMain: { handle(name, handler) { handlers.set(name, handler); } },
+    session: {
+      fromPartition(name) {
+        partitions.push(name);
+        return { setUserAgent() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, on() {} };
+      },
+    },
+    Menu: { buildFromTemplate: template => template, setApplicationMenu() {} },
+    BrowserWindow: class {
+      webContents = webContents;
+      once() {}
+      async loadURL() { resolve(); }
+    },
+  };
+  const previous = Module._load;
+  Module._load = function (id, ...args) {
+    if (id === 'electron') return electron;
+    if (id === './channel.cjs') return { ...channel, readChannel: () => channel.parseChannel({ channel: 'local' }) };
+    return previous.call(this, id, ...args);
+  };
+  delete require.cache[require.resolve('./main.cjs')];
+  try { require('./main.cjs'); } finally { Module._load = previous; }
+  await loaded;
+  assert.deepEqual(partitions, []);
+  const caller = { sender: webContents, senderFrame: frame };
+  assert.deepEqual(await handlers.get('vantara:verify-source')(caller, { host: 'manga.example' }), {
+    host: 'manga.example', state: 'failed', reason: 'isolation_unavailable',
+  });
+  await assert.rejects(handlers.get('vantara:request-resource')(caller, { url: 'file:///source-fixture' }), /رابط غير مسموح/);
+});

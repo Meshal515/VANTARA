@@ -623,7 +623,7 @@ export function withUpdateSources(base, group) {
     if(Number.isFinite(s.lockedMax)&&s.lockedMax>=0)locks.set(s.s,{sourceId:s.s,label:sourceLabel({sourceId:s.s,label:s.s}),lockedMax:s.lockedMax});
     else locks.delete(s.s);
   }
-  const incoming=(group.sources??[]).filter(s=>s?.s&&s.u).map(s=>{
+  const incoming=(group.sources??[]).filter(s=>s?.s&&s.u&&(!s.c||s.m||editions.get(s.s)?.manga?.memo)).map(s=>{
     const old=editions.get(s.s);
     // غلاف الحدث لمصدره وحده (coverSource): كان يُنسب لكل نسخ العمل فيُطلب بترويسات مصدر آخر ويُرفض (حرف بدل غلاف)
     const ownCover=group.cover&&(group.coverSource==null||group.coverSource===s.s)?group.cover:null;

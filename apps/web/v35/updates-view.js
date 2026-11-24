@@ -10,12 +10,12 @@ import { timeline } from '../lib/update-engine.js';
 import { decodeEntities, normalizeTitle } from '../lib/catalog.js';
 import { loadAliases } from '../lib/manga-alias-store.js';
 import { adultSource, adultTitle, isBlockedKey } from '../lib/adult-filter.js';
-import { ARABIC, tierFromId, tierOf } from '../lib/source-policy.js';
+import { ARABIC, knownSourceTier, tierFromId, tierOf } from '../lib/source-policy.js';
 import { isLocalEdition } from '../lib/config.js';
 
 /** مصدر يبني «آخر التحديثات» العامة: عربي آمن بحكم الخادم (المعرّف) وبحكم هذا الجهاز إن عرفه. */
 const publicMangaSource = (id) => Boolean(id) && !adultSource({ id }) &&
-  (isLocalEdition() || (tierFromId(id) === ARABIC && tierOf(id) === ARABIC));
+  (isLocalEdition() ? (knownSourceTier(id) ?? ARABIC) === ARABIC : tierFromId(id) === ARABIC && tierOf(id) === ARABIC);
 import { tagWork } from '../lib/removed-works.js';
 
 const MIN = 60_000;

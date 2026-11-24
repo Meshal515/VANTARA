@@ -109,6 +109,7 @@ android {
             applicationIdSuffix localEdition ? '.local' : '.debug'
             resValue 'string', 'app_name', localEdition ? 'VANTARA Local' : 'VANTARA اختبار'
             if (localEdition) {
+                debuggable false
                 resValue 'string', 'title_activity_main', 'VANTARA Local'
                 manifestPlaceholders = [launcherIcon: '@drawable/ic_launcher_local', launcherRoundIcon: '@drawable/ic_launcher_local']
             }

@@ -26,10 +26,11 @@ export async function scanDiscovery(sources, {
         if (manga?.url && !candidates.has(manga.url)) candidates.set(manga.url, manga);
       }
     };
-    const saved = await knownEditions(source.id, { limit: WORK_BATCH - 1 });
+    const saved = await knownEditions(source.id, { limit: 30 });
     for (const entry of saved) {
-      if (entry.source.u && now - entry.lastChapterCheckAt >= CHECK_INTERVAL) {
+      if (entry.source.u && (!entry.source.c || entry.source.m) && now - entry.lastChapterCheckAt >= CHECK_INTERVAL) {
         candidates.set(entry.source.u, { url: entry.source.u, title: entry.title, memo: entry.source.m });
+        if (candidates.size >= WORK_BATCH - 1) break;
       }
     }
     if (!shouldContinue()) return;

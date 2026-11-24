@@ -13,6 +13,15 @@ node --input-type=module <<'JS'
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 const root = 'android/app/src/main/assets/public';
+for (const file of fs.readdirSync(root, { recursive: true })) {
+  if (file.endsWith('.test.js')) fs.rmSync(`${root}/${file}`);
+}
+const index = `${root}/index.html`;
+const html = fs.readFileSync(index, 'utf8');
+if (!html.includes('<head>')) throw new Error('Capacitor bridge requires a literal head tag');
+const csp = fs.readFileSync(`${root}/local-content-policy.txt`, 'utf8').trim();
+// Capacitor inserts its trusted bridge immediately after the opening head, before this meta tag.
+fs.writeFileSync(index, html.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}" />`));
 const file = `${root}/lib/config.js`;
 const config = fs.readFileSync(file, 'utf8');
 fs.writeFileSync(file, config
@@ -29,4 +38,4 @@ for (const [, path] of content.matchAll(/^\s*'(\/[^']+)',$/gm)) {
 fs.writeFileSync(worker, content.replace(/^const SHELL_DIGEST = '[^']+';$/m, `const SHELL_DIGEST = '${hash.digest('hex')}';`));
 JS
 cd android
-./gradlew --no-daemon -PvantaraLocal=true :app:assembleDebug
+./gradlew --no-daemon -PvantaraLocal=true :app:assembleDebug "$@"

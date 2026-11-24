@@ -61,19 +61,23 @@ function discoveryStore() {
   return discovery;
 }
 const pendingLocal = [];
+let pendingLocalUnits = 0;
+let localFailures = 0;
 let localWrite = null;
 
 function scheduleLocal() {
-  if (!timer) timer = setTimeout(() => void flush(), 250);
+  if (!timer) timer = setTimeout(() => void flush(), Math.min(30_000, 250 * 2 ** localFailures));
 }
 
 function enqueueLocal(row) {
-  if (pendingLocal.length >= MAX_QUEUE_WORKS) {
+  const units = row.units?.length ?? 0;
+  if (pendingLocal.length >= MAX_QUEUE_WORKS || pendingLocalUnits + units > MAX_QUEUE_UNITS) {
     dropped += row.units?.length ?? 1;
     scheduleLocal();
     return false;
   }
   pendingLocal.push({ ...row, work: canonicalRefOf(row.work) });
+  pendingLocalUnits += units;
   scheduleLocal();
   return true;
 }
@@ -91,15 +95,17 @@ async function flushLocal() {
   localWrite = (async () => {
     try {
       await (await discoveryStore()).record(pendingLocal.slice(0, count));
-      pendingLocal.splice(0, count);
+      for (const row of pendingLocal.splice(0, count)) pendingLocalUnits -= row.units?.length ?? 0;
+      localFailures = 0;
       storageFailed = false;
     } catch {
       storageFailed = true;
+      localFailures = Math.min(7, localFailures + 1);
     }
   })();
   try { await localWrite; } finally {
     localWrite = null;
-    if (!storageFailed && pendingLocal.length) scheduleLocal();
+    if (pendingLocal.length) scheduleLocal();
   }
 }
 
@@ -244,10 +250,14 @@ export function report(r) {
  * نُسقطها؛ الخادم لا يُنشئ حدثًا بلا تاريخ إلا بعد تقدّم خط أساس المصدر.
  */
 export function trustDates(units) {
-  const dated = units.filter((u) => u.publishedAt);
-  if (dated.length < 10) return units;
-  const times = dated.map((u) => u.publishedAt);
-  return Math.max(...times) - Math.min(...times) < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
+  let count = 0, first = Infinity, last = -Infinity;
+  for (const { publishedAt } of units) {
+    if (!publishedAt) continue;
+    count++;
+    first = Math.min(first, publishedAt);
+    last = Math.max(last, publishedAt);
+  }
+  return count >= 10 && last - first < 60_000 ? units.map(({ publishedAt, ...u }) => u) : units;
 }
 
 /** Listing-motion hint for diagnosis only. The server never uses this as proof

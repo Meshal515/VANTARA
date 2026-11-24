@@ -6,11 +6,24 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** قرار المالك (20 نوفمبر): التحديث التلقائي فقط إن كان الإصدار الجديد آمنًا ويعمل، ويدوي، ورجوع للسابق. */
+/** سياسة التحديث التلقائي وفحص جاهزية الإصدار والرجوع للإصدار السابق. */
 class MangaSelfUpdateTest {
     private val verified = UpdatePreflight.Verdict(true, "RUNTIME_UPDATE_VERIFIED")
     private val siteDown = UpdatePreflight.Verdict(true, "RUNTIME_UPDATE_UNVERIFIED_ENVIRONMENT")
     private val broken = UpdatePreflight.Verdict(false, "RUNTIME_UPDATE_PREFLIGHT_FAILED")
+
+    @Test fun `local performs no automatic user extension update work`() {
+        var attempts = 0
+        runMangaUserAutoUpdate("com.vantara.app.local") { attempts++ }
+        assertEquals(0, attempts)
+    }
+
+    @Test fun `stable and debug can still check for user extension updates`() {
+        var attempts = 0
+        runMangaUserAutoUpdate("com.vantara.app") { attempts++ }
+        runMangaUserAutoUpdate("com.vantara.app.debug") { attempts++ }
+        assertEquals(2, attempts)
+    }
 
     @Test fun `a newer version that really returns works is applied`() {
         assertEquals(Action.APPLY, MangaSelfUpdate.decide(newer = true, held = null, repoCode = 12, verdict = verified))

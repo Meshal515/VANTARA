@@ -19,6 +19,11 @@ import java.io.File
 import java.net.URI
 import java.security.MessageDigest
 
+/** فحص الإصدار الجديد يشغّل كوده بأذونات التطبيق، لذلك تطلب Local تثبيته يدويًا. */
+internal inline fun runMangaUserAutoUpdate(applicationId: String, update: () -> Unit) {
+    if (applicationId != "com.vantara.app.local") update()
+}
+
 /**
  * مستودعات إضافات المانجا التي يضيفها المستخدم (صيغة Mihon/Keiyoushi):
  *
@@ -27,9 +32,9 @@ import java.security.MessageDigest
  *   <base>/index.min.json   (v1) [{ name, pkg, apk, lang, version, nsfw, sources: [{ id, name, lang }] }]
  *   <base>/apk/<apk>        (v1)
  *
- * الإضافة كود يعمل داخل التطبيق، فالثقة بالمستودع لا بالملف: كل APK يجب أن يكون
- * موقَّعًا بالمفتاح الذي أعلنه المستودع (كما في Mihon)، وبصمته SHA-256 تُثبَّت عند
- * التثبيت فلا يُحمَّل بعدها ملف تغيّر. إضافات الأنمي (Aniyomi) لها واجهة أخرى.
+ * إضافة المانجا الأصلية تعمل داخل عملية التطبيق بأذوناته، ويمكنها الوصول إلى بياناته الخاصة.
+ * يربط توقيع APK الحزمة بمفتاح الناشر المثبّت عند إضافة المستودع. وتثبّت بصمة SHA-256
+ * عند التثبيت لضمان تحميل البايتات نفسها لاحقًا. إضافات الأنمي (Aniyomi) لها واجهة أخرى.
  */
 object RepoIndex {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }

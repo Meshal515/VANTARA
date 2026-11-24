@@ -9,12 +9,14 @@ import { createSqliteDiscoveryStore } from '../../apps/web/lib/discovery-store.j
 
 const { chromium } = await import(process.env.VANTARA_PLAYWRIGHT_MODULE || 'playwright');
 const root = new URL('../../apps/web/', import.meta.url);
+const policy = (await readFile(new URL('local-content-policy.txt', root), 'utf8')).trim();
 const dir = await mkdtemp(join(tmpdir(), 'vantara-ui-discovery-'));
 const file = join(dir, 'discovery.sqlite');
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/') {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Security-Policy', policy);
     return res.end(`<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       <link rel="stylesheet" href="/v35/core.css">

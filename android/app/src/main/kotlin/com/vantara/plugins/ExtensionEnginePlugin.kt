@@ -8,6 +8,7 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.vantara.app.BuildConfig
 import dev.vantara.spike.CatalogueFilterPolicy
 import dev.vantara.spike.CatalogueListingKind
 import dev.vantara.spike.CloudflareInteractionMode
@@ -147,8 +148,9 @@ class ExtensionEnginePlugin : Plugin() {
             // ES1: حالة تالفة لا تُسقط الإقلاع من هذا المسار (الخطأ يظهر في نداءات الواجهة حيث يُلتقط)
             for (ext in runCatching { userStore.state.extensions }.getOrDefault(emptyList())) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
             launch { runCatching { refreshBuiltinsDaily(::eager) } }
-            // SE3: إضافات المستخدم تتحدث وحدها، بشرط أن يعمل الإصدار الجديد فعلًا (MangaSelfUpdate)
-            launch { runCatching { autoUpdateUserExtensionsDaily() } }
+            runMangaUserAutoUpdate(BuildConfig.APPLICATION_ID) {
+                launch { runCatching { autoUpdateUserExtensionsDaily() } }
+            }
         }
     }
 
@@ -541,7 +543,7 @@ class ExtensionEnginePlugin : Plugin() {
         }
     }
 
-    // ───────────────────────── التحديث الذاتي الآمن (MangaSelfUpdate) ─────────────────────────
+    // ───────────────────────── التحديث الذاتي (MangaSelfUpdate) ─────────────────────────
 
     /** الإصدار الذي رجع منه المستخدم يدويًا لكل حزمة: التلقائي لا يعود إليه، ويُحدَّث فقط إلى أحدث منه. */
     private val updateHolds by lazy { context.getSharedPreferences("vantara_manga_update_holds", android.content.Context.MODE_PRIVATE) }
@@ -604,12 +606,12 @@ class ExtensionEnginePlugin : Plugin() {
     }
 
     /** EF1: فشل يعني أن الموقع تغيّر ⇒ فحص تحديث فوري لتلك الإضافة (مرة كل 6 ساعات على الأكثر). */
-    private fun checkUpdateAfterFailure(sourceId: String?, code: String) {
-        if (sourceId.isNullOrBlank() || !MangaSelfUpdate.suggestsUpdate(code)) return
+    private fun checkUpdateAfterFailure(sourceId: String?, code: String) = runMangaUserAutoUpdate(BuildConfig.APPLICATION_ID) {
+        if (sourceId.isNullOrBlank() || !MangaSelfUpdate.suggestsUpdate(code)) return@runMangaUserAutoUpdate
         // المعرّف القديم لحزمة مثبّتة من مستودع يُفحص أيضًا (بلا إضافة مثبّتة يعود أدناه كما كان)
         val pkg = if ('#' in sourceId) sourceId.substringBefore('#') else splitSourceId(sourceId).first
         val now = System.currentTimeMillis()
-        if (now - (failureChecks[pkg] ?: 0L) < MangaSelfUpdate.FAILURE_CHECK_GAP_MS) return
+        if (now - (failureChecks[pkg] ?: 0L) < MangaSelfUpdate.FAILURE_CHECK_GAP_MS) return@runMangaUserAutoUpdate
         failureChecks[pkg] = now
         scope.launch(Dispatchers.IO) {
             runCatching {

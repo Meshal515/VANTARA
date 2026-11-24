@@ -1007,7 +1007,7 @@ export function renderV7Addons({
     if(!/\/manifest\.json\/?$/i.test(parsed.pathname) && yes.dataset.trustedUrl!==uri){
       yes.dataset.trustedUrl=uri;
       yes.textContent="أثق به، أضفه";
-      note.textContent="إضافات المستودع قد تنفّذ كودًا على جهازك. أضف مستودعات تثق بناشريها فقط؛ اضغط مجددًا للتأكيد.";
+      note.textContent="قد تعمل الإضافات الأصلية داخل فانتارا بصلاحياته وتصل إلى بياناته. أضف مستودعات تثق بناشريها فقط. اضغط مجددًا للتأكيد.";
       return;
     }
     if(busy)return;
@@ -1185,7 +1185,7 @@ export function renderV7Addons({
       // المستودعات تحوي كودًا ينفَّذ على جهازك: موافقة صريحة مرة واحدة قبل إضافة أي مستودع
       if(!trusted&&targets.some(t=>t.kind==="native")){
         trusted=true;all.textContent="أثق بهذه المستودعات، ثبّت";
-        note.textContent="إضافات المستودعات تنفّذ كودًا على جهازك. ثبّت فقط إن كان الملف منك أو من مصدر تثق به؛ اضغط مجددًا للتأكيد.";
+        note.textContent="قد تعمل الإضافات الأصلية بصلاحيات فانتارا وتصل إلى بياناته. ثبّت من نسخة أو مستودع تثق به. اضغط مجددًا للتأكيد.";
         if(targets.length===1){const row=rows.get(targets[0].key);const b=row?.querySelector(".v7-transfer-install");if(b)b.textContent="أثق، ثبّت";}
         return;
       }

@@ -48,8 +48,9 @@ export function noteSourceTiers(list) {
   for (const source of list ?? []) if (source?.id) tiers.set(String(source.id), sourceTier(source));
 }
 /** تصنيف مصدر: من بيانه إن عرفه الجهاز، وإلا من معرّفه بتشدد. */
+export const knownSourceTier = (sourceId) => tiers.get(String(sourceId ?? '')) ?? null;
 export function tierOf(sourceId) {
-  return tiers.get(String(sourceId ?? '')) ?? tierFromId(sourceId);
+  return knownSourceTier(sourceId) ?? tierFromId(sourceId);
 }
 /** يبني المكتبة: الرئيسية و«آخر التحديثات» والأقسام. */
 export const buildsLibrary = (sourceId) => tierOf(sourceId) === ARABIC;

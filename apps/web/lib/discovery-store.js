@@ -4,6 +4,64 @@ const SECTIONS = new Set(['manga', 'anime', 'cinema']);
 const KINDS = new Set(['chapter', 'episode', 'movie']);
 const FIRST_LOOKBACK = 14 * 86_400_000;
 const EARLIEST_RELEASE = Date.UTC(2000, 0, 1);
+const PUBLIC_QUERY = new Set(['id', 'work_id', 'manga_id', 'series_id', 'slug', 'manga', 'series', 'story', 'w', 'h', 'width', 'height', 'format']);
+const encoder = new TextEncoder();
+const jsonBytes = (value) => encoder.encode(JSON.stringify(value)).length;
+
+function publicReference(value) {
+  if (typeof value !== 'string' || !value || value.length > 2048 || encoder.encode(value).length > 2048 || /[\u0000-\u0020\\#]/.test(value)) return null;
+  try {
+    const url = new URL(value, 'https://discovery.invalid/');
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) return null;
+    if ([...url.searchParams].some(([name, part]) => !PUBLIC_QUERY.has(name) || !/^[a-z0-9_.-]{1,80}$/i.test(part))) return null;
+    return value;
+  } catch { return null; }
+}
+
+function archivedSource(raw) {
+  const { s, u, t, m, c } = raw ?? {};
+  const url = publicReference(u);
+  const needsContext = c === true || (typeof m === 'string' && Boolean(m.trim()) && !/^\{\s*\}$/.test(m.trim()));
+  return {
+    ...(typeof s === 'string' && s.length > 0 && s.length <= 512 ? { s } : {}),
+    ...(url ? { u: url } : {}),
+    ...(typeof t === 'string' && t ? { t: t.slice(0, 320) } : {}),
+    ...(needsContext ? { c: true } : {}),
+  };
+}
+
+function discoveryContext() {
+  const context = new Map();
+  const runtimeSource = (raw) => {
+    const source = archivedSource(raw);
+    const memo = context.get(JSON.stringify([source.s, source.u]));
+    return memo ? { ...source, m: memo } : source;
+  };
+  return {
+    reports(rows) {
+      return rows.flatMap((row) => {
+        if (!SECTIONS.has(row?.section) || !KINDS.has(row.kind) || typeof row.work !== 'string' || !row.work ||
+            row.work.length > 1024 || typeof row.title !== 'string' || !row.title) return [];
+        const source = archivedSource(row.source);
+        const { s, u, c } = source;
+        const m = row.source?.m;
+        if (s && u && c && typeof m === 'string' && m.length <= 4096) {
+          const key = JSON.stringify([s, u]);
+          context.delete(key);
+          context.set(key, m);
+          if (context.size > 256) context.delete(context.keys().next().value);
+        }
+        return [{ ...row, title: row.title.slice(0, 320), source, cover: publicReference(row.cover), units: Array.isArray(row.units) ? row.units : [] }];
+      });
+    },
+    forScan(row) {
+      return { ...row, source: runtimeSource(row.source ?? {}) };
+    },
+    forTimeline(row) {
+      return { ...row, cover: publicReference(row.cover), sources: (row.sources ?? []).map(runtimeSource) };
+    },
+  };
+}
 
 function result(request) {
   return new Promise((resolve, reject) => {
@@ -19,22 +77,27 @@ function committed(transaction) {
 }
 
 function publicationTimes(units, checkedAt) {
+  let min = Infinity, max = -Infinity, count = 0;
   const dates = units.map((unit) => {
     const at = unit?.publishedAt;
-    return Number.isFinite(at) && at >= EARLIEST_RELEASE && at <= checkedAt ? at : null;
+    if (!Number.isFinite(at) || at < EARLIEST_RELEASE || at > checkedAt) return null;
+    min = Math.min(min, at);
+    max = Math.max(max, at);
+    count++;
+    return Math.trunc(at);
   });
-  const dated = dates.filter((at) => at !== null);
   // بعض المصادر تعطي وقت الجلب نفسه لدفعة كبيرة من الفصول.
-  if (dated.length >= 10 && Math.max(...dated) - Math.min(...dated) < 60_000) return dates.map(() => null);
+  if (count >= 10 && max - min < 60_000) return dates.map(() => null);
   return dates;
 }
 
 function newerSourceList(saved, source) {
   if (!source.s) return saved;
   const index = saved.findIndex((prior) => prior.s === source.s);
-  if (index < 0) return [...saved, source];
-  if (JSON.stringify(saved[index]) === JSON.stringify(source)) return saved;
-  return saved.map((prior, i) => i === index ? source : prior);
+  if (index >= 0 && JSON.stringify(saved[index]) === JSON.stringify(source)) return saved;
+  const next = index < 0 ? [...saved, source] : saved.map((prior, i) => i === index ? source : prior);
+  while (next.length > 1 && (next.length > 64 || jsonBytes(next) > 16 * 1024)) next.splice(next[0] === source ? 1 : 0, 1);
+  return next;
 }
 
 async function applyReports(reports, checkedAt, { getEdition, getEvent, putEdition, putEvent }) {
@@ -64,12 +127,13 @@ async function applyReports(reports, checkedAt, { getEdition, getEvent, putEditi
         : baseline === undefined && publishedAt < checkedAt - FIRST_LOOKBACK)) continue;
 
       const firstSeenAt = existing?.firstSeenAt ?? checkedAt;
-      const release = existing?.publishedAt == null ? publishedAt
-        : publishedAt == null ? existing.publishedAt : Math.min(existing.publishedAt, publishedAt);
-      const previousSources = existing?.sources ?? [];
+      const priorPublication = Number.isFinite(existing?.publishedAt) ? Math.trunc(existing.publishedAt) : null;
+      const release = priorPublication == null ? publishedAt
+        : publishedAt == null ? priorPublication : Math.min(priorPublication, publishedAt);
+      const previousSources = (existing?.sources ?? []).map(archivedSource);
       const sources = newerSourceList(previousSources, source);
-      const cover = existing?.cover ?? report.cover ?? null;
-      const changed = !existing || existing.publishedAt !== release || existing.sources !== sources ||
+      const cover = publicReference(existing?.cover) ?? report.cover ?? null;
+      const changed = !existing || existing.publishedAt !== release || JSON.stringify(existing.sources) !== JSON.stringify(sources) ||
         existing.title !== report.title || existing.cover !== cover;
       putEvent({
         id: eventId, work: report.work, section: report.section, kind: report.kind, number,
@@ -108,7 +172,8 @@ function parsePage(before, limit, defaultLimit) {
   let cursor;
   try { cursor = JSON.parse(before); } catch { /* first page */ }
   const valid = Array.isArray(cursor) && cursor.length === 2 &&
-    Number.isFinite(cursor[0]) && cursor[0] >= 0 && typeof cursor[1] === 'string';
+    Number.isFinite(cursor[0]) && cursor[0] >= 0 && cursor[0] <= Number.MAX_SAFE_INTEGER && typeof cursor[1] === 'string' &&
+    cursor[1].length > 0 && cursor[1].length <= 8192 && !cursor[1].includes('\u0000');
   return { cursor: valid ? cursor : null, count: Math.max(1, Math.min(100, Math.trunc(Number(limit) || defaultLimit))) };
 }
 
@@ -119,14 +184,41 @@ function timelinePage(events, count) {
   return { events: visible, next: more ? JSON.stringify([last.at, last.id]) : null, snapshotAt: Date.now() };
 }
 
+function* bridgePages(first, second) {
+  let page = { editions: [], events: [] }, bytes = 0, count = 0;
+  for (const [key, values] of [first, second]) {
+    for (const value of values) {
+      const size = jsonBytes(value) + 1;
+      if (count && (count === 128 || bytes + size > 400 * 1024)) {
+        yield page;
+        page = { editions: [], events: [] }; bytes = 0; count = 0;
+      }
+      page[key].push(value);
+      count++;
+      bytes += size;
+    }
+  }
+  if (count) yield page;
+}
+
 /** يحسب الدمج مرة واحدة لكل دفعة. النسخة الأصلية ترفض الالتزام إذا سبقتها نافذة أخرى إلى الكتابة. */
 export function createSqliteDiscoveryStore(request) {
-  async function record(reports, checkedAt = Date.now()) {
+  const context = discoveryContext();
+  async function record(input, checkedAt = Date.now()) {
+    const reports = context.reports(input);
+    if (!reports.length) return;
     const keys = reportKeys(reports);
     for (let attempt = 0; attempt < 3; attempt++) {
-      const snapshot = await request({ action: 'snapshot', ...keys });
-      const editions = new Map(snapshot.editions.map((row) => [row.id, row]));
-      const events = new Map(snapshot.events.map((row) => [row.id, row]));
+      let rev, conflicted = false;
+      const editions = new Map(), events = new Map();
+      for (const keysPage of bridgePages(['editions', keys.editions], ['events', keys.events])) {
+        const snapshot = await request({ action: 'snapshot', ...keysPage });
+        if (rev !== undefined && snapshot.rev !== rev) { conflicted = true; break; }
+        rev = snapshot.rev;
+        for (const row of snapshot.editions) editions.set(row.id, row);
+        for (const row of snapshot.events) events.set(row.id, row);
+      }
+      if (conflicted) continue;
       const changedEditions = new Set(), changedEvents = new Set();
       await applyReports(reports, checkedAt, {
         getEdition: (id) => editions.get(id),
@@ -134,12 +226,14 @@ export function createSqliteDiscoveryStore(request) {
         putEdition: (row) => { changedEditions.add(row.id); editions.set(row.id, row); },
         putEvent: (row) => { changedEvents.add(row.id); events.set(row.id, row); },
       });
-      const reply = await request({
-        action: 'commit', rev: snapshot.rev,
-        editions: [...changedEditions].map((id) => editions.get(id)),
-        events: [...changedEvents].map((id) => events.get(id)),
-      });
-      if (reply.committed) return;
+      // Save events before their edition baselines so a retry can recover an interrupted large batch.
+      for (const page of bridgePages(['events', [...changedEvents].map((id) => events.get(id))],
+        ['editions', [...changedEditions].map((id) => editions.get(id))])) {
+        const reply = await request({ action: 'commit', rev, ...page });
+        if (!reply.committed) { conflicted = true; break; }
+        rev++;
+      }
+      if (!conflicted) return;
     }
     throw new Error('discovery_concurrent_write');
   }
@@ -147,18 +241,19 @@ export function createSqliteDiscoveryStore(request) {
     if (!SECTIONS.has(section)) return timelinePage([], 40);
     const { cursor, count } = parsePage(before, limit, 40);
     const reply = await request({ action: 'timeline', section, cursor, limit: count + 1 });
-    return timelinePage(reply.rows, count);
+    return timelinePage(reply.rows.map(context.forTimeline), count);
   }
   async function knownEditions(sourceId, { limit } = {}) {
     const { count } = parsePage(null, limit, 30);
     const reply = await request({ action: 'known', sourceId: String(sourceId), limit: count });
-    return reply.rows;
+    return reply.rows.map(context.forScan);
   }
   return { record, timeline, knownEditions };
 }
 
 export function createDiscoveryStore({ factory = globalThis.indexedDB, keyRange = globalThis.IDBKeyRange } = {}) {
   let opening;
+  const context = discoveryContext();
   function open() {
     if (!factory) return Promise.reject(new Error('discovery_storage_unavailable'));
     opening ??= new Promise((resolve, reject) => {
@@ -178,7 +273,9 @@ export function createDiscoveryStore({ factory = globalThis.indexedDB, keyRange 
     return opening;
   }
 
-  async function record(reports, checkedAt = Date.now()) {
+  async function record(input, checkedAt = Date.now()) {
+    const reports = context.reports(input);
+    if (!reports.length) return;
     const db = await open();
     const tx = db.transaction(['editions', 'events'], 'readwrite');
     const done = committed(tx);
@@ -218,14 +315,15 @@ export function createDiscoveryStore({ factory = globalThis.indexedDB, keyRange 
         else resolve();
       };
     });
-    return timelinePage(events, count);
+    return timelinePage(events.map(context.forTimeline), count);
   }
 
   async function knownEditions(sourceId, { limit = 30 } = {}) {
     const db = await open();
     const index = db.transaction('editions').objectStore('editions').index('source');
     const range = keyRange.bound([String(sourceId), 0], [String(sourceId), Number.MAX_SAFE_INTEGER]);
-    return result(index.getAll(range, Math.max(1, Math.min(100, Math.trunc(Number(limit) || 30)))));
+    const rows = await result(index.getAll(range, Math.max(1, Math.min(100, Math.trunc(Number(limit) || 30)))));
+    return rows.map(context.forScan);
   }
 
   return { record, timeline, knownEditions };

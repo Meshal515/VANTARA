@@ -1,6 +1,6 @@
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { expect, it } from 'vitest';
-import { createDiscoveryStore } from './discovery-store.js';
+import { createDiscoveryStore, createSqliteDiscoveryStore } from './discovery-store.js';
 
 const day = 86_400_000;
 const now = Date.UTC(2026, 10, 23, 12);
@@ -10,6 +10,50 @@ const sample = {
   source: { s: sourceId, u: '/sample', m: 'state' },
 };
 const make = (factory = new IDBFactory()) => createDiscoveryStore({ factory, keyRange: IDBKeyRange });
+
+it('keeps provider context in the current session and excludes private links from the archive', async () => {
+  const factory = new IDBFactory();
+  const store = make(factory);
+  const providerContext = '{"session":"example-session"}';
+  await store.record([{
+    ...sample, source: { s: sourceId, u: '/sample?work_id=45', m: providerContext },
+    cover: 'https://img.example/sample.jpg?token=example-cover', units: [{ number: 4, publishedAt: now - 1000 }],
+  }, {
+    ...sample, work: 'ext:private', title: 'Private link',
+    source: { s: sourceId, u: '/private?sig=example-private' }, units: [{ number: 1, publishedAt: now - 2000 }],
+  }], now);
+  expect((await store.knownEditions(sourceId)).find((row) => row.work === sample.work).source.m).toBe(providerContext);
+
+  const reopened = make(factory);
+  const events = (await reopened.timeline('manga')).events;
+  const editions = await reopened.knownEditions(sourceId);
+  expect(events.find((row) => row.work === sample.work)).toMatchObject({ cover: null, sources: [{ s: sourceId, u: '/sample?work_id=45', c: true }] });
+  expect(events.find((row) => row.work === 'ext:private').sources[0]).not.toHaveProperty('u');
+  expect(JSON.stringify({ events, editions })).not.toMatch(/example-(?:session|cover|private)/);
+});
+
+it('pages large discovery batches while preserving the first undated baseline and every later advance', async () => {
+  let rev = 0;
+  const editions = new Map(), events = new Map();
+  const store = createSqliteDiscoveryStore(async (request) => {
+    expect(request.editions.length + request.events.length).toBeLessThanOrEqual(128);
+    if (request.action === 'snapshot') return {
+      rev,
+      editions: request.editions.map((key) => editions.get(key)).filter(Boolean),
+      events: request.events.map((key) => events.get(key)).filter(Boolean),
+    };
+    expect(request.rev).toBe(rev++);
+    for (const row of request.editions) editions.set(row.id, row);
+    for (const row of request.events) events.set(row.id, row);
+    return { committed: true };
+  });
+  const chapters = (length) => Array.from({ length }, (_, index) => ({ number: index + 1 }));
+  await store.record([{ ...sample, units: chapters(140) }], now - day);
+  expect(events.size).toBe(0);
+  await store.record([{ ...sample, units: chapters(290) }], now);
+  expect(events.size).toBe(150);
+  expect(editions.values().next().value.baselines).toEqual([[0, 290]]);
+});
 
 it('keeps a real publication time and separates the times of an undated observation', async () => {
   const factory = new IDBFactory();

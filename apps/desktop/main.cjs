@@ -143,7 +143,9 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
       const result = await net.fetch(pathToFileURL(file).href);
       if (path.basename(file) === 'index.html' && path.dirname(file) === assets) {
         const html = (await result.text()).replace('<script type="module" src="/app.js"></script>', '<script type="module" src="/desktop/full-boot.js"></script>');
-        return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        const headers = { 'Content-Type': 'text/html; charset=utf-8' };
+        if (localEdition) headers['Content-Security-Policy'] = (await fs.readFile(path.join(assets, 'local-content-policy.txt'), 'utf8')).trim() + "; frame-ancestors 'none'";
+        return new Response(html, { headers });
       }
       return result;
     } catch { return new Response('الملف غير موجود', { status: 404 }); }
@@ -151,8 +153,11 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   const { createDesktopServices, challengePage } = await import('./src/services.mjs');
   // صفحات تحقق المواقع (Cloudflare وحمايات الاستضافة): Chromium مخفي يحلها كـWebView الـAPK (source-browser.cjs)
   const { createSourceBrowser, chromeUserAgent } = require('./source-browser.cjs');
-  // بلا جلسات Electron (بيئة اختبار): لا متصفح مخفي، والطلبات كما كانت
-  const sourceBrowser = session?.fromPartition ? createSourceBrowser({ BrowserWindow, session, net, userAgent: chromeUserAgent(process.versions.chrome), isChallenge: challengePage }) : null;
+  const sourceUserAgent = session?.fromPartition ? chromeUserAgent(process.versions.chrome) : undefined;
+  // Chromium resolves and connects independently. In Local, source requests use the Node transport that pins the validated address.
+  const sourceBrowser = !localEdition && sourceUserAgent
+    ? createSourceBrowser({ BrowserWindow, session, net, userAgent: sourceUserAgent, isChallenge: challengePage })
+    : null;
   // إضافات Mihon (Suwayomi) تحل Cloudflare بالمتصفح نفسه عبر جسر محلي بواجهة FlareSolverr (cf-bridge.cjs)
   const cloudflareBridge = sourceBrowser ? require('./cf-bridge.cjs').createCloudflareBridge({
     solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent,
@@ -180,13 +185,14 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     inputConf:path.join(__dirname,'native-host/input.conf'),
     onEvent: publish,
     browserFetch: sourceBrowser?.fetch ?? null,
-    sourceUserAgent: sourceBrowser?.userAgent,
+    sourceUserAgent,
   });
   for (const [name, method] of [['request-resource', 'requestResource'], ['prewarm-torrent', 'prewarmTorrent'], ['start-playback', 'startPlayback'], ['stop-playback', 'stopPlayback'], ['playback-command', 'playbackCommand'], ['preview-frame', 'previewFrame']]) register(name, args => services[method](args));
   // صفحة التحقق الظاهرة (طلب صريح من المستخدم بزر «تحقق»): مضيف عام فقط، ونجاحها يمرر طلباته بجلسة المتصفح
   register('verify-source', async ({ host } = {}) => {
     const name = String(host ?? '').toLowerCase();
     if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(name) || name.length > 253) return { host: name, state: 'failed', reason: 'invalid_endpoint' };
+    if (localEdition) return { host: name, state: 'failed', reason: 'isolation_unavailable' };
     if (!sourceBrowser) return { host: name, state: 'failed', reason: 'webview_unavailable' };
     const result = await sourceBrowser.verify({ url: `https://${name}/`, parent: window });
     if (result.state === 'verified') services.trustBrowserHost(name);

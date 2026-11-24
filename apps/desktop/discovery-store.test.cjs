@@ -1,9 +1,10 @@
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync } = require('node:fs');
+const { mkdtempSync, readFileSync, rmSync, statSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 const { test } = require('node:test');
-const { openDiscovery } = require('./discovery-store.cjs');
+const { createDiscoveryWorker, openDiscovery } = require('./discovery-store.cjs');
 
 test('SQLite keeps old releases after reopening and rejects a stale concurrent transaction', async () => {
   const { createSqliteDiscoveryStore } = await import("../web/lib/discovery-store.js");
@@ -36,17 +37,154 @@ test('SQLite keeps old releases after reopening and rejects a stale concurrent t
   }
 });
 
-test('SQLite rolls back the whole batch when a later row cannot be saved', () => {
+const edition = {
+  id: 'edition', sourceId: 'source', work: 'ext:book', section: 'manga', title: 'Book',
+  source: { s: 'source', u: '/book', c: true }, firstSeenAt: 10, lastCheckedAt: 10,
+  lastChapterCheckAt: 10, baselines: [[0, 1.5]],
+};
+const event = {
+  id: 'chapter', work: 'ext:book', section: 'manga', kind: 'chapter', number: 1.5, season: null,
+  title: 'Book', cover: null, sources: [edition.source], firstSeenAt: 10, at: 10,
+  publishedAt: null, lastCheckedAt: 10, updatedAt: 10,
+};
+
+test('SQLite rejects a malformed commit before changing the archive', () => {
+  const storage = openDiscovery(':memory:');
+  try {
+    for (const badEvent of [
+      { ...event, at: null },
+      { ...event, number: '1.5' },
+      { ...event, sources: [{ s: 'source', m: 'private context' }] },
+      { ...event, sources: [{ s: 'source', c: 'true' }] },
+      { ...event, sources: [{ s: 'source', u: '/book?token=private' }] },
+      { ...event, cover: 'https://reader.example/cover#private' },
+      { ...event, detail: {} },
+    ]) {
+      assert.throws(() => storage.request({
+        action: 'commit', rev: 0, editions: [edition], events: [badEvent],
+      }), { message: 'invalid_discovery_request' });
+    }
+    assert.deepEqual(storage.request({ action: 'snapshot', editions: ['edition'], events: ['chapter'] }),
+      { rev: 0, editions: [], events: [] });
+    assert.deepEqual(storage.request({ action: 'commit', rev: 0, editions: [edition], events: [event] }),
+      { committed: true });
+  } finally { storage.close(); }
+});
+
+test('SQLite validates arguments for each read operation', () => {
+  const storage = openDiscovery(':memory:');
+  try {
+    for (const input of [
+      { action: 'unrecognized' },
+      { action: 'snapshot', editions: [14], events: [] },
+      { action: 'timeline', section: 'other', limit: 10 },
+      { action: 'timeline', section: 'manga', cursor: [10] },
+      { action: 'timeline', section: 'manga', cursor: ['10', 'chapter'] },
+      { action: 'timeline', section: 'manga', cursor: [10, ''] },
+      { action: 'known', sourceId: 14 },
+      { action: 'known', sourceId: 'source', limit: '10' },
+      { action: 'known', sourceId: 'source', limit: 102 },
+      { action: 'known', sourceId: 's'.repeat(513) },
+    ]) {
+      assert.throws(() => storage.request(input), { message: 'invalid_discovery_request' });
+    }
+    assert.deepEqual(storage.request({ action: 'timeline', section: 'manga', cursor: [10.5, 'chapter'] }), { rows: [] });
+  } finally { storage.close(); }
+});
+
+test('SQLite enforces combined batch and UTF-8 byte limits', () => {
   const storage = openDiscovery(':memory:');
   try {
     assert.throws(() => storage.request({
-      action: 'commit', rev: 0,
-      editions: [{ id: 'edition', sourceId: 'source', lastChapterCheckAt: 10 }],
-      events: [{ id: 'chapter', section: 'manga', at: null }],
-    }));
-    assert.deepEqual(storage.request({ action: 'snapshot', editions: ['edition'], events: ['chapter'] }),
-      { rev: 0, editions: [], events: [] });
+      action: 'snapshot', editions: Array(128).fill('edition'), events: Array(129).fill('chapter'),
+    }), { message: 'discovery_request_too_large' });
+    const wideSource = { u: `/${'界'.repeat(680)}`, t: '界'.repeat(1024) };
+    assert.throws(() => storage.request({
+      action: 'commit', rev: 0, editions: [], events: [{ ...event, sources: Array(7).fill(wideSource) }],
+    }), { message: 'discovery_request_too_large' });
+    assert.throws(() => storage.request({
+      action: 'commit', rev: 0, editions: [],
+      events: Array.from({ length: 72 }, (_, n) => ({ ...event, id: `chapter-${n}`, sources: Array(3).fill(wideSource) })),
+    }), { message: 'discovery_request_too_large' });
+    assert.equal(storage.request({ action: 'snapshot', editions: [], events: [] }).rev, 0);
   } finally { storage.close(); }
+});
+
+test('desktop worker bounds outstanding requests and can accept more after replies', async () => {
+  const request = createDiscoveryWorker(':memory:');
+  const input = { action: 'timeline', section: 'manga', limit: 5 };
+  await assert.rejects(request({ ...input, limit: 0 }), { message: 'invalid_discovery_request' });
+  const replies = await Promise.allSettled(Array.from({ length: 9 }, () => request(input)));
+  assert.deepEqual(replies.slice(0, 8), Array(8).fill({ status: 'fulfilled', value: { rows: [] } }));
+  assert.equal(replies[8].status, 'rejected');
+  assert.equal(replies[8].reason.message, 'discovery_busy');
+  assert.deepEqual(await request(input), { rows: [] });
+});
+
+test('SQLite upgrades old source context without changing saved releases or revision', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vantara-discovery-upgrade-'));
+  const filename = path.join(dir, 'discovery.sqlite');
+  try {
+    openDiscovery(filename).close();
+    const legacy = new DatabaseSync(filename);
+    try {
+      legacy.exec('PRAGMA user_version=1; UPDATE discovery_meta SET rev=7');
+      const source = { s: 'source', u: '/book', m: 'old private context' };
+      legacy.prepare('INSERT INTO editions VALUES (?,?,?,?)')
+        .run(edition.id, edition.sourceId, edition.lastChapterCheckAt, JSON.stringify({ ...edition, source }));
+      legacy.prepare('INSERT INTO events VALUES (?,?,?,?)')
+        .run(event.id, event.section, event.at, JSON.stringify({ ...event, sources: [source, { s: 'other' }] }));
+    } finally { legacy.close(); }
+    const storage = openDiscovery(filename);
+    try {
+      assert.deepEqual(storage.request({ action: 'snapshot', editions: ['edition'], events: ['chapter'] }), {
+        rev: 7, editions: [edition], events: [{ ...event, sources: [edition.source, { s: 'other' }] }],
+      });
+      assert.equal(statSync(`${filename}-wal`).size, 0);
+      assert.doesNotMatch(readFileSync(filename).toString('latin1'), /old private context/);
+    } finally { storage.close(); }
+    const reopened = new DatabaseSync(filename);
+    try {
+      assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 2);
+      assert.doesNotMatch(reopened.prepare('SELECT payload FROM events').get().payload, /old private context/);
+    } finally { reopened.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SQLite removes sensitive legacy references while preserving history and public query IDs', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'vantara-discovery-references-'));
+  const filename = path.join(dir, 'discovery.sqlite');
+  const unsafe = 'https://reader.example/book?token=old-private-query';
+  const safe = 'https://reader.example/book?manga_id=book-2';
+  const unsafeId = JSON.stringify(['manga', 'source', unsafe]);
+  const safeId = JSON.stringify(['manga', 'source', safe]);
+  const oldCover = 'https://reader:old-private-password@reader.example/cover.jpg';
+  try {
+    openDiscovery(filename).close();
+    const legacy = new DatabaseSync(filename);
+    try {
+      legacy.exec('PRAGMA user_version=1; UPDATE discovery_meta SET rev=7');
+      const insertEdition = legacy.prepare('INSERT INTO editions VALUES (?,?,?,?)');
+      for (const [id, u] of [[unsafeId, unsafe], [safeId, safe]]) {
+        insertEdition.run(id, edition.sourceId, edition.lastChapterCheckAt, JSON.stringify({ ...edition, id, source: { s: 'source', u } }));
+      }
+      legacy.prepare('INSERT INTO events VALUES (?,?,?,?)').run(event.id, event.section, event.at, JSON.stringify({
+        ...event, cover: oldCover, sources: [{ s: 'source', u: unsafe }, { s: 'other', u: `${safe}#old-private-fragment` }],
+      }));
+    } finally { legacy.close(); }
+    const storage = openDiscovery(filename);
+    try {
+      const { rows } = storage.request({ action: 'known', sourceId: 'source' });
+      const retained = rows.find(({ id }) => id !== safeId);
+      assert.match(retained.id, /^legacy:[a-f0-9]{64}$/);
+      assert.deepEqual(retained, { ...edition, id: retained.id, source: { s: 'source' } });
+      const data = storage.request({ action: 'snapshot', editions: [unsafeId, safeId, retained.id], events: [event.id] });
+      assert.equal(data.rev, 7);
+      assert.deepEqual(data.editions, [{ ...edition, id: safeId, source: { s: 'source', u: safe } }, retained]);
+      assert.deepEqual(data.events, [{ ...event, sources: [{ s: 'source' }, { s: 'other' }] }]);
+      assert.doesNotMatch(readFileSync(filename).toString('latin1'), /old-private-/);
+    } finally { storage.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('catch-up preserves every saved row across page boundaries and equal publication times', async () => {

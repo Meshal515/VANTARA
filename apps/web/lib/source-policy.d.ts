@@ -6,6 +6,7 @@ export type Tier = 'arabic' | 'foreign' | 'mixed' | 'blocked';
 export function sourceTier(source: unknown): Tier;
 export function tierFromId(sourceId: unknown): Tier;
 export function noteSourceTiers(list: unknown[]): void;
+export function knownSourceTier(sourceId: unknown): Tier | null;
 export function tierOf(sourceId: unknown): Tier;
 export function buildsLibrary(sourceId: unknown): boolean;
 export function searchable(sourceId: unknown): boolean;
