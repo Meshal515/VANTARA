@@ -1,0 +1,144 @@
+name: VANTARA Local Android APK
+
+# This channel is deliberately isolated from Stable and the protected Debug channel.
+# It builds only experiment/vantara-local with a DEDICATED persistent Local signing key.
+on:
+  push:
+    branches:
+      - experiment/vantara-local
+    paths:
+      - 'android/**'
+      - 'apps/web/**'
+      - 'extensions/**'
+      - 'packages/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'capacitor.config.*'
+      - '.github/workflows/vantara-local-android.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vantara-local-android
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish-local:
+    if: github.repository == 'Meshal515/VANTARA' && github.ref == 'refs/heads/experiment/vantara-local'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ANDROID_KEY_ALIAS: ${{ vars.VANTARA_LOCAL_KEY_ALIAS || 'vantara-local' }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.VANTARA_LOCAL_KEYSTORE_PASSWORD }}
+      VANTARA_VERSION_CODE: ${{ github.run_number }}
+      VANTARA_VERSION_NAME: 0.1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Require the Local-only persistent signing key
+        env:
+          LOCAL_KEYSTORE: ${{ secrets.VANTARA_LOCAL_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${LOCAL_KEYSTORE:-}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::Configure VANTARA_LOCAL_KEYSTORE_BASE64 and VANTARA_LOCAL_KEYSTORE_PASSWORD in GitHub Actions secrets. Never use the production signing secrets on this branch."
+            exit 1
+          fi
+          printf '%s' "$LOCAL_KEYSTORE" | base64 -d > "$RUNNER_TEMP/vantara-local.jks"
+          test -s "$RUNNER_TEMP/vantara-local.jks"
+          chmod 600 "$RUNNER_TEMP/vantara-local.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/vantara-local.jks" >> "$GITHUB_ENV"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Test web and safety contracts
+        run: |
+          pnpm test:web
+          pnpm test:safety
+
+      - name: Build signed VANTARA Local using the existing dedicated script
+        run: bash tools/build-android-local.sh
+
+      - name: Test Android unit tests for the Local variant
+        working-directory: android
+        run: ./gradlew --no-daemon -PvantaraLocal=true :app:testDebugUnitTest
+
+      - name: Verify independent package, local edition, icon, signature and output
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/debug/VANTARA-Local.apk
+          test -s "$apk" || { echo "::error::VANTARA-Local.apk missing"; exit 1; }
+          grep -Fq "const BAKED_EDITION = 'local';" android/app/src/main/assets/public/lib/config.js
+          buildtools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$buildtools/aapt" dump badging "$apk" > "$RUNNER_TEMP/vantara-local-badging.txt"
+          grep -Fq "package: name='com.vantara.app.local'" "$RUNNER_TEMP/vantara-local-badging.txt"
+          grep -Fq "application-label:'VANTARA Local'" "$RUNNER_TEMP/vantara-local-badging.txt"
+          "$buildtools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/vantara-local-signer.txt"
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$RUNNER_TEMP/vantara-local-signer.txt"
+          mkdir -p dist
+          cp "$apk" dist/VANTARA-Local.apk
+          (cd dist && sha256sum VANTARA-Local.apk > VANTARA-Local.apk.sha256)
+
+      - name: Block accidental signing key change across Local updates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view vantara-local-preview --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            mkdir -p "$RUNNER_TEMP/previous-local"
+            gh release download vantara-local-preview --repo "$GITHUB_REPOSITORY" \
+              --pattern VANTARA-Local.apk --dir "$RUNNER_TEMP/previous-local"
+            old="$RUNNER_TEMP/previous-local/VANTARA-Local.apk"
+            new="dist/VANTARA-Local.apk"
+            test -s "$old"
+            buildtools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+            prev_cert=$("$buildtools/apksigner" verify --print-certs "$old" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            new_cert=$("$buildtools/apksigner" verify --print-certs "$new" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+            test -n "$prev_cert" && test "$prev_cert" = "$new_cert" || {
+              echo "::error::Local signing certificate changed; refusing to break installed users' updates."
+              exit 1
+            }
+          fi
+
+      - name: Upload signed Local APK as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VANTARA-Local-APK
+          path: |
+            dist/VANTARA-Local.apk
+            dist/VANTARA-Local.apk.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Publish isolated Local prerelease (never Stable or Debug)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view vantara-local-preview --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create vantara-local-preview --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'VANTARA Local — Android preview' \
+              --notes 'Independent experimental Local APK. Separate package com.vantara.app.local and persistent Local signing key; does not overwrite Stable or Debug.' \
+              --prerelease --latest=false
+          fi
+          gh release upload vantara-local-preview --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/VANTARA-Local.apk dist/VANTARA-Local.apk.sha256
+          echo "Local APK: https://github.com/$GITHUB_REPOSITORY/releases/download/vantara-local-preview/VANTARA-Local.apk" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/vantara-local.jks"
