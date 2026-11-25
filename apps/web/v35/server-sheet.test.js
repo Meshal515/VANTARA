@@ -454,3 +454,23 @@ it('اختيار الجودة لا يُمسح بصمت إن غاب خياره م
   choose(body, 'all', 0);
   expect(hosts()).toContain('mp4upload');
 });
+
+it('UX14: البصمة هوية التورنت؛ الاسم والحجم احتياط فقط حين تغيب', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const H1 = 'a'.repeat(40), H2 = 'b'.repeat(40);
+  const label = 'Show.S01E01.1080p.WEB.x264\n👤 300 💾 1.4 GB ⚙️ Nyaa';
+  const rows = () => body.querySelectorAll('.ss-row').length;
+  // نفس الإصدار من مصدرين: البصمة نفسها واسم مختلف قليلًا ← صف واحد
+  ui.update({ routes: [tor(label, { id: 's1', quality: 1080, infoHash: H1 }), tor('Show S01E01 1080p WEB x264 (copy)\n👤 120 💾 1.4 GB ⚙️ Nyaa', { id: 's2', quality: 1080, infoHash: H1 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(1);
+  // بصمتان مختلفتان بالاسم والحجم نفسيهما ← صفّان
+  ui.update({ routes: [tor(label, { id: 'd1', quality: 1080, infoHash: H1 }), tor(label, { id: 'd2', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(2);
+  // بلا بصمة عند أحدهما: الاسم والحجم يجمعانهما كما كان
+  ui.update({ routes: [tor(label, { id: 'n1', quality: 1080, infoHash: H1 }), tor(label, { id: 'n2', quality: 1080 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(1);
+  // ومسار بلا بصمة لا يربط بصمتين مختلفتين
+  ui.update({ routes: [tor(label, { id: 'c1', quality: 1080, infoHash: H1 }), tor(label, { id: 'c2', quality: 1080 }), tor(label, { id: 'c3', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(2);
+});

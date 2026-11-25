@@ -858,25 +858,44 @@ export function createServerSheet(body, o) {
   // التورنت الواحد صف واحد: Torrentio نفسه يصل من إضافة Stremio ومن إضافتي Aniyomi (Torrentio وTorrentio Anime)،
   // فكان الإصدار نفسه يظهر ثلاث مرات ويتضاعف «غير متاح». الهوية: اسم الملف والحجم. الصف الظاهر يبقى (لا قفزة)
   // ما لم يمت وتصل نسخة صالحة منه.
+  // UX14: البصمة (infoHash) هي هوية التورنت الدقيقة: نفس البصمة صف واحد ولو اختلف اسم الملف، وبصمتان معروفتان
+  // مختلفتان صفّان ولو تطابق الاسم والحجم. إن غابت البصمة عند أحدهما يبقى الاسم والحجم (Aniyomi قد لا يعطيها).
   const torrentKey = (r) => {
     const d = view(r);
     const file = d.torrent ? d.info?.filename : null;
     return file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
   };
+  const hashOf = (r) => {
+    if (!view(r).torrent) return null;
+    const direct = typeof r.infoHash === 'string' && /^[a-f\d]{40}$/i.test(r.infoHash) ? r.infoHash : null;
+    const magnet = direct ? null : String(r.magnet ?? r.url ?? '').match(/btih:([a-f\d]{40})/i)?.[1];
+    const hash = (direct ?? magnet)?.toLowerCase();
+    return hash ? `${hash}|${r.fileIdx ?? ''}` : null;
+  };
+  const sameTorrent = (a, b) => {
+    const ha = hashOf(a), hb = hashOf(b);
+    if (ha && hb) return ha === hb;
+    const ka = torrentKey(a);
+    return ka != null && ka === torrentKey(b);
+  };
   const seedersOf = (r) => Number(view(r).info?.seeders) || 0;
   const oneTorrent = (routes) => {
-    const best = new Map();
+    const groups = [];
     for (const r of routes) {
-      const key = torrentKey(r);
-      if (!key) continue;
-      const cur = best.get(key);
-      const take = !cur
-        || (placed.has(cur.id) ? isDead(cur) && isSelectable(r)
-          : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
-          : true);
-      if (take) best.set(key, r);
+      if (!view(r).torrent || (!hashOf(r) && !torrentKey(r))) continue;
+      const h = hashOf(r);
+      // لا تجمع المجموعة بصمتين معروفتين مختلفتين، ولو ربط بينهما مسار بلا بصمة
+      const g = groups.find((x) => x.members.some((m) => sameTorrent(m, r)) && x.members.every((m) => !h || !hashOf(m) || hashOf(m) === h));
+      if (!g) { groups.push({ best: r, members: [r] }); continue; }
+      g.members.push(r);
+      const cur = g.best;
+      const take = placed.has(cur.id) ? isDead(cur) && isSelectable(r)
+        : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
+        : true;
+      if (take) g.best = r;
     }
-    return routes.filter((r) => { const key = torrentKey(r); return !key || best.get(key) === r; });
+    const hidden = new Set(groups.flatMap((g) => g.members.filter((m) => m !== g.best)));
+    return routes.filter((r) => !hidden.has(r));
   };
   function update(model) {
     if (destroyed) return;
