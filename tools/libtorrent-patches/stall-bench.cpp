@@ -69,6 +69,8 @@ static void streaming(lt::settings_pack& s) {
   s.set_int(lt::settings_pack::request_queue_time, 1);
   s.set_int(lt::settings_pack::whole_pieces_threshold, 0);
   s.set_bool(lt::settings_pack::piece_extent_affinity, false);
+  // BENCH_IPT: initial_picker_threshold (الافتراضي في libtorrent 4: أول أربع قطع تُختار عشوائيًا وتُهمل الأولوية)
+  if (std::getenv("BENCH_IPT")) s.set_int(lt::settings_pack::initial_picker_threshold, envInt("BENCH_IPT", 4));
   int const tick = envInt("BENCH_TICK_MS", 0);
   if (tick > 0) s.set_int(lt::settings_pack::tick_interval, tick);
 }
@@ -140,10 +142,11 @@ int main(int argc, char** argv) {
   p.flags &= ~lt::torrent_flags::auto_managed;
   p.flags &= ~lt::torrent_flags::paused;
   p.piece_priorities.assign(std::size_t(pieces), lt::dont_download);
+  if (envInt("BENCH_SEQ", 0)) p.flags |= lt::torrent_flags::sequential_download;
   auto h = dl.add_torrent(p);
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   // البطيء أولًا: يأخذ طلبات القطعة الأولى قبل أن يتصل السريع (كما يحدث مع مشارك أبكر لكن أبطأ)
-  h.connect_peer({lt::make_address("127.0.0.1"), std::uint16_t(basePort + 2)});
+  if (!envInt("BENCH_NO_SLOW", 0)) h.connect_peer({lt::make_address("127.0.0.1"), std::uint16_t(basePort + 2)});
   std::this_thread::sleep_for(std::chrono::milliseconds(150));
   h.connect_peer({lt::make_address("127.0.0.1"), std::uint16_t(basePort + 1)});
 
@@ -151,9 +154,13 @@ int main(int argc, char** argv) {
   std::set<int> aheadSet;
   auto place = [&](int head) {
     std::vector<std::pair<int, int>> wanted;
+    // BENCH_CRIT: كم قطعة من النافذة تأخذ موعدًا (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7، فيقسم
+    // السرعة عليها كلها)؛ الباقي أولوية 6 بلا موعد
+    int const crit = envInt("BENCH_CRIT", window);
     for (int k = 0; k < window && head + k < pieces; ++k) {
       int const dl_ms = k == 0 ? 0 : (k < 4 ? 250 * k : 750 + (k - 3) * 750);
-      wanted.emplace_back(head + k, dl_ms);
+      if (k < crit) wanted.emplace_back(head + k, dl_ms);
+      else h.piece_priority(lt::piece_index_t(head + k), lt::download_priority_t(6));
     }
     std::set<int> keep;
     for (auto& w : wanted) keep.insert(w.first);
@@ -181,8 +188,26 @@ int main(int argc, char** argv) {
   for (int head = 0; head < readPieces; ++head) {
     place(head);
     auto const t0 = clk::now();
+    int tracedAt = 0;
     while (!h.have_piece(lt::piece_index_t(head))) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      if (head == 0 && envInt("BENCH_TRACE", 0)) {
+        int const ms = int(std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t0).count());
+        if (ms - tracedAt >= 500) {
+          tracedAt = ms;
+          auto const st = h.status(lt::torrent_handle::query_pieces);
+          std::vector<lt::partial_piece_info> q; h.get_download_queue(q);
+          int fin = 0, req = 0;
+          std::string idx;
+          for (auto const& pp : q) {
+            idx += std::to_string(static_cast<int>(pp.piece_index)) + ":" + std::to_string(pp.finished) + "/" + std::to_string(pp.requested) + " ";
+            if (pp.piece_index == lt::piece_index_t(0)) { fin = pp.finished; req = pp.requested; }
+          }
+          std::cerr << "  queue " << idx << " prio0=" << int(static_cast<std::uint8_t>(h.piece_priority(lt::piece_index_t(0)))) << "\n";
+          std::cerr << ms << "ms payload=" << (st.total_payload_download >> 10) << "KB peers=" << st.num_peers
+                    << " p0 finished=" << fin << " requested=" << req << " downloading=" << q.size() << "\n";
+        }
+      }
       if (clk::now() - start > std::chrono::seconds(envInt("BENCH_BUDGET_S", 240))) { timedOut = true; break; }
     }
     if (timedOut) break;
@@ -194,7 +219,7 @@ int main(int argc, char** argv) {
   auto const st = h.status();
   std::int64_t const wasted = st.total_redundant_bytes + st.total_failed_bytes;
   std::cout << "{\"mode\":\"" << mode << "\",\"stallCapMs\":" << envInt("VANTARA_LT_STALL_CAP_MS", 0)
-            << ",\"tickMs\":" << envInt("BENCH_TICK_MS", 500) << ",\"pieceKb\":" << pieceKb
+            << ",\"crit\":" << envInt("BENCH_CRIT", 12) << ",\"ipt\":" << envInt("BENCH_IPT", 4) << ",\"seq\":" << envInt("BENCH_SEQ", 0) << ",\"tickMs\":" << envInt("BENCH_TICK_MS", 500) << ",\"pieceKb\":" << pieceKb
             << ",\"fastKbps\":" << fastKbps << ",\"slowKbps\":" << slowKbps
             << ",\"read\":" << waits.size() << ",\"timedOut\":" << (timedOut ? "true" : "false")
             << ",\"totalMs\":" << total << ",\"worstWaitMs\":" << worst
