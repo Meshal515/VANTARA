@@ -13,3 +13,20 @@ describe('ربط ملف إضافات CloudStream عند الإقلاع', () => {
     expect(bind).toBeGreaterThan(wait);
   });
 });
+
+describe('فتح مدير الإضافات (UX06 وUX10)', () => {
+  const body = (() => { const s = readFileSync(new URL('./shell.js', import.meta.url), 'utf8'); const i = s.indexOf('async function openAddons()'); return s.slice(i, s.indexOf('async function openNativeAddonSource', i)); })();
+  it('لا انتظار بين آخر فحص للجيل ورسم المدير', () => {
+    const render = body.indexOf('addonHubView = renderAddons(');
+    const lastGuard = body.lastIndexOf('if(run!==addonViewGeneration', render);
+    expect(lastGuard).toBeGreaterThan(-1);
+    expect(body.slice(lastGuard, render)).not.toMatch(/\bawait\b/);
+    // الوسائط نفسها لا تنتظر شيئًا (الانتظار داخل onSourcesChanged لاحق لا يخص الرسم)
+    expect(body.slice(render, body.indexOf('\n', render))).not.toMatch(/cloudstreamRepositories: await/);
+  });
+  it('الفشل يعرض زر إعادة محاولة يعيد فتح المدير', () => {
+    const fail = body.slice(body.lastIndexOf('} catch'));
+    expect(fail).toContain('إعادة المحاولة');
+    expect(fail).toContain('openAddons()');
+  });
+});

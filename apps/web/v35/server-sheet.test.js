@@ -412,3 +412,65 @@ it('كل سيرفر مباشر صالح ظاهر مهما كثر، والتور�
   ui.update({ routes: [...direct, ...torrents, cam, { id: 'late', sourceId: 'witanime', server: 'late', quality: 720, state: 'READY', probed: true, probeMs: 900 }], settled: true, status: { text: '' } });
   expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(21);
 });
+
+it('جودة غير معلنة تظهر «تلقائي» لا «HD» (UX11)، والمعلنة كما هي', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const unknown = { id: 'u', sourceId: 'witanime', sourceName: 'Witanime', server: 'hls', state: 'READY', probed: true, probeMs: 400 };
+  const known = { id: 'k', sourceId: 'witanime', sourceName: 'Witanime', server: 'mp4', quality: 720, state: 'READY', probed: true, probeMs: 400 };
+  ui.update({ routes: [unknown, known], settled: true, status: { text: '2' } });
+  const labels = Object.fromEntries([...body.querySelectorAll('.ss-row')].map((row) => [row.querySelector('.ss-name').textContent, row.querySelector('.ss-q')]));
+  const qs = [...body.querySelectorAll('.ss-row .ss-q')];
+  const texts = qs.map((q) => q.firstElementChild.textContent);
+  expect(texts).toContain('تلقائي');
+  expect(texts).toContain('720p');
+  expect(texts).not.toContain('HD');
+  expect(qs.find((q) => q.firstElementChild.textContent === 'تلقائي').classList.contains('ss-q--auto')).toBe(true);
+  expect(qs.find((q) => q.firstElementChild.textContent === '720p').classList.contains('ss-q--auto')).toBe(false);
+  expect(Object.keys(labels).length).toBeGreaterThan(0);
+});
+
+it('اختيار الجودة لا يُمسح بصمت إن غاب خياره مؤقتًا، ويعود حين يظهر (UX13)', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const a = { id: 'a', sourceId: 'witanime', server: 'streamwish', quality: 1080, state: 'READY', probeMs: 700 };
+  const b = { id: 'b', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probeMs: 900 };
+  const c = { id: 'c', sourceId: 'witanime', server: 'vidmoly', quality: 480, state: 'READY', probeMs: 900 };
+  ui.update({ routes: [a, b, c], settled: false, status: { text: '3' } });
+  choose(body, 1080, 0);
+  const hosts = () => [...body.querySelectorAll('.ss-row')].map((r) => r.querySelector('.ss-host').textContent.toLowerCase());
+  expect(hosts()).toEqual(['streamwish']);
+  // سيرفر 1080 الوحيد سقط: تُعرض الكل بدل قائمة فارغة
+  ui.update({ routes: [{ ...a, state: 'UNAVAILABLE' }, b, c], settled: false, status: { text: '2' } });
+  expect(hosts().length).toBeGreaterThan(1);
+  // وصل سيرفر 1080 جديد: اختيار المستخدم يعود
+  const d = { id: 'd', sourceId: 'witanime', server: 'filemoon', quality: 1080, state: 'READY', probeMs: 600 };
+  ui.update({ routes: [{ ...a, state: 'UNAVAILABLE' }, b, c, d], settled: true, status: { text: '3' } });
+  // السيرفر الساقط يبقى ظاهرًا بسببه («غير متاح») كما هو مقصود؛ المهم أن 720/480 خرجا
+  expect(hosts()).toContain('filemoon');
+  expect(hosts()).not.toContain('mp4upload');
+  expect(hosts()).not.toContain('vidmoly');
+  // واختيار «كل الجودات» صراحة يُحترم أيضًا
+  choose(body, 'all', 0);
+  expect(hosts()).toContain('mp4upload');
+});
+
+it('UX14: البصمة هوية التورنت؛ الاسم والحجم احتياط فقط حين تغيب', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const H1 = 'a'.repeat(40), H2 = 'b'.repeat(40);
+  const label = 'Show.S01E01.1080p.WEB.x264\n👤 300 💾 1.4 GB ⚙️ Nyaa';
+  const rows = () => body.querySelectorAll('.ss-row').length;
+  // نفس الإصدار من مصدرين: البصمة نفسها واسم مختلف قليلًا ← صف واحد
+  ui.update({ routes: [tor(label, { id: 's1', quality: 1080, infoHash: H1 }), tor('Show S01E01 1080p WEB x264 (copy)\n👤 120 💾 1.4 GB ⚙️ Nyaa', { id: 's2', quality: 1080, infoHash: H1 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(1);
+  // بصمتان مختلفتان بالاسم والحجم نفسيهما ← صفّان
+  ui.update({ routes: [tor(label, { id: 'd1', quality: 1080, infoHash: H1 }), tor(label, { id: 'd2', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(2);
+  // بلا بصمة عند أحدهما: الاسم والحجم يجمعانهما كما كان
+  ui.update({ routes: [tor(label, { id: 'n1', quality: 1080, infoHash: H1 }), tor(label, { id: 'n2', quality: 1080 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(1);
+  // ومسار بلا بصمة لا يربط بصمتين مختلفتين
+  ui.update({ routes: [tor(label, { id: 'c1', quality: 1080, infoHash: H1 }), tor(label, { id: 'c2', quality: 1080 }), tor(label, { id: 'c3', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(2);
+});
