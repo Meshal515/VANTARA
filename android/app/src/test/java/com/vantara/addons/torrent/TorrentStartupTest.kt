@@ -96,4 +96,33 @@ class TorrentStartupTest {
         assertFalse(TorrentPrefetch.edgesFit(16 * 1024 * 1024, 3))
         assertFalse(TorrentPrefetch.edgesFit(0, 3))
     }
+
+    @Test fun advancingOnePieceTouchesOnlyTheDifferenceAndNeverEmptiesTheCriticalList() {
+        val before = TorrentPolicy.deadlines((5..16).toList())
+        val after = TorrentPolicy.deadlines((6..17).toList())
+        val diff = TorrentPolicy.deadlineDiff(before.mapTo(HashSet()) { it.first }, after)
+        assertEquals(listOf(5), diff.reset)
+        // القطعة الجديدة (17) تأخذ موعدها، والقطعة التي يقرؤها المشغّل الآن (6) يُعاد ضبط موعدها إلى 0؛ الباقي لا يُلمس
+        assertEquals(listOf(6 to 0, 17 to after.first { it.first == 17 }.second), diff.set)
+        assertEquals((6..17).toSet(), diff.keep)
+        // ما يبقى بموعد بعد الإلغاء وقبل الإضافة لا يفرغ أبدًا: libtorrent لا يطلق cancel_non_critical
+        assertTrue((before.map { it.first }.toSet() - diff.reset.toSet()).isNotEmpty())
+    }
+
+    @Test fun seekReplacesTheWholeWindowAndKeepsPendingEdges() {
+        val before = TorrentPolicy.deadlines((5..16).toList(), listOf(40))
+        val after = TorrentPolicy.deadlines((30..41).toList(), listOf(40))
+        val diff = TorrentPolicy.deadlineDiff(before.mapTo(HashSet()) { it.first }, after)
+        assertEquals((5..16).toList(), diff.reset)
+        assertTrue(40 in diff.keep)
+        assertFalse(diff.set.any { it.first == 40 })
+        assertEquals(30 to 0, diff.set.first())
+    }
+
+    @Test fun firstWindowSetsEverything() {
+        val wanted = TorrentPolicy.deadlines((0..11).toList(), listOf(99))
+        val diff = TorrentPolicy.deadlineDiff(emptySet(), wanted)
+        assertTrue(diff.reset.isEmpty())
+        assertEquals(wanted, diff.set)
+    }
 }
