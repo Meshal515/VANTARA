@@ -70,15 +70,18 @@ class TorrentThroughputDeviceTest {
         // النافذة القديمة مقابل الجديدة، بسرعة الجوال الفعلية في لقطة المستخدم (6 Mbps ≈ 750KB/s) وبلا حد
         val limited = { TorrentEngine.streamingSettings().downloadRateLimit(750 * 1024) }
         val open = { TorrentEngine.streamingSettings() }
-        val variants = listOf<Triple<String, () -> SettingsPack, Boolean>>(
-            Triple("old@6Mbps", limited, true), Triple("new@6Mbps", limited, false),
-            Triple("old@open", open, true), Triple("new@open", open, false),
+        // clear = مسح كل المواعيد عند كل تقدّم (الإنتاج حتى 25 نوفمبر)، diff = الإنتاج الحالي (المواعيد بالفرق
+        // وحدها، متغير واحد)، seq = الفرق مع التنزيل التسلسلي وقراءة القطعة التالية
+        val variants = listOf<Triple<String, () -> SettingsPack, Pair<Boolean, Boolean>>>(
+            Triple("clear@6Mbps", limited, true to false), Triple("diff@6Mbps", limited, true to true),
+            Triple("clear@open", open, true to false), Triple("diff@open", open, true to true),
+            Triple("seq@open", open, false to true),
         )
         for ((i, choice) in choices.withIndex()) {
             // الترتيب يتناوب حتى لا يستفيد بديل واحد من سرب «دافئ»
             val order = variants.indices.map { variants[(it + i) % variants.size] }
-            for ((name, settings, legacy) in order) {
-                val engine = TorrentEngine(context, sessionSettings = settings, legacyWindow = legacy)
+            for ((name, settings, mode) in order) {
+                val engine = TorrentEngine(context, sessionSettings = settings, legacyWindow = mode.first, diffDeadlines = mode.second)
                 try { results.put(attempt(engine, choice).put("variant", name)) } finally { engine.close() }
                 out.writeText(JSONObject().put("results", results).toString(2))
                 Thread.sleep(3000)

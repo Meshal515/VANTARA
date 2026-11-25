@@ -1,0 +1,58 @@
+diff --git a/src/torrent.cpp b/src/torrent.cpp
+index 22a616b..7e2d8ac 100644
+--- a/src/torrent.cpp
++++ b/src/torrent.cpp
+@@ -63,6 +63,7 @@ POSSIBILITY OF SUCH DAMAGE.
+ #include <numeric>
+ #include <limits> // for numeric_limits
+ #include <cstdio> // for snprintf
++#include <cstdlib> // VANTARA: getenv
+ #include <functional>
+ 
+ #include "libtorrent/torrent.hpp"
+@@ -129,6 +130,23 @@ POSSIBILITY OF SUCH DAMAGE.
+ using namespace std::placeholders;
+ 
+ namespace libtorrent {
++
++namespace {
++	// VANTARA tuning knobs, read once per process from the environment so one
++	// binary can be A/B tested against stock behaviour (0 = stock).
++	int vantara_env_int(char const* name)
++	{
++		char const* v = std::getenv(name);
++		if (v == nullptr || *v == '\0') return 0;
++		int const n = std::atoi(v);
++		return n > 0 ? n : 0;
++	}
++	int vantara_stall_cap_ms()
++	{
++		static int const value = vantara_env_int("VANTARA_LT_STALL_CAP_MS");
++		return value;
++	}
++}
+ namespace {
+ 
+ bool is_downloading_state(int const st)
+@@ -11088,9 +11106,19 @@ namespace {
+ 				// if it's been more than half of the typical download time
+ 				// of a piece since we requested the last block, allow
+ 				// one more request per block
+-				if (m_average_piece_time > 0)
++				// VANTARA (stall-cap): stock libtorrent never re-requests a stalled block
++				// while m_average_piece_time is 0 (no critical piece finished yet, i.e.
++				// exactly at playback start), and with large pieces the average grows to
++				// several seconds. VANTARA_LT_STALL_CAP_MS > 0 caps the wait budget; 0 keeps
++				// the stock behaviour unchanged.
++				int stall_budget = m_average_piece_time > 0
++					? int(m_average_piece_time + m_piece_time_deviation / 2) : 0;
++				int const stall_cap = vantara_stall_cap_ms();
++				if (stall_cap > 0)
++					stall_budget = stall_budget > 0 ? std::min(stall_budget, stall_cap) : stall_cap;
++				if (stall_budget > 0)
+ 					timed_out = int(total_milliseconds(now - i.last_requested)
+-						/ std::max(int(m_average_piece_time + m_piece_time_deviation / 2), 1));
++						/ std::max(stall_budget, 1));
+ 
+ #if TORRENT_DEBUG_STREAMING > 0
+ 				i.timed_out = timed_out;

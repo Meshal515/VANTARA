@@ -511,6 +511,9 @@ export function createServerSheet(body, o) {
   listen(body, 'click', () => closeDrops());
 
   const filter = { q: 'all', v: null, a: 'all' };
+  // اختيار المستخدم نفسه (UX13): إن اختفى خياره مؤقتًا (سيرفره الوحيد مات أو لم يصل بعد) تُعرض الكل، ثم يعود
+  // اختياره حين يظهر خيار بالقيمة نفسها. لا يُمسح بصمت.
+  const wanted = { q: 'all', v: null, a: 'all' };
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
   const pick = (r) => {
@@ -623,7 +626,9 @@ export function createServerSheet(body, o) {
     b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
     b.disabled = pending && !isTryable(r);
     const qb = b.querySelector('.ss-q');
-    qb.firstElementChild.textContent = d.q == null ? 'HD' : qualityLabel(d.q);
+    // جودة غير معروفة (HLS متكيّف أو مصدر لم يعلنها) لا تُكتب «HD»: هذا ادعاء لم يتحقق، والوصف المقروء «تلقائي»
+    qb.firstElementChild.textContent = qualityLabel(d.q);
+    qb.classList.toggle('ss-q--auto', d.q == null);
     // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
     qb.lastElementChild.textContent = '';
     qb.lastElementChild.innerHTML = glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
@@ -816,7 +821,7 @@ export function createServerSheet(body, o) {
   const langTabs = [['SUB', 'مترجم'], ['DUB', 'مدبلج']].map(([key, text]) => {
     const b = btn('ss-tab');
     b.textContent = text;
-    b.onclick = () => { filter.v = filter.v === key ? null : key; update(last); };
+    b.onclick = () => { filter.v = wanted.v = filter.v === key ? null : key; update(last); };
     lang.append(b);
     return [key, b];
   });
@@ -824,18 +829,18 @@ export function createServerSheet(body, o) {
   function paintFilters(routes) {
     const live = routes.filter((r) => !isDead(r));
     const qs = [...new Set(live.map((r) => view(r).q).filter((x) => x != null))].sort((a, b) => b - a);
-    if (filter.q !== 'all' && !qs.includes(filter.q)) filter.q = 'all';
+    filter.q = wanted.q !== 'all' && qs.includes(wanted.q) ? wanted.q : 'all';
     const dub = live.some((r) => r.variant === 'DUB');
     const sub = live.some((r) => r.variant !== 'DUB');
-    if (!(dub && sub)) filter.v = null;
+    filter.v = dub && sub ? wanted.v : null;
     const names = [...new Set(live.map((r) => view(r).name))];
-    if (filter.a !== 'all' && !names.includes(filter.a)) filter.a = 'all';
+    filter.a = wanted.a !== 'all' && names.includes(wanted.a) ? wanted.a : 'all';
     quality.set([['all', 'كل الجودات'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q,
       filter.q === 'all' ? (qs.length === 1 ? qualityLabel(qs[0]) : 'كل الجودات') : qualityLabel(filter.q),
-      (k) => { filter.q = k; update(last); });
+      (k) => { filter.q = wanted.q = k; update(last); });
     source.set([['all', 'كل المصادر'], ...names.map((n) => [n, n])], filter.a,
       filter.a === 'all' ? (names.length === 1 ? names[0] : 'كل المصادر') : filter.a,
-      (k) => { filter.a = k; update(last); });
+      (k) => { filter.a = wanted.a = k; update(last); });
     lang.hidden = !(dub && sub);
     for (const [key, b] of langTabs) {
       b.classList.toggle('on', filter.v === key);
