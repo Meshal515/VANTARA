@@ -472,7 +472,15 @@ export function renderV7Addons({
     }
     return row;
   }
-  function switchTab(t){restoreScroll=false;tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;currentSearch="";type="الكل";search.value="";notify("");draw();}
+  // UX05: لكل تبويب بحثه ونوعه؛ الرجوع إليه يعيد ما كتبه المستخدم بدل مسحه
+  const tabMemory=new Map();
+  function switchTab(t){
+    if(!opened)tabMemory.set(tab,{search:search.value,type});
+    restoreScroll=false;tab=t;opened=null;menuOpen=false;filterMenu.hidden=true;
+    const kept=tabMemory.get(t)||{search:"",type:"الكل"};
+    search.value=kept.search;currentSearch=kept.search.trim().toLocaleLowerCase();type=kept.type;
+    notify("");draw();
+  }
   function toggleMenu(){
     menuOpen=!menuOpen;filterMenu.hidden=!menuOpen;
   }
