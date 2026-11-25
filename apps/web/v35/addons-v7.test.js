@@ -879,3 +879,18 @@ it('exports my extensions and imports them on another device: list, one trust co
   expect(other.querySelector('.v7-dialog .v7-notice').textContent).toContain('2 مثبّتة');
   other.close();
 });
+
+it('UX05: لكل تبويب بحثه؛ الرجوع إلى تبويب يعيد ما كُتب فيه بدل مسحه',async()=>{
+ const d=setup();
+ const view=renderV7Addons({registry:registry([])});d.body.append(view);await tick();
+ const input=view.querySelector('input');
+ const tabs=()=>[...view.querySelectorAll('.v7-tab')];
+ input.value='anime';input.oninput();
+ tabs()[1].click();await tick();
+ expect(input.value).toBe('');
+ input.value='manga';input.oninput();
+ tabs()[0].click();await tick();
+ expect(input.value).toBe('anime');
+ tabs()[1].click();await tick();
+ expect(input.value).toBe('manga');
+});
