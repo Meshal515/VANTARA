@@ -31,6 +31,12 @@ class TorrentEngine internal constructor(
      * قياس واحد (1080p: 46.6 مقابل 24.5 ث)، فتبقى للاختبار حتى يثبتها قياس مكرر.
      */
     private val legacyWindow: Boolean = true,
+    /**
+     * المواعيد بالفرق (TorrentPolicy.deadlineDiff) مستقلة عن [legacyWindow]: الأخير يبقى للتنزيل التسلسلي
+     * وقراءة القطعة التالية مسبقًا (هما ما يُشتبه أنه أبطأ أول بايت في قياس 6 Mbps الوحيد). false = المسح
+     * الكامل القديم، للمقارنة فقط في TorrentThroughputDeviceTest.
+     */
+    private val diffDeadlines: Boolean = true,
     // آخر معامل: الاختبارات القديمة تمرّره lambda لاحقة
     private val networkFilter: () -> ip_filter = ::publicNetworkFilter,
 ) : AutoCloseable {
@@ -645,26 +651,28 @@ class TorrentEngine internal constructor(
             if (next == window) return@synchronized
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             val handle = torrent ?: throw IOException("Torrent session ended")
-            window.filterNot { it in next }.forEach { handle.piecePriority(it, Priority.IGNORE) }
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val pending = TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
             val wanted = TorrentPolicy.deadlines(next, pending)
-            if (legacyWindow) {
+            if (!diffDeadlines) {
+                window.filterNot { it in next }.forEach { handle.piecePriority(it, Priority.IGNORE) }
                 handle.clearPieceDeadlines()
                 for ((piece, deadline) in wanted) {
                     handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
                     handle.setPieceDeadline(piece, deadline)
                 }
+                deadlined = wanted.mapTo(HashSet()) { it.first }
             } else {
-                // الفرق فقط: مسح كل المواعيد ثم إعادتها عند كل قطعة كان يلغي طلبات القطع الجارية عند المشاركين
-                val keep = wanted.mapTo(HashSet()) { it.first }
-                for (piece in deadlined) if (piece !in keep) handle.resetPieceDeadline(piece)
-                for ((piece, deadline) in wanted) {
-                    if (piece in deadlined && deadline != 0) continue
+                val diff = TorrentPolicy.deadlineDiff(deadlined, wanted)
+                // إلغاء الموعد أولًا: libtorrent يعيد أولوية القطعة إلى 1 عند إلغائه، فالتجاهل يأتي بعده وإلا
+                // بقيت القطع خلف المشغّل تُنزَّل بأولوية منخفضة
+                for (piece in diff.reset) handle.resetPieceDeadline(piece)
+                window.filterNot { it in next || it in diff.keep }.forEach { handle.piecePriority(it, Priority.IGNORE) }
+                for ((piece, deadline) in diff.set) {
                     handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
-                    if (piece !in deadlined) handle.setPieceDeadline(piece, deadline)
+                    handle.setPieceDeadline(piece, deadline)
                 }
-                deadlined = keep
+                deadlined = HashSet(diff.keep)
             }
             extendAhead(handle, file, pieceLength, next)
             window = next
