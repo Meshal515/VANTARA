@@ -261,7 +261,9 @@ export function createRegistry({ engines, store, ctx, now = () => Date.now(), lo
       // الحظر الأمني: يعطّل ويشرح، ولا يحذف تعريفًا ولا مكتبة. LKG المحظور لا يُستعاد
       const rules = (Array.isArray(blocked) ? blocked : []).filter((b) => b && typeof b === 'object' && (typeof b.id === 'string' || typeof b.hash === 'string'));
       const isBlocked = (id, slot) => Boolean(slot) && rules.find((b) => (!b.id || b.id === id) && (!b.hash || b.hash === slot.hash));
-      for (const [id, rec] of Object.entries(state)) {
+      // F00-16: حزمة لم تصل (بلا شبكة/404) تعني أن السياسة مجهولة، لا أنها «لا حظر»: الحظر المحفوظ يبقى كما هو
+      // (لا فشل مفتوح). تُعاد حسابات الحظر فقط حين تصل سياسة فعلية.
+      for (const [id, rec] of bundle ? Object.entries(state) : []) {
         const hit = isBlocked(id, rec.stable);
         const { blocked: _old, ...clean } = rec;
         if (hit && rec.lkg && !isBlocked(id, rec.lkg)) {
