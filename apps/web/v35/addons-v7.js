@@ -741,7 +741,15 @@ export function renderV7Addons({
   function cancelDiagnostic(){
     if(diagnosticController){diagnosticController.abort();diagnosticController=null;busy=false;}
   }
-  function closeModal(force=false){if(busy&&!force&&!diagnosticController)return;releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=true;disposeLogos(dialog);dialog.replaceChildren();}
+  // UX04: الرجوع أثناء تثبيت/حذف لا يقطع العملية (فلا تبقى إضافة نصف مثبتة)، لكنه يرد بوضوح بدل أن يبدو التطبيق معلقًا.
+  // النجاح يغلق النافذة وحده، والفشل يبقيها بسببه.
+  function busyNote(){
+    if(layer.hidden)return;
+    let note=dialog.querySelector(".v7-busy-note");
+    if(!note){note=el("p","v7-busy-note");note.setAttribute("role","status");note.setAttribute("aria-live","polite");dialog.append(note);}
+    note.textContent="جارٍ التنفيذ. تُغلق النافذة وحدها عند انتهائه.";
+  }
+  function closeModal(force=false){if(busy&&!force&&!diagnosticController){busyNote();return;}releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=true;disposeLogos(dialog);dialog.replaceChildren();}
   function showDialog(title,description){
     if(!alive)return;
     releaseDiagnosticUi();releaseDiagnosticUi=()=>{};cancelDiagnostic();layer.hidden=false;disposeLogos(dialog);dialog.replaceChildren();

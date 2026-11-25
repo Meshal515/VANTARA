@@ -222,3 +222,4 @@
 /* UX10: فشل قراءة الإضافات مع زر إعادة المحاولة (خارج .v7-addon لأن المدير لم يُرسم) */
 .addons-load-failed{display:grid;gap:12px;justify-items:start;padding:16px 0}
 .addons-load-failed .v7-simple-btn{height:44px;min-width:106px;padding-inline:16px;background:var(--surface-1,#121019);border:1px solid #2b2b34;border-radius:13px;color:#efedf4;font-weight:800}
+.v7-addon .v7-busy-note{margin:12px 0 0;color:var(--text-2,#bdb8c8);font-size:13px;font-weight:700}
