@@ -288,9 +288,6 @@ public:
         s.set_int(lt::settings_pack::request_queue_time, 1);
         s.set_int(lt::settings_pack::whole_pieces_threshold, 0);
         s.set_bool(lt::settings_pack::piece_extent_affinity, false);
-        // أول 4 قطع تُختار عشوائيًا متجاهلة الأولوية ما لم يكن التنزيل تسلسليًا؛ هنا التسلسلي مفعّل فلا أثر عادة،
-        // لكن VANTARA_LT_NO_SEQUENTIAL (تجربة) كان يعيد العشوائية. مطابق للـAPK (stall-bench).
-        s.set_int(lt::settings_pack::initial_picker_threshold, 0);
         // TCP فقط كما Stremio وAPK: uTP ضاعف زمن الوصول في 8 مقارنات من 8 على أسراب حقيقية
         s.set_bool(lt::settings_pack::enable_outgoing_utp, false);
         s.set_bool(lt::settings_pack::enable_incoming_utp, false);

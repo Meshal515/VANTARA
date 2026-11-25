@@ -900,12 +900,6 @@ class TorrentEngine internal constructor(
             settings.setInteger(settings_pack.int_types.request_queue_time.swigValue(), 1)
             settings.setInteger(settings_pack.int_types.whole_pieces_threshold.swigValue(), 0)
             settings.setBoolean(settings_pack.bool_types.piece_extent_affinity.swigValue(), false)
-            // libtorrent يختار أول 4 قطع عشوائيًا متجاهلًا الأولوية ما لم يكن التنزيل تسلسليًا
-            // (peer_connection::picker_options: num_have < initial_picker_threshold ⇒ لا rarest_first ولا ترتيب).
-            // في البث يعني ذلك أن القطعة التي ينتظرها المشغّل تأتي بعد قطع عشوائية من النافذة وما قدّامها:
-            // tools/libtorrent-patches/stall-bench أظهر القطعة 12 (أولوية 4) ثم 9 قبل القطعة 0 (أولوية 7).
-            // ويندوز لا يتأثر لأنه يفعّل sequential_download. 0 = الأولوية تُحترم من أول طلب.
-            settings.setInteger(settings_pack.int_types.initial_picker_threshold.swigValue(), 0)
             // مشاركون خلف NAT لا يصلون إلا باتصال داخل: افتح المنفذ تلقائيًا حيث يسمح الراوتر
             // TCP وحده كما Stremio (torrent-stream): uTP يتراجع مع كل تذبذب في تأخير الشبكة. قيس على
             // المحاكي بأسراب Torrentio حقيقية (TorrentThroughputDeviceTest): بلا uTP تضاعف ما يصل
