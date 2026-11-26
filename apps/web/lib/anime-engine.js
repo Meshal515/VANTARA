@@ -629,8 +629,8 @@ export async function best(session, prefer = null, waitMs = 45_000) {
 
 /** أفضل رابط داخل سيرفر اختاره المستخدم. */
 /** «المقترح» في الورقة تورنت: يُسخَّن الآن قبل غيره (أندرويد). بلا جسر أصلي (ويب/ويندوز): لا شيء. */
-export async function warm(session, route, at = 0) {
-  try { return (await call('warm', { session, route, ...(at > 0 ? { at } : {}) }))?.warming === true; } catch { return false; }
+export async function warm(session, route, at = 0, { hover = false } = {}) {
+  try { return (await call('warm', { session, route, ...(at > 0 ? { at } : {}), ...(hover ? { hover: true } : {}) }))?.warming === true; } catch { return false; }
 }
 
 /**
@@ -694,6 +694,11 @@ export function topWarmer(onFacts, options) {
       void warm(s, route, options?.at);
       if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
       watch.poke();
+    },
+    /** مرور الفأرة على صف (ويندوز): يُسخَّن بجانب «المقترح» لا بدله، ولا يأخذ مكانه في التجديد. */
+    hover(s, route) {
+      if (ended || !s || !route) return;
+      void warm(s, route, options?.at, { hover: true });
     },
     rows(s, ids) {
       if (ended || !s) return;

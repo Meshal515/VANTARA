@@ -397,6 +397,16 @@ async function connectIPC(state, path) {
  */
 export const START_CACHE_WAIT_SECONDS = 0.5;
 export const REBUFFER_CACHE_WAIT_SECONDS = 3;
+/**
+ * أدوار التسخين على ويندوز. «المقترح» والمرور يجلبان أول 8MB (الرأس ومرفقات MKV المعتادة وأول مشهد) وآخر 2MB
+ * (فهرس Cues، كـTAIL_INDEX_BYTES في الـAPK)؛ كانت 24MB+8MB: أبطأ اكتمالًا بثوانٍ وتنافس التشغيل إن ضُغط قبلها.
+ * الخلفي أول 2MB فقط، واثنان كحد.
+ */
+export const PREWARM_ROLES=Object.freeze({
+  top:Object.freeze({rank:3,limit:1,head:8*1024*1024,tail:2*1024*1024}),
+  hover:Object.freeze({rank:2,limit:1,head:8*1024*1024,tail:2*1024*1024}),
+  background:Object.freeze({rank:1,limit:2,head:2*1024*1024,tail:0}),
+});
 export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null,browserFetch=null,sourceUserAgent=SOURCE_USER_AGENT,warmTorrentMs=60000}) {
   if (typeof userData!=='string'||!(binaries?.rqbit||binaries?.libtorrent)||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
@@ -422,7 +432,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   // تعداد أقراص ويندوز عبر PowerShell يستغرق حتى 5 ث باردًا؛ يبدأ مع الخدمات لا عند الضغط على تشغيل،
   // ويُحدَّث في الخلفية بعد كل استعمال (قرص أُضيف أو أزيل). المساحة الحرة تُقرأ طازجة في كل تشغيل.
   let fixedRoots=platform==='win32'?windowsFixedRoots():null;
-  let prewarm=null;
+  // تسخين متعدد على المحرك الدائم: «المقترح» (top) ومرور الفأرة (hover) والصفوف الظاهرة (background).
+  // المرور لا يرمي «المقترح»، والخلفي أصغر وأقل عددًا. المفتاح: infoHash|fileIdx
+  const prewarms=new Map();
+  const isPrewarm=state=>{for(const p of prewarms.values())if(p.state===state)return true;return false;};
   /**
    * المحرك الدائم (مثل أندرويد وNuvio): عملية تورنت واحدة تعيش ما دام التطبيق مفتوحًا، لا عملية لكل تشغيل.
    * كان كل تشغيل يشغّل محركًا جديدًا وينتظر جاهزيته ويحمّل DHT ويكلم المتتبعات من الصفر. كل جلسة تضيف
@@ -509,7 +522,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return {position:state.progress.position??0,duration:state.progress.duration??0,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true};
   }
   function emitPlaybackState(state) {if(state.ready){const value=playbackState(state);state.budget?.update(value);emit(state,{type:'playback/state',...value});}}
-  function assertSession(state) { if (state.stopped||(current!==state&&prewarm?.state!==state)||closed) throw cancelled(); }
+  function assertSession(state) { if (state.stopped||(current!==state&&!isPrewarm(state))||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
     state.trace?.stop();state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.resolveCommands?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
@@ -534,7 +547,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return state.cleanup;
   }
   async function fail(state,message) {
-    if(prewarm?.state===state){void dropPrewarm();return;}
+    if(isPrewarm(state)){void dropPrewarm(state);return;}
     if(state.stopped||current!==state)return;
     state.failure=message;emit(state,{type:'playback/error',message});await cleanup(state);if(current===state)current=null;
   }
@@ -1091,36 +1104,44 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   /**
    * تجهيز مسبق مثل التطبيقات السريعة: ما إن تعرف صفحة العمل أفضل تورنت حتى يبدأ المحرك ويجلب البيانات
    * ويتصل بالشركاء وينزّل أول الملف وآخره (فهرس الحاوية)، ثم يتوقف عن التنزيل. عند الضغط على تشغيل
-   * يتبنّى startPlayback نفس الجلسة فيقرأ mpv أول الإطارات من القرص. تجهيز واحد فقط في كل وقت،
-   * ويُحذف (مع ملفاته) بعد مهلة أو عند تجهيز عمل آخر أو تشغيل مصدر مختلف.
+   * يتبنّى startPlayback نفس الجلسة فيقرأ mpv أول الإطارات من القرص. عدة تجهيزات بأدوار ([PREWARM_ROLES])،
+   * وكل واحد يُترك بعد مهلة أو حين يحل محله مثله أو عند بدء التشغيل.
    */
-  async function prewarmTorrent({candidate}={}) {
+  async function prewarmTorrent({candidate,role='top'}={}) {
     if(closed)return {prewarmed:false};
     candidate=validateCandidate(candidate);
-    if(!candidate.infoHash)return {prewarmed:false};
+    const spec=PREWARM_ROLES[role];
+    if(!candidate.infoHash||!spec)return {prewarmed:false};
     const key=`${candidate.infoHash}|${candidate.fileIdx??''}`;
-    if(prewarm?.key===key)return {prewarmed:true};
+    const have=prewarms.get(key);
+    // نفس التورنت بدور مثله أو أعلى: يبقى كما هو (المرور على «المقترح» لا يعيد تسخينه)
+    if(have&&have.state.stopped)prewarms.delete(key);
+    else if(have&&have.spec.rank>=spec.rank)return {prewarmed:true};
     // لا ننافس تورنتًا يُشاهَد الآن على عرض النطاق
     if(current&&!current.stopped&&current.win)return {prewarmed:false};
-    await dropPrewarm();
+    if(have)await dropPrewarm(have.state);
+    // كل دور له حد: «مقترح» واحد (الجديد يحل محل القديم)، ومرور واحد، وخلفيان
+    const same=[...prewarms.values()].filter(p=>p.role===role);
+    if(role==='background'&&same.length>=spec.limit)return {prewarmed:false};
+    for(const p of same.slice(0,Math.max(0,same.length-spec.limit+1)))await dropPrewarm(p.state);
     if(closed)return {prewarmed:false};
     const state={session:null,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false,prewarming:true};
     // لا نسخة إعادة تشغيل للتجهيز: الحساب غير معروف بعد، ونسخة الإعادة خاصة بكل حساب
     state.cacheRecorders=new Set();state.torrentReaders=new Map();state.replayStore=null;
     state.rangeSequence=0;state.trace=createStartupTrace(event=>emit(state,event));
-    prewarm={key,state};states.add(state);
-    state.prewarmTimer=setTimeout(()=>{if(prewarm?.state===state)void dropPrewarm();},prewarmTtlMs);
+    prewarms.set(key,{key,state,role,spec});states.add(state);
+    state.prewarmTimer=setTimeout(()=>{if(isPrewarm(state))void dropPrewarm(state);},prewarmTtlMs);
     state.engineTask=(async()=>{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       return engine(state,candidate);
     })();
-    state.engineTask.then(()=>prewarmEdges(state),()=>{if(prewarm?.state===state)void dropPrewarm();});
+    state.engineTask.then(()=>prewarmEdges(state,spec),()=>{if(isPrewarm(state))void dropPrewarm(state);});
     return {prewarmed:true};
   }
-  /** يقرأ أول الملف وآخره عبر rqbit (فيعطيهما أولوية القارئ) ثم يوقف التنزيل إن لم يُتبنَّ التجهيز بعد. */
-  async function prewarmEdges(state) {
+  /** يقرأ أول الملف وآخره عبر المحرك (فيعطيهما أولوية القارئ) ثم يوقف التنزيل إن لم يُتبنَّ التجهيز بعد. */
+  async function prewarmEdges(state,spec=PREWARM_ROLES.top) {
     const w=state.win,size=w?.fileLength;if(!(size>0)||!state.streamUrl)return;
-    const head=Math.min(size,24*1024*1024),tail=Math.min(8*1024*1024,Math.max(0,size-head));
+    const head=Math.min(size,spec.head),tail=Math.min(spec.tail,Math.max(0,size-head));
     const ranges=[`bytes=0-${head-1}`,...(tail?[`bytes=${size-tail}-${size-1}`]:[])];
     const read=range=>new Promise(resolve=>{
       const attempt=()=>{
@@ -1129,7 +1150,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(res.statusCode>=500){res.resume();return setTimeout(attempt,250);}
           res.on('data',()=>{});res.once('end',()=>resolve(res.statusCode<300));res.once('error',()=>resolve(false));
         });
-        // تُلغى عند تبنّي التشغيل (takePrewarm): قراءة 24MB+8MB جارية كانت تنافس طلب mpv الأول على المشاركين والسرعة
+        // تُلغى عند تبنّي التشغيل (takePrewarm): قراءة الأطراف الجارية كانت تنافس طلب mpv الأول على المشاركين والسرعة
         (state.edgeRequests??=new Set()).add(req);req.once('close',()=>state.edgeRequests?.delete(req));
         req.on('error',()=>resolve(false));req.setTimeout(90000,()=>req.destroy());
       };
@@ -1142,18 +1163,20 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.prewarmPause=localJSON(state.api,`/torrents/${state.torrentId}/pause`,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(()=>{w.paused=true;},()=>{});
   }
   function takePrewarm(candidate) {
-    const p=prewarm;
-    if(!p||p.key!==`${candidate.infoHash}|${candidate.fileIdx??''}`||p.state.stopped)return null;
-    prewarm=null;clearTimeout(p.state.prewarmTimer);p.state.prewarming=false;
+    const key=`${candidate.infoHash}|${candidate.fileIdx??''}`,p=prewarms.get(key);
+    if(!p||p.state.stopped)return null;
+    prewarms.delete(key);clearTimeout(p.state.prewarmTimer);p.state.prewarming=false;
     // تسخين بدأ قبل الضغط بلحظة (المرور بالفأرة): أطرافه لم تكتمل. التشغيل يطلب ما يحتاجه بنفسه، فلا ينافسه تسخين.
     // عينات المالك (Debug 80): «مُسخَّن قبل الضغط» وأول صورة +14.3 و+18.1 ث، مقابل 0.1–1.25 ث حين اكتمل التسخين قبله
     for(const req of p.state.edgeRequests??[])req.destroy();
     p.state.edgeRequests?.clear();
     return p.state;
   }
-  async function dropPrewarm() {
-    const p=prewarm;if(!p)return;prewarm=null;
-    clearTimeout(p.state.prewarmTimer);await cleanup(p.state);
+  async function dropPrewarm(state) {
+    for(const [key,p] of prewarms)if(p.state===state){prewarms.delete(key);clearTimeout(state.prewarmTimer);await cleanup(state);}
+  }
+  async function dropPrewarms() {
+    await Promise.all([...prewarms.values()].map(p=>dropPrewarm(p.state)));
   }
   async function startPlayback({session,candidate,title,position=0,pause=false,ownerId='guest'}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
@@ -1161,7 +1184,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(typeof ownerId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(ownerId))throw new Error('هوية حساب غير صالحة');
     candidate=validateCandidate(candidate);
     const adopted=takePrewarm(candidate);
-    if(!adopted&&prewarm)void dropPrewarm();
+    // ما بقي من التسخين ينافس التشغيل على المشاركين والسرعة: يُترك (المحرك الدائم يبقيه دافئًا 60 ث)
+    void dropPrewarms();
     const old=current,state=adopted??{session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
     state.session=session;
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();state.subtitleCatalog=new Map();state.subtitleSequence=0;state.subtitleAutoTried=new Set();state.subtitleAuto=null;
@@ -1410,7 +1434,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return src?{available:true,positionMs:ms,src}:{available:false,positionMs:ms};
   }
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
-  async function close(){closed=true;await dropPrewarm();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));const last=hub;hub=null;await stopHub(last);if(last?.cacheParent)await rm(last.cacheParent,{recursive:true,force:true}).catch(()=>{});await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
+  async function close(){closed=true;await dropPrewarms();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));const last=hub;hub=null;await stopHub(last);if(last?.cacheParent)await rm(last.cacheParent,{recursive:true,force:true}).catch(()=>{});await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
   /** مضيف اجتاز صفحة التحقق الظاهرة: طلباته من جلسة المتصفح (فيها كوكي التحقق) كما بعد الحل المخفي. */
   function trustBrowserHost(host){
     const name=String(host??'').toLowerCase();

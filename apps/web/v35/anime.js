@@ -2723,7 +2723,7 @@ export function createAnime(deps) {
         onBest: () => playBest(),
         onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
         onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
-        onHover: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
+        onHover: (r) => { if (sheet.session && !sheet.closed) tops.hover(sheet.session, r.id); },
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('anime'); } } : {}),
         // من داخل مصدر: سيرفراته وحده، و«جرّب البدائل» يفتح العمل نفسه (هوية AniList) بكل المصادر على الحلقة نفسها

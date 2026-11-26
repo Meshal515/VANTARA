@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs } from './services.mjs';
+import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs, PREWARM_ROLES } from './services.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 
 const hash = 'a'.repeat(40);
@@ -203,6 +203,26 @@ test('تبنّي تسخين لم تكتمل أطرافه يلغي قراءاته
   assert.ok(await closed()>=1,'قراءات أطراف التسخين أُغلقت عند التبنّي');
   await writeFile(join(dir,'release-stream'),'1');
   await services.stopPlayback({session:'adopt-mid-edges'}).catch(()=>{});
+});
+test('المرور بالفأرة على خيار آخر يُسخَّن بجانب «المقترح» ولا يرميه، والتشغيل يتبنّى «المقترح»',async t=>{
+  const {services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'top'}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:1},role:'hover'}),{prewarmed:true});
+  // المرور على «المقترح» نفسه لا يعيد تسخينه بدور أدنى
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'hover'}),{prewarmed:true});
+  await services.startPlayback({session:'top-survives-hover',candidate:{infoHash:hash,fileIdx:0}});
+  const stages=events.filter(e=>e.session==='top-survives-hover'&&e.type==='playback/diagnostic').map(e=>`${e.stage}${e.mode?`:${e.mode}`:''}`);
+  assert.ok(stages.includes('source-selected:prewarmed'),stages.join(','));
+  await services.stopPlayback({session:'top-survives-hover'}).catch(()=>{});
+});
+test('أدوار التسخين: الخلفي اثنان كحد، والأطراف أصغر من 24MB+8MB القديمة',async t=>{
+  const {services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  assert.equal(PREWARM_ROLES.top.head,8*1024*1024);assert.equal(PREWARM_ROLES.top.tail,2*1024*1024);
+  assert.equal(PREWARM_ROLES.background.tail,0);
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'background'}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:1},role:'background'}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:'b'.repeat(40),fileIdx:0},role:'background'}),{prewarmed:false});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'nope'}),{prewarmed:false});
 });
 test('playing a different torrent discards the prewarm instead of competing with it',async t=>{
   const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
