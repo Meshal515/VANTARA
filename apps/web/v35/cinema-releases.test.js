@@ -77,9 +77,12 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(best.querySelector('.ss-details').textContent).toContain('REMUX');
   expect(best.querySelector('.an-srv-lang--ar').textContent).toBe('عربي');
   expect(best.querySelector('.an-srv-seeds').textContent).toBe('412');
-  expect(best.querySelectorAll('.ss-meter i.on').length).toBe(4);
+  // الزارعون بأيقونة أشخاص ولون السرب، والتلميح يقول ما الرقم (لا أعمدة تُقرأ Ping)
+  expect(best.querySelector('.ss-seeds--strong svg')).not.toBeNull();
+  expect(best.querySelector('.ss-seeds').title).toBe('عدد الزارعين (Seeders) كما أعلنه المصدر');
+  expect(best.querySelector('.ss-meter')).toBeNull();
   expect(best.className).toContain('an-srv--swarm-strong');
-  expect(visible[4].querySelectorAll('.ss-meter i.on').length).toBe(1);
+  expect(visible[4].querySelector('.ss-seeds--weak')).not.toBeNull();
   expect(gone[0].className).toContain('an-srv--swarm-dead');
   // المقترح: أكثر مشاركين بحجم يُبثّ وترميز سهل (لا ريمكس 61 GB) — أول صف، وسببه تحت «شغّل الأفضل»
   const top = sheet.querySelectorAll('.ss-row--top');
