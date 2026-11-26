@@ -409,6 +409,29 @@ it('يجهّز أفضل تورنت في الخلفية قبل الضغط على 
   } finally { vi.useRealTimers(); }
 });
 
+it('تسخين ويندوز يتبع «المقترح» من الورقة ولا يعود لترتيب المحرك بعده', async () => {
+  vi.useFakeTimers();
+  try {
+    const f = fixture(), prewarms = [];
+    f.bridge.prewarmTorrent = async args => { prewarms.push(args); return { prewarmed: true }; };
+    f.source.streams = async () => [
+      {...f.stream, infoHash:'b'.repeat(40),title:'حي\n👤 500 💾 1.4 GB'},
+      {...f.stream, infoHash:'c'.repeat(40),title:'عربي\n👤 60 💾 1.0 GB'},
+    ];
+    await prepared(f);
+    const { routes } = await f.engine.routes({ session: 's' });
+    const arabic = routes.find(r => /عربي/.test(r.label));
+    // الورقة تعلن مقترحها قبل أن يسخّن المحرك ترتيبه: يُسخَّن هو وحده
+    expect(f.engine.warm({ session: 's', route: arabic.id })).toEqual({ warming: true });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(prewarms.map(p => p.candidate.infoHash)).toEqual(['c'.repeat(40)]);
+    // نفس المقترح مرة ثانية: لا تكرار
+    f.engine.warm({ session: 's', route: arabic.id });
+    expect(prewarms).toHaveLength(1);
+    await f.engine.closeSession({session:'s'});
+  } finally { vi.useRealTimers(); }
+});
+
 it('«رشّح الحلقة لصديق» من مشغّل ويندوز يمر بصندوق صادر كالـAPK، ويسحبه صاحب الحساب وحده مرة واحدة', async () => {
   const f = fixture();
   await prepared(f);

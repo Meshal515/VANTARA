@@ -632,6 +632,67 @@ export async function best(session, prefer = null, waitMs = 45_000) {
 export async function warm(session, route) {
   try { return (await call('warm', { session, route }))?.warming === true; } catch { return false; }
 }
+/**
+ * الصفوف الظاهرة غير «المقترح» بترتيب الورقة: تسخين خلفي محدود (أندرويد). `[]` أو `stop` يهدّئه كله.
+ * بلا جسر أصلي: لا شيء.
+ */
+export async function warmBackground(session, routes, { stop = false } = {}) {
+  try { return (await call('warmBackground', { session, routes: routes ?? [], stop }))?.warming ?? 0; } catch { return 0; }
+}
+
+/** حقائق المحرك لتورنتات الجلسة المُسخَّنة: `{ routeId: { pieceLength, seeds, peers } }`. بلا جسر أصلي: `{}`. */
+export async function torrentFacts(session) {
+  try { return (await call('torrentFacts', { session }))?.facts ?? {}; } catch { return {}; }
+}
+
+/**
+ * يتابع حقائق التسخين ما دامت الورقة تطلبها: كل `every` حتى `span` من آخر `poke()` (مقترح جديد يمدّها).
+ * `onFacts` يُستدعى حين تتغير فقط. يرجع `{ poke, stop }`.
+ */
+export function watchFacts(session, onFacts, { every = 1500, span = 20000, read = torrentFacts } = {}) {
+  let until = 0, timer = null, stopped = false, last = '';
+  const tick = async () => {
+    timer = null;
+    if (stopped) return;
+    const facts = await read(session);
+    if (stopped) return;
+    const key = JSON.stringify(facts);
+    if (key !== last) { last = key; onFacts(facts); }
+    if (Date.now() < until) timer = setTimeout(tick, every);
+  };
+  return {
+    poke() { if (stopped) return; until = Date.now() + span; if (!timer) timer = setTimeout(tick, every); },
+    stop() { stopped = true; clearTimeout(timer); timer = null; },
+  };
+}
+
+/**
+ * «المقترح» في الورقة: يسخّنه ويتابع حقائق المحرك (حجم القطعة والسرب المقاس) لتدخل درجته.
+ * `top(session, routeId)` لكل مقترح جديد، و`rows(session, ids)` للصفوف الظاهرة (تسخين خلفي)،
+ * و`stop()` عند إغلاق الورقة: يهدّئ الخلفي ويترك «المقترح» لمدته (غالبًا هو ما يُشغَّل).
+ */
+export function topWarmer(onFacts, options) {
+  let watch = null, session = null, ended = false;
+  return {
+    top(s, route) {
+      if (ended || !s || !route) return;
+      void warm(s, route);
+      if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
+      watch.poke();
+    },
+    rows(s, ids) {
+      if (ended || !s) return;
+      void warmBackground(s, ids);
+      if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
+      watch.poke();
+    },
+    stop() {
+      if (!ended && session) void warmBackground(session, [], { stop: true });
+      ended = true; watch?.stop(); watch = null; session = null;
+    },
+  };
+}
+
 export async function pick(session, route) {
   return (await call('pick', { session, route }))?.candidate ?? null;
 }

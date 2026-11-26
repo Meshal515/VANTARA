@@ -2435,6 +2435,9 @@ export function createCinema(deps) {
       };
 
       // نفس ورقة الأنمي (server-sheet.js): «الأفضل لك»، المباشر ثم التورنت، والمتعذّر مطويّ
+      // المقترح يُسخَّن، وحقائق المحرك عنه (حجم القطعة والسرب المقاس) تعود لدرجته
+      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); });
+      off.push(() => tops.stop());
       const ui = createServerSheet(body, {
         el,
         kicker: heading,
@@ -2449,7 +2452,8 @@ export function createCinema(deps) {
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
-        onTop: (r) => { if (sheet.session && !sheet.closed) void engine.warm(sheet.session, r.id); },
+        onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
+        onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
         onRetry: () => { deps.closeSheet(); dropWarm(); play(m, season, n, position); },
         onUnavailable: (r) => toast(validity(r).reason ?? routeFailureMessage(r.reason), 5000),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
@@ -2488,7 +2492,7 @@ export function createCinema(deps) {
           const parts = [direct ? `${direct} مباشر` : null, torrents ? `${torrents} تورنت` : null].filter(Boolean).join(' · ');
           line = { text: `${parts} جاهز${settled ? '' : ' · البقية تصل'}`, spin: !settled };
         }
-        ui.update({ routes: sheet.routes, busy: sheet.busy, settled, missing: sheet.missing, error: Boolean(sheet.error), noSources: sheet.noSources === true && !sheet.routes.length, status: line, retry: settled && !ready ? { wait: 0 } : null });
+        ui.update({ routes: sheet.routes, facts: sheet.facts, busy: sheet.busy, settled, missing: sheet.missing, error: Boolean(sheet.error), noSources: sheet.noSources === true && !sheet.routes.length, status: line, retry: settled && !ready ? { wait: 0 } : null });
       };
       const queuePaint = () => {
         if (sheet.closed || queued) return;
