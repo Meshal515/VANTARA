@@ -35,6 +35,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val warmedAt: Long = 0L, val warmedPieces: Int = 0,
         /** مشاركون بطيئون حُجبوا مؤقتًا لتتحرر قطعة عالقة (TorrentHotswap). */
         val swaps: Int = 0,
+        val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -51,6 +52,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     @Volatile var openAt = 0L; private set
     @Volatile var readyAt = 0L; private set
     @Volatile var frameAt = 0L; private set
+    /** لحظة الضغط على التشغيل (elapsedRealtime من نية فتح المشغّل)، تبقى عبر تبديل المصادر. 0 = غير معروفة. */
+    @Volatile var launchedAt = 0L
 
     private var preparationMs: Long? = null
     private var audioOnlyAt = 0L
@@ -160,8 +163,10 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }
         val firstByte = reads.firstOrNull { it.firstByteAt > 0 }?.firstByteAt ?: 0L
+        if (launchedAt in 1..openAt) appendLine("من الضغط حتى فتح المصدر: ${secs(openAt - launchedAt)} ث" +
+            (if (frameAt > 0) " · من الضغط حتى أول صورة: ${secs(frameAt - launchedAt)} ث" else ""))
         appendLine("خط البدء: " + listOfNotNull(
-            t?.let { "بيانات التورنت ${rel(it.metadataAt)}" }, t?.let { "أول قطعة ${rel(it.firstPieceAt)}" },
+            t?.let { "بيانات التورنت ${rel(it.metadataAt)}" }, t?.let { "أول مشارك ${rel(it.firstPeerAt)}" }, t?.let { "أول بيانات ${rel(it.firstPayloadAt)}" }, t?.let { "أول قطعة ${rel(it.firstPieceAt)}" },
             "أول بايت ${rel(firstByte)}", "جاهز ${rel(readyAt)}", "أول صورة ${rel(frameAt)}",
         ).joinToString(" · "))
         appendLine("الاستخراج وتجهيز السيرفر: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر المرشح، قبل الفحص والمشغّل)")
@@ -182,7 +187,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         append("الحكم: ").append(verdict(t, p, nowMs))
     }
 
-    private fun rel(t: Long) = if (t > 0 && openAt > 0 && t >= openAt) String.format(Locale.US, "+%.1f", (t - openAt) / 1000.0) else "—"
+    // ما حدث قبل فتح المشغّل (التسخين المسبق، بيانات محفوظة) يُكتب «قبل الفتح» لا «—»: البدء الدافئ يُعرف من البارد
+    private fun rel(t: Long) = if (t > 0 && openAt > 0 && t >= openAt) String.format(Locale.US, "+%.1f", (t - openAt) / 1000.0) else if (t > 0 && openAt > 0) "قبل الفتح" else "—"
 
     companion object {
         const val MAX_READS = 60

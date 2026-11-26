@@ -17,6 +17,23 @@ class PlaybackDiagnosticsTest {
     )
     private fun player(state: Int = Player.STATE_READY) = PlaybackDiagnostics.PlayerFacts(state, 4_000, 40_000, 1_437_000, "video/x-matroska", "video/av01 1920x1080", "c2.qti.av1.decoder", 3, 1)
 
+    /** خط البدء الكامل: من الضغط، وأول مشارك وأول بيانات، وما جُهّز قبل فتح المشغّل يُكتب «قبل الفتح». */
+    @Test fun timelineStartsAtTheTapAndMarksWarmStagesBeforeOpen() {
+        diag.launchedAt = 1_000_000L - 1_500
+        at(0); diag.start()
+        val head = Any()
+        at(100); diag.initializing(head); at(2_000); diag.opened(head, 0); diag.transferred(head, mb.toInt())
+        at(2_400); diag.state(Player.STATE_READY, 0, 3_000); diag.firstFrame()
+        val warm = PlaybackDiagnostics.TorrentFacts(
+            peers = 20, seeds = 10, downloadBps = 2_000_000, fileBytes = 318 * mb, pieceBytes = (1 * mb).toInt(),
+            metadataAt = 1_000_000L - 30_000, firstPieceAt = 1_000_000L + 1_900, waitingPiece = -1, waitingSince = 0, waitingBlocks = null,
+            firstPeerAt = 1_000_000L - 29_000, firstPayloadAt = 1_000_000L + 700,
+        )
+        val report = diag.report(warm, player(), clock)
+        assertTrue(report, report.contains("من الضغط حتى فتح المصدر: 1.5 ث · من الضغط حتى أول صورة: 3.9 ث"))
+        assertTrue(report, report.contains("خط البدء: بيانات التورنت قبل الفتح · أول مشارك قبل الفتح · أول بيانات +0.7 · أول قطعة +1.9"))
+    }
+
     /** لقطة المستخدم (Steins;Gate): أول بايت +4.6 والجاهزية +19.9 — التقرير يقول أين ذهبت المدة بأرقامها. */
     @Test fun reportsWhereTheTimeBetweenFirstByteAndReadyWent() {
         at(0); diag.start()
@@ -30,7 +47,7 @@ class PlaybackDiagnosticsTest {
         assertTrue(verdict, verdict.startsWith("أطول مرحلة: من أول بايت إلى الجاهزية 15.3 ث"))
         assertTrue(verdict, verdict.contains("من البداية 10.4MB") && verdict.contains("من آخر الملف"))
         val report = diag.report(torrent(), player(), clock)
-        assertTrue(report, report.contains("خط البدء: بيانات التورنت +1.2 · أول قطعة +4.6 · أول بايت +4.6 · جاهز +19.9 · أول صورة +19.9"))
+        assertTrue(report, report.contains("خط البدء: بيانات التورنت +1.2 · أول مشارك — · أول بيانات — · أول قطعة +4.6 · أول بايت +4.6 · جاهز +19.9 · أول صورة +19.9"))
         assertTrue(report, report.contains("1) +0.1 من البداية → 10.4MB · فتح بعد 4.5 ث · أول بايت بعد 0.0 ث · مدة 9.8 ث"))
         assertTrue(report, report.contains("المفكك c2.qti.av1.decoder") && report.contains("ترجمة 3"))
         // لا عنوان ولا رابط ولا هوية في التقرير المنسوخ
