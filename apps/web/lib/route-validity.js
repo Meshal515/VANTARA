@@ -34,7 +34,7 @@ function seedersOf(r) {
  * السرب كما قاسه المحرك بعد التسخين (رد المتتبع والباذرون المعروفون)، أصدق من رقم العنوان القديم.
  * لا يُعتمد إلا إن وصل المحرك للسرب فعلًا (باذر أو متصل)، وإلا فالمعلن: صفر مبكر ليس دليل موت.
  */
-function measuredSeeds(d) {
+export function measuredSeeds(d) {
   const m = d?.measured;
   if (!d?.torrent || !m) return null;
   const seeds = Number(m.seeds), peers = Number(m.peers);
@@ -112,6 +112,13 @@ const CODEC = { 'H.264': 1, HEVC: 0.6, AV1: 0.1 };
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
 
+/** حجم القطعة المقاس إلى 0..1 (الأصغر يبدأ أسرع)، أو null إن لم يُعرف بعد. */
+export function pieceScore(pieceLength) {
+  const len = Number(pieceLength);
+  if (!Number.isFinite(len) || len <= 0) return null;
+  return len <= MB ? 1 : len <= 2 * MB ? 0.85 : len <= 4 * MB ? 0.6 : len <= 8 * MB ? 0.3 : 0;
+}
+
 /**
  * معايير «شغّل الأفضل» وأوزانها. كل معيار يعطي 0..1 والوزن يضربه؛ المجموع هو الدرجة.
  * `d` وصف الصف من server-sheet.js describe(): { torrent, q, langs, info, prefer, … }.
@@ -143,9 +150,7 @@ export const RANK_CRITERIA = Object.freeze([
     // يُعرف بعد البيانات الوصفية (التسخين)، فالمجهول وسط معلن. يحسم بين المتقاربين ولا يتخطى العربية أو الجودة.
     id: 'piece', label: 'حجم القطعة: الأصغر يبدأ أسرع (يُقاس بعد التسخين)', weight: 150,
     score: (r, d) => {
-      const len = Number(d.measured?.pieceLength);
-      if (!d.torrent || !Number.isFinite(len) || len <= 0) return 0.5;
-      return len <= MB ? 1 : len <= 2 * MB ? 0.85 : len <= 4 * MB ? 0.6 : len <= 8 * MB ? 0.3 : 0;
+      return d.torrent ? pieceScore(d.measured?.pieceLength) ?? 0.5 : 0.5;
     },
   },
   {

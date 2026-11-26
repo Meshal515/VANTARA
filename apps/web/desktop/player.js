@@ -20,7 +20,9 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   // قياس المشغل للوحة «الشبكة» كالـAPK (PlayerActivity.showNetwork): كل حقل يُحدّث من حدثه ويبقى آخر قيمة معروفة.
   // stages: زمن كل مرحلة منذ فتح الجلسة (تجهيز ← المحرك ← التحميل ← المشغل ← أول إطار).
   const NET_FIELDS={downloadSpeed:'torrentBps',peers:'peers',seeds:'seeds',aheadMs:'aheadMs',inputBps:'inputBps',videoBps:'videoBps',videoHeight:'videoHeight'};
-  function freshNet(prev){return {openAt:Date.now(),stages:{},server:prev?.server??null};}
+  function freshNet(prev){return {openAt:Date.now(),tapAt:engine.playRequestedAt?.({session})??null,stages:{},trace:[],server:prev?.server??null};}
+  // تشخيص البدء من عملية الخدمات (startup-trace.mjs): المرحلة وزمنها بساعتها، وأرقام آمنة فقط
+  function addTrace(prev,event){const next={...(prev??freshNet(null))};next.trace=[...(next.trace??[]),{stage:String(event.stage),ms:Number(event.elapsedMs)||0,...(event.mode?{mode:String(event.mode)}:{}),...(Number.isFinite(event.waitMs)?{waitMs:event.waitMs}:{})}].slice(-80);return next;}
   function mergeNet(prev,event){const next={...(prev??freshNet(null))};for(const [from,to] of Object.entries(NET_FIELDS))if(Number.isFinite(event[from])&&event[from]>=0)next[to]=event[from];return next;}
   function markStage(prev,stage){const next={...(prev??freshNet(null))};if(next.stages[stage]==null)next.stages={...next.stages,[stage]:Date.now()-next.openAt};return next;}
   const httpsArt=url=>typeof url==='string'&&/^https:\/\//i.test(url)?url:null;
@@ -276,6 +278,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
     if(event.type==='playback/action'){if(event.action==='fullscreen')panel.querySelector('[data-action="fullscreen"]').click();if(event.action==='close')keyboard({key:'Escape',target:{},preventDefault(){}});}
     if(['playback/progress','playback/state','playback/pause'].includes(event.type)){if(typeof event.buffering==='boolean')buffering=event.buffering;netInfo=mergeNet(netInfo,event);if(event.type==='playback/pause')link?.push(true);if(Number.isFinite(event.position))position=event.position;if(Number.isFinite(event.duration))duration=event.duration;if(typeof event.paused==='boolean')paused=event.paused;update();if(event.buffering)tell('ينتظر بيانات الفيديو…');else if(ready)tell('');}
     // Technical torrent stages stay in diagnostics; the player uses one quiet loading indicator.
+    if(event.type==='playback/diagnostic'){netInfo=addTrace(netInfo,event);return;}
     if(event.type==='playback/stage'){netInfo=markStage(netInfo,event.stage);const p=STAGE_PROGRESS[event.stage];if(p>loadProgress){loadProgress=p;link?.push(true);if(roomState?.visible)void lobbyUi?.update({...roomState,progress:loadProgress});}return;}
     if(event.type==='playback/seek'){seekDone++;link?.push(true);}
     if(event.type==='playback/retrying')return;

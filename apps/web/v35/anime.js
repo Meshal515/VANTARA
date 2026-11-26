@@ -2721,6 +2721,7 @@ export function createAnime(deps) {
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
         onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
+        onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('anime'); } } : {}),
         // من داخل مصدر: سيرفراته وحده، و«جرّب البدائل» يفتح العمل نفسه (هوية AniList) بكل المصادر على الحلقة نفسها

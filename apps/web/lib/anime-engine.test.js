@@ -361,3 +361,25 @@ describe('watchFacts', () => {
     expect(read).toHaveBeenCalledTimes(6);
   });
 });
+
+describe('topWarmer', () => {
+  it('إغلاق الورقة يهدّئ التسخين الخلفي مرة واحدة، ولا تسخين بعده', async () => {
+    const calls = [];
+    const rec = (name) => async (args) => { calls.push([name, args]); return { warming: 1 }; };
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { configure: async () => ({ ok: true, errors: [] }), warm: rec('warm'), warmBackground: rec('warmBackground'), torrentFacts: async () => ({ facts: {} }) } } };
+    try {
+      await configure({ force: true, fetchImpl: async () => ({ json: async () => ({}) }) });
+      const t = engine.topWarmer(() => {}, { every: 10_000, span: 1 });
+      t.top('s1', 'r0');
+      t.rows('s1', ['r1', 'r2']);
+      await new Promise((r) => setTimeout(r, 0));
+      t.stop();
+      t.rows('s1', ['r3']);
+      t.stop();
+      await new Promise((r) => setTimeout(r, 0));
+    } finally { delete globalThis.Capacitor; }
+    expect(calls.map(([n, a]) => [n, a.routes ?? a.route, a.stop ?? false])).toEqual([
+      ['warm', 'r0', false], ['warmBackground', ['r1', 'r2'], false], ['warmBackground', [], true],
+    ]);
+  });
+});

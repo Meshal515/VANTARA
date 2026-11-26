@@ -58,6 +58,35 @@ export const clock = (ms) => {
 const badgeOf = (q) => (!q ? 'HD' : q >= 2000 ? '4K' : q >= 1000 ? 'FHD' : q >= 700 ? 'HD' : `${q}p`);
 
 /** يبني الطبقة داخل doc ويعيد {update(state), root}. send(message) يرسل الأوامر لـplayer.js. */
+/**
+ * نص تشخيص البدء في ويندوز (مثل لوحة أندرويد): من الضغط حتى أول صورة، وهل كان مُسخَّنًا، ومراحل المحرك
+ * والمشغّل بزمنها. `net` من player.js: { tapAt, openAt, stages, trace: [{ stage, ms, mode, waitMs }] }.
+ * مراحل المحرك تُقاس من اختيار المصدر في عملية الخدمات (ساعة واحدة)، وما قبله «قبل الضغط» (التسخين).
+ */
+export function diagnosticText(net = {}) {
+  const st = net.stages ?? {}, trace = net.trace ?? [];
+  const s = (ms) => `${(ms / 1000).toFixed(2)} ث`;
+  const tap = Number.isFinite(net.tapAt) && Number.isFinite(net.openAt) ? net.openAt - net.tapAt : null;
+  const fromTap = (k) => (st[k] != null ? s((tap ?? 0) + st[k]) : '—');
+  const anchor = trace.find((e) => e.stage === 'source-selected');
+  const mode = anchor?.mode === 'prewarmed' ? 'مُسخَّن (بدأ قبل الضغط)' : anchor ? 'بارد (بلا تسخين)' : 'غير معروف';
+  const lines = [
+    'VANTARA ويندوز · تشخيص البدء',
+    `البدء: ${mode}`,
+    `من الضغط حتى بدء الخدمة: ${tap != null ? s(tap) : '—'}`,
+    `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى أول صورة: ${fromTap('first-frame') !== '—' ? fromTap('first-frame') : fromTap('ready')}`,
+  ];
+  if (anchor) {
+    lines.push('مراحل المحرك (من اختيار المصدر):');
+    for (const e of trace) {
+      const rel = e.ms - anchor.ms;
+      const extra = [e.mode && e.stage !== 'source-selected' ? e.mode : null, Number.isFinite(e.waitMs) ? `انتظار ${Math.round(e.waitMs)}ms` : null].filter(Boolean).join(' · ');
+      lines.push(`  ${e.stage}  ${rel < 0 ? `قبل الضغط ${s(-rel)}` : `+${s(rel)}`}${extra ? `  (${extra})` : ''}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const el = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
   const iconButton = (name, label, onClick, cls = '') => {
@@ -639,6 +668,13 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     const at = (k) => (st[k] != null ? `+${secs(st[k])}` : '—');
     const line = [`تجهيز ${secs(st['player-start'])}`, torrent ? `المحرك ${at('engine-ready')}` : null, torrent ? `تحميل ${at('downloading')}` : null, `المشغّل ${at('player-start')}`, `إطار ${at('ready')}`].filter(Boolean).join(' · ') + ' ث';
     body.append(metricRow('تسلسل البدء', line, 'soft', true));
+    // تشخيص كامل كالـAPK: من الضغط، ومُسخَّن أو بارد، ومراحل المحرك بزمنها؛ يُنسخ ويُرسل
+    const text = diagnosticText(n);
+    body.append(metricRow('البدء', text.split('\n')[1].replace('البدء: ', ''), 'soft', true));
+    const copy = sheetRow('نسخ التشخيص', 'للإرسال: المراحل بزمنها من الضغط حتى أول صورة', { onClick: () => {
+      Promise.resolve(globalThis.navigator?.clipboard?.writeText(text)).then(() => { copy.querySelector('small')?.replaceChildren('نُسخ'); }, () => { copy.querySelector('small')?.replaceChildren('تعذّر النسخ'); });
+    } });
+    body.append(copy);
     if (state.serverCode) body.append(metricRow('السيرفر', state.serverCode, 'mute'));
     body.append(sheetRow('إظهار القياس فوق الفيديو', 'زمن الاستجابة · السرعة · الجاهز', { on: chipOn(), onClick: () => {
       setChip(!chipOn());

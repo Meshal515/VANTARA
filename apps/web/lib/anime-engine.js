@@ -632,6 +632,14 @@ export async function best(session, prefer = null, waitMs = 45_000) {
 export async function warm(session, route) {
   try { return (await call('warm', { session, route }))?.warming === true; } catch { return false; }
 }
+/**
+ * الصفوف الظاهرة غير «المقترح» بترتيب الورقة: تسخين خلفي محدود (أندرويد). `[]` أو `stop` يهدّئه كله.
+ * بلا جسر أصلي: لا شيء.
+ */
+export async function warmBackground(session, routes, { stop = false } = {}) {
+  try { return (await call('warmBackground', { session, routes: routes ?? [], stop }))?.warming ?? 0; } catch { return 0; }
+}
+
 /** حقائق المحرك لتورنتات الجلسة المُسخَّنة: `{ routeId: { pieceLength, seeds, peers } }`. بلا جسر أصلي: `{}`. */
 export async function torrentFacts(session) {
   try { return (await call('torrentFacts', { session }))?.facts ?? {}; } catch { return {}; }
@@ -660,7 +668,8 @@ export function watchFacts(session, onFacts, { every = 1500, span = 20000, read 
 
 /**
  * «المقترح» في الورقة: يسخّنه ويتابع حقائق المحرك (حجم القطعة والسرب المقاس) لتدخل درجته.
- * `top(session, routeId)` لكل مقترح جديد، و`stop()` عند إغلاق الورقة.
+ * `top(session, routeId)` لكل مقترح جديد، و`rows(session, ids)` للصفوف الظاهرة (تسخين خلفي)،
+ * و`stop()` عند إغلاق الورقة: يهدّئ الخلفي ويترك «المقترح» لمدته (غالبًا هو ما يُشغَّل).
  */
 export function topWarmer(onFacts, options) {
   let watch = null, session = null, ended = false;
@@ -671,7 +680,16 @@ export function topWarmer(onFacts, options) {
       if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
       watch.poke();
     },
-    stop() { ended = true; watch?.stop(); watch = null; session = null; },
+    rows(s, ids) {
+      if (ended || !s) return;
+      void warmBackground(s, ids);
+      if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
+      watch.poke();
+    },
+    stop() {
+      if (!ended && session) void warmBackground(session, [], { stop: true });
+      ended = true; watch?.stop(); watch = null; session = null;
+    },
   };
 }
 

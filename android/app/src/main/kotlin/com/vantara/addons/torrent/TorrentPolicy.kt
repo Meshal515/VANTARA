@@ -234,6 +234,10 @@ object TorrentPolicy {
  */
 object TorrentPrefetch {
     const val MAX = 2
+    /** التسخين الخلفي للصفوف الظاهرة (غير «المقترح»): عددها، وسرعة كل واحد، وميزانية قطعته الأولى. */
+    const val BACKGROUND_MAX = 4
+    const val BACKGROUND_RATE = 1024 * 1024
+    const val BACKGROUND_BUDGET = 8L * 1024 * 1024
     /** طرفا الملف (3 قطع) لا يُجلبان مسبقًا إن تجاوزا هذا الحجم: بيانات الجوّال. */
     const val MAX_EDGE_BYTES = 12L * 1024 * 1024
     private val seedersMark = Regex("👤\\s*([0-9]{1,7})")

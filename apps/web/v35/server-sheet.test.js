@@ -4,7 +4,7 @@
  */
 import { parseHTML } from 'linkedom';
 import { expect, it, vi } from 'vitest';
-import { addonName, createServerSheet, describe as describeRoute, hostName, releaseGroup, sourceLabel } from './server-sheet.js';
+import { addonName, createServerSheet, describe as describeRoute, hostName, releaseGroup, sourceLabel, warmRows, warmScore } from './server-sheet.js';
 
 const TORR = 'addon|https://torrentio.strem.fun|com.stremio.torrentio.addon';
 const COMET = 'addon|https://comet.elfhosted.com|comet.elfhosted.com';
@@ -521,4 +521,44 @@ it('حقائق المحرك (حجم القطعة والسرب المقاس) تن
   // صفر مقاس بلا اتصال ليس دليل موت: يبقى المعلن
   ui.update({ routes: [big, small], facts: { small: { pieceLength: 1 << 20, seeds: 0, peers: 0 } }, settled: true, status: { text: '' } });
   expect(topName()).toContain('BBB');
+});
+
+it('ترتيب التسخين الخلفي: السرب 16 ثم حجم القطعة 12 ثم العربي 2، وما سربه 20 فأقل يُترك إن وُجد أقوى', () => {
+  const row = (id, seeders, { arabic = false, piece } = {}) => ({ r: { id }, d: { torrent: true, info: { seeders, arabic }, langs: [] }, m: piece ? { pieceLength: piece, seeds: seeders, peers: 3 } : undefined });
+  // السرب الأقوى وزنًا: 900 بقطعة 2MB فوق 40 بقطعة 512KB
+  expect(warmRows([row('small', 40, { piece: 512 << 10 }), row('big', 900, { piece: 2 << 20 })])).toEqual(['big', 'small']);
+  // لكن القطعة الضخمة (8MB = 16 ضعف 512KB قبل أول صورة) تخسر أمام سرب كافٍ (60) بقطعة صغيرة
+  expect(warmScore(row('a', 900, { piece: 8 << 20 }).d, row('a', 900, { piece: 8 << 20 }).m)).toBeCloseTo(19.4, 1);
+  expect(warmRows([row('small', 60, { piece: 512 << 10 }), row('big', 900, { piece: 8 << 20 })])).toEqual(['small', 'big']);
+  // حجم القطعة يحسم السرب المتقارب
+  expect(warmRows([row('p8', 400, { piece: 8 << 20 }), row('p1', 380, { piece: 1 << 20 })])).toEqual(['p1', 'p8']);
+  // العربي يحسم المتساوي فقط
+  expect(warmRows([row('en', 300), row('ar', 300, { arabic: true })])).toEqual(['ar', 'en']);
+  // قاعدة 20: الضعيف يُترك مع وجود أقوى، ويُسخَّن إن كان وحده
+  expect(warmRows([row('w', 5), row('s', 21), row('e', 20)])).toEqual(['s']);
+  expect(warmRows([row('w', 5), row('e', 20)])).toEqual(['e', 'w']);
+});
+
+it('الورقة ترسل الصفوف الظاهرة غير «المقترح» للتسخين الخلفي، لا النسخ الإضافية', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onWarmRows = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onWarmRows });
+    const routes = Array.from({ length: 9 }, (_, i) => tor(`Show.S01E01.1080p.WEB.x264-G${i}\n👤 ${100 + i * 50} 💾 1.4 GB ⚙️ Nyaa`, { id: `t${i}`, quality: 1080, infoHash: String(i).repeat(40) }));
+    ui.update({ routes, settled: true, status: { text: '' } });
+    vi.advanceTimersByTime(401);
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+    const ids = onWarmRows.mock.calls[0][0];
+    const top = body.querySelector('.ss-row--top');
+    const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')];
+    expect(shown.length).toBe(6);
+    // خمسة ظاهرة غير المقترح، ولا شيء من «نسخ إضافية»
+    expect(ids).toHaveLength(5);
+    expect(ids).not.toContain(routes.find((r) => top.textContent.includes(r.label.split('\n')[0].split('-').pop())).id);
+    // نفس القائمة في تحديث لاحق: لا إعادة
+    ui.update({ routes, settled: true, status: { text: '' } });
+    vi.advanceTimersByTime(1000);
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
 });
