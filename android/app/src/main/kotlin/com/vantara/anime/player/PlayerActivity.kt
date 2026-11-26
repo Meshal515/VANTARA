@@ -970,16 +970,31 @@ class PlayerActivity : Activity() {
     private var cuesDeferred = false
     /**
      * قفزة على مصدر بدأ بلا فهرس: Media3 يرجعه إلى البداية لأنه غير قابل للقفز، فنعيد تجهيزه بالفهرس عند الموضع
-     * المطلوب (القفزة بداية جديدة أصلًا). إن صار قابلًا للقفز (الفهرس قبل أول Cluster) تمر القفزة عادية.
+     * المطلوب. إن صار قابلًا للقفز (الفهرس قبل أول Cluster) تمر القفزة عادية.
      */
     private fun seekNeedsCues(positionMs: Long): Boolean {
         if (!cuesDeferred || !::player.isInitialized) return false
         val c = current ?: return false
-        if (player.isCurrentMediaItemSeekable) { cuesDeferred = false; return false }
         cuesDeferred = false
-        // بعد إعادة البناء: لا تكرار على هذا المصدر حتى لو بدأ من 0
-        main.post { if (current === c) start(c, positionMs.coerceAtLeast(1_000)) }
+        if (player.isCurrentMediaItemSeekable) return false
+        withCues(c, positionMs)
         return true
+    }
+
+    /**
+     * المصدر نفسه بفهرس الحاوية عند [positionMs]، لا بدء جديد: [start] يمسح ترجمات الإضافات المختارة ويعيد شاشة
+     * التحميل وتشخيص البدء، وهذا قفزة لا تشغيل. المعرّف ([activeMediaId]) والصوت الخارجي كما بدأ.
+     * تُعامل كقفزة لمراقب التوقف (setMediaSource لا يطلق DISCONTINUITY_REASON_SEEK).
+     */
+    private fun withCues(c: Candidate, positionMs: Long) {
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).deferTail(android.net.Uri.parse(c.url), false) }
+        val media = CandidateMediaSources.create(c, playbackDataSourceFactory(c), !retriedWithoutAudio, activeMediaId)
+        externalAudioUrls = media.externalAudioUrls
+        player.setMediaSource(media.mediaSource, positionMs.coerceAtLeast(0))
+        player.prepare()
+        seekRecovery.seeked(SystemClock.elapsedRealtime())
+        seekBudget.seek(c.url, SystemClock.elapsedRealtime())
+        watchStall()
     }
 
     private fun start(c: Candidate, positionMs: Long, withoutExternalAudio: Boolean = false) {
