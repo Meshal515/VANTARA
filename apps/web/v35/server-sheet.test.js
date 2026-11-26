@@ -562,3 +562,29 @@ it('الورقة ترسل الصفوف الظاهرة غير «المقترح» 
     expect(onWarmRows).toHaveBeenCalledTimes(1);
   } finally { vi.useRealTimers(); }
 });
+
+it('الفأرة على صف تورنت 120ms تسخّنه، والخروج يعيد «المقترح»، واللمس لا يسخّن', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onHover = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onHover });
+    const a = tor('Show.S01E01.1080p.WEB.x264-AAA\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'a', quality: 1080, infoHash: 'a'.repeat(40) });
+    const b = tor('Show.S01E01.1080p.WEB.x264-BBB\n👤 40 💾 1.4 GB ⚙️ Nyaa', { id: 'b', quality: 1080, infoHash: 'b'.repeat(40) });
+    ui.update({ routes: [a, b], settled: true, status: { text: '' } });
+    const rowOf = (tag) => [...body.querySelectorAll('.ss-row')].find((x) => x.textContent.includes(tag));
+    const fire = (node, type, pointerType) => { const e = new body.ownerDocument.defaultView.Event(type); Object.defineProperty(e, 'pointerType', { value: pointerType }); node.dispatchEvent(e); };
+    fire(rowOf('BBB'), 'pointerenter', 'touch');
+    vi.advanceTimersByTime(500);
+    expect(onHover).not.toHaveBeenCalled();
+    fire(rowOf('BBB'), 'pointerenter', 'mouse');
+    vi.advanceTimersByTime(119);
+    expect(onHover).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(onHover.mock.calls.map((c) => c[0].id)).toEqual(['b']);
+    fire(rowOf('BBB'), 'pointerleave', 'mouse');
+    vi.advanceTimersByTime(801);
+    // «المقترح» (900 مشارك) يعود مسخَّنًا
+    expect(onHover.mock.calls.map((c) => c[0].id)).toEqual(['b', 'a']);
+  } finally { vi.useRealTimers(); }
+});
