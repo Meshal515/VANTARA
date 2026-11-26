@@ -336,7 +336,8 @@ class TorrentEngine internal constructor(
             firstPieceAt = state?.firstPieceAt ?: 0L, fileBytes = state?.fileBytes ?: 0L, pieceBytes = state?.pieceBytes ?: 0,
             metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L,
             mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
-            warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0)
+            warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0,
+            firstPeerAt = state?.firstPeerAt ?: 0L, firstPayloadAt = state?.firstPayloadAt ?: 0L)
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -503,6 +504,17 @@ class TorrentEngine internal constructor(
         @Volatile var warmedPieces = 0; private set
         /** للتشخيص: كم مشاركًا بطيئًا حُجب مؤقتًا لتتحرر قطعة عالقة. */
         @Volatile var swaps = 0
+        /** خط البدء (elapsedRealtime): أول مشارك متصل وأول بيانات من الشبكة لهذا التورنت. */
+        @Volatile var firstPeerAt = 0L; private set
+        @Volatile var firstPayloadAt = 0L; private set
+        /** يُستدعى أثناء انتظار القطعة فقط حتى يُعرف الاثنان، فلا كلفة بعدها. */
+        fun sampleStart(handle: TorrentHandle) {
+            if (firstPeerAt != 0L && firstPayloadAt != 0L) return
+            val st = runCatching { handle.status() }.getOrNull() ?: return
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (firstPeerAt == 0L && st.numPeers() > 0) firstPeerAt = now
+            if (firstPayloadAt == 0L && st.totalPayloadDownload() > 0) firstPayloadAt = now
+        }
         /** بنية بداية ملف MKV كما مرّت بالقارئ؛ null لغير MKV. */
         @Volatile var head: MkvHead? = null; private set
         val fileBytes: Long get() = file?.size ?: 0L
@@ -769,6 +781,7 @@ class TorrentEngine internal constructor(
                     val handle = torrent ?: throw IOException("Torrent session ended")
                     if (handle.status().errorCode().value() != 0) throw IOException("Torrent host/download failure")
                     if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
+                    sampleStart(handle)
                     // A 4K piece can be 16 MB: fail on a stalled swarm, not on a slow but moving one.
                     // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
                     // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).

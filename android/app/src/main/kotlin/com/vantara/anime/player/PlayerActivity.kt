@@ -611,6 +611,7 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        diag.launchedAt = intent?.getLongExtra(EXTRA_LAUNCHED_AT, 0L) ?: 0L
         // مشغّل الموسم الجديد ظهر: القديم (تحته بشاشة الغرفة) يُغلق الآن، فلا تظهر صفحة بينهما
         handoffFrom?.get()?.takeIf { it !== this && it.handingOff && !it.isFinishing }?.finish()
         handoffFrom = null
@@ -2410,7 +2411,7 @@ class PlayerActivity : Activity() {
         val url = current?.url
         val facts = t?.let {
             val blocks = if (it.waitingPiece >= 0 && url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).pieceBlocks(android.net.Uri.parse(url), it.waitingPiece) }.getOrNull() else null
-            PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps)
+            PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps, it.firstPeerAt, it.firstPayloadAt)
         }
         val f = player.videoFormat
         val groups = player.currentTracks.groups
@@ -2889,5 +2890,8 @@ class PlayerActivity : Activity() {
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_LAUNCH, json.encodeToString(Launch.serializer(), launch))
                 .putExtra(EXTRA_SESSION, launch.session)
+                .putExtra(EXTRA_LAUNCHED_AT, android.os.SystemClock.elapsedRealtime())
+        /** لحظة الضغط على التشغيل، لخط البدء في التشخيص (من الضغط حتى أول صورة). */
+        const val EXTRA_LAUNCHED_AT = "vantara.launchedAt"
     }
 }
