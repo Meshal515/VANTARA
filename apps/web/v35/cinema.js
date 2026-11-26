@@ -2449,6 +2449,7 @@ export function createCinema(deps) {
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
+        onTop: (r) => { if (sheet.session && !sheet.closed) void engine.warm(sheet.session, r.id); },
         onRetry: () => { deps.closeSheet(); dropWarm(); play(m, season, n, position); },
         onUnavailable: (r) => toast(validity(r).reason ?? routeFailureMessage(r.reason), 5000),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
