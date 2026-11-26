@@ -656,7 +656,8 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   function paintNetwork(body) {
     const { n, st, torrent, prep, aheadS } = netFacts();
     body.replaceChildren();
-    body.append(metricRow(torrent ? 'تجهيز التورنت' : 'زمن البدء', prep != null ? `${prep} ms` : 'لم يُقس بعد', prep == null ? 'mute' : prep < 300 ? 'ok' : prep < 800 ? 'warn' : 'bad'));
+    const warmed = (n.trace ?? []).some((e) => e.stage === 'source-selected' && e.mode === 'prewarmed');
+    body.append(metricRow(torrent ? 'تجهيز التورنت' : 'زمن البدء', prep != null ? `${prep} ms` : warmed ? 'مُسخَّن قبل الضغط' : 'لم يُقس بعد', prep == null ? (warmed ? 'ok' : 'mute') : prep < 300 ? 'ok' : prep < 800 ? 'warn' : 'bad'));
     body.append(metricRow('السرعة الآن', mbps(n.inputBps)));
     body.append(metricRow('جاهز أمامك', aheadS != null ? `${aheadS} ثانية` : '—', aheadS == null ? 'mute' : aheadS >= 15 ? 'ok' : aheadS >= 5 ? 'warn' : 'bad'));
     if (torrent && Number.isFinite(n.diskAheadMs)) { const m = Math.floor(n.diskAheadMs / 60000), s = Math.floor(n.diskAheadMs / 1000) % 60; body.append(metricRow('جاهز على القرص', m ? `${m} د ${s} ث` : `${s} ثانية`, 'soft')); }

@@ -429,6 +429,8 @@ for (const path of ["docs/audits/TOGETHER_AUDIT_2026-11-15.md", "docs/audits/ADD
 seams.add("android/app/src/test/java/com/vantara/addons/torrent/TorrentPolicyTest.kt");
 // eea70b7 على فرع Debug (26 نوفمبر): خلفية نافذة تحديد النص شفافة في سمتي الإقلاع والتشغيل
 seams.add("android/app/src/main/res/values/styles.xml");
+// تشخيص بدء ويندوز (26 نوفمبر): قيمة prewarmed في التتبع الآمن، وإعادة لقطة التتبع للوحة المشغّل بعد preparing
+for (const path of ["apps/desktop/src/startup-trace.mjs", "apps/desktop/src/startup-trace.test.mjs"]) seams.add(path);
 for (const path of ["apps/desktop/source-browser.cjs", "apps/desktop/source-browser.test.cjs", "apps/desktop/source-smoke.cjs", "apps/desktop/main.cjs", "apps/desktop/src/services.mjs", "apps/desktop/src/services.test.mjs", "apps/web/desktop/source-fetcher.js", ".github/workflows/windows-debug.yml"]) seams.add(path);
 // فصول Madara المقسومة صفحات (?t=N): Berserk في مانجا العاشق 386 لا 50 (طلب المالك، 15 نوفمبر)
 for (const path of ["apps/web/pwa/sources/engines/madara.js", "apps/web/pwa/sources/engines/madara.test.js"]) seams.add(path);
