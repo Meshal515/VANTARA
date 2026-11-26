@@ -194,6 +194,22 @@ object TorrentPolicy {
         return PieceRead(piece.toInt(), offset, minOf(count.toLong(), file.size - position, (pieceLength - offset).toLong()).toInt())
     }
     /** First piece and the last two of the file: MP4 moov, MKV cues and AVI idx1 live at one end. */
+    /**
+     * تعديل مواعيد النافذة بالفرق ([deadlineDiff]): ما خرج منها يُلغى موعده، وما دخل يأخذ موعده، والقطعة
+     * التي يقرؤها المشغّل الآن (موعد 0) يُعاد ضبط موعدها دائمًا. السبب من كود libtorrent 2.0.12 نفسه
+     * (torrent.cpp: set_piece_deadline وcancel_non_critical): إذا فرغت قائمة القطع الحرجة ثم أُضيفت قطعة،
+     * تُلغى كل الطلبات غير الحرجة عند كل المشاركين. مسح المواعيد كلها ثم إعادتها (النافذة القديمة) يفرغ
+     * القائمة عند كل تقدّم قطعة، فتُلغى طلبات ما قدّام النافذة في كل مرة. وإعادة ضبط قطعة موجودة لا تصفّر
+     * مؤقت إعادة الطلب فيها (first_requested/last_requested) بخلاف مسحها وإضافتها من جديد.
+     */
+    data class DeadlineDiff(val reset: List<Int>, val set: List<Pair<Int, Int>>, val keep: Set<Int>)
+    fun deadlineDiff(current: Set<Int>, wanted: List<Pair<Int, Int>>): DeadlineDiff {
+        val keep = wanted.mapTo(LinkedHashSet()) { it.first }
+        val reset = current.filter { it !in keep }
+        val set = wanted.filter { (piece, deadline) -> deadline == 0 || piece !in current }
+        return DeadlineDiff(reset, set, keep)
+    }
+
     fun edges(file: TorrentFile, pieceLength: Int): List<Int> {
         if (file.size <= 0) return emptyList()
         val first = (file.offset / pieceLength).toInt()

@@ -1,0 +1,111 @@
+--- a/src/torrent.cpp	2026-11-25 23:19:33.310495795 +0000
++++ b/src/torrent.cpp	2026-11-25 23:32:15.404750423 +0000
+@@ -146,6 +146,92 @@
+ 		static int const value = vantara_env_int("VANTARA_LT_STALL_CAP_MS");
+ 		return value;
+ 	}
++	int vantara_hedge_ms()
++	{
++		static int const value = vantara_env_int("VANTARA_LT_HEDGE_MS");
++		return value;
++	}
++
++	// VANTARA (urgent-hedge): proactive, bounded duplicate requests for the head
++	// of the piece the player is blocked on. Stock libtorrent only re-requests a
++	// busy block after the piece "times out" and stops issuing critical requests
++	// once the best peer's queue exceeds 2 s, so one slow peer holding the next
++	// blocks stalls playback while the rest of the swarm is idle for that piece.
++	// VANTARA delivers only whole, hash-verified pieces, so the piece waits for
++	// its LAST block, wherever it sits (unlike a player fed unverified blocks
++	// from the read position, which only cares about the next few). Each tick:
++	// for every unfinished block of the head piece, estimate when its holder will
++	// deliver it (queue position / payload rate); if that is at least
++	// VANTARA_LT_HEDGE_MS away, ask the peer that can deliver it in under half
++	// that time. Never more than two owners per block and at most
++	// max_hedges_per_tick new duplicates, so the cost stays bounded.
++	void vantara_hedge_blocks(piece_picker& picker, piece_index_t const piece
++		, std::vector<peer_connection*> const& candidates, int const block_bytes
++		, std::set<peer_connection*>& with_requests)
++	{
++		int constexpr max_hedges_per_tick = 32;
++		int constexpr max_owners = 2;
++		std::int64_t const threshold = vantara_hedge_ms();
++		auto const queue = picker.get_download_queue();
++		auto const dp = std::find_if(queue.begin(), queue.end()
++			, [piece](piece_picker::downloading_piece const& d) { return d.index == piece; });
++		if (dp == queue.end()) return;
++		auto const blocks = picker.blocks_for_piece(*dp);
++		int hedged = 0;
++		for (int k = 0; k < int(blocks.size()) && hedged < max_hedges_per_tick; ++k)
++		{
++			auto const& info = blocks[k];
++			if (info.state == piece_picker::block_info::state_finished
++				|| info.state == piece_picker::block_info::state_writing)
++				continue;
++			if (info.state != piece_picker::block_info::state_requested
++				|| info.num_peers >= max_owners)
++				continue;
++			piece_block const block(piece, k);
++			auto* holder = info.peer != nullptr
++				? static_cast<peer_connection*>(info.peer->connection) : nullptr;
++			std::int64_t eta = std::numeric_limits<std::int32_t>::max();
++			if (holder != nullptr)
++			{
++				auto const& dq = holder->download_queue();
++				auto const it = std::find_if(dq.begin(), dq.end(), aux::has_block(block));
++				std::int64_t ahead;
++				if (it != dq.end()) ahead = (it - dq.begin()) + 1;
++				else
++				{
++					auto const& rq = holder->request_queue();
++					auto const jt = std::find_if(rq.begin(), rq.end(), aux::has_block(block));
++					ahead = std::int64_t(dq.size())
++						+ (jt != rq.end() ? (jt - rq.begin()) + 1 : std::int64_t(rq.size()) + 1);
++				}
++				int const rate = std::max(holder->statistics().download_payload_rate(), 1);
++				eta = ahead * block_bytes * 1000 / rate;
++			}
++			if (eta < threshold) continue;
++			peer_connection* best = nullptr;
++			std::int64_t best_eta = eta / 2;
++			for (auto* c : candidates)
++			{
++				if (c == holder || !c->has_piece(piece)) continue;
++				auto const& cdq = c->download_queue();
++				auto const& crq = c->request_queue();
++				if (std::find_if(cdq.begin(), cdq.end(), aux::has_block(block)) != cdq.end()) continue;
++				if (std::find_if(crq.begin(), crq.end(), aux::has_block(block)) != crq.end()) continue;
++				int const crate = c->statistics().download_payload_rate();
++				std::int64_t ceta;
++				if (crate > 0) ceta = (std::int64_t(cdq.size()) + 1) * block_bytes * 1000 / crate;
++				else if (cdq.empty() && crq.empty()) ceta = threshold / 2; // idle, speed not yet known
++				else continue; // busy with unknown speed: no evidence it is faster
++				if (ceta < best_eta) { best = c; best_eta = ceta; }
++			}
++			if (best != nullptr
++				&& best->add_request(block, peer_connection::time_critical | peer_connection::busy))
++			{
++				with_requests.insert(best);
++				++hedged;
++			}
++		}
++	}
+ }
+ namespace {
+ 
+@@ -11178,6 +11264,15 @@
+ 				break;
+ 		}
+ 
++		if (vantara_hedge_ms() > 0 && !m_time_critical_pieces.empty() && has_picker())
++		{
++			std::vector<peer_connection*> candidates;
++			for (auto* c : m_connections)
++				if (c->can_request_time_critical()) candidates.push_back(c);
++			vantara_hedge_blocks(*m_picker, m_time_critical_pieces.front().piece
++				, candidates, block_size(), peers_with_requests);
++		}
++
+ 		// commit all the time critical requests
+ 		for (auto p : peers_with_requests)
+ 		{
