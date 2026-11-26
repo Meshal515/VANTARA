@@ -66,6 +66,8 @@ jobs:
       - name: OpenSSL (${{ matrix.openssl }})
         run: |
           set -euo pipefail
+          # OpenSSL يجد أدوات NDK عبر ANDROID_NDK_ROOT (Dockerfile jlibtorrent يضبط ANDROID_NDK_HOME عامًا)
+          export ANDROID_NDK_ROOT=/src/android-ndk ANDROID_NDK_HOME=/src/android-ndk
           export ANDROID_TOOLCHAIN=/src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64
           export AR=$ANDROID_TOOLCHAIN/bin/llvm-ar RANLIB=$ANDROID_TOOLCHAIN/bin/llvm-ranlib
           export CC=$ANDROID_TOOLCHAIN/bin/${{ matrix.clang }}${ANDROID_API}-clang
@@ -78,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           cd /src/frostwire-jlibtorrent/swig
-          export CONTINUE_BUILD=1 PROCEED_WITH_BUILD=1
+          export CONTINUE_BUILD=1 PROCEED_WITH_BUILD=1 ANDROID_NDK_ROOT=/src/android-ndk ANDROID_NDK_HOME=/src/android-ndk
           ./build-android-${{ matrix.abi }}.sh --build-only 2>&1 | grep -E 'error|warning: unused|\.so|failed|^\.\.\.' | tail -40 || true
           lib=bin/release/android/${{ matrix.jni }}/libjlibtorrent.so
           test -s "$lib"
