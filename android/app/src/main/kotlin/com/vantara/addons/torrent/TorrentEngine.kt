@@ -44,6 +44,15 @@ class TorrentEngine internal constructor(
     private val connectivity = context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
     /** Wi-Fi أو إيثرنت (غير محسوبة). عند الشك: محدودة، فلا تُنزَّل قطع قبل الاختيار. */
     private fun unmetered(): Boolean = runCatching { connectivity?.isActiveNetworkMetered == false }.getOrDefault(false)
+    /**
+     * استئناف تورنت أوقفه تسخين منتهٍ أو خمول: الإيقاف قطع كل المشاركين، والاستئناف وحده لا يسأل المتتبعات وDHT حتى
+     * موعدها، فيبدأ بالقلة المعروفة ثم «يكثرون فجأة» (عيّنة المالك على ويندوز: أول صورة +20 ث). إعلان فوري كالإضافة الأولى.
+     */
+    private fun resumeAnnounced(handle: TorrentHandle) = runCatching {
+        val wasPaused = handle.flags().and_(TorrentFlags.PAUSED).nonZero()
+        handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume()
+        if (wasPaused) { handle.forceReannounce(); handle.forceDHTAnnounce() }
+    }
     @Volatile private var connectTimeoutApplied = -1
     /**
      * مهلة اتصال المشارك حسب الشبكة: 3 ث على Wi-Fi و15 على بيانات الجوال (مصافحتها أبطأ، و7 ث كانت تُسقط
@@ -251,8 +260,8 @@ class TorrentEngine internal constructor(
         }
         if (!state.warm(until)) return
         val handle = state.handle(stopped, request)
-        // مقبض موجود يعود كما هو؛ إن هدّأه تسخين سابق (cool ← pause) فهو موقوف: إعادة التسخين تستأنفه
-        runCatching { handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
+        // مقبض موجود يعود كما هو؛ إن هدّأه تسخين سابق (cool ← pause) فهو موقوف: إعادة التسخين تستأنفه وتعلن فورًا
+        resumeAnnounced(handle)
         state.limitWhileWarm(handle, if (bg) TorrentPrefetch.BACKGROUND_RATE else -1)
         val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
         val selected = inspect(state, info, request)
@@ -496,7 +505,8 @@ class TorrentEngine internal constructor(
             tuneConnectTimeout()
             val handle = state.handle(stopped, request)
             // مشغّل حقيقي: بلا حد اتصالات التسخين المسبق، ويعمل حتى لو أوقفه تسخين/خمول سابق قبل اكتمال metadata
-            runCatching { handle.swig().set_max_connections(-1); handle.setDownloadLimit(-1); handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
+            runCatching { handle.swig().set_max_connections(-1); handle.setDownloadLimit(-1) }
+            resumeAnnounced(handle)
             val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
             state.metadataReady()
             val selected = inspect(state, info, request)
