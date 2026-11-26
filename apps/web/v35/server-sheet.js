@@ -238,7 +238,7 @@ export function factDate(v) {
 /**
  * يبني الورقة داخل `body` ويعيد {update, best, status, body, scroll}.
  *
- * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onTop(r), onWarmRows(ids), onRetry(), onUnavailable(r),
+ * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onTop(r), onWarmRows(ids), onHover(r), onRetry(), onUnavailable(r),
  *      selectable(r), pending(r), dead(r), sourceName(r), prefer, directLang, extraFoot[] }
  * media: { title, logo, backdrop, backdropFallback, backdropPosition, code ('S01E02'),
  *          label ('الموسم 1 · الحلقة 2'), episodeTitle, description, rating: {value, label},
@@ -647,6 +647,28 @@ export function createServerSheet(body, o) {
   let topTimer = 0, warmedTop = null;
   // الصفوف الظاهرة غير «المقترح»: تسخين خلفي بترتيب warmRows، بعد أن تثبت 400ms، وحين تتغير فقط
   let rowsTimer = null, rowsKey = '';
+  // الفأرة على صف تورنت 120ms: يُسخَّن هو (الضغط غالبًا بعد نصف ثانية)، والخروج من الصفوف يعيد «المقترح».
+  // الفأرة وحدها (pointerType mouse): اللمس لا يمر فوق الصفوف، وتطبيق الجوال يبقى كما هو
+  let hoverTimer = null, hovered = null;
+  const routeById = (id) => (last?.routes ?? []).find((x) => x.id === id) ?? null;
+  const hoverRow = (id) => {
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      if (destroyed || !o.onHover) return;
+      const cur = routeById(id);
+      if (!cur || !view(cur).torrent || !isSelectable(cur) || hovered === id) return;
+      hovered = id; o.onHover(cur);
+    }, 120);
+  };
+  const leaveRows = () => {
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      if (destroyed || !o.onHover || hovered == null) return;
+      hovered = null;
+      const top = topId != null ? routeById(topId) : null;
+      if (top && view(top).torrent) o.onHover(top);
+    }, 800);
+  };
   const announceRows = (ids) => {
     if (!o.onWarmRows) return;
     const key = ids.join('|');
@@ -670,6 +692,9 @@ export function createServerSheet(body, o) {
       b.type = 'button';
       b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><i class="ss-ico" aria-hidden="true"></i><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
       rows.set(r.id, b);
+      const id = r.id;
+      b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') hoverRow(id); });
+      b.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') leaveRows(); });
     }
     const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
     const top = r.id === topId;
@@ -1086,6 +1111,7 @@ export function createServerSheet(body, o) {
     clearTimeout(settleTimer);
     clearTimeout(topTimer);
     clearTimeout(rowsTimer);
+    clearTimeout(hoverTimer);
     for (const id of frames) globalThis.cancelAnimationFrame?.(id);
     frames.clear();
     for (const unsubscribe of subscriptions) unsubscribe();
