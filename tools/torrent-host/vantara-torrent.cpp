@@ -285,7 +285,9 @@ public:
         s.set_bool(lt::settings_pack::close_redundant_connections, false);
         s.set_int(lt::settings_pack::connection_speed, 200);
         s.set_int(lt::settings_pack::torrent_connect_boost, 100);
-        s.set_int(lt::settings_pack::peer_connect_timeout, 15);
+        // 3 ث (كان 15): مشارك ميت من DHT أو متتبع قديم يحجز مكانه حتى المهلة. stall-bench بثلاثين ميتًا وحد اتصالات
+        // 24: أول قطعة 16 ث بمهلة 15 و4.0 ث بمهلة 3. شبكة الكمبيوتر سلكية أو Wi-Fi (الجوال يبقي 15 على بيانات الجوال)
+        s.set_int(lt::settings_pack::peer_connect_timeout, 3);
         s.set_int(lt::settings_pack::handshake_timeout, 15);
         s.set_int(lt::settings_pack::tracker_receive_timeout, 6);
         s.set_int(lt::settings_pack::tracker_completion_timeout, 15);
