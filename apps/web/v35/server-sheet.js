@@ -539,6 +539,13 @@ export function createServerSheet(body, o) {
     views.set(r.id, { key, d });
     return d;
   };
+  // حقائق المحرك للمُسخَّن (حجم القطعة والسرب المقاس) تدخل درجة «المقترح» ومكان الصف الجديد فقط؛
+  // الصف الظاهر لا يتحرك بها
+  let measured = {};
+  const scoreOf = (r) => {
+    const m = measured[r.id];
+    return rank(r, m ? { ...view(r), measured: m } : view(r));
+  };
 
   const section = (cls, title, sub) => {
     const s = el('section', `an-srv-group ${cls}`);
@@ -907,12 +914,13 @@ export function createServerSheet(body, o) {
   function update(model) {
     if (destroyed) return;
     last = model;
+    measured = model.facts ?? {};
     const routes = oneTorrent(model.routes ?? []);
     paintFilters(routes);
     const shown = routes.filter(passes);
     const ready = shown.filter(isSelectable);
     const anyReady = routes.some(isSelectable);
-    const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
+    const scored = ready.map((r) => ({ r, s: scoreOf(r) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
     const top = scored[0]?.r ?? null;
     topId = top?.id ?? null;
     announceTop(top);
@@ -940,7 +948,7 @@ export function createServerSheet(body, o) {
     const live = shown.filter((r) => isSelectable(r) || (placed.has(r.id) && folded.get(r.id) !== false))
     const waiting = shown.filter((r) => isPending(r) && !placed.has(r.id))
     const fresh = live.filter((r) => !placed.has(r.id))
-      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? rank(r, view(r)) : -1e9 }))
+      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? scoreOf(r) : -1e9 }))
       .sort((a, b) => b.s - a.s || (a.d.torrent && b.d.torrent ? torrentOrder(a, b) : 0));
     for (const { r } of fresh) placed.set(r.id, ++placedSeq);
     const bySeq = (a, b) => placed.get(a.id) - placed.get(b.id);

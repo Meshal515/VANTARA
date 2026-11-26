@@ -502,3 +502,23 @@ it('المقترح تورنت يُعلن للتسخين مرة واحدة بعد
     expect(onTop2).not.toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
 });
+
+it('حقائق المحرك (حجم القطعة والسرب المقاس) تنقل «المقترح» بين المتقاربين ولا تحرك الصفوف', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const big = tor('Show.S01E01.1080p.WEB.x264-AAA\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'big', quality: 1080, infoHash: 'a'.repeat(40) });
+  const small = tor('Show.S01E01.1080p.WEB.x264-BBB\n👤 850 💾 1.4 GB ⚙️ Nyaa', { id: 'small', quality: 1080, infoHash: 'b'.repeat(40) });
+  const order = () => [...body.querySelectorAll('.ss-group--torrent .ss-row')].map((b) => (b.textContent.includes('AAA') ? 'AAA' : b.textContent.includes('BBB') ? 'BBB' : '?'));
+  const topName = () => body.querySelector('.ss-row--top')?.textContent ?? '';
+  ui.update({ routes: [big, small], settled: true, status: { text: '' } });
+  const before = order();
+  expect(before).toEqual(['AAA', 'BBB']);
+  expect(topName()).toContain('AAA');
+  // المُسخَّن الأول قطعه 8MB والثاني 1MB، والسرب المقاس متقارب: الأصغر قطعةً يبدأ أسرع
+  ui.update({ routes: [big, small], facts: { big: { pieceLength: 8 << 20, seeds: 700, peers: 12 }, small: { pieceLength: 1 << 20, seeds: 650, peers: 10 } }, settled: true, status: { text: '' } });
+  expect(topName()).toContain('BBB');
+  expect(order()).toEqual(before);
+  // صفر مقاس بلا اتصال ليس دليل موت: يبقى المعلن
+  ui.update({ routes: [big, small], facts: { small: { pieceLength: 1 << 20, seeds: 0, peers: 0 } }, settled: true, status: { text: '' } });
+  expect(topName()).toContain('BBB');
+});

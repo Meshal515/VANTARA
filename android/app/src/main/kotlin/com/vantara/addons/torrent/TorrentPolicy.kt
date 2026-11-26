@@ -88,6 +88,8 @@ data class TorrentStats(
     /** خط البدء: أول مشارك متصل وأول بيانات من الشبكة (elapsedRealtime، 0 = لم يحدث). */
     val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
 )
+/** ما قاسه المحرك لتورنت: حجم القطعة، والسرب (باذرون معروفون، -1 مجهول)، والمتصلون الآن. */
+data class TorrentFacts(val pieceLength: Int, val swarmSeeds: Int, val peers: Int)
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
 /** Pure bounds/selection rules, shared by native loader and regression tests. */

@@ -334,6 +334,19 @@ class TorrentEngine internal constructor(
     /** Routing-table size: 0 for a long time means the device cannot reach the BitTorrent network at all. */
     fun dhtNodes(): Long = if (managerHolder.isInitialized()) runCatching { manager.dhtNodes() }.getOrDefault(0L) else 0L
     /** Live swarm facts for a ticket: what Stremio shows while buffering. Null before the session exists. */
+    /**
+     * حقائق مقاسة لتورنت في المحرك الآن (مُسخَّن أو يعمل): حجم القطعة من البيانات الوصفية، والسرب كما رآه المحرك
+     * (أكبر من رد المتتبع num_complete والباذرين المعروفين list_seeds) والمتصلون. null قبل البيانات الوصفية.
+     * لـ«المقترح» في ورقة السيرفرات: زمن أول قطعة ≈ حجم القطعة ÷ المعدل، والمعلن في عنوان الإضافة قد يكون قديمًا.
+     */
+    fun facts(uri: Uri): TorrentFacts? {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
+        if (!managerHolder.isInitialized()) return null
+        val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
+        val info = runCatching { handle.torrentFile() }.getOrNull()?.takeIf { it.isValid } ?: return null
+        val status = runCatching { handle.status() }.getOrNull() ?: return null
+        return TorrentFacts(info.pieceLength(), maxOf(status.numComplete(), status.listSeeds()), status.numPeers())
+    }
     fun stats(uri: Uri): TorrentStats? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
         if (!managerHolder.isInitialized()) return null

@@ -338,3 +338,26 @@ describe('Glass في المشغّل الأصلي', () => {
     expect((await run(null)).material).toBeUndefined();
   });
 });
+
+describe('watchFacts', () => {
+  afterEach(() => vi.useRealTimers());
+  it('يقرأ حقائق المحرك حتى ينتهي الامتداد، ويُبلغ عند التغير فقط، ويتوقف نهائيًا', async () => {
+    vi.useFakeTimers();
+    const seen = [];
+    let n = 0;
+    const read = vi.fn(async () => (++n < 3 ? {} : { r1: { pieceLength: 1 << 20, seeds: 40, peers: 6 } }));
+    const w = engine.watchFacts('s1', (f) => seen.push(f), { every: 100, span: 450, read });
+    w.poke();
+    await vi.advanceTimersByTimeAsync(1000);
+    // 100..500ms: خمس قراءات ثم يتوقف (الامتداد 450ms)
+    expect(read).toHaveBeenCalledTimes(5);
+    expect(seen).toEqual([{}, { r1: { pieceLength: 1 << 20, seeds: 40, peers: 6 } }]);
+    w.poke();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(read).toHaveBeenCalledTimes(6);
+    w.stop();
+    w.poke();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).toHaveBeenCalledTimes(6);
+  });
+});

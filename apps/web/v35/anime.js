@@ -2702,6 +2702,9 @@ export function createAnime(deps) {
         }
       };
 
+      // المقترح يُسخَّن، وحقائق المحرك عنه (حجم القطعة والسرب المقاس) تعود لدرجته
+      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); });
+      off.push(() => tops.stop());
       const ui = createServerSheet(body, {
         el,
         kicker: unitLabel(m, n),
@@ -2717,7 +2720,7 @@ export function createAnime(deps) {
         onBack: () => deps.closeSheet(),
         onPick: (r) => playRoute(r),
         onBest: () => playBest(),
-        onTop: (r) => { if (sheet.session && !sheet.closed) void engine.warm(sheet.session, r.id); },
+        onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('anime'); } } : {}),
         // من داخل مصدر: سيرفراته وحده، و«جرّب البدائل» يفتح العمل نفسه (هوية AniList) بكل المصادر على الحلقة نفسها
@@ -2776,6 +2779,7 @@ export function createAnime(deps) {
         if (retryWait) cooldownTimer = setTimeout(paint, 1000);
         ui.update({
           routes: sheet.routes,
+          facts: sheet.facts,
           busy: sheet.busy,
           settled: sheet.done,
           missing: sheet.work === false,

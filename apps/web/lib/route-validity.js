@@ -31,6 +31,17 @@ function seedersOf(r) {
 }
 
 /**
+ * السرب كما قاسه المحرك بعد التسخين (رد المتتبع والباذرون المعروفون)، أصدق من رقم العنوان القديم.
+ * لا يُعتمد إلا إن وصل المحرك للسرب فعلًا (باذر أو متصل)، وإلا فالمعلن: صفر مبكر ليس دليل موت.
+ */
+function measuredSeeds(d) {
+  const m = d?.measured;
+  if (!d?.torrent || !m) return null;
+  const seeds = Number(m.seeds), peers = Number(m.peers);
+  return Number.isFinite(seeds) && (seeds > 0 || peers > 0) ? Math.max(0, seeds) : null;
+}
+
+/**
  * حالة الرابط وسببها: `{ state, reason }`. `reason` جملة عربية لغير المتاح فقط.
  * `now` للاختبار (انتهاء صلاحية الروابط المؤقتة).
  */
@@ -99,6 +110,7 @@ export function failureText(reason) {
 const QUALITY = { 1080: 1, 2160: 0.8, 1440: 0.8, 720: 0.6, 480: 0.2 };
 const CODEC = { 'H.264': 1, HEVC: 0.6, AV1: 0.1 };
 const GB = 1024 ** 3;
+const MB = 1024 ** 2;
 
 /**
  * معايير «شغّل الأفضل» وأوزانها. كل معيار يعطي 0..1 والوزن يضربه؛ المجموع هو الدرجة.
@@ -118,12 +130,22 @@ export const RANK_CRITERIA = Object.freeze([
     id: 'start', label: 'سرعة البدء: زمن الفحص للمباشر، والمشاركون للتورنت', weight: 250,
     score: (r, d) => {
       if (d.torrent) {
-        const s = d.info?.seeders ?? seedersOf(r);
+        const s = measuredSeeds(d) ?? d.info?.seeders ?? seedersOf(r);
         return Number.isFinite(s) ? Math.min(1, Math.log10(1 + Math.max(0, s)) / 3) : 0;
       }
       const ms = Number(r.probeMs);
       if (!Number.isFinite(ms) || ms <= 0) return 0.5;
       return ms < 1500 ? 1 : ms < 4000 ? 0.7 : 0.4;
+    },
+  },
+  {
+    // زمن أول قطعة ≈ حجمها ÷ المعدل، ولا يُسلَّم شيء قبل اكتمالها والتحقق منها: 8MB تنتظر ثمانية أضعاف 1MB.
+    // يُعرف بعد البيانات الوصفية (التسخين)، فالمجهول وسط معلن. يحسم بين المتقاربين ولا يتخطى العربية أو الجودة.
+    id: 'piece', label: 'حجم القطعة: الأصغر يبدأ أسرع (يُقاس بعد التسخين)', weight: 150,
+    score: (r, d) => {
+      const len = Number(d.measured?.pieceLength);
+      if (!d.torrent || !Number.isFinite(len) || len <= 0) return 0.5;
+      return len <= MB ? 1 : len <= 2 * MB ? 0.85 : len <= 4 * MB ? 0.6 : len <= 8 * MB ? 0.3 : 0;
     },
   },
   {

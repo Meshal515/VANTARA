@@ -250,6 +250,25 @@ class AnimeEnginePlugin : Plugin() {
         call.resolve(JSObject().put("warming", url != null))
     }
 
+    /**
+     * حقائق تورنتات الجلسة التي في المحرك الآن (المُسخَّنة): `{ facts: { routeId: { pieceLength, seeds, peers } } }`.
+     * الورقة تستعملها في درجة «المقترح» وحدها (لا ترتيب الصفوف). لا اتصال جديد: قراءة حالة فقط.
+     */
+    @PluginMethod
+    fun torrentFacts(call: PluginCall) {
+        val out = JSObject()
+        val prep = engine.prepared(call.getString("session") ?: "")
+        if (prep != null) runCatching {
+            val torrent = com.vantara.addons.torrent.TorrentEngine.get(context)
+            for (route in prep.routes()) {
+                val url = prep.candidatesOf(route.id).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url ?: continue
+                val f = torrent.facts(android.net.Uri.parse(url)) ?: continue
+                out.put(route.id, JSObject().put("pieceLength", f.pieceLength).put("seeds", f.swarmSeeds).put("peers", f.peers))
+            }
+        }
+        call.resolve(JSObject().put("facts", out))
+    }
+
     /** أفضل مرشّح داخل سيرفر اختاره المستخدم من الورقة. */
     @PluginMethod
     fun pick(call: PluginCall) {
