@@ -390,6 +390,13 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
+/**
+ * انتظار mpv قبل العرض: عند البدء ذاكرته فارغة فيدخل التخزين دائمًا (cache-pause-initial لم يكن يغيّر شيئًا)،
+ * وcache-pause-wait هو ما يحدد البدء. قياس (mpv 0.37، HTTP محدود، 1080p 5Mbps، ثلاث جولات): 3 ث ← 2.04/3.85 ث حتى
+ * الحركة عند 1.5/0.7MB/s؛ 0.5 ث ← 0.84/1.40 ث. نبدأ بنصف ثانية، وبعد أول توقف في المشاهدة نرفعها إلى 3 ث.
+ */
+export const START_CACHE_WAIT_SECONDS = 0.5;
+export const REBUFFER_CACHE_WAIT_SECONDS = 3;
 export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null,browserFetch=null,sourceUserAgent=SOURCE_USER_AGENT}) {
   if (typeof userData!=='string'||!(binaries?.rqbit||binaries?.libtorrent)||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
@@ -905,7 +912,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const freeMemory=freemem();
     const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
     const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=yes','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=yes','--cache=yes','--cache-on-disk=no',`--cache-pause-wait=${START_CACHE_WAIT_SECONDS}`,`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -967,7 +974,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
           if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
-          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);}
+          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);
+            // أول توقف للتخزين بعد بدء العرض: الشبكة أبطأ مما بدأنا به، فالاستئناف ينتظر ثلاث ثوانٍ (لا تقطيع متكرر)
+            if(event.data&&state.ready&&!state.rebufferWait){state.rebufferWait=true;void ipcCommand(state,['set_property','cache-pause-wait',REBUFFER_CACHE_WAIT_SECONDS]).catch(()=>{});}}
 
         }
       }
