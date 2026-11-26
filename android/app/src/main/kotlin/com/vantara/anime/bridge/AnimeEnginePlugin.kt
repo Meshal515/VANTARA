@@ -250,6 +250,47 @@ class AnimeEnginePlugin : Plugin() {
         call.resolve(JSObject().put("warming", url != null))
     }
 
+    /**
+     * الصفوف الظاهرة غير «المقترح» بترتيب الورقة (السرب 16، حجم القطعة 12، العربي 2): تسخين خلفي محدود.
+     * قائمة فارغة أو `stop` تهدّئ الخلفي كله (إغلاق الورقة). لا شيء لجلسة التنزيل.
+     */
+    @PluginMethod
+    fun warmBackground(call: PluginCall) {
+        val session = call.getString("session") ?: ""
+        val torrent = com.vantara.addons.torrent.TorrentEngine.get(context)
+        val prep = engine.prepared(session)
+        val list = call.getArray("routes")
+        val routes = (0 until (list?.length() ?: 0)).mapNotNull { list?.optString(it)?.takeIf { s -> s.isNotBlank() } }
+        if (prep == null || call.getBoolean("stop", false) == true || routes.isEmpty() || session.startsWith(com.vantara.anime.AnimeEngine.DOWNLOAD_SESSION_PREFIX)) {
+            runCatching { torrent.coolBackground() }
+            return call.resolve(JSObject().put("warming", 0))
+        }
+        val uris = routes.take(16).mapNotNull { route ->
+            prep.rank(prep.notRejected(prep.candidatesOf(route))).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url?.let(android.net.Uri::parse)
+        }
+        runCatching { torrent.prefetchBackground(uris) }
+        call.resolve(JSObject().put("warming", minOf(uris.size, com.vantara.addons.torrent.TorrentPrefetch.BACKGROUND_MAX)))
+    }
+
+    /**
+     * حقائق تورنتات الجلسة التي في المحرك الآن (المُسخَّنة): `{ facts: { routeId: { pieceLength, seeds, peers } } }`.
+     * الورقة تستعملها في درجة «المقترح» وحدها (لا ترتيب الصفوف). لا اتصال جديد: قراءة حالة فقط.
+     */
+    @PluginMethod
+    fun torrentFacts(call: PluginCall) {
+        val out = JSObject()
+        val prep = engine.prepared(call.getString("session") ?: "")
+        if (prep != null) runCatching {
+            val torrent = com.vantara.addons.torrent.TorrentEngine.get(context)
+            for (route in prep.routes()) {
+                val url = prep.candidatesOf(route.id).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url ?: continue
+                val f = torrent.facts(android.net.Uri.parse(url)) ?: continue
+                out.put(route.id, JSObject().put("pieceLength", f.pieceLength).put("seeds", f.swarmSeeds).put("peers", f.peers))
+            }
+        }
+        call.resolve(JSObject().put("facts", out))
+    }
+
     /** أفضل مرشّح داخل سيرفر اختاره المستخدم من الورقة. */
     @PluginMethod
     fun pick(call: PluginCall) {
