@@ -168,12 +168,11 @@ function torrentOrder(a, b) {
   return t(b.d) - t(a.d) || (b.d.q ?? 0) - (a.d.q ?? 0) || Number(Boolean(b.d.info?.arabic)) - Number(Boolean(a.d.info?.arabic)) || (b.d.info?.seeders ?? 0) - (a.d.info?.seeders ?? 0);
 }
 
-const METER = { dead: 0, weak: 1, fair: 2, strong: 3 };
-const meterBars = (d) => {
-  const s = d.info?.seeders;
-  if (!Number.isFinite(s)) return -1;
-  return s >= 100 ? 4 : METER[d.tier] ?? 0;
-};
+/**
+ * عدد الزارعين بأيقونة أشخاص ولون السرب (أخضر قوي، برتقالي متوسط، أحمر ضعيف). كانت أعمدة تشبه إشارة الشبكة فقرأها
+ * مستخدم «Ping بالميلي ثانية» واختار سيرفرًا بلا مشاركين. الرقم كما أعلنه المصدر، فالصفر لا يعني موت التورنت قطعًا.
+ */
+const SEEDS_HINT = 'عدد الزارعين (Seeders) كما أعلنه المصدر';
 const compact = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
 
 
@@ -205,11 +204,11 @@ function detailLines(r, d) {
     ['المصدر', [i.source, i.site].filter(Boolean).join(' · ')],
     ['الترميز', [i.codec, ...(d.hdr ?? [])].filter(Boolean).join(' · ')],
     ['الصوت', i.audio],
-    ['المشاركون', Number.isFinite(i.seeders) ? `${i.seeders.toLocaleString('en')} · ${SWARM_AR[d.tier] ?? ''}` : null],
+    ['الزارعون (Seeders)', Number.isFinite(i.seeders) ? `${i.seeders.toLocaleString('en')} · ${SWARM_AR[d.tier] ?? ''}` : null],
   ].filter(([, v]) => v);
 }
 
-const SWARM_AR = { strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'سرب ضعيف', dead: 'بلا مشاركين' };
+const SWARM_AR = { strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'سرب ضعيف', dead: 'لم يعلن المصدر زارعين' };
 
 /** لماذا هذا هو المقترح، بكلمات قليلة: يُقال تحت زر «شغّل الأفضل». */
 export function bestReason(r, d) {
@@ -737,11 +736,9 @@ export function createServerSheet(body, o) {
       end.replaceChildren(small);
     }
     else if (d.torrent) {
-      const bars = meterBars(d);
-      const meter = Array.from({ length: 4 }, (_, i) => `<i${i < bars ? ' class="on"' : ''}></i>`).join('');
-      end.innerHTML = bars < 0
+      end.innerHTML = !Number.isFinite(d.info?.seeders)
         ? '<small>غير معلن</small>'
-        : `<span class="ss-meter ss-meter--${d.tier}" aria-hidden="true">${meter}</span><b class="an-srv-seeds" dir="ltr">${compact(d.info.seeders)}</b>`;
+        : `<span class="ss-seeds ss-seeds--${d.tier}" dir="ltr" title="${SEEDS_HINT}">${glyph('users', { size: 14 })}<b class="an-srv-seeds">${compact(d.info.seeders)}</b></span>`;
     } else end.innerHTML = `<small class="ss-ok">${VALIDITY_AR.VALID}</small><span class="ss-play">${glyph('play', { size: 13, filled: true })}</span>`;
     // سهم صغير يفتح التفاصيل تحت الصف؛ لمسه لا يشغّل
     const lines = d.torrent && !pending && !gone ? detailLines(r, d) : [];
@@ -776,7 +773,7 @@ export function createServerSheet(body, o) {
       box?.remove();
       b.classList.remove('ss-row--open');
     }
-    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
+    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
     b.onclick = () => {
