@@ -291,18 +291,32 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       return { candidate: c?.id ?? null, route: c?.route ?? null, code: c?.code ?? null };
     },
     /**
-     * «المقترح» في ورقة السيرفرات تورنت: يُسخَّن هو (خدمة ويندوز تحمل تسخينًا واحدًا، فالجديد يحل محل القديم).
-     * بعده لا يسخّن ترتيب المحرك هنا شيئًا آخر في هذه الجلسة.
+     * «المقترح» في ورقة السيرفرات تورنت: يُسخَّن هو (دور top)، ومرور الفأرة على صف آخر يسخّنه بدور hover فلا يرمي
+     * «المقترح» (services.prewarmTorrent يحمل عدة تسخينات على المحرك الدائم). بعده لا يسخّن ترتيب المحرك هنا شيئًا آخر.
      */
-    warm({ session, route }) {
+    warm({ session, route, hover = false }) {
       const s = sessions.get(session);
       if (!s || s.closed || s.playing || !bridge?.prewarmTorrent) return { warming: false };
       const c = choices(s, route)[0];
       if (!c?.infoHash) return { warming: false };
+      if (hover) { void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'hover' })).catch(() => {}); return { warming: true }; }
       s.sheetTop = true; clearTimeout(s.prewarmTimer);
       const key = `${c.infoHash}|${c.fileIdx ?? ''}`;
-      if (s.prewarmKey !== key) { s.prewarmKey = key; void Promise.resolve(bridge.prewarmTorrent({ candidate: c })).catch(() => {}); }
+      if (s.prewarmKey !== key) { s.prewarmKey = key; void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'top' })).catch(() => {}); }
       return { warming: true };
+    },
+    /** الصفوف الظاهرة غير «المقترح» (بترتيب الورقة): تسخين خلفي صغير، والخدمة تحده باثنين. */
+    warmBackground({ session, routes = [], stop = false }) {
+      const s = sessions.get(session);
+      if (stop || !s || s.closed || s.playing || !bridge?.prewarmTorrent) return { warming: 0 };
+      let warming = 0;
+      for (const route of (Array.isArray(routes) ? routes : []).slice(0, 2)) {
+        const c = choices(s, route)[0];
+        if (!c?.infoHash) continue;
+        warming++;
+        void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'background' })).catch(() => {});
+      }
+      return { warming };
     },
     async pick({ session, route }) { return { candidate: choices(sessionOf(session), route)[0]?.id ?? null }; },
     async playerState({session}) {

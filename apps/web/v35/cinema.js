@@ -2436,7 +2436,7 @@ export function createCinema(deps) {
 
       // نفس ورقة الأنمي (server-sheet.js): «الأفضل لك»، المباشر ثم التورنت، والمتعذّر مطويّ
       // المقترح يُسخَّن، وحقائق المحرك عنه (حجم القطعة والسرب المقاس) تعود لدرجته
-      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); });
+      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); }, { at: engine.resumeFraction(position, (Number.parseInt(String(m.runtime ?? ''), 10) || 0) * 60000) });
       off.push(() => tops.stop());
       const ui = createServerSheet(body, {
         el,
@@ -2454,7 +2454,7 @@ export function createCinema(deps) {
         onBest: () => playBest(),
         onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
         onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
-        onHover: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
+        onHover: (r) => { if (sheet.session && !sheet.closed) tops.hover(sheet.session, r.id); },
         onRetry: () => { deps.closeSheet(); dropWarm(); play(m, season, n, position); },
         onUnavailable: (r) => toast(validity(r).reason ?? routeFailureMessage(r.reason), 5000),
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
