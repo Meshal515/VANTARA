@@ -62,4 +62,20 @@ class TorrentPolicyTest {
         val straddle = TorrentFile(0, "straddle.mkv", 10L * 8 * mb + mb, 0)
         assertEquals(listOf(0, 9, 10), TorrentPolicy.edges(straddle, 8 * mb))
     }
+    @Test fun startFocusOnlyUntilTheAwaitedPieceArrives() {
+        val full = (0..11).toList()
+        // أول نافذة والقطعة 0 لم تكتمل: تركيز
+        assertTrue(TorrentPolicy.focusStart(full, emptyList(), focused = false, haveHead = false))
+        // ما زالت تنتظر 0 والتركيز قائم: يبقى
+        assertTrue(TorrentPolicy.focusStart(full, listOf(0, 1), focused = true, haveHead = false))
+        // اكتملت 0: تُفتح النافذة
+        assertFalse(TorrentPolicy.focusStart(full, listOf(0, 1), focused = true, haveHead = true))
+        // تخطي المرفقات من 0 إلى 3 بعد فتح النافذة: قفزة خارج القطع ذات الموعد، تركيز
+        assertTrue(TorrentPolicy.focusStart((3..14).toList(), full, focused = false, haveHead = false))
+        // تشغيل مستمر: القطعة التالية من القطع ذات الموعد، فلا تركيز ولو لم تكتمل
+        assertFalse(TorrentPolicy.focusStart((1..12).toList(), full, focused = false, haveHead = false))
+        // قفزة إلى موضع بعيد لم يُنزَّل: تركيز
+        assertTrue(TorrentPolicy.focusStart((500..511).toList(), (1..12).toList(), focused = false, haveHead = false))
+        assertFalse(TorrentPolicy.focusStart(emptyList(), full, focused = false, haveHead = false))
+    }
 }
