@@ -239,6 +239,8 @@ class TorrentEngine internal constructor(
         val state = synchronized(states) {
             if (hash in permanentActive) return
             states[hash] ?: run {
+                // الخلفي لا يُخلي أحدًا (الإخلاء يحذف الملفات): كان يحذف قطع «المقترح» المسخَّنة بعد انتهاء مهلتها
+                if (bg && states.size >= MAX_RESIDENT_STATES) return
                 if (states.size >= MAX_RESIDENT_STATES) {
                     val now = System.currentTimeMillis()
                     val oldest = states.entries.filter { it.value.unused() && it.value.idleAt < now }.minByOrNull { it.value.idleAt } ?: return

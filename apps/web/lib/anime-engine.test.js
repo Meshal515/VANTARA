@@ -383,3 +383,23 @@ describe('topWarmer', () => {
     ]);
   });
 });
+
+describe('topWarmer refresh', () => {
+  afterEach(() => { vi.useRealTimers(); delete globalThis.Capacitor; });
+  it('يجدد تسخين «المقترح» كل دقيقة ما دامت الورقة مفتوحة، ويتوقف بالإغلاق', async () => {
+    const calls = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { configure: async () => ({ ok: true, errors: [] }), warm: async (a) => { calls.push(a.route); return { warming: true }; }, torrentFacts: async () => ({ facts: {} }), warmBackground: async () => ({ warming: 0 }) } } };
+    await configure({ force: true, fetchImpl: async () => ({ json: async () => ({}) }) });
+    vi.useFakeTimers();
+    const t = engine.topWarmer(() => {}, { every: 10_000_000, span: 1, refreshMs: 60_000 });
+    t.top('s1', 'r0');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(calls).toEqual(['r0']);
+    t.top('s1', 'r1');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toEqual(['r0', 'r1', 'r1', 'r1']);
+    t.stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toHaveLength(4);
+  });
+});
