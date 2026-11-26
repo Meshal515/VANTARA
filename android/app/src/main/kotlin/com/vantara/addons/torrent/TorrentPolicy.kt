@@ -87,6 +87,8 @@ data class TorrentStats(
     val warmedAt: Long = 0L, val warmedPieces: Int = 0, val swaps: Int = 0,
     /** خط البدء: أول مشارك متصل وأول بيانات من الشبكة (elapsedRealtime، 0 = لم يحدث). */
     val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
+    /** الخيار B ([TurboRead]): مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
+    val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
 )
 /** ما قاسه المحرك لتورنت: حجم القطعة، والسرب (باذرون معروفون، -1 مجهول)، والمتصلون الآن. */
 data class TorrentFacts(val pieceLength: Int, val swarmSeeds: Int, val peers: Int)
@@ -237,6 +239,10 @@ object TorrentPolicy {
      * إلى 3.2 ث. القفزة تشمل تخطي مرفقات MKV. التشغيل المستمر لا يتأثر: القطعة التالية من القطع ذات الموعد أصلًا،
      * أو اكتملت.
      */
+    /** القطع ذات الموعد في التركيز: القطعة المنتظرة وحدها حين القطعة كبيرة (≥4MB تحمل ثواني من الفيديو). */
+    fun focusPieces(pieceLength: Int, critical: Int = 2): Int = if (pieceLength >= LARGE_PIECE_BYTES) 1 else critical
+    const val LARGE_PIECE_BYTES = 4 * 1024 * 1024
+
     fun focusStart(next: List<Int>, applied: List<Int>, focused: Boolean, haveHead: Boolean, critical: Int = 2): Boolean =
         next.isNotEmpty() && !haveHead && (next.first() !in applied.take(critical) || (focused && next.first() == applied.first()))
 
@@ -274,8 +280,11 @@ object TorrentPrefetch {
     /** «تسخين كامل على باقة الجوال» في ورقة الشبكة بالمشغّل: مقفل افتراضيًا، والمستخدم يفعّله لنفسه. */
     const val PREFS = "vantara.player"
     const val WARM_ON_METERED = "warmOnMetered"
-    /** ميزانية التسخين على شبكة غير محدودة (Wi-Fi) لكل خيار. */
-    const val WARM_BUDGET = 16L * 1024 * 1024
+    /**
+     * ميزانية التسخين على شبكة غير محدودة (Wi-Fi) لكل خيار: أول قطعة والذيل حتى قطع 16MB (كانت 16MB فيبقى ذيل
+     * ملفات 16MB بعد الضغط). الرأس وحده بموعد، والذيل بأولوية أقل (TorrentEngine.prefetched)، فلا يبطئ الرأس.
+     */
+    const val WARM_BUDGET = 48L * 1024 * 1024
     /**
      * القطع التي تُنزَّل قبل الضغط على تشغيل. الثواني الضائعة (11–16 ث على الجوال) كانت قبل أول
      * قطعة: انتظار أن يسمح المشاركون بالتحميل. التسخين يبدأ هذا الانتظار والمستخدم يتصفح.
@@ -479,4 +488,42 @@ object EpisodeNames {
         val at = varying.lastOrNull() ?: return ids
         return ids + regular.associateWith { p -> ids[p]!!.copy(episode = tokens[p]!![at].takeIf { it > 0 }) }
     }
+}
+
+/**
+ * الخيار B (قرار المالك 26 نوفمبر، Debug فقط): أول قطعة يقرؤها المشغّل بعد كل فتح (بدء أو قفزة) تُقرأ من كتلها المكتوبة
+ * على القرص قبل اكتمال التحقق منها، فلا تنتظر قطعة 16MB كاملة (Reacher: أول 9KB بعد 7.1–7.3 ث). بقية القطع موثقة.
+ *
+ * ما يضمنه: البايتات من كتل أعلن libtorrent كتابتها (block_finished_alert يُطلق بعد نجاح الكتابة،
+ * peer_connection::on_disk_write_complete)، متصلة من موضع القراءة، داخل القطعة. فشل تحقق قطعة قُرئ منها
+ * (hash_failed_alert) يجعل التورنت موثقًا فقط ويعيد المشغّل تجهيز المصدر من بيانات موثقة.
+ * ما لا يضمنه: أن البايتات صحيحة قبل التحقق. تصل إلى مستخرج Media3 في عملية التطبيق ثم المفكك (في عملية media
+ * المعزولة من Android). التحقق اللاحق يكشف الخراب ولا يلغي أثر ما قُرئ قبله.
+ * لا يمس: التحميلات الدائمة (تنتظر اكتمال libtorrent الموثق)، ولا الرفع للآخرين (libtorrent لا يرفع إلا قطعًا موثقة).
+ */
+object TurboRead {
+    /** حجم كتلة libtorrent (default_block_size). */
+    const val BLOCK_BYTES = 16 * 1024
+    /** القطع المختلفة التي يحق لكل فتح أن يقرأ منها قبل التحقق: رأس الملف، وما بعد مرفقات MKV التي تُتخطى. */
+    const val PIECES_PER_OPEN = 2
+    /** سقف البايتات غير الموثقة لكل فتح، مهما كان حجم القطعة. */
+    const val MAX_BYTES_PER_OPEN = 32L * 1024 * 1024
+    /** مفتاح التعطيل في «المزيد» بالمشغّل (Debug). في Stable مقفل بالكود. */
+    const val PREF = "turboUnverified"
+
+    /**
+     * كم بايتًا متصلًا من [offset] (داخل قطعة حجمها [pieceSize]) كُتبت كتله كلها، بحد [length]. 0 إن لم تُكتب كتلة
+     * [offset] بعد. لا يتجاوز كتلة غير مكتوبة ولا نهاية القطعة أبدًا (اختبار عشوائي في TorrentPolicyTest).
+     */
+    fun writtenSpan(written: java.util.BitSet?, offset: Int, length: Int, pieceSize: Int, block: Int = BLOCK_BYTES): Int {
+        if (written == null || block <= 0 || pieceSize <= 0 || offset < 0 || length <= 0 || offset >= pieceSize) return 0
+        val limit = minOf(pieceSize.toLong(), offset.toLong() + length)
+        var end = offset.toLong()
+        while (end < limit && written.get((end / block).toInt())) end = minOf((end / block + 1) * block, limit)
+        return (end - offset).toInt()
+    }
+
+    /** رقم كتلة من تنبيه libtorrent صالح لقطعة بهذا الحجم (لا يُصدَّق تنبيه خارج حدودها). */
+    fun validBlock(block: Int, pieceLength: Int, blockSize: Int = BLOCK_BYTES): Boolean =
+        pieceLength > 0 && block >= 0 && block.toLong() * blockSize < pieceLength
 }
