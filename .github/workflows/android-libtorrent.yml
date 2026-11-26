@@ -108,7 +108,7 @@ jobs:
           retention-days: 90
   publish:
     # نسخة مُحسَّنة واحدة لكل معالج على إصدار مسبق ثابت (ليس latest ولا Stable). لا يُستبدل إصدار موجود: تغيير
-    # التعديلات يعني رفع رقم p في الوسم. Debug يثبّت البصمات في tools/libtorrent-patches/android-natives.lock.
+    # التعديلات يعني رفع رقم p في الوسم. Debug يثبّت البصمات في android/app/libtorrent-natives.lock.
     name: Publish natives (prerelease, immutable)
     needs: native
     if: github.event_name == 'push'
