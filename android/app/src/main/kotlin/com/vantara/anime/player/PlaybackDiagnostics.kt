@@ -155,6 +155,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
                 else -> "التسخين المسبق: اكتمل بعد بدء التشغيل · ${t.warmedPieces} قطعة"
             })
             if (t.swaps > 0) appendLine("تبديل مشاركين بطيئين عن قطعة عالقة: ${t.swaps}")
+            appendLine("المحرك: " + if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (VANTARA 0001+0002، نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12")
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }
