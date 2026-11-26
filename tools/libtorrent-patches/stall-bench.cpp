@@ -73,6 +73,8 @@ static void streaming(lt::settings_pack& s) {
   if (std::getenv("BENCH_IPT")) s.set_int(lt::settings_pack::initial_picker_threshold, envInt("BENCH_IPT", 4));
   int const tick = envInt("BENCH_TICK_MS", 0);
   if (tick > 0) s.set_int(lt::settings_pack::tick_interval, tick);
+  // BENCH_PCT: peer_connect_timeout بالثواني (الإنتاج 15، Nuvio 3)
+  if (std::getenv("BENCH_PCT")) s.set_int(lt::settings_pack::peer_connect_timeout, envInt("BENCH_PCT", 15));
 }
 
 // loopback معفى من حدود السرعة افتراضيًا (local peer class): نزيل الإعفاء ونضع سقف رفع لكل باذر
@@ -144,6 +146,11 @@ int main(int argc, char** argv) {
   p.piece_priorities.assign(std::size_t(pieces), lt::dont_download);
   if (envInt("BENCH_SEQ", 0)) p.flags |= lt::torrent_flags::sequential_download;
   auto h = dl.add_torrent(p);
+  // BENCH_MAXCONN: حد اتصالات التورنت (التسخين 24، الخلفي 12، التشغيل بلا حد)
+  if (envInt("BENCH_MAXCONN", 0) > 0) h.set_max_connections(envInt("BENCH_MAXCONN", 0));
+  // BENCH_DEAD: مشاركون ميتون يُعرفون قبل الحيّين (منافذ 30000+ تُسقط حزم SYN محليًا: الاتصال يعلق حتى المهلة)،
+  // كما يحدث مع عناوين DHT والمتتبعات القديمة
+  for (int i = 0; i < envInt("BENCH_DEAD", 0); ++i) h.connect_peer({lt::make_address("127.0.0.1"), std::uint16_t(30000 + i)});
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   // البطيء أولًا: يأخذ طلبات القطعة الأولى قبل أن يتصل السريع (كما يحدث مع مشارك أبكر لكن أبطأ)
   if (!envInt("BENCH_NO_SLOW", 0)) h.connect_peer({lt::make_address("127.0.0.1"), std::uint16_t(basePort + 2)});
