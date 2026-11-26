@@ -681,33 +681,29 @@
   min-width: 2.2em;
   font-size: var(--fs-meta);
   font-weight: 600;
-  color: var(--text-2);
   font-variant-numeric: tabular-nums;
   text-align: end;
 }
-.v35 .an-srv--swarm-dead .an-srv-seeds {
-  color: var(--text-4);
+/* الزارعون: أيقونة أشخاص والرقم بلون السرب (لا أعمدة تُقرأ إشارة شبكة أو Ping) */
+.v35 .ss-seeds {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
 }
-/* صحة السرب: أعمدة رمادية صغيرة — مؤشر لا إشارة مرور */
-.v35 .ss-meter {
-  direction: ltr;
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 11px;
+.v35 .ss-seeds .icon {
+  flex: none;
 }
-.v35 .ss-meter i {
-  width: 3px;
-  border-radius: 1px;
-  background: var(--surface-3);
+.v35 .ss-seeds--strong {
+  color: var(--success);
 }
-.v35 .ss-meter i.on {
-  background: var(--text-3);
+.v35 .ss-seeds--fair {
+  color: var(--warning);
 }
-.v35 .ss-meter i:nth-child(1) { height: 4px; }
-.v35 .ss-meter i:nth-child(2) { height: 6px; }
-.v35 .ss-meter i:nth-child(3) { height: 8.5px; }
-.v35 .ss-meter i:nth-child(4) { height: 11px; }
+.v35 .ss-seeds--weak,
+.v35 .ss-seeds--dead {
+  color: var(--danger);
+}
 .v35 .ss-play {
   display: grid;
   place-items: center;

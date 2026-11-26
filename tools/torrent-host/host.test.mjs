@@ -163,6 +163,61 @@ test('libtorrent host: /diag reports engine rate, peers and the piece the reader
   else assert.equal(after.body.reads.direct_hits, 0, 'direct path off by default');
 });
 
+/**
+ * وسيط TCP يحد السرعة فعلًا: libtorrent يعفي الاتصال المحلي من upload_rate_limit، فبلا وسيط تصل القطع كلها قبل أن
+ * يتصادم قارئان ولا يُختبر شيء. دلو رموز بدقة 10ms لكل اتجاه، وتأخير [delayMs] في اتجاه واحد.
+ */
+function throttleProxy(target, bps, delayMs) {
+  const server = net.createServer(client => {
+    const upstream = net.connect(target, '127.0.0.1');
+    const pipe = (from, to) => {
+      const queue = []; let budget = 0, ended = false;
+      const timer = setInterval(() => {
+        budget = Math.min(budget + bps / 100, bps / 10);
+        const now = Date.now();
+        while (queue.length && queue[0].at <= now && budget >= 1) {
+          const n = Math.min(queue[0].buf.length, Math.floor(budget));
+          to.write(queue[0].buf.subarray(0, n)); budget -= n;
+          if (n === queue[0].buf.length) queue.shift(); else queue[0].buf = queue[0].buf.subarray(n);
+        }
+        if (ended && !queue.length) { clearInterval(timer); to.end(); }
+      }, 10);
+      from.on('data', buf => queue.push({ buf, at: Date.now() + delayMs }));
+      from.on('end', () => { ended = true; });
+      from.on('close', () => { ended = true; });
+      from.on('error', () => { clearInterval(timer); to.destroy(); });
+    };
+    upstream.on('connect', () => { pipe(client, upstream); pipe(upstream, client); });
+    upstream.on('error', () => client.destroy());
+    client.on('error', () => upstream.destroy());
+  });
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges) both finish without starving each other', { skip, timeout: 120000 }, async t => {
+  // التسخين في ويندوز يقرأ أول الملف وآخره معًا. كان كل قارئ يضع النافذة على موضعه وحده: قطعة الآخر تصير «لا تُنزَّل»
+  // (وضع التركيز) أو أدنى أولوية بلا موعد، وwaitPiece لا يعيد الأولويات. قبل الإصلاح، 6 جولات بهذا الإعداد: 5 علقت
+  // (الرأس أكثر من 60 ث، أو الذيل 16.5 ث بانتظار أن يبلغه التنزيل المتسلسل)؛ بعده 9 جولات أسوؤها 8.2 ث والمثالي 5 ث.
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  assert.ok(seedPeer, `the seeder magnet names its loopback peer: ${magnet}`);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 2 * 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  const head = 8 * 1024 * 1024, tail = 2 * 1024 * 1024;
+  const started = performance.now();
+  const timed = range => request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: range }, raw: true, timeout: 30000 })
+    .then(r => ({ r, ms: Math.round(performance.now() - started) }));
+  const [first, last] = await Promise.all([timed(`bytes=0-${head - 1}`), timed(`bytes=${data.length - tail}-${data.length - 1}`)]);
+  t.diagnostic(`head ${first.ms}ms, tail ${last.ms}ms (ideal ≈ ${Math.round((head + tail) / (2 * 1024 * 1024) * 1000)}ms)`);
+  assert.ok(first.r.body.equals(data.subarray(0, head)), 'head bytes exact');
+  assert.ok(last.r.body.equals(data.subarray(data.length - tail)), 'tail bytes exact');
+  // 13 ث: ضعفا المثالي ونصف، وأقصر من أقصر تعليق قيس قبل الإصلاح (16.4 ث)
+  assert.ok(Math.max(first.ms, last.ms) < 13000, `a reader starved: head ${first.ms}ms, tail ${last.ms}ms`);
+});
+
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vantara-torrent-parent-'));
   const apiPort = await port(), listenPort = await port();

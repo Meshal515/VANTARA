@@ -699,7 +699,14 @@ private:
         std::vector<int> window;
         for (int p = piece; p <= std::min(last, piece + (focus ? policy::CRITICAL : policy::WINDOW) - 1); ++p) window.push_back(p);
         std::vector<int> pending;
-        for (int p : edgePieces(ti, fileIndex)) if (std::find(window.begin(), window.end(), p) == window.end() && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
+        auto const wantedAlready = [&](int p) {
+            return std::find(window.begin(), window.end(), p) != window.end() || std::find(pending.begin(), pending.end(), p) != pending.end();
+        };
+        // قطعة ينتظرها قارئ آخر الآن (التسخين يقرأ الرأس والذيل معًا): نافذة الأحدث وحده كانت تجعلها «لا تُنزَّل»،
+        // وwaitPiece لا يعيد الأولويات، فيعلق ذلك القارئ حتى مهلته (90 ث في prewarmEdges)
+        for (auto const& [id, r] : t->readers)
+            if (id != readerId && r.piece >= first && r.piece <= last && !wantedAlready(r.piece) && !t->h.have_piece(lt::piece_index_t(r.piece))) pending.push_back(r.piece);
+        for (int p : edgePieces(ti, fileIndex)) if (!wantedAlready(p) && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
         std::vector<int> const critical = policy::CRITICAL > 0 && int(window.size()) > policy::CRITICAL
             ? std::vector<int>(window.begin(), window.begin() + policy::CRITICAL) : window;
         auto const wanted = policy::deadlines(critical, pending);

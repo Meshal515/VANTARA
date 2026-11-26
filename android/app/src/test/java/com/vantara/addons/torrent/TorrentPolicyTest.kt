@@ -78,4 +78,61 @@ class TorrentPolicyTest {
         assertTrue(TorrentPolicy.focusStart((500..511).toList(), (1..12).toList(), focused = false, haveHead = false))
         assertFalse(TorrentPolicy.focusStart(emptyList(), full, focused = false, haveHead = false))
     }
+    @Test fun largePiecesFocusOnTheAwaitedPieceAlone() {
+        val mb = 1024 * 1024
+        assertEquals(2, TorrentPolicy.focusPieces(mb))
+        assertEquals(2, TorrentPolicy.focusPieces(2 * mb))
+        assertEquals(1, TorrentPolicy.focusPieces(4 * mb))
+        assertEquals(1, TorrentPolicy.focusPieces(16 * mb))
+    }
+    @Test fun turboReadsOnlyContiguousWrittenBlocksInsideThePiece() {
+        val b = TurboRead.BLOCK_BYTES
+        val bits = java.util.BitSet().apply { set(0); set(1); set(3) }
+        // الكتلتان 0 و1 مكتوبتان، والثالثة (2) لا: يتوقف عند حدها
+        assertEquals(2 * b, TurboRead.writtenSpan(bits, 0, 10 * b, 16 * b))
+        assertEquals(2 * b - 100, TurboRead.writtenSpan(bits, 100, 10 * b, 16 * b))
+        // بحد الطول المطلوب
+        assertEquals(500, TurboRead.writtenSpan(bits, 100, 500, 16 * b))
+        // كتلة الموضع غير مكتوبة: لا شيء، ولو كُتب ما بعدها
+        assertEquals(0, TurboRead.writtenSpan(bits, 2 * b, b, 16 * b))
+        // آخر قطعة أقصر من حجم القطع، وكتلتها الأخيرة ناقصة
+        val tail = java.util.BitSet().apply { set(0, 3) }
+        assertEquals(2 * b + 10, TurboRead.writtenSpan(tail, 0, 100 * b, 2 * b + 10))
+        // مدخلات خارج الحدود
+        assertEquals(0, TurboRead.writtenSpan(null, 0, b, 16 * b))
+        assertEquals(0, TurboRead.writtenSpan(bits, -1, b, 16 * b))
+        assertEquals(0, TurboRead.writtenSpan(bits, 16 * b, b, 16 * b))
+        assertEquals(0, TurboRead.writtenSpan(bits, 0, 0, 16 * b))
+    }
+    @Test fun turboSpanFuzzNeverCrossesAnUnwrittenBlockOrThePieceEnd() {
+        // اختبار عشوائي ببذرة ثابتة: الخصائص الأربع تحدد الدالة تمامًا
+        val random = java.util.Random(20261127)
+        val b = TurboRead.BLOCK_BYTES
+        repeat(20_000) {
+            val pieceSize = 1 + random.nextInt(32 * 1024 * 1024)
+            val blocks = (pieceSize + b - 1) / b
+            val bits = java.util.BitSet()
+            val density = random.nextDouble()
+            for (i in 0 until blocks) if (random.nextDouble() < density) bits.set(i)
+            val offset = random.nextInt(pieceSize + b) - b / 2
+            val length = random.nextInt(4 * 1024 * 1024) - 1024
+            val n = TurboRead.writtenSpan(bits, offset, length, pieceSize)
+            assertTrue(n >= 0)
+            if (offset < 0 || length <= 0 || offset >= pieceSize) { assertEquals(0, n); return@repeat }
+            assertTrue("within the request", n <= length)
+            assertTrue("within the piece", offset.toLong() + n <= pieceSize)
+            if (n > 0) for (block in offset / b..(offset + n - 1) / b) assertTrue("block $block written", bits.get(block))
+            if (n < length && offset + n < pieceSize) assertFalse("maximal: next block unwritten", bits.get((offset + n) / b))
+        }
+    }
+    @Test fun turboRejectsBlocksOutsideThePiece() {
+        val b = TurboRead.BLOCK_BYTES
+        assertTrue(TurboRead.validBlock(0, 16 * b))
+        assertTrue(TurboRead.validBlock(15, 16 * b))
+        assertFalse(TurboRead.validBlock(16, 16 * b))
+        assertFalse(TurboRead.validBlock(-1, 16 * b))
+        assertFalse(TurboRead.validBlock(0, 0))
+        // أكبر رقم كتلة لا يفيض
+        assertFalse(TurboRead.validBlock(Int.MAX_VALUE, 16 * b))
+    }
 }
