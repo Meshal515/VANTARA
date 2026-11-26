@@ -331,3 +331,15 @@ it('تشخيص البدء في ويندوز: من الضغط، ومُسخَّن 
   expect(text).toContain('range-first-byte  +0.45 ث  (torrent · انتظار 420ms)');
   expect(diagnosticText({ trace: [{ stage: 'source-selected', ms: 0, mode: 'cold' }] })).toContain('البدء: بارد (بلا تسخين)');
 });
+
+it('الشريط بثلاث طبقات: الجاهز على القرص تحت تخزين المشغّل، وسطر «جاهز على القرص» في الشبكة', () => {
+  const { view } = fixture();
+  view.update({ ready: true, paused: true, position: 60000, duration: 1440000, bufferedMs: 120000, diskMs: 780000, net: { openAt: 0, stages: { 'engine-start': 10 }, peers: 20, diskAheadMs: 720000 } });
+  const width = (cls) => view.root.querySelector(cls).style.width;
+  expect(width('.pp-buffered')).toBe(`${(120000 / 1440000) * 100}%`);
+  expect(width('.pp-disk')).toBe(`${(780000 / 1440000) * 100}%`);
+  view.open.more();
+  [...view.root.querySelectorAll('.pp-sheet button')].find((b) => b.textContent.includes('الشبكة')).click();
+  const rows = Object.fromEntries([...view.root.querySelectorAll('.pp-sheet .pp-metric')].map((r) => [r.querySelector('span').textContent, r.querySelector('b').textContent]));
+  expect(rows['جاهز على القرص']).toBe('12 د 0 ث');
+});

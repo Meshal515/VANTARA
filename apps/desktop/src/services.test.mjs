@@ -40,11 +40,23 @@ test('mpv uses a trusted embedded HWND and releases it after process cleanup',as
   assert.ok(args.includes('--wid=123456'));assert.ok(args.includes('--osc=no'));
   await services.stopPlayback({session:'embedded'});assert.equal(released,1);
 });
+test('أول توقف للتخزين بعد بدء العرض يرفع انتظار الاستئناف إلى 3 ث مرة واحدة (البدء نصف ثانية)',async t=>{
+  const {dir,services}=await fixture(t,'rebuffer');
+  await services.startPlayback({session:'rebuffer',candidate:{url:'https://video.example.com/test.mp4'}});
+  await new Promise(r=>setTimeout(r,500));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const raised=commands.filter(m=>JSON.stringify(m.command)==='["set_property","cache-pause-wait",3]');
+  assert.equal(raised.length,1);
+  await services.stopPlayback({session:'rebuffer'});
+});
 test('مشغل Windows يطلب حتى دقيقة كاش أمامي بحد RAM ويحاول التسريع العتادي الآمن',async t=>{
   const {dir,services}=await fixture(t);
   await services.startPlayback({session:'memory-cache',candidate:{url:'https://video.example.com/test.mp4'}});
   const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
-  assert.ok(args.includes('--cache-secs=60'));
+  // لا سقف بالثواني (كان 60 ث فالشريط لا يتجاوز دقيقة): الحد هو الحجم وحده حسب ذاكرة الجهاز
+  assert.ok(!args.some(x=>x.startsWith('--cache-secs')));
+  // البدء بعد نصف ثانية مخزنة لا ثلاث (قياس: 2.04 ← 0.84 ث حتى الحركة)، وcache-pause-initial لا يغيّر شيئًا فأُزيل
+  assert.ok(args.includes('--cache-pause-wait=0.5'));assert.ok(!args.some(x=>x.startsWith('--cache-pause-initial')));
   assert.ok(args.some(x=>/^--demuxer-max-bytes=(128|256|512)MiB$/.test(x)));
   assert.ok(args.some(x=>/^--demuxer-max-back-bytes=(32|64|128)MiB$/.test(x)));
   assert.ok(args.includes('--cache-on-disk=no'));
@@ -114,7 +126,7 @@ const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-liste
 fs.appendFileSync(${JSON.stringify(join(dir,'rqbit-attempts'))},JSON.stringify(args)+'\\n');if(${JSON.stringify(mode)}==='dht-conflict'&&!args.includes('--disable-dht-persistence'))process.exit(1);
 fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,pid:process.pid,auth:process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS}));
 const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');if(${JSON.stringify(mode)}==='initializing'&&req.url.includes('/stream/')){const f=${JSON.stringify(join(dir,'init-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));if(n<2){res.writeHead(500,{'content-type':'application/json'});return res.end('{"error_kind":"internal_error","human_readable":"with_storage_and_file: invalid state: initializing","status":500}');}res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}if(${JSON.stringify(mode)}==='headers-before-body'&&req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});res.flushHeaders();const gate=setInterval(()=>{if(fs.existsSync(${JSON.stringify(join(dir,'release-stream'))})){clearInterval(gate);res.end('abcd');}},10);res.once('close',()=>clearInterval(gate));return;}res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
-  await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let nextTrackId=0,paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-remove'){const at=tracks.findIndex(t=>t.id===m.command[1]);if(at>=0)tracks.splice(at,1);c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:++nextTrackId,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
+  await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let nextTrackId=0,paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-remove'){const at=tracks.findIndex(t=>t.id===m.command[1]);if(at>=0)tracks.splice(at,1);c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:++nextTrackId,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}==='rebuffer')for(const at of [120,240])setTimeout(()=>c.write(JSON.stringify({event:'property-change',name:'paused-for-cache',data:true})+'\\n'),at);if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
   const events=[];services=createDesktopServices({userData:dir,binaries:{rqbit,mpv,...(serviceOptions.extraBinaries??{})},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,torrentMetadataStrategy:'list-only',replayCache:false,...serviceOptions});
   return {dir,services,events,binaries:{rqbit,mpv}};
@@ -235,8 +247,10 @@ test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC و�
   assert.ok(commands.some(m=>JSON.stringify(m.command)==='["seek",9,"absolute"]'));
   await services.stopPlayback({session:'one'});
   assert.equal(events.filter(e=>e.type==='playback/closed').length,1);
-  assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
-  await services.close();await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
+  // المحرك الدائم يبقى بعد الإيقاف (التشغيل التالي لا ينتظر تشغيله)، ويُنهى مع إغلاق الخدمات
+  assert.doesNotThrow(()=>process.kill(rq.pid,0));
+  await services.close();assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
+  await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
 });
 // Playback start acknowledges the process before mpv's asynchronous first-frame event.
 // Assert the real event with a bounded wait, not a race with the Node scheduler.
@@ -409,6 +423,7 @@ test('فشل callback الأحداث لا يمنع إنهاء العمليات �
   await services.startPlayback({session:'callback',candidate:{infoHash:hash,fileIdx:0}});
   const rq=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));
   await services.stopPlayback({session:'callback'});
+  await services.close();
   assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
   const {readdir}=await import('node:fs/promises');const {cacheNamespace}=await import('./torrent-cache.mjs');
   await assert.rejects(readdir(join(dir,cacheNamespace(dir))),{code:'ENOENT'});
@@ -790,4 +805,27 @@ test('صفحة تحقق الموقع تُحل بالمتصفح المخفي كا
   assert.equal(challengePage({status:200,headers:{},text:'<title>One moment, please...</title>'}),true);
   assert.equal(challengePage({status:403,headers:{'cf-mitigated':'challenge'},text:''}),true);
   assert.equal(challengePage({status:200,headers:{},text:'<html><title>مانجا ليك</title><p>One moment please read</p></html>'}),false);
+});
+
+test('المحرك الدائم: تشغيلان متتاليان على عملية محرك واحدة، والتورنت المتروك يتوقف ثم يعود دافئًا ثم يُحذف بعد المهلة',async t=>{
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',warmTorrentMs:400});
+  const requests=async()=>(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse).map(r=>r.url);
+  await services.startPlayback({session:'p1',candidate:{infoHash:hash,fileIdx:0}});
+  const first=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8')).pid;
+  await services.stopPlayback({session:'p1'});
+  // ترك التورنت: يتوقف (لا ينزّل لأحد) ولا يُحذف فورًا
+  await new Promise(r=>setTimeout(r,100));
+  assert.ok((await requests()).includes('/torrents/0/pause'));
+  assert.ok(!(await requests()).includes('/torrents/0/delete'));
+  // العودة قبل المهلة: نفس المحرك، والتورنت يُستأنف بدل إعادة تنزيله
+  events.length=0;
+  await services.startPlayback({session:'p2',candidate:{infoHash:hash,fileIdx:0}});
+  assert.equal(JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8')).pid,first,'لا عملية محرك جديدة');
+  assert.equal((await readFile(join(dir,'rqbit-attempts'),'utf8')).trim().split('\n').length,1);
+  assert.ok((await requests()).includes('/torrents/0/start'));
+  assert.ok(events.some(e=>e.type==='playback/diagnostic'&&e.stage==='engine-ready'&&e.mode==='cache'),'التشخيص يقول إن المحرك كان جاهزًا');
+  await services.stopPlayback({session:'p2'});
+  // بعد مهلة الدفء: يُحذف بملفه
+  await new Promise(r=>setTimeout(r,700));
+  assert.ok((await requests()).includes('/torrents/0/delete'));
 });
