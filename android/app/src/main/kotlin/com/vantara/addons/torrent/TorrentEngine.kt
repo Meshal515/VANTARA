@@ -44,6 +44,19 @@ class TorrentEngine internal constructor(
     private val connectivity = context.applicationContext.getSystemService(android.net.ConnectivityManager::class.java)
     /** Wi-Fi أو إيثرنت (غير محسوبة). عند الشك: محدودة، فلا تُنزَّل قطع قبل الاختيار. */
     private fun unmetered(): Boolean = runCatching { connectivity?.isActiveNetworkMetered == false }.getOrDefault(false)
+    @Volatile private var connectTimeoutApplied = -1
+    /**
+     * مهلة اتصال المشارك حسب الشبكة: 3 ث على Wi-Fi و15 على بيانات الجوال (مصافحتها أبطأ، و7 ث كانت تُسقط
+     * مشاركين صالحين). قياس stall-bench بثلاثين مشاركًا ميتًا قبل الحيّين وحد اتصالات التسخين (24/12): أول قطعة
+     * 16–32 ث بمهلة 15، و4.0 ث بمهلة 3؛ بلا حد اتصالات (التشغيل) 2.0 ث في الحالتين. يُطبَّق عند التسخين والتشغيل.
+     */
+    private fun tuneConnectTimeout() {
+        if (!managerHolder.isInitialized()) return
+        val want = if (unmetered()) CONNECT_TIMEOUT_UNMETERED_S else CONNECT_TIMEOUT_METERED_S
+        if (want == connectTimeoutApplied) return
+        runCatching { manager.applySettings(SettingsPack().apply { setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), want) }) }
+            .onSuccess { connectTimeoutApplied = want }
+    }
     private val playerPrefs = context.applicationContext.getSharedPreferences(TorrentPrefetch.PREFS, Context.MODE_PRIVATE)
     /** Wi-Fi، أو باقة جوال فعّل لها المستخدم التسخين الكامل بنفسه. */
     private fun warmPiecesAllowed(): Boolean = unmetered() || runCatching { playerPrefs.getBoolean(TorrentPrefetch.WARM_ON_METERED, false) }.getOrDefault(false)
@@ -222,6 +235,7 @@ class TorrentEngine internal constructor(
         val hash = request.infoHash
         val stopped = { shutdown.get() || synchronized(warming) { (if (bg) background[hash] else warming[hash]) != until } }
         if (stopped() || !nativeAvailable()) return
+        tuneConnectTimeout()
         val state = synchronized(states) {
             if (hash in permanentActive) return
             states[hash] ?: run {
@@ -477,6 +491,7 @@ class TorrentEngine internal constructor(
         }
         for (hash in others) states[hash]?.let { other -> runCatching { pruner.execute { runCatching { other.cool() } } } }
         return try {
+            tuneConnectTimeout()
             val handle = state.handle(stopped, request)
             // مشغّل حقيقي: بلا حد اتصالات التسخين المسبق، ويعمل حتى لو أوقفه تسخين/خمول سابق قبل اكتمال metadata
             runCatching { handle.swig().set_max_connections(-1); handle.setDownloadLimit(-1); handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
@@ -968,6 +983,8 @@ class TorrentEngine internal constructor(
         private const val ONE_SECOND_NS = 1_000_000_000L
         private const val PREFETCH_HOLD_MS = 90_000L
         private const val PREFETCH_CONNECTIONS = 24
+        private const val CONNECT_TIMEOUT_UNMETERED_S = 3
+        private const val CONNECT_TIMEOUT_METERED_S = 15
         private const val BACKGROUND_CONNECTIONS = 12
         private const val DHT_STATE_FILE = "dht.state"
         private const val MAX_DHT_STATE_BYTES = 512 * 1024
