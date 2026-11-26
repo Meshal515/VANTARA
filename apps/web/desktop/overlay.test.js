@@ -1,7 +1,7 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import {expect,it,vi,afterEach} from 'vitest';
 import {parseHTML} from 'linkedom';
-import {createOverlayView} from './overlay.js';
+import {createOverlayView,diagnosticText} from './overlay.js';
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 function fixture(){
   vi.useFakeTimers();
@@ -317,4 +317,17 @@ it('بلا غرفة: زر الأصدقاء يفتح الدعوة كما هو',()
   const {view,send}=fixture();view.update({ready:true});
   view.root.querySelector('[data-action="users"]').click();
   expect(send).toHaveBeenCalledWith({name:'room'});
+});
+
+it('تشخيص البدء في ويندوز: من الضغط، ومُسخَّن أو بارد، ومراحل المحرك بزمنها وما قبل الضغط', () => {
+  const text = diagnosticText({ tapAt: 1000, openAt: 1400, stages: { 'player-start': 2600, 'first-frame': 5600 }, trace: [
+    { stage: 'engine-ready', ms: 900 }, { stage: 'prewarm-edges', ms: 4000 }, { stage: 'source-selected', ms: 6000, mode: 'prewarmed' },
+    { stage: 'range-first-byte', ms: 6450, mode: 'torrent', waitMs: 420 },
+  ] });
+  expect(text).toContain('البدء: مُسخَّن (بدأ قبل الضغط)');
+  expect(text).toContain('من الضغط حتى بدء الخدمة: 0.40 ث');
+  expect(text).toContain('حتى أول صورة: 6.00 ث');
+  expect(text).toContain('engine-ready  قبل الضغط 5.10 ث');
+  expect(text).toContain('range-first-byte  +0.45 ث  (torrent · انتظار 420ms)');
+  expect(diagnosticText({ trace: [{ stage: 'source-selected', ms: 0, mode: 'cold' }] })).toContain('البدء: بارد (بلا تسخين)');
 });

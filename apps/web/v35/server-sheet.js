@@ -16,7 +16,7 @@ import { parseRelease, swarmTier } from '../addons/release-info.js';
 import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
-import { isChecking, isUnavailable, isValid, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
+import { isChecking, isUnavailable, isValid, measuredSeeds, pieceScore, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
 /** https أو صورة PNG مضمّنة صغيرة فقط: لا مخطط آخر يصل إلى CSS. */
 const safeIconUrl = (value) => {
@@ -120,6 +120,34 @@ export function rank(r, d) {
   return scoreRoute(r, d).score;
 }
 
+/**
+ * ترتيب التسخين الخلفي (قرار المالك 26 نوفمبر): السرب 16 درجة، ثم حجم القطعة 12، ثم العربي 2.
+ * السرب المقاس إن وصل المحرك إليه وإلا المعلن؛ حجم القطعة المجهول وسط (6).
+ */
+export function warmScore(d, measured) {
+  const seeds = measuredSeeds({ ...d, measured }) ?? d.info?.seeders;
+  const swarm = Number.isFinite(seeds) ? 16 * Math.min(1, Math.log10(1 + Math.max(0, seeds)) / 3) : 0;
+  const piece = 12 * (pieceScore(measured?.pieceLength) ?? 0.5);
+  const arabic = d.langs?.some((l) => l.ar) || d.info?.arabic ? 2 : 0;
+  return swarm + piece + arabic;
+}
+
+/** أقل سرب يُسخَّن إن وُجد أعلى منه بين الظاهر؛ إن لم يوجد يُسخَّن الموجود. */
+export const WARM_MIN_SEEDS = 20;
+
+/**
+ * الصفوف الظاهرة غير «المقترح» مرتبة للتسخين الخلفي: `rows` = [{ r, d, m }]. يرجع المعرّفات.
+ * ما سربه 20 فأقل يُترك إن وُجد أقوى منه، ويُسخَّن إن لم يوجد غيره.
+ */
+export function warmRows(rows) {
+  const seedsOf = (x) => measuredSeeds({ ...x.d, measured: x.m }) ?? x.d.info?.seeders ?? 0;
+  const strong = rows.filter((x) => seedsOf(x) > WARM_MIN_SEEDS);
+  return (strong.length ? strong : rows)
+    .map((x) => ({ id: x.r.id, s: warmScore(x.d, x.m) }))
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.id);
+}
+
 /** آخر صف تورنت لُمس: يُنسب إليه زمن بدء المشغّل الأصلي حين يصل (playstat). */
 let lastPick = null;
 /**
@@ -210,7 +238,7 @@ export function factDate(v) {
 /**
  * يبني الورقة داخل `body` ويعيد {update, best, status, body, scroll}.
  *
- * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onTop(r), onRetry(), onUnavailable(r),
+ * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onTop(r), onWarmRows(ids), onRetry(), onUnavailable(r),
  *      selectable(r), pending(r), dead(r), sourceName(r), prefer, directLang, extraFoot[] }
  * media: { title, logo, backdrop, backdropFallback, backdropPosition, code ('S01E02'),
  *          label ('الموسم 1 · الحلقة 2'), episodeTitle, description, rating: {value, label},
@@ -539,6 +567,13 @@ export function createServerSheet(body, o) {
     views.set(r.id, { key, d });
     return d;
   };
+  // حقائق المحرك للمُسخَّن (حجم القطعة والسرب المقاس) تدخل درجة «المقترح» ومكان الصف الجديد فقط؛
+  // الصف الظاهر لا يتحرك بها
+  let measured = {};
+  const scoreOf = (r) => {
+    const m = measured[r.id];
+    return rank(r, m ? { ...view(r), measured: m } : view(r));
+  };
 
   const section = (cls, title, sub) => {
     const s = el('section', `an-srv-group ${cls}`);
@@ -610,6 +645,15 @@ export function createServerSheet(body, o) {
   let topId = null;
   // onTop: «المقترح» تورنت ثبت 400ms (لا مع كل تحديث للصفوف): المحرك يسخّنه قبل غيره. مرة لكل مقترح.
   let topTimer = 0, warmedTop = null;
+  // الصفوف الظاهرة غير «المقترح»: تسخين خلفي بترتيب warmRows، بعد أن تثبت 400ms، وحين تتغير فقط
+  let rowsTimer = null, rowsKey = '';
+  const announceRows = (ids) => {
+    if (!o.onWarmRows) return;
+    const key = ids.join('|');
+    clearTimeout(rowsTimer);
+    if (key === rowsKey) return;
+    rowsTimer = setTimeout(() => { if (destroyed) return; rowsKey = key; o.onWarmRows(ids); }, 400);
+  };
   const announceTop = (top) => {
     clearTimeout(topTimer);
     if (!o.onTop || !top || !view(top).torrent || top.id === warmedTop) return;
@@ -907,12 +951,13 @@ export function createServerSheet(body, o) {
   function update(model) {
     if (destroyed) return;
     last = model;
+    measured = model.facts ?? {};
     const routes = oneTorrent(model.routes ?? []);
     paintFilters(routes);
     const shown = routes.filter(passes);
     const ready = shown.filter(isSelectable);
     const anyReady = routes.some(isSelectable);
-    const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
+    const scored = ready.map((r) => ({ r, s: scoreOf(r) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
     const top = scored[0]?.r ?? null;
     topId = top?.id ?? null;
     announceTop(top);
@@ -940,7 +985,7 @@ export function createServerSheet(body, o) {
     const live = shown.filter((r) => isSelectable(r) || (placed.has(r.id) && folded.get(r.id) !== false))
     const waiting = shown.filter((r) => isPending(r) && !placed.has(r.id))
     const fresh = live.filter((r) => !placed.has(r.id))
-      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? rank(r, view(r)) : -1e9 }))
+      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? scoreOf(r) : -1e9 }))
       .sort((a, b) => b.s - a.s || (a.d.torrent && b.d.torrent ? torrentOrder(a, b) : 0));
     for (const { r } of fresh) placed.set(r.id, ++placedSeq);
     const bySeq = (a, b) => placed.get(a.id) - placed.get(b.id);
@@ -973,6 +1018,9 @@ export function createServerSheet(body, o) {
       const d = view(r);
       return d.tier === 'dead' || d.info?.source === 'CAM';
     });
+    announceRows(warmRows(torrentLive
+      .filter((r) => r.id !== topId && folded.get(r.id) === true && isSelectable(r))
+      .map((r) => ({ r, d: view(r), m: measured[r.id] }))));
     // قسمان يظهران في الوصول نفسه: ما فيه سيرفر صالح أولًا (المباشر عند التساوي)
     const newGroups = [[direct, directLive], [torrent, torrentLive]].filter(([g, items]) => items.length && !sectionAt.has(g))
       .sort((a, b) => Number(b[1].some(isSelectable)) - Number(a[1].some(isSelectable)));
@@ -1037,6 +1085,7 @@ export function createServerSheet(body, o) {
     destroyed = true;
     clearTimeout(settleTimer);
     clearTimeout(topTimer);
+    clearTimeout(rowsTimer);
     for (const id of frames) globalThis.cancelAnimationFrame?.(id);
     frames.clear();
     for (const unsubscribe of subscriptions) unsubscribe();
