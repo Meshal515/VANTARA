@@ -4,7 +4,9 @@ import {execFileSync} from 'node:child_process';
 // This pin is not a claim that its live-provider or player gates passed.
 const base='7a266dac8492471948931d3a4e1f600836b44b06';
 const lines=execFileSync('git',['diff','--name-status','--no-renames',base],{encoding:'utf8'}).trim().split('\n').filter(Boolean);
-const prefixes=['extensions/runtime-core/','extensions/runtime-android/','tools/repository-compat/','docs/repository-compat/','docs/addons/'];
+const prefixes=['extensions/runtime-core/','extensions/runtime-android/','tools/repository-compat/','docs/repository-compat/','docs/addons/',
+  // Owner-requested logo source files (26 Nov 2026): design assets only, not used by any app build.
+  'docs/brand/logo/'];
 // Owner's server-delivery and installation journey regressions. Exact seams;
 // no broad legacy allowance and no change to the pinned protection baseline.
 const deliverySeams=[
