@@ -229,6 +229,17 @@ object TorrentPolicy {
     }
     /** فهارس الحاويات التي رأيناها في آخر الملف: 63KB–697KB؛ 2MB هامش آمن. */
     const val TAIL_INDEX_BYTES = 2L * 1024 * 1024
+    /**
+     * تركيز البدء: عند أول نافذة أو قفزة إلى موضع جديد، والقطعة المنتظرة لم تكتمل، تُطلب القطع ذات الموعد
+     * وحدها. فتح النافذة كلها (12 قطعة متتابعة) يملأ طابور كل مشارك بنحو 10 كتل لقطع لا ينتظرها المشغّل،
+     * فالكتل الأخيرة من القطعة المنتظرة (عند مشاركين بطيئين) لا تُنقذ إلا خلف طابور من ثانية إلى ثانيتين.
+     * محاكي السرب (40 مشاركًا، 49 Mbps، قطعة 1MB): أول قطعة بعد تسخين 1.5 ث من 3.9 إلى 1.8 ث، وباردًا من 5.6
+     * إلى 3.2 ث. القفزة تشمل تخطي مرفقات MKV. التشغيل المستمر لا يتأثر: القطعة التالية من القطع ذات الموعد أصلًا،
+     * أو اكتملت.
+     */
+    fun focusStart(next: List<Int>, applied: List<Int>, focused: Boolean, haveHead: Boolean, critical: Int = 2): Boolean =
+        next.isNotEmpty() && !haveHead && (next.first() !in applied.take(critical) || (focused && next.first() == applied.first()))
+
     fun window(file: TorrentFile, position: Long, pieceLength: Int, count: Int = 12): List<Int> {
         require(count in 1..64)
         val first = readAt(file, position, pieceLength, 1)?.piece ?: return emptyList()

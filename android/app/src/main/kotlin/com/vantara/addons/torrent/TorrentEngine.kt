@@ -588,6 +588,9 @@ class TorrentEngine internal constructor(
         private var edgesWanted = false
         private var torrent: TorrentHandle? = null
         private var window = emptyList<Int>()
+        /** تركيز البدء ([TorrentPolicy.focusStart]) فعّال الآن، وآخر موضع طلبه المشغّل لفتح النافذة بعده. */
+        private var focused = false
+        private var lastPosition = 0L
         /** القطع التي لها موعد الآن: يُعدَّل الفرق فقط حين تتحرك النافذة، لا تُمسح كلها وتُعاد. */
         private var deadlined = HashSet<Int>()
         // النافذة المتحركة: الملف المختار، القطع المطلوبة قدّام النافذة، والمدى المفرّغ من القرص
@@ -752,7 +755,7 @@ class TorrentEngine internal constructor(
             if (selected != null && selected != file.index && refs > 1) throw IOException("Another file from this torrent is already playing")
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
-                selected = file.index; initialized = true; window = emptyList(); aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
+                selected = file.index; initialized = true; window = emptyList(); focused = false; aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
                 head = if (file.path.endsWith(".mkv", ignoreCase = true)) MkvHead() else null
                 this.file = file; pieceLength = info.pieceLength()
                 val metadata = File(folder.parentFile, "metadata.torrent")
@@ -771,12 +774,16 @@ class TorrentEngine internal constructor(
             }
         }
         fun prioritize(file: TorrentFile, position: Long, pieceLength: Int) = synchronized(monitor) {
-            val next = TorrentPolicy.window(file, position, pieceLength)
+            val full = TorrentPolicy.window(file, position, pieceLength)
             // رجوع لمنطقة فُرّغت من القرص: libtorrent يقرأها أصفارًا، فنعيد البناء أولًا
-            if (next.isNotEmpty() && evicted(next.first())) rebuild()
-            if (next == window) return@synchronized
-            if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
+            if (full.isNotEmpty() && evicted(full.first())) rebuild()
             val handle = torrent ?: throw IOException("Torrent session ended")
+            lastPosition = position
+            val focus = PATCHED && TorrentPolicy.focusStart(full, window, focused, full.isNotEmpty() && handle.havePiece(full.first()), CRITICAL_PIECES)
+            // في التركيز تُطبَّق القطع ذات الموعد وحدها؛ النافذة كاملة تُفتح حين تكتمل القطعة المنتظرة
+            val next = if (focus) full.take(CRITICAL_PIECES) else full
+            if (next == window && focus == focused) return@synchronized
+            if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val pending = TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
             // مع libtorrent المخصص: قطعتان فقط بموعد (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7 فيقسم السرعة عليها)،
@@ -804,8 +811,17 @@ class TorrentEngine internal constructor(
                 deadlined = HashSet(diff.keep)
                 for (piece in next) if (piece !in diff.keep) handle.piecePriority(piece, Priority.SIX)
             }
-            extendAhead(handle, file, pieceLength, next)
+            if (focus) { for (p in aheadRange) if (p !in next) handle.piecePriority(p, Priority.IGNORE); aheadRange = IntRange.EMPTY }
+            else extendAhead(handle, file, pieceLength, next)
             window = next
+            focused = focus
+        }
+
+        /** القطعة المنتظرة في التركيز اكتملت: تُفتح النافذة كاملة قبل أن يطلب المشغّل ما بعدها. */
+        private fun widenIfReady(handle: TorrentHandle) {
+            val head = window.firstOrNull() ?: return
+            val f = file ?: return
+            if (focused && handle.havePiece(head)) runCatching { prioritize(f, lastPosition, pieceLength) }
         }
 
         /** ما بعد النافذة حتى [ahead] قطعة: أولوية عادية بلا مواعيد، فيُنزَّل قدّام بقدر المساحة. */
@@ -868,7 +884,7 @@ class TorrentEngine internal constructor(
             }
             handle.resume()
             torrent = handle
-            window = emptyList(); aheadRange = IntRange.EMPTY
+            window = emptyList(); aheadRange = IntRange.EMPTY; focused = false
             reading.clear(); failed.clear()
             for (p in evictedFrom until evictedUntil) pieces.remove(p)?.let { memoryBytes -= it.size }
             evictedFrom = Int.MAX_VALUE; evictedUntil = 0
@@ -890,6 +906,7 @@ class TorrentEngine internal constructor(
                     val handle = torrent ?: throw IOException("Torrent session ended")
                     if (handle.status().errorCode().value() != 0) throw IOException("Torrent host/download failure")
                     if (handle.havePiece(piece) && reading.add(piece)) handle.readPiece(piece)
+                    widenIfReady(handle)
                     sampleStart(handle)
                     // A 4K piece can be 16 MB: fail on a stalled swarm, not on a slow but moving one.
                     // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
@@ -1052,7 +1069,8 @@ class TorrentEngine internal constructor(
             settings.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
             if (PATCHED) {
                 // المتغير H في tools/libtorrent-patches (6 تشغيلات): أول قطعة بوسيط 4.3 ث وأقصى 6 بدل 8.8 وأقصى 10.
-                // دورة 100ms تعيد طلب الكتل الحرجة أسرع، والأولوية تُحترم من أول طلب (لا اختيار عشوائي لأول 4 قطع)
+                // الأولوية تُحترم من أول طلب (لا اختيار عشوائي لأول 4 قطع). تنبيه: tick_interval لا يسرّع إنقاذ الكتل
+                // الحرجة؛ libtorrent يعيد تخطيطها في second_tick مرة كل ثانية مهما كانت الدورة (session_impl.cpp)
                 settings.setInteger(settings_pack.int_types.tick_interval.swigValue(), 100)
                 settings.setInteger(settings_pack.int_types.initial_picker_threshold.swigValue(), 0)
             }
