@@ -64,7 +64,7 @@ jobs:
           {
             echo "base=$base"
             # المحرك: يعيد بناء libtorrent واختباره وتشغيل التورنت 1080p/2K/4K ومقارنة السرب
-            echo "engine=$(pick '^tools/torrent-host/(vantara-torrent\.cpp|CMakeLists\.txt|host\.test\.mjs)$|^apps/desktop/src/(torrent|services|libtorrent)')"
+            echo "engine=$(pick '^tools/torrent-host/(vantara-torrent\.cpp|CMakeLists\.txt|host\.test\.mjs)$|^tools/libtorrent-patches/|^apps/desktop/src/(torrent|services|libtorrent)')"
             echo "desktop=$(pick '^apps/desktop/')"
             echo "web=$(pick '^apps/web/')"
             # التحديث داخل التطبيق N -> N+1: فقط حين يتغير ما يمسّه
@@ -139,23 +139,26 @@ jobs:
             apps/desktop/native/VANTARA.exe
             apps/desktop/native/vantara-torrent.exe
             apps/desktop/native/vantara-torrent.version.txt
-          key: windows-native-electron-44.7.2-${{ hashFiles('tools/torrent-host/vantara-torrent.cpp', 'tools/torrent-host/CMakeLists.txt', 'apps/desktop/native-host/**', 'tools/build-video-host.ps1', 'tools/brand-windows-executable.ps1', 'tools/windows-icon-resources.mjs', 'apps/desktop/assets/vantara-debug.ico') }}
+          key: windows-native-electron-44.7.2-${{ hashFiles('tools/torrent-host/vantara-torrent.cpp', 'tools/torrent-host/CMakeLists.txt', 'tools/libtorrent-patches/vcpkg-overlay/**', 'tools/libtorrent-patches/0001-vantara-stall-cap.patch', 'tools/libtorrent-patches/0002-vantara-urgent-hedge.patch', 'apps/desktop/native-host/**', 'tools/build-video-host.ps1', 'tools/brand-windows-executable.ps1', 'tools/windows-icon-resources.mjs', 'apps/desktop/assets/vantara-debug.ico') }}
       - name: Restore vcpkg binary cache
         if: steps.built.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: .vcpkg-cache
-          key: vcpkg-libtorrent-x64-windows-static-${{ hashFiles('tools/torrent-host/CMakeLists.txt') }}-v1
+          key: vcpkg-libtorrent-x64-windows-static-${{ hashFiles('tools/torrent-host/CMakeLists.txt', 'tools/libtorrent-patches/vcpkg-overlay/**', 'tools/libtorrent-patches/000*.patch') }}-v2
           restore-keys: vcpkg-libtorrent-x64-windows-static-
       - name: Build libtorrent (vcpkg, static) and vantara-torrent.exe
         if: steps.built.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static
+          # libtorrent 2.0.12 لـVANTARA (نسخة أندرويد نفسها) مع تعديلي البث، من منفذ vcpkg المخصص؛ 2.1.x الرسمي
+          # كان read_piece فيه 11–30 ث على ويندوز حقيقي مقابل 1.2–2.1 ث هنا (windows-libtorrent.yml)
+          Copy-Item tools/libtorrent-patches/0001-vantara-stall-cap.patch, tools/libtorrent-patches/0002-vantara-urgent-hedge.patch tools/libtorrent-patches/vcpkg-overlay/libtorrent
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static --overlay-ports=tools/libtorrent-patches/vcpkg-overlay
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg libtorrent build failed' }
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" list libtorrent
-          cmake -S tools/torrent-host -B build/torrent-host -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          cmake -S tools/torrent-host -B build/torrent-host -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DVANTARA_PATCHED_LIBTORRENT=ON
           if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
           cmake --build build/torrent-host --config Release
           if ($LASTEXITCODE -ne 0) { throw 'engine build failed' }
@@ -170,6 +173,7 @@ jobs:
           # نسخة libtorrent الفعلية (vcpkg) تُختم في BUILD-MANIFEST وTHIRD-PARTY-NOTICES
           (& (Join-Path $clean 'vantara-torrent.exe') --version | Select-Object -First 1).Trim() | Set-Content -NoNewline -Encoding ascii apps/desktop/native/vantara-torrent.version.txt
           Get-Content apps/desktop/native/vantara-torrent.version.txt
+          if ((Get-Content apps/desktop/native/vantara-torrent.version.txt) -notmatch '2\.0\.12') { throw 'expected VANTARA libtorrent 2.0.12' }
           Get-FileHash -Algorithm SHA256 apps/desktop/native/vantara-torrent.exe
       - name: libtorrent engine integration on real Windows
         if: steps.built.outputs.cache-hit != 'true'
