@@ -511,6 +511,9 @@ export function createServerSheet(body, o) {
   listen(body, 'click', () => closeDrops());
 
   const filter = { q: 'all', v: null, a: 'all' };
+  // اختيار المستخدم نفسه (UX13): إن اختفى خياره مؤقتًا (سيرفره الوحيد مات أو لم يصل بعد) تُعرض الكل، ثم يعود
+  // اختياره حين يظهر خيار بالقيمة نفسها. لا يُمسح بصمت.
+  const wanted = { q: 'all', v: null, a: 'all' };
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
   const pick = (r) => {
@@ -623,7 +626,9 @@ export function createServerSheet(body, o) {
     b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
     b.disabled = pending && !isTryable(r);
     const qb = b.querySelector('.ss-q');
-    qb.firstElementChild.textContent = d.q == null ? 'HD' : qualityLabel(d.q);
+    // جودة غير معروفة (HLS متكيّف أو مصدر لم يعلنها) لا تُكتب «HD»: هذا ادعاء لم يتحقق، والوصف المقروء «تلقائي»
+    qb.firstElementChild.textContent = qualityLabel(d.q);
+    qb.classList.toggle('ss-q--auto', d.q == null);
     // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
     qb.lastElementChild.textContent = '';
     qb.lastElementChild.innerHTML = glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
@@ -816,7 +821,7 @@ export function createServerSheet(body, o) {
   const langTabs = [['SUB', 'مترجم'], ['DUB', 'مدبلج']].map(([key, text]) => {
     const b = btn('ss-tab');
     b.textContent = text;
-    b.onclick = () => { filter.v = filter.v === key ? null : key; update(last); };
+    b.onclick = () => { filter.v = wanted.v = filter.v === key ? null : key; update(last); };
     lang.append(b);
     return [key, b];
   });
@@ -824,18 +829,18 @@ export function createServerSheet(body, o) {
   function paintFilters(routes) {
     const live = routes.filter((r) => !isDead(r));
     const qs = [...new Set(live.map((r) => view(r).q).filter((x) => x != null))].sort((a, b) => b - a);
-    if (filter.q !== 'all' && !qs.includes(filter.q)) filter.q = 'all';
+    filter.q = wanted.q !== 'all' && qs.includes(wanted.q) ? wanted.q : 'all';
     const dub = live.some((r) => r.variant === 'DUB');
     const sub = live.some((r) => r.variant !== 'DUB');
-    if (!(dub && sub)) filter.v = null;
+    filter.v = dub && sub ? wanted.v : null;
     const names = [...new Set(live.map((r) => view(r).name))];
-    if (filter.a !== 'all' && !names.includes(filter.a)) filter.a = 'all';
+    filter.a = wanted.a !== 'all' && names.includes(wanted.a) ? wanted.a : 'all';
     quality.set([['all', 'كل الجودات'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q,
       filter.q === 'all' ? (qs.length === 1 ? qualityLabel(qs[0]) : 'كل الجودات') : qualityLabel(filter.q),
-      (k) => { filter.q = k; update(last); });
+      (k) => { filter.q = wanted.q = k; update(last); });
     source.set([['all', 'كل المصادر'], ...names.map((n) => [n, n])], filter.a,
       filter.a === 'all' ? (names.length === 1 ? names[0] : 'كل المصادر') : filter.a,
-      (k) => { filter.a = k; update(last); });
+      (k) => { filter.a = wanted.a = k; update(last); });
     lang.hidden = !(dub && sub);
     for (const [key, b] of langTabs) {
       b.classList.toggle('on', filter.v === key);
@@ -853,25 +858,44 @@ export function createServerSheet(body, o) {
   // التورنت الواحد صف واحد: Torrentio نفسه يصل من إضافة Stremio ومن إضافتي Aniyomi (Torrentio وTorrentio Anime)،
   // فكان الإصدار نفسه يظهر ثلاث مرات ويتضاعف «غير متاح». الهوية: اسم الملف والحجم. الصف الظاهر يبقى (لا قفزة)
   // ما لم يمت وتصل نسخة صالحة منه.
+  // UX14: البصمة (infoHash) هي هوية التورنت الدقيقة: نفس البصمة صف واحد ولو اختلف اسم الملف، وبصمتان معروفتان
+  // مختلفتان صفّان ولو تطابق الاسم والحجم. إن غابت البصمة عند أحدهما يبقى الاسم والحجم (Aniyomi قد لا يعطيها).
   const torrentKey = (r) => {
     const d = view(r);
     const file = d.torrent ? d.info?.filename : null;
     return file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
   };
+  const hashOf = (r) => {
+    if (!view(r).torrent) return null;
+    const direct = typeof r.infoHash === 'string' && /^[a-f\d]{40}$/i.test(r.infoHash) ? r.infoHash : null;
+    const magnet = direct ? null : String(r.magnet ?? r.url ?? '').match(/btih:([a-f\d]{40})/i)?.[1];
+    const hash = (direct ?? magnet)?.toLowerCase();
+    return hash ? `${hash}|${r.fileIdx ?? ''}` : null;
+  };
+  const sameTorrent = (a, b) => {
+    const ha = hashOf(a), hb = hashOf(b);
+    if (ha && hb) return ha === hb;
+    const ka = torrentKey(a);
+    return ka != null && ka === torrentKey(b);
+  };
   const seedersOf = (r) => Number(view(r).info?.seeders) || 0;
   const oneTorrent = (routes) => {
-    const best = new Map();
+    const groups = [];
     for (const r of routes) {
-      const key = torrentKey(r);
-      if (!key) continue;
-      const cur = best.get(key);
-      const take = !cur
-        || (placed.has(cur.id) ? isDead(cur) && isSelectable(r)
-          : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
-          : true);
-      if (take) best.set(key, r);
+      if (!view(r).torrent || (!hashOf(r) && !torrentKey(r))) continue;
+      const h = hashOf(r);
+      // لا تجمع المجموعة بصمتين معروفتين مختلفتين، ولو ربط بينهما مسار بلا بصمة
+      const g = groups.find((x) => x.members.some((m) => sameTorrent(m, r)) && x.members.every((m) => !h || !hashOf(m) || hashOf(m) === h));
+      if (!g) { groups.push({ best: r, members: [r] }); continue; }
+      g.members.push(r);
+      const cur = g.best;
+      const take = placed.has(cur.id) ? isDead(cur) && isSelectable(r)
+        : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
+        : true;
+      if (take) g.best = r;
     }
-    return routes.filter((r) => { const key = torrentKey(r); return !key || best.get(key) === r; });
+    const hidden = new Set(groups.flatMap((g) => g.members.filter((m) => m !== g.best)));
+    return routes.filter((r) => !hidden.has(r));
   };
   function update(model) {
     if (destroyed) return;

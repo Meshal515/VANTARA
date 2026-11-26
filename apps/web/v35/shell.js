@@ -5485,9 +5485,21 @@ export function mountV35(deps, { page = 'home' } = {}) {
         }
         return out;
       };
-      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: await addons.cloudstreamRepositories?.(), sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if((sync.user?.userId??'local')!==profile)return; /* SRC2: المصدر المثبت يدخل البحث وصفحة العمل ولو غادرت صفحة الإضافات قبل الإشعار؛ إعادة فتحها فقط إن بقيت فيها */ resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run!==addonViewGeneration || currentPage()!=='utility')return; if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      // UX06: كل انتظار قبل الرسم يعقبه فحص الجيل والصفحة والحساب، فلا تحل واجهة متأخرة مكان وجهة أحدث
+      const cloudstreamRepos = await addons.cloudstreamRepositories?.();
+      if(run!==addonViewGeneration || currentPage()!=='utility' || (sync.user?.userId??'local')!==profile)return;
+      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: cloudstreamRepos, sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if((sync.user?.userId??'local')!==profile)return; /* SRC2: المصدر المثبت يدخل البحث وصفحة العمل ولو غادرت صفحة الإضافات قبل الإشعار؛ إعادة فتحها فقط إن بقيت فيها */ resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run!==addonViewGeneration || currentPage()!=='utility')return; if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
-    } catch { if(run===addonViewGeneration && currentPage()==='utility')q('utilityBody').replaceChildren(el('p', 'work-meta', 'تعذّر قراءة الإضافات. المصادر الأصلية مستمرة.')); }
+    } catch {
+      if(run!==addonViewGeneration || currentPage()!=='utility')return;
+      // UX10: الفشل له زر إعادة محاولة، لا نص وحده
+      const box=el('div','addons-load-failed');
+      const retry=el('button','v7-simple-btn','إعادة المحاولة');
+      retry.type='button';
+      retry.onclick=()=>{ void openAddons(); };
+      box.append(el('p', 'work-meta', 'تعذّر قراءة الإضافات. مكتبتك وتقدّمك محفوظان.'), retry);
+      q('utilityBody').replaceChildren(box);
+    }
   }
   async function openNativeAddonSource(record, sourceId) {
     closeAddonSource();

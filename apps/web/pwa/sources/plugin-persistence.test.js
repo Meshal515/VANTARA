@@ -177,6 +177,23 @@ describe('Last Known Good', () => {
     expect(r.unavailableReason('src.a')).toMatch(/عُطّل لسبب أمني/);
     await expect(r.call('src.a', async () => 1)).rejects.toThrow(/لسبب أمني/);
   });
+
+  it('F00-16: تعذّر قراءة الحزمة لا يرفع حظرًا أمنيًا محفوظًا (لا فشل مفتوح)', async () => {
+    const { make } = setup();
+    await make().init([def('src.a', 1)]);
+    let r = make();
+    await r.init([def('src.a', 1)], { blocked: [{ id: 'src.a', reason: 'ثغرة' }] });
+    expect(r.source('src.a')).toBeNull();
+    // الحزمة لم تصل (بلا شبكة/404): السياسة مجهولة، فالحظر المحفوظ يبقى
+    r = make();
+    await r.init(null);
+    expect(r.source('src.a')).toBeNull();
+    expect(r.unavailableReason('src.a')).toMatch(/عُطّل لسبب أمني/);
+    // حزمة وصلت ولا حظر فيها: السياسة رفعته صراحة، فيعود المصدر
+    r = make();
+    await r.init([def('src.a', 1)], { blocked: [] });
+    expect(r.source('src.a')).not.toBeNull();
+  });
 });
 
 describe('stable identity: source id migration and collisions', () => {
