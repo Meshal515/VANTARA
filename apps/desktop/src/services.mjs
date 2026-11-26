@@ -1174,6 +1174,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
       emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)});
+      // لوحة المشغّل تفتح مع preparing: ما سُجّل قبله (التسخين كله، واختيار المصدر) كان يضيع فيظهر «البدء: غير معروف»
+      for(const event of state.trace?.snapshot()??[])emit(state,event);
       let url;
       if(adopted){
         // التورنت جُهّز في الخلفية من صفحة العمل: المحرك والبيانات وأول الملف وفهرسه على القرص.
