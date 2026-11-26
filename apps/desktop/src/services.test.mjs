@@ -44,7 +44,8 @@ test('مشغل Windows يطلب حتى دقيقة كاش أمامي بحد RAM �
   const {dir,services}=await fixture(t);
   await services.startPlayback({session:'memory-cache',candidate:{url:'https://video.example.com/test.mp4'}});
   const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
-  assert.ok(args.includes('--cache-secs=60'));
+  // لا سقف بالثواني (كان 60 ث فالشريط لا يتجاوز دقيقة): الحد هو الحجم وحده حسب ذاكرة الجهاز
+  assert.ok(!args.some(x=>x.startsWith('--cache-secs')));
   assert.ok(args.some(x=>/^--demuxer-max-bytes=(128|256|512)MiB$/.test(x)));
   assert.ok(args.some(x=>/^--demuxer-max-back-bytes=(32|64|128)MiB$/.test(x)));
   assert.ok(args.includes('--cache-on-disk=no'));

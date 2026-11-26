@@ -141,8 +141,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const times = el('div', 'pp-times'), timeNow = el('span', null, '0:00'), timeTotal = el('span', null, '0:00');
   times.append(timeNow, timeTotal);
   const bar = el('div', 'pp-bar'); bar.setAttribute('role', 'slider'); bar.setAttribute('aria-label', 'التقدّم'); bar.tabIndex = 0; bar.dataset.control = 'seek';
-  const track = el('div', 'pp-track'), buffered = el('i', 'pp-buffered'), played = el('i', 'pp-played'), thumb = el('b', 'pp-thumb');
-  track.append(buffered, played);
+  // ثلاث طبقات: الجاهز على القرص (باهت)، ثم ما حمّله المشغّل في الذاكرة، ثم المشاهَد
+  const track = el('div', 'pp-track'), disk = el('i', 'pp-disk'), buffered = el('i', 'pp-buffered'), played = el('i', 'pp-played'), thumb = el('b', 'pp-thumb');
+  track.append(disk, buffered, played);
   const hoverTip = el('span', 'pp-hover'); hoverTip.hidden = true;
   // صورة مصغرة فوق المؤشر عند المرور أو السحب (كـCloudStream بطريقتنا): مربع يظهر بتلاشٍ وتكبير ناعم، والصورة من
   // المحرك لكل 10 ث (player.js ← services.previewFrame)، والوقت تحتها. بلا صورة بعد: الوقت وحده في المربع.
@@ -270,6 +271,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     const p = d ? Math.min(1, t / d) : 0;
     played.style.width = `${p * 100}%`; thumb.style.left = `${p * 100}%`;
     buffered.style.width = `${d && state.bufferedMs ? Math.min(1, state.bufferedMs / d) * 100 : 0}%`;
+    disk.style.width = `${d && state.diskMs ? Math.min(1, state.diskMs / d) * 100 : 0}%`;
     bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
   }
 
@@ -657,6 +659,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     body.append(metricRow(torrent ? 'تجهيز التورنت' : 'زمن البدء', prep != null ? `${prep} ms` : 'لم يُقس بعد', prep == null ? 'mute' : prep < 300 ? 'ok' : prep < 800 ? 'warn' : 'bad'));
     body.append(metricRow('السرعة الآن', mbps(n.inputBps)));
     body.append(metricRow('جاهز أمامك', aheadS != null ? `${aheadS} ثانية` : '—', aheadS == null ? 'mute' : aheadS >= 15 ? 'ok' : aheadS >= 5 ? 'warn' : 'bad'));
+    if (torrent && Number.isFinite(n.diskAheadMs)) { const m = Math.floor(n.diskAheadMs / 60000), s = Math.floor(n.diskAheadMs / 1000) % 60; body.append(metricRow('جاهز على القرص', m ? `${m} د ${s} ث` : `${s} ثانية`, 'soft')); }
     if (Number.isFinite(n.videoHeight)) body.append(metricRow('الفيديو', `${n.videoHeight}p${Number.isFinite(n.videoBps) && n.videoBps > 0 ? ` · ${(n.videoBps / 1e6).toFixed(1)} Mbps` : ''}`, 'soft'));
     if (torrent) {
       body.append(metricRow('مشاركون متصلون', Number.isFinite(n.peers) ? `${n.peers}${Number.isFinite(n.seeds) ? ` (زارعون ${n.seeds})` : ''}` : '—', n.peers > 0 ? 'ok' : 'bad'));

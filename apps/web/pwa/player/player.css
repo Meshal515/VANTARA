@@ -221,6 +221,9 @@ html.pwa-playing body {
   left: 0;
   width: 0;
 }
+.pwa-player .pp-disk {
+  background: rgba(255, 255, 255, 0.16);
+}
 .pwa-player .pp-buffered {
   background: rgba(255, 255, 255, 0.4);
 }
