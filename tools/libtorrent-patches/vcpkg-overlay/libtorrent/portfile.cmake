@@ -33,7 +33,7 @@ vcpkg_from_github(
         OUT_SOURCE_PATH SOURCE_PATH
         REPO arvidn/libtorrent
         REF "v${VERSION}"
-        SHA512 80c345cdf5a7a255db32329be007d4920b177c7915e7c3515c4a049871292eae5276b8cd45fa2c6bf7445dcd5434c96afb57dc4244e2bfbee6813c5f2954b4df
+        SHA512 5d737dbc25f335f5dc207647155289177ded51051f6338629680efc766825a52ec952092a1b0297121bfc201d4508be3cb427e24b18a18649435377dcfeb086b
         HEAD_REF RC_2_0
         # VANTARA: تعديلا البث (tools/libtorrent-patches). ينسخهما سير windows-debug إلى مجلد المنفذ قبل البناء
         # فيدخلان بصمة كاش vcpkg. معطلان ما لم يضبط المحرك VANTARA_LT_STALL_CAP_MS / VANTARA_LT_HEDGE_MS.
