@@ -582,16 +582,18 @@ class TorrentEngine internal constructor(
     internal inner class Lease(private val state: State, val file: TorrentFile, val pieceLength: Int, private val cancelled: () -> Boolean, private val preview: Boolean = false) {
         private val closed = AtomicBoolean(false)
         /**
-         * الخيار B لهذا الفتح ([TurboRead]): أول قطعتين مختلفتين يقرؤهما (رأس الملف أو موضع القفزة، وما بعد مرفقات MKV)
-         * وحدهما يُقرآن قبل التحقق، بسقف بايتات. الفتح يبقى طوال التشغيل المتصل، فما بعدهما موثق دائمًا.
+         * الخيار B لهذا الفتح ([TurboRead]): أول القطع المختلفة التي يقرؤها (رأس الملف أو موضع القفزة، وما بعد مرفقات
+         * MKV) حتى سقف البايتات ([TurboRead.piecesPerOpen]) وحدها تُقرأ قبل التحقق. الفتح يبقى طوال التشغيل المتصل، فما
+         * بعدها موثق دائمًا.
          */
-        private val firstPieces = ArrayList<Int>(TurboRead.PIECES_PER_OPEN)
+        private val firstLimit = TurboRead.piecesPerOpen(pieceLength)
+        private val firstPieces = ArrayList<Int>(firstLimit)
         private var earlyLeft = if (preview) 0L else TurboRead.MAX_BYTES_PER_OPEN
         /** القراءة من القرص والإغلاق تحت قفل واحد: الإغلاق من خيط آخر ينتظر قراءة جارية (ملّي ثوانٍ من ذاكرة النظام). */
         private val diskLock = Any()
         private var disk: java.io.RandomAccessFile? = null
         private fun earlyAsk(plan: PieceRead): TurboAsk? {
-            if (plan.piece !in firstPieces && firstPieces.size < TurboRead.PIECES_PER_OPEN) firstPieces += plan.piece
+            if (plan.piece !in firstPieces && firstPieces.size < firstLimit) firstPieces += plan.piece
             if (earlyLeft <= 0 || plan.piece !in firstPieces || !turboAllowed(state.infoHash)) return null
             return TurboAsk(plan.offset, minOf(plan.length.toLong(), earlyLeft).toInt())
         }

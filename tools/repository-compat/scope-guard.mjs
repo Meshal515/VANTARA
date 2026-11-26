@@ -475,6 +475,8 @@ for (const path of ["android/app/src/main/kotlin/com/vantara/addons/torrent/Torr
 for (const path of ["android/app/src/main/kotlin/com/vantara/anime/player/SeekGuardPlayer.kt"]) seams.add(path);
 // الخيار B (قرار المالك 26 نوفمبر): أداة إثبات أن كتلة block_finished_alert مقروءة من القرص ومطابقة لحظة إعلانها
 seams.add("tools/libtorrent-patches/block-probe.cpp");
+// موضع بدء التورنت تحت 5 ث بدءٌ من الأول (تشخيص المالك على Debug 3410، 27 نوفمبر)
+seams.add("android/app/src/test/java/com/vantara/anime/player/PlaybackSeekBudgetTest.kt");
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);

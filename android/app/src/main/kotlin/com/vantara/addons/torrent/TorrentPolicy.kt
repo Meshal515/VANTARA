@@ -504,10 +504,20 @@ object EpisodeNames {
 object TurboRead {
     /** حجم كتلة libtorrent (default_block_size). */
     const val BLOCK_BYTES = 16 * 1024
-    /** القطع المختلفة التي يحق لكل فتح أن يقرأ منها قبل التحقق: رأس الملف، وما بعد مرفقات MKV التي تُتخطى. */
+    /** أقل عدد قطع مختلفة يحق لكل فتح أن يقرأ منها قبل التحقق: رأس الملف، وما بعد مرفقات MKV التي تُتخطى. */
     const val PIECES_PER_OPEN = 2
     /** سقف البايتات غير الموثقة لكل فتح، مهما كان حجم القطعة. */
     const val MAX_BYTES_PER_OPEN = 32L * 1024 * 1024
+    /**
+     * القطع المختلفة الأولى لكل فتح التي تُقرأ قبل التحقق: ما يملأ [MAX_BYTES_PER_OPEN] منها، وقطعتان على الأقل.
+     * كانت قطعتين أيًّا كان حجمها: 32MB بقطع 16MB، و8MB فقط بقطع 4MB. تشخيص المالك (حلقة أنمي بقطع 4MB، بعد
+     * استئناف بـ3 ث): «ينتظر القطعة 2442 منذ 2.9 ث (232/256 كتلة)» و«قُرئ 4.1MB» من سقف 32MB: الثالثة موثقة فوقف.
+     */
+    fun piecesPerOpen(pieceLength: Int): Int {
+        if (pieceLength <= 0) return PIECES_PER_OPEN
+        val fill = (MAX_BYTES_PER_OPEN + pieceLength - 1) / pieceLength
+        return fill.coerceIn(PIECES_PER_OPEN.toLong(), 64L).toInt()
+    }
     /** مفتاح التعطيل في «المزيد» بالمشغّل (Debug). في Stable مقفل بالكود. */
     const val PREF = "turboUnverified"
 
