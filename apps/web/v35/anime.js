@@ -2703,7 +2703,8 @@ export function createAnime(deps) {
       };
 
       // المقترح يُسخَّن، وحقائق المحرك عنه (حجم القطعة والسرب المقاس) تعود لدرجته
-      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); });
+      const totalMs = Number(saved.duration) > 0 ? Number(saved.duration) : Number(m.duration) > 0 ? Number(m.duration) * 60000 : 0;
+      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); }, { at: clip ? 0 : engine.resumeFraction(startAt, totalMs) });
       off.push(() => tops.stop());
       const ui = createServerSheet(body, {
         el,
@@ -2722,7 +2723,7 @@ export function createAnime(deps) {
         onBest: () => playBest(),
         onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
         onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
-        onHover: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
+        onHover: (r) => { if (sheet.session && !sheet.closed) tops.hover(sheet.session, r.id); },
         noSourcesTitle: 'أضف مصدرًا لتشاهد',
         ...(deps.addSource ? { onAddSource: () => { deps.closeSheet(); deps.addSource('anime'); } } : {}),
         // من داخل مصدر: سيرفراته وحده، و«جرّب البدائل» يفتح العمل نفسه (هوية AniList) بكل المصادر على الحلقة نفسها
