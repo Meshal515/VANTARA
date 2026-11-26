@@ -471,7 +471,29 @@ public:
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
         o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
-          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << ",\"direct_ahead\":" << directAhead << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
+          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << ",\"direct_ahead\":" << directAhead << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_
+          << ",\"redundant_bytes\":" << st.total_redundant_bytes << ",\"failed_bytes\":" << st.total_failed_bytes << ",\"readers\":[";
+        // كل قارئ مفتوح: قطعته، ومنذ متى، وهل نُزّلت، وهل قراءتها من القرص جارية، وأولويتها وموعدها (أين يعلق إن علق)
+        {
+            std::vector<std::pair<uint64_t, Reader>> readers;
+            std::set<int> reading, deadlined;
+            { std::lock_guard<std::mutex> lock(m_); readers.assign(t->readers.begin(), t->readers.end()); reading = t->reading; deadlined = t->deadlined; }
+            auto const info = t->h.torrent_file();
+            int const total = info ? info->num_pieces() : 0;
+            bool first = true;
+            for (auto const& [rid, r] : readers) {
+                int const piece = int(r.piece);
+                bool const valid = piece >= 0 && piece < total;
+                o << (first ? "" : ",") << "{\"id\":" << rid << ",\"piece\":" << piece
+                  << ",\"ms\":" << std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - r.at).count()
+                  << ",\"have\":" << (valid && t->h.have_piece(lt::piece_index_t(piece)) ? 1 : 0)
+                  << ",\"reading\":" << (reading.count(piece) ? 1 : 0)
+                  << ",\"prio\":" << (valid ? int(static_cast<std::uint8_t>(t->h.piece_priority(lt::piece_index_t(piece)))) : -1)
+                  << ",\"deadline\":" << (deadlined.count(piece) ? 1 : 0) << "}";
+                first = false;
+            }
+        }
+        o << "]}";
         return {200, o.str()};
     }
 
