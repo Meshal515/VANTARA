@@ -53,5 +53,13 @@ class TorrentPolicyTest {
         assertEquals(listOf(0, 3, 4), TorrentPolicy.edges(TorrentFile(0, "movie.mkv", 450, 30), 100))
         assertEquals(listOf(2), TorrentPolicy.edges(TorrentFile(1, "tiny.mp4", 10, 250), 100))
         assertEquals(emptyList<Int>(), TorrentPolicy.edges(TorrentFile(1, "empty.mp4", 0, 250), 100))
+        // قطع 8MB لملف 2.24GB (عينة الجهاز): الفهرس في آخر 2MB، فقطعة الذيل الأخيرة وحدها لا قطعتان (16MB)
+        val mb = 1024 * 1024
+        val big = TorrentFile(0, "remux.mkv", 2_405_181_440L, 0)
+        val lastBig = ((big.size - 1) / (8 * mb)).toInt()
+        assertEquals(listOf(0, lastBig), TorrentPolicy.edges(big, 8 * mb))
+        // الملف ينتهي بعد حد القطعة بـ1MB: آخر 2MB تقع في قطعتين، فكلتاهما
+        val straddle = TorrentFile(0, "straddle.mkv", 10L * 8 * mb + mb, 0)
+        assertEquals(listOf(0, 9, 10), TorrentPolicy.edges(straddle, 8 * mb))
     }
 }

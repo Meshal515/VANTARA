@@ -214,12 +214,21 @@ object TorrentPolicy {
         return DeadlineDiff(reset, set, keep)
     }
 
+    /**
+     * أول قطعة، وقطع الذيل التي تغطي آخر [TAIL_INDEX_BYTES] من الملف (قطعتان كحد): فهرس الحاوية (Cues في MKV،
+     * moov في MP4) في أوله أو آخره. كانت «آخر قطعتين» دائمًا: بقطع 8MB تلك 16MB والفهرس 697KB فقط (عينة الجهاز
+     * 26 نوفمبر: 24MB قبل أول صورة بسرب من 8 مشاركين = 14.8 ث).
+     */
     fun edges(file: TorrentFile, pieceLength: Int): List<Int> {
         if (file.size <= 0) return emptyList()
         val first = (file.offset / pieceLength).toInt()
-        val last = ((Math.addExact(file.offset, file.size) - 1) / pieceLength).toInt()
-        return listOf(first, last - 1, last).filter { it in first..last }.distinct()
+        val end = Math.addExact(file.offset, file.size)
+        val last = ((end - 1) / pieceLength).toInt()
+        val tailFrom = maxOf(last - 1, ((end - minOf(file.size, TAIL_INDEX_BYTES)) / pieceLength).toInt())
+        return (listOf(first) + (tailFrom..last)).filter { it in first..last }.distinct()
     }
+    /** فهارس الحاويات التي رأيناها في آخر الملف: 63KB–697KB؛ 2MB هامش آمن. */
+    const val TAIL_INDEX_BYTES = 2L * 1024 * 1024
     fun window(file: TorrentFile, position: Long, pieceLength: Int, count: Int = 12): List<Int> {
         require(count in 1..64)
         val first = readAt(file, position, pieceLength, 1)?.piece ?: return emptyList()
