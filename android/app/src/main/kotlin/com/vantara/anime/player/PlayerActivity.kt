@@ -644,7 +644,7 @@ class PlayerActivity : Activity() {
             .setLoadControl(PlaybackBuffering.create(Runtime.getRuntime().maxMemory()))
             .setSeekBackIncrementMs(SEEK_MS)
             .setSeekForwardIncrementMs(SEEK_MS)
-            .build()
+            .build().let { SeekGuardPlayer(it, ::seekNeedsCues) }
         // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
@@ -966,6 +966,22 @@ class PlayerActivity : Activity() {
         watchStall()
     }
 
+    /** المصدر الحالي بدأ بلا فهرس الحاوية (CandidateMediaSources.deferCues) ولم يُعد تجهيزه بعد. */
+    private var cuesDeferred = false
+    /**
+     * قفزة على مصدر بدأ بلا فهرس: Media3 يرجعه إلى البداية لأنه غير قابل للقفز، فنعيد تجهيزه بالفهرس عند الموضع
+     * المطلوب (القفزة بداية جديدة أصلًا). إن صار قابلًا للقفز (الفهرس قبل أول Cluster) تمر القفزة عادية.
+     */
+    private fun seekNeedsCues(positionMs: Long): Boolean {
+        if (!cuesDeferred || !::player.isInitialized) return false
+        val c = current ?: return false
+        if (player.isCurrentMediaItemSeekable) { cuesDeferred = false; return false }
+        cuesDeferred = false
+        // بعد إعادة البناء: لا تكرار على هذا المصدر حتى لو بدأ من 0
+        main.post { if (current === c) start(c, positionMs.coerceAtLeast(1_000)) }
+        return true
+    }
+
     private fun start(c: Candidate, positionMs: Long, withoutExternalAudio: Boolean = false) {
         seekBudget.reset()
         main.removeCallbacks(stallWatchdog)
@@ -989,7 +1005,14 @@ class PlayerActivity : Activity() {
         together?.onPreparing()
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
-        val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
+        // تورنت من أول الحلقة: أول صورة من الرأس بلا انتظار الفهرس، والذيل ينزل بعده. الاستئناف والغرفة والمقطع
+        // يحتاجون القفز من البداية فيبقون بالفهرس
+        val deferCues = c.url.startsWith("vantara-torrent:") && positionMs < 1_000 && together == null && clip == null
+        cuesDeferred = deferCues
+        if (c.url.startsWith("vantara-torrent:")) runCatching {
+            com.vantara.addons.torrent.TorrentEngine.get(this).deferTail(android.net.Uri.parse(c.url), deferCues)
+        }
+        val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId, deferCues = deferCues)
         // HLS المحلي يبقى على Media3. الملف المباشر يُقرأ من القرص لاستخراج إطار عند الطلب.
         if (::seekPreview.isInitialized) {
             val file = android.net.Uri.parse(c.url).takeIf { android.os.Build.VERSION.SDK_INT >= 27 && it.scheme == "file" }?.path

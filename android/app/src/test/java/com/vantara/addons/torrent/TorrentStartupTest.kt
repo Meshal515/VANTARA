@@ -79,12 +79,14 @@ class TorrentStartupTest {
         val mb = 1024 * 1024
         // 256KB: أول قطعة والذيل كله
         assertEquals(listOf(0, 1240, 1239), TorrentPrefetch.warmPieces(listOf(0, 1239, 1240), 256 * 1024, unmetered = true))
-        // 8MB (Spider-Man): كانت «الأطراف ≤12MB» تُسقطه كله؛ الآن أول قطعة + آخر قطعة = 16MB
-        assertEquals(listOf(0, 1175), TorrentPrefetch.warmPieces(listOf(0, 1174, 1175), 8 * mb, unmetered = true))
-        // 16MB: أول قطعة وحدها تملأ الميزانية
-        assertEquals(listOf(0), TorrentPrefetch.warmPieces(listOf(0, 586, 587), 16 * mb, unmetered = true))
+        // 8MB (Spider-Man): كانت «الأطراف ≤12MB» تُسقطه كله؛ الآن أول قطعة والذيل
+        assertEquals(listOf(0, 1175, 1174), TorrentPrefetch.warmPieces(listOf(0, 1174, 1175), 8 * mb, unmetered = true))
+        // 16MB (Reacher): أول قطعة والذيل، فلا يبقى الفهرس بعد الضغط
+        assertEquals(listOf(0, 587, 586), TorrentPrefetch.warmPieces(listOf(0, 586, 587), 16 * mb, unmetered = true))
+        // 32MB: أول قطعة وحدها
+        assertEquals(listOf(0), TorrentPrefetch.warmPieces(listOf(0, 9, 10), 32 * mb, unmetered = true))
         // أكبر من الميزانية: لا شيء
-        assertTrue(TorrentPrefetch.warmPieces(listOf(0, 9, 10), 32 * mb, unmetered = true).isEmpty())
+        assertTrue(TorrentPrefetch.warmPieces(listOf(0, 9, 10), 64 * mb, unmetered = true).isEmpty())
         // باقة الجوال: بيانات واتصالات فقط
         assertTrue(TorrentPrefetch.warmPieces(listOf(0, 1239, 1240), 256 * 1024, unmetered = false).isEmpty())
     }

@@ -41,8 +41,13 @@ object CandidateMediaSources {
      * error: callers may retry once with [includeExternalAudio] false, retaining this candidate.
      */
     fun create(candidate: Candidate, dataSourceFactory: DataSource.Factory, includeExternalAudio: Boolean = true,
-        mediaId: String = candidate.id): Result {
-        val factory = DefaultMediaSourceFactory(dataSourceFactory)
+        mediaId: String = candidate.id, deferCues: Boolean = false): Result {
+        // [deferCues]: مستخرج MKV لا يقفز إلى فهرس Cues في آخر الملف قبل أول Cluster، فأول صورة تأتي من الرأس وحده.
+        // التورنت يسلّم قطعًا موثقة كاملة، فقراءة 168KB من الذيل كانت تكلف قطعة 16MB (Reacher: 13 و24 ث).
+        // المصدر بلا فهرس لا يقبل القفز؛ PlayerActivity يعيد تجهيزه بالفهرس عند أول قفزة (SeekGuardPlayer).
+        val factory = if (!deferCues) DefaultMediaSourceFactory(dataSourceFactory)
+            else DefaultMediaSourceFactory(dataSourceFactory, androidx.media3.extractor.DefaultExtractorsFactory()
+                .setMatroskaExtractorFlags(androidx.media3.extractor.mkv.MatroskaExtractor.FLAG_DISABLE_SEEK_FOR_CUES))
         val item = MediaItem.Builder().setUri(candidate.url).setMediaId(mediaId).apply {
             when (candidate.container) {
                 Container.HLS -> setMimeType(MimeTypes.APPLICATION_M3U8)

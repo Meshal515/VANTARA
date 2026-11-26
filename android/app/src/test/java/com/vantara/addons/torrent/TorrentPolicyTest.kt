@@ -78,4 +78,11 @@ class TorrentPolicyTest {
         assertTrue(TorrentPolicy.focusStart((500..511).toList(), (1..12).toList(), focused = false, haveHead = false))
         assertFalse(TorrentPolicy.focusStart(emptyList(), full, focused = false, haveHead = false))
     }
+    @Test fun largePiecesFocusOnTheAwaitedPieceAlone() {
+        val mb = 1024 * 1024
+        assertEquals(2, TorrentPolicy.focusPieces(mb))
+        assertEquals(2, TorrentPolicy.focusPieces(2 * mb))
+        assertEquals(1, TorrentPolicy.focusPieces(4 * mb))
+        assertEquals(1, TorrentPolicy.focusPieces(16 * mb))
+    }
 }

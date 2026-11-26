@@ -74,6 +74,11 @@ class TorrentEngine internal constructor(
     private val tickets = ConcurrentHashMap<String, Ticket>()
     private val states = ConcurrentHashMap<String, State>()
     /**
+     * تورنتات يبدأ مشغّلها بلا فهرس الحاوية ([deferTail]): الذيل لا يُطلب بموعد قبل أول صورة، وينزل بأولوية أقل.
+     * عينة Reacher (قطع 16MB): انتظار الذيل وحده 13 و24 ث من 21 و32 ث حتى أول صورة.
+     */
+    private val tailDeferred = ConcurrentHashMap.newKeySet<String>()
+    /**
      * تنزيل دائم واحد لكل تورنت في وقت واحد (TD2): حلقتان من حزمة موسم واحدة تتشاركان مقبض libtorrent نفسه
      * (أولويات الملفات، مسار الحفظ، والتقدّم)، فكانت الثانية تُوقف ملف الأولى ثم «تكمل» الاثنتين ويُحفظ ملف الأولى ناقصًا.
      */
@@ -294,6 +299,11 @@ class TorrentEngine internal constructor(
         val token = UUID.randomUUID().toString()
         tickets[token] = Ticket(request)
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
+    }
+    /** المشغّل يبدأ هذا المصدر بلا فهرس (أول صورة من الرأس) [on]، أو يحتاج الفهرس الآن (قفزة، استئناف). */
+    fun deferTail(uri: Uri, on: Boolean) {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return
+        if (on) tailDeferred.add(hash) else tailDeferred.remove(hash)
     }
     /** طلب التورنت خلف تذكرة تشغيل (`vantara-torrent://…`): للتنزيل الدائم من الاختيار نفسه. */
     fun requestOf(uri: Uri): TorrentRequest? =
@@ -714,12 +724,14 @@ class TorrentEngine internal constructor(
             if (refs > 0) return@synchronized
             val current = torrent?.takeIf { it.isValid } ?: return@synchronized
             select(current, file, info, fetchEdges = false)
-            // أول قطعة بموعد فوري ثم الذيل؛ المشغّل حين يفتح يضع أطرافه فوقها ويجد ما اكتمل جاهزًا
-            for ((piece, deadline) in TorrentPolicy.deadlines(pieces.take(1), pieces.drop(1))) {
-                current.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
-                current.setPieceDeadline(piece, deadline)
-                deadlined += piece
+            // أول قطعة وحدها بموعد فوري، والذيل (أو موضع الاستئناف) بأولوية أقل بلا موعد: ينزل بما يفيض عن الرأس.
+            // المالك يضغط غالبًا بعد 2–6 ث من فتح الورقة؛ كان الذيل يقاسم الرأس السرعة في هذه الثواني
+            pieces.firstOrNull()?.let { head ->
+                current.piecePriority(head, Priority.SEVEN)
+                current.setPieceDeadline(head, 0)
+                deadlined += head
             }
+            for (piece in pieces.drop(1)) current.piecePriority(piece, Priority.FIVE)
             warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size
             current.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             current.resume()
@@ -765,11 +777,14 @@ class TorrentEngine internal constructor(
                 // Container index lives at the head or the tail: fetch both before the extractor asks,
                 // time-critical from the moment metadata exists (head first, then the tail).
                 val edges = TorrentPolicy.edges(file, info.pieceLength())
-                for ((piece, deadline) in TorrentPolicy.deadlines(edges.take(1), edges.drop(1))) {
+                val deferred = hash in tailDeferred
+                for ((piece, deadline) in TorrentPolicy.deadlines(edges.take(1), if (deferred) emptyList() else edges.drop(1))) {
                     handle.piecePriority(piece, if (deadline == 0) Priority.SEVEN else Priority.SIX)
                     handle.setPieceDeadline(piece, deadline)
                     deadlined += piece
                 }
+                // بلا فهرس: الذيل ينزل بما يفيض عن الرأس، بلا موعد يقاسمه السرعة
+                if (deferred) for (piece in edges.drop(1)) if (!handle.havePiece(piece)) handle.piecePriority(piece, Priority.FOUR)
                 edgesWanted = true
             }
         }
@@ -781,11 +796,13 @@ class TorrentEngine internal constructor(
             lastPosition = position
             val focus = PATCHED && TorrentPolicy.focusStart(full, window, focused, full.isNotEmpty() && handle.havePiece(full.first()), CRITICAL_PIECES)
             // في التركيز تُطبَّق القطع ذات الموعد وحدها؛ النافذة كاملة تُفتح حين تكتمل القطعة المنتظرة
-            val next = if (focus) full.take(CRITICAL_PIECES) else full
+            // القطع الكبيرة (≥4MB): القطعة المنتظرة وحدها، فالثانية (16MB في Reacher) كانت تقاسم الرأس السرعة
+            val next = if (focus) full.take(TorrentPolicy.focusPieces(pieceLength, CRITICAL_PIECES)) else full
             if (next == window && focus == focused) return@synchronized
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
-            val pending = TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
+            val tailWaits = hash in tailDeferred
+            val pending = if (tailWaits) emptyList() else TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
             // مع libtorrent المخصص: قطعتان فقط بموعد (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7 فيقسم السرعة عليها)،
             // وبقية النافذة أولوية 6 بلا موعد. المكتبة الأصلية: النافذة كلها كما كانت (القياس: الضيقة وحدها لا تفيدها).
             val critical = if (PATCHED) next.take(CRITICAL_PIECES) else next
@@ -813,6 +830,8 @@ class TorrentEngine internal constructor(
             }
             if (focus) { for (p in aheadRange) if (p !in next) handle.piecePriority(p, Priority.IGNORE); aheadRange = IntRange.EMPTY }
             else extendAhead(handle, file, pieceLength, next)
+            // بلا فهرس: الذيل يبقى مطلوبًا بأولوية أقل لأول قفزة (إلغاء النافذة القديمة لا يمسّه)
+            if (tailWaits) for (piece in TorrentPolicy.edges(file, pieceLength).drop(1)) if (piece !in next && !handle.havePiece(piece)) handle.piecePriority(piece, Priority.FOUR)
             window = next
             focused = focus
         }

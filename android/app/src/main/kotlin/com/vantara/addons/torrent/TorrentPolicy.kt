@@ -237,6 +237,10 @@ object TorrentPolicy {
      * إلى 3.2 ث. القفزة تشمل تخطي مرفقات MKV. التشغيل المستمر لا يتأثر: القطعة التالية من القطع ذات الموعد أصلًا،
      * أو اكتملت.
      */
+    /** القطع ذات الموعد في التركيز: القطعة المنتظرة وحدها حين القطعة كبيرة (≥4MB تحمل ثواني من الفيديو). */
+    fun focusPieces(pieceLength: Int, critical: Int = 2): Int = if (pieceLength >= LARGE_PIECE_BYTES) 1 else critical
+    const val LARGE_PIECE_BYTES = 4 * 1024 * 1024
+
     fun focusStart(next: List<Int>, applied: List<Int>, focused: Boolean, haveHead: Boolean, critical: Int = 2): Boolean =
         next.isNotEmpty() && !haveHead && (next.first() !in applied.take(critical) || (focused && next.first() == applied.first()))
 
@@ -274,8 +278,11 @@ object TorrentPrefetch {
     /** «تسخين كامل على باقة الجوال» في ورقة الشبكة بالمشغّل: مقفل افتراضيًا، والمستخدم يفعّله لنفسه. */
     const val PREFS = "vantara.player"
     const val WARM_ON_METERED = "warmOnMetered"
-    /** ميزانية التسخين على شبكة غير محدودة (Wi-Fi) لكل خيار. */
-    const val WARM_BUDGET = 16L * 1024 * 1024
+    /**
+     * ميزانية التسخين على شبكة غير محدودة (Wi-Fi) لكل خيار: أول قطعة والذيل حتى قطع 16MB (كانت 16MB فيبقى ذيل
+     * ملفات 16MB بعد الضغط). الرأس وحده بموعد، والذيل بأولوية أقل (TorrentEngine.prefetched)، فلا يبطئ الرأس.
+     */
+    const val WARM_BUDGET = 48L * 1024 * 1024
     /**
      * القطع التي تُنزَّل قبل الضغط على تشغيل. الثواني الضائعة (11–16 ث على الجوال) كانت قبل أول
      * قطعة: انتظار أن يسمح المشاركون بالتحميل. التسخين يبدأ هذا الانتظار والمستخدم يتصفح.
