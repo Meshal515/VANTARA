@@ -792,7 +792,10 @@ class TorrentEngine internal constructor(
                         if (total > done) { if (done >= 0) progressAt = now; done = total }
                         // القطعة المنتظرة عالقة عند مشارك بطيء: يُحجب مؤقتًا فتُطلب كتلته من أسرع (TorrentHotswap)
                         val waited = android.os.SystemClock.elapsedRealtime() - waitingSince
-                        if (waited >= TorrentHotswap.WAIT_MS && now - swappedAt >= 2 * ONE_SECOND_NS) {
+                        // مع libtorrent المخصص يعالج التعديلان 0001/0002 الكتلة العالقة داخل المحرك بلا قطع اتصال؛ حجب المشارك
+                        // 60 ث هنا يُسقط كل كتله الجارية فتُطلب من جديد. عينات الجهاز (26 نوفمبر): أبطأ بدايتين (3.8 ث من أول
+                        // بيانات إلى أول قطعة) كانتا مع حجب 2 و3 مشاركين. يبقى للمكتبة الأصلية فقط.
+                        if (!PATCHED && waited >= TorrentHotswap.WAIT_MS && now - swappedAt >= 2 * ONE_SECOND_NS) {
                             val victims = runCatching {
                                 val list = com.frostwire.jlibtorrent.swig.peer_info_vector()
                                 handle.swig().get_peer_info(list)
