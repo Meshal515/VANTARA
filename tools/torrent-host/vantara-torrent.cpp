@@ -490,7 +490,13 @@ public:
         auto t = find(id);
         if (!t) return {404, R"({"error":"not found"})"};
         if (what == "pause") { t->h.pause(); t->paused = true; }
-        else if (what == "start") { t->h.resume(); t->paused = false; }
+        else if (what == "start") {
+            // الإيقاف يقطع كل المشاركين؛ الاستئناف وحده يبدأ بالقلة المعروفة ولا يسأل المتتبعات وDHT حتى موعدها
+            // (عيّنة المالك: زارعون قليلون ثم كثروا فجأة، وأول صورة +20 ث مع تورنت دافئ). إعلان فوري كالإضافة الأولى
+            const bool was = t->paused;
+            t->h.resume(); t->paused = false;
+            if (was) { t->h.force_reannounce(); t->h.force_dht_announce(); }
+        }
         else if (what == "delete" || what == "forget") {
             {
                 std::lock_guard<std::mutex> lock(m_);
