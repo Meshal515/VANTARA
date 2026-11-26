@@ -247,8 +247,10 @@ test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC و�
   assert.ok(commands.some(m=>JSON.stringify(m.command)==='["seek",9,"absolute"]'));
   await services.stopPlayback({session:'one'});
   assert.equal(events.filter(e=>e.type==='playback/closed').length,1);
-  assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
-  await services.close();await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
+  // المحرك الدائم يبقى بعد الإيقاف (التشغيل التالي لا ينتظر تشغيله)، ويُنهى مع إغلاق الخدمات
+  assert.doesNotThrow(()=>process.kill(rq.pid,0));
+  await services.close();assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
+  await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
 });
 // Playback start acknowledges the process before mpv's asynchronous first-frame event.
 // Assert the real event with a bounded wait, not a race with the Node scheduler.
@@ -421,6 +423,7 @@ test('فشل callback الأحداث لا يمنع إنهاء العمليات �
   await services.startPlayback({session:'callback',candidate:{infoHash:hash,fileIdx:0}});
   const rq=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));
   await services.stopPlayback({session:'callback'});
+  await services.close();
   assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
   const {readdir}=await import('node:fs/promises');const {cacheNamespace}=await import('./torrent-cache.mjs');
   await assert.rejects(readdir(join(dir,cacheNamespace(dir))),{code:'ENOENT'});
@@ -802,4 +805,27 @@ test('صفحة تحقق الموقع تُحل بالمتصفح المخفي كا
   assert.equal(challengePage({status:200,headers:{},text:'<title>One moment, please...</title>'}),true);
   assert.equal(challengePage({status:403,headers:{'cf-mitigated':'challenge'},text:''}),true);
   assert.equal(challengePage({status:200,headers:{},text:'<html><title>مانجا ليك</title><p>One moment please read</p></html>'}),false);
+});
+
+test('المحرك الدائم: تشغيلان متتاليان على عملية محرك واحدة، والتورنت المتروك يتوقف ثم يعود دافئًا ثم يُحذف بعد المهلة',async t=>{
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',warmTorrentMs:400});
+  const requests=async()=>(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse).map(r=>r.url);
+  await services.startPlayback({session:'p1',candidate:{infoHash:hash,fileIdx:0}});
+  const first=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8')).pid;
+  await services.stopPlayback({session:'p1'});
+  // ترك التورنت: يتوقف (لا ينزّل لأحد) ولا يُحذف فورًا
+  await new Promise(r=>setTimeout(r,100));
+  assert.ok((await requests()).includes('/torrents/0/pause'));
+  assert.ok(!(await requests()).includes('/torrents/0/delete'));
+  // العودة قبل المهلة: نفس المحرك، والتورنت يُستأنف بدل إعادة تنزيله
+  events.length=0;
+  await services.startPlayback({session:'p2',candidate:{infoHash:hash,fileIdx:0}});
+  assert.equal(JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8')).pid,first,'لا عملية محرك جديدة');
+  assert.equal((await readFile(join(dir,'rqbit-attempts'),'utf8')).trim().split('\n').length,1);
+  assert.ok((await requests()).includes('/torrents/0/start'));
+  assert.ok(events.some(e=>e.type==='playback/diagnostic'&&e.stage==='engine-ready'&&e.mode==='cache'),'التشخيص يقول إن المحرك كان جاهزًا');
+  await services.stopPlayback({session:'p2'});
+  // بعد مهلة الدفء: يُحذف بملفه
+  await new Promise(r=>setTimeout(r,700));
+  assert.ok((await requests()).includes('/torrents/0/delete'));
 });
