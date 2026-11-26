@@ -75,6 +75,11 @@ class TorrentEngine internal constructor(
                     } else state.readFailed(alert.piece())
                 }
             })
+            // libtorrent المخصص يقرأ ضبطه من البيئة مرة واحدة عند أول استعمال، فيُضبط قبل بدء الجلسة
+            if (PATCHED) {
+                runCatching { Os.setenv("VANTARA_LT_STALL_CAP_MS", STALL_CAP_MS.toString(), true) }
+                runCatching { Os.setenv("VANTARA_LT_HEDGE_MS", HEDGE_MS.toString(), true) }
+            }
             val params = SessionParams(sessionSettings())
             // جدول DHT المحفوظ: بدء بارد بلا عقد كان يكلّف عشرات الثواني قبل أول مشارك
             runCatching {
@@ -653,7 +658,10 @@ class TorrentEngine internal constructor(
             val handle = torrent ?: throw IOException("Torrent session ended")
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val pending = TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
-            val wanted = TorrentPolicy.deadlines(next, pending)
+            // مع libtorrent المخصص: قطعتان فقط بموعد (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7 فيقسم السرعة عليها)،
+            // وبقية النافذة أولوية 6 بلا موعد. المكتبة الأصلية: النافذة كلها كما كانت (القياس: الضيقة وحدها لا تفيدها).
+            val critical = if (PATCHED) next.take(CRITICAL_PIECES) else next
+            val wanted = TorrentPolicy.deadlines(critical, pending)
             if (!diffDeadlines) {
                 window.filterNot { it in next }.forEach { handle.piecePriority(it, Priority.IGNORE) }
                 handle.clearPieceDeadlines()
@@ -673,6 +681,7 @@ class TorrentEngine internal constructor(
                     handle.setPieceDeadline(piece, deadline)
                 }
                 deadlined = HashSet(diff.keep)
+                for (piece in next) if (piece !in diff.keep) handle.piecePriority(piece, Priority.SIX)
             }
             extendAhead(handle, file, pieceLength, next)
             window = next
@@ -837,6 +846,11 @@ class TorrentEngine internal constructor(
         /** تنزيل دائم بلا أي تقدّم ثلاث دقائق: يُبلَّغ بسببه (لا مشاركين) بدل انتظار بلا نهاية. */
         const val PERMANENT_STALL_MS = 3 * 60_000L
         const val SCHEME = "vantara-torrent"
+        /** libtorrent مخصص بتعديلي VANTARA (0001 و0002) مربوط في هذا البناء؛ بدونه يبقى السلوك الأصلي حرفيًا. */
+        val PATCHED: Boolean = com.vantara.app.BuildConfig.VANTARA_PATCHED_TORRENT
+        internal const val CRITICAL_PIECES = 2
+        internal const val STALL_CAP_MS = 1000
+        internal const val HEDGE_MS = 750
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024
         private const val MAX_ACTIVE_BYTES = 8L * 1024 * 1024 * 1024
@@ -908,6 +922,12 @@ class TorrentEngine internal constructor(
             settings.setBoolean(settings_pack.bool_types.enable_incoming_utp.swigValue(), false)
             settings.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), true)
             settings.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), true)
+            if (PATCHED) {
+                // المتغير H في tools/libtorrent-patches (6 تشغيلات): أول قطعة بوسيط 4.3 ث وأقصى 6 بدل 8.8 وأقصى 10.
+                // دورة 100ms تعيد طلب الكتل الحرجة أسرع، والأولوية تُحترم من أول طلب (لا اختيار عشوائي لأول 4 قطع)
+                settings.setInteger(settings_pack.int_types.tick_interval.swigValue(), 100)
+                settings.setInteger(settings_pack.int_types.initial_picker_threshold.swigValue(), 0)
+            }
             return settings
         }
         private val PRIVATE_RANGES = listOf(
