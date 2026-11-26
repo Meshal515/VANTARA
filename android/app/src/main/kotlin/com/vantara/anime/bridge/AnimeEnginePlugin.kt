@@ -235,6 +235,21 @@ class AnimeEnginePlugin : Plugin() {
         }
     }
 
+    /**
+     * «المقترح» في ورقة السيرفرات صار تورنت: يُسخَّن الآن (بيانات + أول قطعة + الفهرس، حسب الباقة) قبل غيره، لأن
+     * الترتيب الأصلي (Streams.rank) يختلف عن ترتيب الورقة فكان يسخّن خيارًا آخر. لا شيء لجلسة التنزيل.
+     */
+    @PluginMethod
+    fun warm(call: PluginCall) {
+        val session = call.getString("session") ?: ""
+        val prep = engine.prepared(session)
+        val route = call.getString("route")
+        if (prep == null || route == null || session.startsWith(com.vantara.anime.AnimeEngine.DOWNLOAD_SESSION_PREFIX)) return call.resolve(JSObject().put("warming", false))
+        val url = prep.rank(prep.notRejected(prep.candidatesOf(route))).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url
+        if (url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(context).prefetch(android.net.Uri.parse(url), fetchEdges = true, priority = true) }
+        call.resolve(JSObject().put("warming", url != null))
+    }
+
     /** أفضل مرشّح داخل سيرفر اختاره المستخدم من الورقة. */
     @PluginMethod
     fun pick(call: PluginCall) {
