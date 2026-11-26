@@ -36,6 +36,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         /** مشاركون بطيئون حُجبوا مؤقتًا لتتحرر قطعة عالقة (TorrentHotswap). */
         val swaps: Int = 0,
         val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
+        /** الخيار B: مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
+        val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -158,6 +160,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
                 else -> "التسخين المسبق: اكتمل بعد بدء التشغيل · ${t.warmedPieces} قطعة"
             })
             if (t.swaps > 0) appendLine("تبديل مشاركين بطيئين عن قطعة عالقة: ${t.swaps}")
+            appendLine("قبل التحقق: " + (if (t.turbo) "مسموح" else "موثق فقط") + " · قُرئ ${bytes(t.earlyBytes)}" +
+                if (t.earlyFailures > 0) " · فشل تحقق ${t.earlyFailures} قطعة وأُعيد التشغيل موثقًا" else "")
             appendLine("المحرك: " + if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (VANTARA 0001+0002، نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12")
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
