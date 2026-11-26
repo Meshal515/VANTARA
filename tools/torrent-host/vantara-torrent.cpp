@@ -109,6 +109,13 @@ static const std::vector<std::string> PUBLIC_TRACKERS = {
 static constexpr int MAX_ANNOUNCE = 48;
 // قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
 static int WINDOW = 12;                    // TorrentPolicy.window count
+// libtorrent مخصص (tools/libtorrent-patches عبر منفذ vcpkg): قطعتان فقط بموعد، فـlibtorrent يرفع كل قطعة بموعد إلى
+// الأولوية 7 ويقسم السرعة عليها. المتغير H في stall-bench: أول قطعة بوسيط 4.3 ث بدل 8.8. مع المكتبة الأصلية النافذة كلها.
+#ifdef VANTARA_PATCHED_LIBTORRENT
+static int CRITICAL = 2;
+#else
+static int CRITICAL = 0;  // 0 = كل النافذة
+#endif
 static int AHEAD_PIECES = 64;
 // قراءة القطع المكتملة التالية من القرص قبل أن يطلبها القارئ (الـAPK: state.readAhead لقطعة واحدة). 0 = السلوك الحالي
 // بلا قراءة مسبقة؛ تجربة قياس فقط عبر VANTARA_LT_READAHEAD حتى تثبت النتائج المتكررة.
@@ -288,6 +295,11 @@ public:
         s.set_int(lt::settings_pack::request_queue_time, 1);
         s.set_int(lt::settings_pack::whole_pieces_threshold, 0);
         s.set_bool(lt::settings_pack::piece_extent_affinity, false);
+#ifdef VANTARA_PATCHED_LIBTORRENT
+        // دورة 100ms تعيد طلب الكتل الحرجة أسرع، والأولوية تُحترم من أول طلب (المتغير H)
+        s.set_int(lt::settings_pack::tick_interval, 100);
+        s.set_int(lt::settings_pack::initial_picker_threshold, 0);
+#endif
         // TCP فقط كما Stremio وAPK: uTP ضاعف زمن الوصول في 8 مقارنات من 8 على أسراب حقيقية
         s.set_bool(lt::settings_pack::enable_outgoing_utp, false);
         s.set_bool(lt::settings_pack::enable_incoming_utp, false);
@@ -670,7 +682,9 @@ private:
         for (int p = piece; p <= std::min(last, piece + policy::WINDOW - 1); ++p) window.push_back(p);
         std::vector<int> pending;
         for (int p : edgePieces(ti, fileIndex)) if (std::find(window.begin(), window.end(), p) == window.end() && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
-        auto const wanted = policy::deadlines(window, pending);
+        std::vector<int> const critical = policy::CRITICAL > 0 && int(window.size()) > policy::CRITICAL
+            ? std::vector<int>(window.begin(), window.begin() + policy::CRITICAL) : window;
+        auto const wanted = policy::deadlines(critical, pending);
         std::set<int> keep;
         for (auto const& w : wanted) keep.insert(w.first);
         // الفرق فقط: مسح كل المواعيد يلغي طلبات جارية عند المشاركين
@@ -679,6 +693,7 @@ private:
         int const aheadEnd = std::min(last, piece + std::max(policy::AHEAD_PIECES, policy::WINDOW));
         for (int p = piece; p <= last; ++p) prio[size_t(p)] = p <= aheadEnd ? lt::download_priority_t(4) : lt::low_priority;
         for (int p : edgePieces(ti, fileIndex)) if (p >= first) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
+        for (int p : window) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
         for (auto const& [p, deadline] : wanted) prio[size_t(p)] = deadline == 0 ? lt::top_priority : lt::download_priority_t(6);
         t->h.prioritize_pieces(prio);
         for (auto const& [p, deadline] : wanted) if (deadline == 0 || !t->deadlined.count(p)) t->h.set_piece_deadline(lt::piece_index_t(p), deadline);
@@ -1120,6 +1135,20 @@ static int seedMode(std::string const& file, int port, int pieceSize) {
 int main(int argc, char** argv) {
     // تجارب القياس فقط: حجم نافذة القراءة وما بعدها؛ بلا المتغيرين تبقى قيم الـAPK (12 و64)
     if (const char* w = std::getenv("VANTARA_LT_WINDOW")) policy::WINDOW = std::max(1, std::atoi(w));
+    if (const char* c = std::getenv("VANTARA_LT_CRITICAL")) policy::CRITICAL = std::max(0, std::atoi(c));
+#ifdef VANTARA_PATCHED_LIBTORRENT
+    // ضبط التعديلين قبل أول جلسة (libtorrent يقرؤه مرة واحدة)؛ متغير بيئة موجود يغلب للمقارنة
+    auto defaultEnv = [](char const* name, char const* value) {
+        if (std::getenv(name)) return;
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        setenv(name, value, 0);
+#endif
+    };
+    defaultEnv("VANTARA_LT_STALL_CAP_MS", "1000");
+    defaultEnv("VANTARA_LT_HEDGE_MS", "750");
+#endif
     if (const char* a = std::getenv("VANTARA_LT_AHEAD")) policy::AHEAD_PIECES = std::max(1, std::atoi(a));
     if (const char* r = std::getenv("VANTARA_LT_READAHEAD")) policy::READAHEAD = std::clamp(std::atoi(r), 0, 16);
     if (const char* d = std::getenv("VANTARA_LT_DISK")) policy::DISK_IO = d;

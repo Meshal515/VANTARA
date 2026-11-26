@@ -1,0 +1,101 @@
+name: Windows libtorrent (VANTARA patched) — build, integration, A/B
+# يبني محرك ويندوز مرتين على ويندوز حقيقي: بمكتبة vcpkg الحالية (2.1.x كما في الإنتاج) وبمنفذ VANTARA
+# (libtorrent 2.0.12 = نسخة أندرويد نفسها + تعديلا 0001 و0002، والإعداد H بـVANTARA_PATCHED_LIBTORRENT)،
+# ثم اختبار التكامل الحقيقي للمخصص، ومقارنة على أسراب قانونية عامة بترتيب متناوب. مؤشر فقط: قرص مشغّل CI
+# ليس جهاز المالك. لا ينشر شيئًا ولا يلمس قناة Debug.
+on:
+  push:
+    branches: ['ccr-e88a4b6c-3dl430']
+    paths:
+      - 'tools/libtorrent-patches/0001-vantara-stall-cap.patch'
+      - 'tools/libtorrent-patches/0002-vantara-urgent-hedge.patch'
+      - 'tools/libtorrent-patches/vcpkg-overlay/**'
+      - 'tools/torrent-host/vantara-torrent.cpp'
+      - 'tools/torrent-host/CMakeLists.txt'
+      - '.github/workflows/windows-libtorrent.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-libtorrent-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  engine:
+    runs-on: windows-2022
+    timeout-minutes: 170
+    env:
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\.vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Restore vcpkg binary cache (Boost/OpenSSL shared with windows-debug)
+        uses: actions/cache/restore@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-vantara-libtorrent-${{ hashFiles('tools/libtorrent-patches/vcpkg-overlay/**', 'tools/libtorrent-patches/000*.patch') }}
+          restore-keys: |
+            vcpkg-vantara-libtorrent-
+            vcpkg-libtorrent-x64-windows-static-
+      - name: Build stock engine (vcpkg libtorrent, as in production)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .vcpkg-cache, out | Out-Null
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg stock libtorrent failed' }
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" list libtorrent
+          cmake -S tools/torrent-host -B build/stock -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
+          cmake --build build/stock --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'stock engine build failed' }
+          Copy-Item build/stock/Release/vantara-torrent.exe out/vantara-torrent-stock.exe
+          & out/vantara-torrent-stock.exe --version
+      - name: Build VANTARA engine (overlay libtorrent 2.0.12 + patches)
+        shell: pwsh
+        run: |
+          $port = 'tools/libtorrent-patches/vcpkg-overlay/libtorrent'
+          # التعديلان داخل مجلد المنفذ فيدخلان بصمته (لا كاش قديم بلا تعديل)
+          Copy-Item tools/libtorrent-patches/0001-vantara-stall-cap.patch, tools/libtorrent-patches/0002-vantara-urgent-hedge.patch $port
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" remove libtorrent:x64-windows-static
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static --overlay-ports=tools/libtorrent-patches/vcpkg-overlay
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg VANTARA libtorrent failed' }
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" list libtorrent
+          cmake -S tools/torrent-host -B build/vantara -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DVANTARA_PATCHED_LIBTORRENT=ON
+          if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
+          cmake --build build/vantara --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'VANTARA engine build failed' }
+          Copy-Item build/vantara/Release/vantara-torrent.exe out/vantara-torrent.exe
+          $v = (& out/vantara-torrent.exe --version | Select-Object -First 1).Trim()
+          Write-Output "version: $v"
+          if ($v -notmatch '2\.0\.12') { throw "expected libtorrent 2.0.12, got $v" }
+          # التعديلان داخل الملف التنفيذي فعلًا
+          $bytes = [System.IO.File]::ReadAllText((Resolve-Path out/vantara-torrent.exe), [System.Text.Encoding]::ASCII)
+          if (-not $bytes.Contains('VANTARA_LT_STALL_CAP_MS') -or -not $bytes.Contains('VANTARA_LT_HEDGE_MS')) { throw 'patches missing from the binary' }
+          Get-FileHash -Algorithm SHA256 out/*.exe | Format-List
+      - name: Save vcpkg binary cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .vcpkg-cache
+          key: vcpkg-vantara-libtorrent-${{ hashFiles('tools/libtorrent-patches/vcpkg-overlay/**', 'tools/libtorrent-patches/000*.patch') }}-${{ github.run_id }}
+      - name: Engine integration on real Windows (VANTARA engine)
+        env:
+          VANTARA_TORRENT_HOST_BINARY: ${{ github.workspace }}\out\vantara-torrent.exe
+        run: node --test --test-concurrency=1 --test-timeout=120000 tools/torrent-host/host.test.mjs
+      - name: Real-swarm A/B, alternating (stock vs VANTARA) — indicative
+        continue-on-error: true
+        timeout-minutes: 60
+        shell: pwsh
+        run: |
+          foreach ($round in 1..2) {
+            foreach ($kind in @('stock', 'vantara')) {
+              $exe = if ($kind -eq 'stock') { 'out/vantara-torrent-stock.exe' } else { 'out/vantara-torrent.exe' }
+              node tools/torrent-host/swarm-ab.mjs "--libtorrent=$((Resolve-Path $exe).Path)" "--report=out/swarm-$kind-$round.json" --rounds=1 --sources=cc-by --quick
+            }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-libtorrent-vantara
+          path: out/
+          retention-days: 90
