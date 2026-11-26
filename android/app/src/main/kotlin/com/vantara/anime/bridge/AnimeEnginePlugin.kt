@@ -246,7 +246,9 @@ class AnimeEnginePlugin : Plugin() {
         val route = call.getString("route")
         if (prep == null || route == null || session.startsWith(com.vantara.anime.AnimeEngine.DOWNLOAD_SESSION_PREFIX)) return call.resolve(JSObject().put("warming", false))
         val url = prep.rank(prep.notRejected(prep.candidatesOf(route))).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url
-        if (url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(context).prefetch(android.net.Uri.parse(url), fetchEdges = true, priority = true) }
+        // موضع الاستئناف نسبةً من الحلقة (0 = من البداية): قطعته تُسخَّن مع الرأس والذيل
+        val at = (call.getDouble("at") ?: 0.0).coerceIn(0.0, 0.98)
+        if (url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(context).prefetch(android.net.Uri.parse(url), fetchEdges = true, priority = true, at = at) }
         call.resolve(JSObject().put("warming", url != null))
     }
 

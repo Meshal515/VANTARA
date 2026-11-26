@@ -259,6 +259,24 @@ object TorrentPrefetch {
     fun pick(ranked: List<Pair<String, String?>>, background: Boolean = false, limit: Int = MAX): List<Pair<String, Boolean>> =
         ranked.filter { seeders(it.second) != 0 }.distinctBy { it.first }.take(limit)
             .mapIndexed { index, (url, _) -> url to (index == 0 && !background) }
+    /**
+     * الاستئناف من منتصف الحلقة: قطعتا موضعه بعد الرأس مباشرة (قبل الذيل)، فالمشغّل يجد ما يطلبه أولًا جاهزًا.
+     * عينة الجهاز (26 نوفمبر): استئناف عند 21:17 من ملف 377MB، والتسخين جهّز الرأس والذيل فقط، فانتظر طلب الموضع 2.5 ث.
+     * [at] نسبة من الملف (0 = من البداية، لا شيء يُضاف). بميزانية القطعتين نفسها، وعلى شبكة غير محدودة فقط.
+     */
+    fun withResume(pieces: List<Int>, file: TorrentFile, pieceLength: Int, at: Double, unmetered: Boolean,
+                   budget: Long = RESUME_BUDGET): List<Int> {
+        if (!unmetered || at <= 0.0 || pieceLength <= 0 || file.size <= 0) return pieces
+        val first = (file.offset / pieceLength).toInt()
+        val last = ((Math.addExact(file.offset, file.size) - 1) / pieceLength).toInt()
+        val at0 = (file.offset + (file.size * at.coerceIn(0.0, 0.98)).toLong()) / pieceLength
+        val resume = (at0.toInt()..minOf(last, at0.toInt() + 1)).filter { it in first..last }
+            .take(maxOf(0, (budget / pieceLength).toInt()))
+        if (resume.isEmpty()) return pieces
+        val head = pieces.take(1)
+        return (head + resume + pieces.drop(1)).distinct()
+    }
+    const val RESUME_BUDGET = 16L * 1024 * 1024
     fun edgesFit(pieceLength: Int, pieces: Int): Boolean = pieceLength > 0 && pieceLength.toLong() * pieces <= MAX_EDGE_BYTES
     /** «تسخين كامل على باقة الجوال» في ورقة الشبكة بالمشغّل: مقفل افتراضيًا، والمستخدم يفعّله لنفسه. */
     const val PREFS = "vantara.player"

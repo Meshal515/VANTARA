@@ -2436,7 +2436,7 @@ export function createCinema(deps) {
 
       // نفس ورقة الأنمي (server-sheet.js): «الأفضل لك»، المباشر ثم التورنت، والمتعذّر مطويّ
       // المقترح يُسخَّن، وحقائق المحرك عنه (حجم القطعة والسرب المقاس) تعود لدرجته
-      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); });
+      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); }, { at: engine.resumeFraction(position, (Number.parseInt(String(m.runtime ?? ''), 10) || 0) * 60000) });
       off.push(() => tops.stop());
       const ui = createServerSheet(body, {
         el,

@@ -2703,7 +2703,8 @@ export function createAnime(deps) {
       };
 
       // المقترح يُسخَّن، وحقائق المحرك عنه (حجم القطعة والسرب المقاس) تعود لدرجته
-      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); });
+      const totalMs = Number(saved.duration) > 0 ? Number(saved.duration) : Number(m.duration) > 0 ? Number(m.duration) * 60000 : 0;
+      const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); }, { at: clip ? 0 : engine.resumeFraction(startAt, totalMs) });
       off.push(() => tops.stop());
       const ui = createServerSheet(body, {
         el,

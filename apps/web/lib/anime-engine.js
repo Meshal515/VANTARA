@@ -629,8 +629,18 @@ export async function best(session, prefer = null, waitMs = 45_000) {
 
 /** أفضل رابط داخل سيرفر اختاره المستخدم. */
 /** «المقترح» في الورقة تورنت: يُسخَّن الآن قبل غيره (أندرويد). بلا جسر أصلي (ويب/ويندوز): لا شيء. */
-export async function warm(session, route) {
-  try { return (await call('warm', { session, route }))?.warming === true; } catch { return false; }
+export async function warm(session, route, at = 0) {
+  try { return (await call('warm', { session, route, ...(at > 0 ? { at } : {}) }))?.warming === true; } catch { return false; }
+}
+
+/**
+ * موضع الاستئناف كنسبة من الحلقة (0..0.98) لتسخين قطعته قبل الضغط، أو 0 حين يبدأ من أوله أو لا تُعرف المدة.
+ * عينة الجهاز (26 نوفمبر): استئناف عند 21:17 والتسخين جهّز الرأس والذيل فقط، فانتظر طلب الموضع 2.5 ث.
+ */
+export function resumeFraction(positionMs, totalMs) {
+  const p = Number(positionMs), t = Number(totalMs);
+  if (!(p > 5000) || !(t > p)) return 0;
+  return Math.min(0.98, p / t);
 }
 /**
  * الصفوف الظاهرة غير «المقترح» بترتيب الورقة: تسخين خلفي محدود (أندرويد). `[]` أو `stop` يهدّئه كله.
@@ -680,8 +690,8 @@ export function topWarmer(onFacts, options) {
     top(s, route) {
       if (ended || !s || !route) return;
       last = { s, route };
-      if (!refresh) refresh = setInterval(() => { if (!ended && last) void warm(last.s, last.route); }, every);
-      void warm(s, route);
+      if (!refresh) refresh = setInterval(() => { if (!ended && last) void warm(last.s, last.route, options?.at); }, every);
+      void warm(s, route, options?.at);
       if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
       watch.poke();
     },

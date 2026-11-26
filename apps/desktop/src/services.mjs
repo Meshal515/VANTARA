@@ -1129,6 +1129,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(res.statusCode>=500){res.resume();return setTimeout(attempt,250);}
           res.on('data',()=>{});res.once('end',()=>resolve(res.statusCode<300));res.once('error',()=>resolve(false));
         });
+        // تُلغى عند تبنّي التشغيل (takePrewarm): قراءة 24MB+8MB جارية كانت تنافس طلب mpv الأول على المشاركين والسرعة
+        (state.edgeRequests??=new Set()).add(req);req.once('close',()=>state.edgeRequests?.delete(req));
         req.on('error',()=>resolve(false));req.setTimeout(90000,()=>req.destroy());
       };
       attempt();
@@ -1143,6 +1145,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const p=prewarm;
     if(!p||p.key!==`${candidate.infoHash}|${candidate.fileIdx??''}`||p.state.stopped)return null;
     prewarm=null;clearTimeout(p.state.prewarmTimer);p.state.prewarming=false;
+    // تسخين بدأ قبل الضغط بلحظة (المرور بالفأرة): أطرافه لم تكتمل. التشغيل يطلب ما يحتاجه بنفسه، فلا ينافسه تسخين.
+    // عينات المالك (Debug 80): «مُسخَّن قبل الضغط» وأول صورة +14.3 و+18.1 ث، مقابل 0.1–1.25 ث حين اكتمل التسخين قبله
+    for(const req of p.state.edgeRequests??[])req.destroy();
+    p.state.edgeRequests?.clear();
     return p.state;
   }
   async function dropPrewarm() {

@@ -166,7 +166,7 @@ class TorrentEngine internal constructor(
      * واتصال بالمشاركين لـ[PREFETCH_HOLD_MS]، و[fetchEdges] يجلب طرفي الملف أيضًا. لا يشغّل فيديو،
      * ولا يحجز قارئًا (لا يُحسب في MAX_ACTIVE_STATES)، ويُلغى حين تُغلق الجلسة التذكرة.
      */
-    fun prefetch(uri: Uri, fetchEdges: Boolean, priority: Boolean = false) {
+    fun prefetch(uri: Uri, fetchEdges: Boolean, priority: Boolean = false, at: Double = 0.0) {
         if (shutdown.get()) return
         val request = uri.host?.let(tickets::get)?.request ?: return
         val hash = request.infoHash
@@ -191,7 +191,7 @@ class TorrentEngine internal constructor(
         evicted?.let { old -> states[old]?.let { runCatching { it.cool() } } }
         val submitted = runCatching {
             prefetcher.execute {
-                runCatching { warm(request, until, fetchEdges, bg = false) }
+                runCatching { warm(request, until, fetchEdges, bg = false, at = at) }
                     .onFailure {
                         // فشل/إلغاء: لا يبقى متصلًا خارج العدّاد
                         synchronized(warming) { if (warming[hash] == until) warming.remove(hash) }
@@ -240,7 +240,7 @@ class TorrentEngine internal constructor(
         val hashes = synchronized(warming) { background.keys.toList().also { background.clear() } }
         for (hash in hashes) states[hash]?.let { runCatching { it.cool() } }
     }
-    private fun warm(request: TorrentRequest, until: Long, fetchEdges: Boolean, bg: Boolean) {
+    private fun warm(request: TorrentRequest, until: Long, fetchEdges: Boolean, bg: Boolean, at: Double = 0.0) {
         val hash = request.infoHash
         val stopped = { shutdown.get() || synchronized(warming) { (if (bg) background[hash] else warming[hash]) != until } }
         if (stopped() || !nativeAvailable()) return
@@ -270,7 +270,7 @@ class TorrentEngine internal constructor(
         val pieces = if (!fetchEdges || directory.usableSpace < MIN_FREE_BYTES) emptyList()
             // الخلفي: أول قطعة فقط وبميزانية أصغر؛ الفهرس للمقترح وحده
             else if (bg) TorrentPrefetch.warmPieces(edges.take(1), info.pieceLength(), warmPiecesAllowed(), TorrentPrefetch.BACKGROUND_BUDGET)
-            else TorrentPrefetch.warmPieces(edges, info.pieceLength(), warmPiecesAllowed())
+            else TorrentPrefetch.withResume(TorrentPrefetch.warmPieces(edges, info.pieceLength(), warmPiecesAllowed()), selected, info.pieceLength(), at, warmPiecesAllowed())
         state.prefetched(selected, info, pieces)
     }
     private fun saveDhtState(force: Boolean) {
