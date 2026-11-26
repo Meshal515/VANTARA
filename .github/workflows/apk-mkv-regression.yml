@@ -3,10 +3,11 @@ name: APK subtitled MKV regression
 # بلا خطأ (Media3 1.5.1 كان يتوقف بـ «Out of range»). لا ينشر شيئًا.
 on:
   push:
-    branches: ['claude/manga-translation-system-9a2zjl', 'claude/media3-1.6.1-clean']
+    branches: ['claude/manga-translation-system-9a2zjl', 'claude/media3-1.6.1-clean', 'ccr-e88a4b6c-3dl430']
     paths:
       - '.github/workflows/apk-mkv-regression.yml'
       - 'android/app/build.gradle'
+      - 'android/app/libtorrent-natives.lock'
       - 'android/app/src/androidTest/java/com/vantara/addons/torrent/MkvSubtitleRegressionDeviceTest.kt'
   workflow_dispatch:
 permissions:
@@ -32,6 +33,19 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec cap sync android
+      - name: VANTARA libtorrent natives (pinned SHA-256), as in the signed Debug build
+        run: |
+          set -euo pipefail
+          lock=android/app/libtorrent-natives.lock
+          if [ ! -f "$lock" ]; then echo "no lock: stock jlibtorrent"; exit 0; fi
+          dir="$RUNNER_TEMP/lt-natives"
+          grep -v '^#' "$lock" | while read -r abi url sha; do
+            [ -n "$abi" ] || continue
+            mkdir -p "$dir/$abi"
+            curl -fsSL --retry 3 -o "$dir/$abi/libjlibtorrent.so" "$url"
+            echo "$sha  $dir/$abi/libjlibtorrent.so" | sha256sum -c -
+          done
+          echo "ORG_GRADLE_PROJECT_vantaraPatchedTorrentDir=$dir" >> "$GITHUB_ENV"
       - name: Build emulator APKs
         run: |
           cat > "$RUNNER_TEMP/x86.gradle" <<'GRADLE'
