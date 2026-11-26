@@ -472,7 +472,20 @@ public:
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
         o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
           << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << ",\"direct_ahead\":" << directAhead << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_
-          << ",\"redundant_bytes\":" << st.total_redundant_bytes << ",\"failed_bytes\":" << st.total_failed_bytes << ",\"readers\":[";
+          << ",\"redundant_bytes\":" << st.total_redundant_bytes << ",\"failed_bytes\":" << st.total_failed_bytes << ",\"peer_states\":[";
+        // حالة كل مشارك: هل نحن مهتمون، وهل خنقنا، وهل هو مهتم، وطول طابورينا عنده (تعليق ويندوز 82–85: طلبات توقفت والمشارك متصل)
+        for (size_t i = 0; i < peers.size() && i < 8; ++i) {
+            auto const& pi = peers[i];
+            o << (i ? "," : "") << "{\"interesting\":" << (bool(pi.flags & lt::peer_info::interesting) ? 1 : 0)
+              << ",\"choked_us\":" << (bool(pi.flags & lt::peer_info::remote_choked) ? 1 : 0)
+              << ",\"snubbed\":" << (bool(pi.flags & lt::peer_info::snubbed) ? 1 : 0)
+              << ",\"seed\":" << (bool(pi.flags & lt::peer_info::seed) ? 1 : 0)
+              << ",\"dq\":" << pi.download_queue_length << ",\"req_timeout\":" << pi.request_timeout
+              << ",\"target\":" << pi.target_dl_queue_length << ",\"down\":" << pi.down_speed
+              << ",\"piece\":" << int(static_cast<std::int32_t>(pi.downloading_piece_index)) << "}";
+        }
+        o << "],\"state\":" << int(st.state) << ",\"paused\":" << (bool(st.flags & lt::torrent_flags::paused) ? 1 : 0)
+          << ",\"finished\":" << (st.is_finished ? 1 : 0) << ",\"readers\":[";
         // كل قارئ مفتوح: قطعته، ومنذ متى، وهل نُزّلت، وهل قراءتها من القرص جارية، وأولويتها وموعدها (أين يعلق إن علق)
         {
             std::vector<std::pair<uint64_t, Reader>> readers;

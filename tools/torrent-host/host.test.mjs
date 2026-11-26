@@ -223,7 +223,7 @@ test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges)
       const d = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
       if (!d?.waiting) continue;
       maxRead = Math.max(maxRead, d.reads?.max_ms ?? 0);
-      snapshots.push(`${Math.round(performance.now() - started)}ms rate=${d.rate_bps} peers=${d.peers} pieces=${d.pieces} waiting=${JSON.stringify(d.waiting)} reads=${JSON.stringify(d.reads)} readers=${JSON.stringify(d.readers)}`);
+      snapshots.push(`${Math.round(performance.now() - started)}ms rate=${d.rate_bps} peers=${d.peers} pieces=${d.pieces} state=${d.state} paused=${d.paused} finished=${d.finished} peer_states=${JSON.stringify(d.peer_states)} waiting=${JSON.stringify(d.waiting)} readers=${JSON.stringify(d.readers)}`);
       if (d.waiting.piece >= 0 && d.waiting.ms > 4000 && d.waiting.blocks === -1) starved.push(`piece ${d.waiting.piece} waited ${d.waiting.ms}ms unrequested`);
     }
   })();
