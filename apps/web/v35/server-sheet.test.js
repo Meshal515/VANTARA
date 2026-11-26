@@ -474,3 +474,31 @@ it('UX14: البصمة هوية التورنت؛ الاسم والحجم احت�
   ui.update({ routes: [tor(label, { id: 'c1', quality: 1080, infoHash: H1 }), tor(label, { id: 'c2', quality: 1080 }), tor(label, { id: 'c3', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
   expect(rows()).toBe(2);
 });
+
+it('المقترح تورنت يُعلن للتسخين مرة واحدة بعد أن يثبت، والمباشر لا', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onTop = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onTop });
+    const t = tor('Show.S01E01.1080p.WEB.x264\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'tt', quality: 1080, infoHash: 'c'.repeat(40) });
+    ui.update({ routes: [t], settled: false, status: { text: '1' } });
+    ui.update({ routes: [t], settled: false, status: { text: '1' } });
+    vi.advanceTimersByTime(399);
+    expect(onTop).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(onTop).toHaveBeenCalledTimes(1);
+    expect(onTop.mock.calls[0][0].id).toBe('tt');
+    // نفس المقترح في تحديثات لاحقة: لا إعادة
+    ui.update({ routes: [t], settled: true, status: { text: '1' } });
+    vi.advanceTimersByTime(1000);
+    expect(onTop).toHaveBeenCalledTimes(1);
+    // مقترح مباشر لا تورنت: لا تسخين
+    const { el: el2, body: body2 } = dom();
+    const onTop2 = vi.fn();
+    const ui2 = createServerSheet(body2, { el: el2, onPick: vi.fn(), onTop: onTop2 });
+    ui2.update({ routes: [{ id: 'd', sourceId: 'witanime', server: 'mp4upload', quality: 1080, state: 'READY', probed: true, probeMs: 400 }], settled: true, status: { text: '1' } });
+    vi.advanceTimersByTime(1000);
+    expect(onTop2).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});

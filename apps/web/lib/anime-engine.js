@@ -628,6 +628,10 @@ export async function best(session, prefer = null, waitMs = 45_000) {
 }
 
 /** أفضل رابط داخل سيرفر اختاره المستخدم. */
+/** «المقترح» في الورقة تورنت: يُسخَّن الآن قبل غيره (أندرويد). بلا جسر أصلي (ويب/ويندوز): لا شيء. */
+export async function warm(session, route) {
+  try { return (await call('warm', { session, route }))?.warming === true; } catch { return false; }
+}
 export async function pick(session, route) {
   return (await call('pick', { session, route }))?.candidate ?? null;
 }

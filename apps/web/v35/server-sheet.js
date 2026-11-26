@@ -210,7 +210,7 @@ export function factDate(v) {
 /**
  * يبني الورقة داخل `body` ويعيد {update, best, status, body, scroll}.
  *
- * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onRetry(), onUnavailable(r),
+ * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onTop(r), onRetry(), onUnavailable(r),
  *      selectable(r), pending(r), dead(r), sourceName(r), prefer, directLang, extraFoot[] }
  * media: { title, logo, backdrop, backdropFallback, backdropPosition, code ('S01E02'),
  *          label ('الموسم 1 · الحلقة 2'), episodeTitle, description, rating: {value, label},
@@ -608,6 +608,13 @@ export function createServerSheet(body, o) {
   }
 
   let topId = null;
+  // onTop: «المقترح» تورنت ثبت 400ms (لا مع كل تحديث للصفوف): المحرك يسخّنه قبل غيره. مرة لكل مقترح.
+  let topTimer = 0, warmedTop = null;
+  const announceTop = (top) => {
+    clearTimeout(topTimer);
+    if (!o.onTop || !top || !view(top).torrent || top.id === warmedTop) return;
+    topTimer = setTimeout(() => { if (destroyed || topId !== top.id) return; warmedTop = top.id; o.onTop(top); }, 400);
+  };
   function row(r) {
     const d = view(r);
     const pending = isPending(r);
@@ -908,6 +915,7 @@ export function createServerSheet(body, o) {
     const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
     const top = scored[0]?.r ?? null;
     topId = top?.id ?? null;
+    announceTop(top);
 
     // سطر الحالة: «55 جاهزة من 77 · البقية تصل»
     const st = model.status ?? {};
@@ -1028,6 +1036,7 @@ export function createServerSheet(body, o) {
     if (destroyed) return;
     destroyed = true;
     clearTimeout(settleTimer);
+    clearTimeout(topTimer);
     for (const id of frames) globalThis.cancelAnimationFrame?.(id);
     frames.clear();
     for (const unsubscribe of subscriptions) unsubscribe();
