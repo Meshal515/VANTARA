@@ -113,12 +113,18 @@ class TorrentEngine internal constructor(
     private val prefetcher = Executors.newFixedThreadPool(TorrentPrefetch.MAX) { task -> Thread(task, "VantaraTorrentWarm").apply { isDaemon = true } }
     /** hash → نهاية التسخين المسبق؛ لا يتجاوز [TorrentPrefetch.MAX] في أي وقت. */
     private val warming = HashMap<String, Long>()
+    /**
+     * التسخين الخلفي (الصفوف الظاهرة غير «المقترح»): hash → نهايته. يُقفل بـ[warming] نفسه، ولا يُحسب في حدها،
+     * وله منفذه وحده فلا ينتظر «المقترح» خلفه. اتصالات أقل وسرعة محدودة: يأخذ الفائض ولا يزاحم.
+     */
+    private val background = HashMap<String, Long>()
+    private val backgroundPool = Executors.newFixedThreadPool(TorrentPrefetch.BACKGROUND_MAX) { task -> Thread(task, "VantaraTorrentWarmBg").apply { isDaemon = true } }
     @Volatile private var dhtSavedAt = 0L
     init { pruner.scheduleWithFixedDelay({ runCatching { prune() }; runCatching { saveDhtState(false) } }, 1, 1, TimeUnit.MINUTES) }
     /** Process/test shutdown on a worker thread. Ordinary player close releases only its reader. */
     override fun close() {
         if (!shutdown.compareAndSet(false, true)) return
-        pruner.shutdownNow(); prefetcher.shutdownNow(); tickets.clear()
+        pruner.shutdownNow(); prefetcher.shutdownNow(); backgroundPool.shutdownNow(); tickets.clear()
         synchronized(warming) { warming.clear() }
         runCatching { saveDhtState(true) }
         val active = synchronized(states) { states.values.toList().also { states.clear() } }
@@ -151,6 +157,8 @@ class TorrentEngine internal constructor(
             // إن كان يُسخَّن أصلًا بلا قطع (الخيار الثاني: بيانات فقط) يُعاد تسخينه بالقطع؛ الخيط القديم يتوقف وحده
             // (warming[hash] != until). عينات الجهاز (26 نوفمبر): 4 من 7 تشغيلات «لم يُسخَّن هذا الخيار».
             if (hash in warming && !priority) return
+            // كان يُسخَّن في الخلفية ثم صار «المقترح»: يُرفع (خيط الخلفية يتوقف وحده لأن نهايته تغيّرت)
+            background.remove(hash)
             if (hash !in warming && warming.size >= TorrentPrefetch.MAX) {
                 if (!priority) return
                 evicted = warming.entries.minByOrNull { it.value }?.key
@@ -161,7 +169,7 @@ class TorrentEngine internal constructor(
         evicted?.let { old -> states[old]?.let { runCatching { it.cool() } } }
         val submitted = runCatching {
             prefetcher.execute {
-                runCatching { warm(request, until, fetchEdges) }
+                runCatching { warm(request, until, fetchEdges, bg = false) }
                     .onFailure {
                         // فشل/إلغاء: لا يبقى متصلًا خارج العدّاد
                         synchronized(warming) { if (warming[hash] == until) warming.remove(hash) }
@@ -171,9 +179,48 @@ class TorrentEngine internal constructor(
         }
         if (submitted.isFailure) synchronized(warming) { warming.remove(hash) }
     }
-    private fun warm(request: TorrentRequest, until: Long, fetchEdges: Boolean) {
+
+    /**
+     * الصفوف الظاهرة في ورقة السيرفرات غير «المقترح»، مرتبة من الورقة (السرب ثم حجم القطعة ثم العربي): أول
+     * [TorrentPrefetch.BACKGROUND_MAX] تُسخَّن في الخلفية، وما خرج من القائمة يهدأ. بيانات واتصالات دائمًا، وأول قطعة
+     * فقط على شبكة غير محدودة بسرعة محدودة. ما يُسخَّن بأولوية أو يُشغَّل الآن لا يُلمس.
+     */
+    fun prefetchBackground(uris: List<Uri>) {
+        if (shutdown.get()) return
+        val requests = uris.mapNotNull { u -> u.host?.let(tickets::get)?.request }.distinctBy { it.infoHash }
+        val until = System.currentTimeMillis() + PREFETCH_HOLD_MS
+        val start = ArrayList<TorrentRequest>()
+        val dropped: List<String>
+        synchronized(warming) {
+            val busy = synchronized(states) { states.filterValues { !it.unused() }.keys + permanentActive }
+            val wanted = requests.filter { it.infoHash !in warming && it.infoHash !in busy }.take(TorrentPrefetch.BACKGROUND_MAX)
+            val keep = wanted.map { it.infoHash }.toSet()
+            dropped = background.keys.filter { it !in keep }
+            dropped.forEach { background.remove(it) }
+            for (r in wanted) if (r.infoHash !in background) { background[r.infoHash] = until; start += r }
+        }
+        for (hash in dropped) states[hash]?.let { runCatching { it.cool() } }
+        for (r in start) {
+            val submitted = runCatching {
+                backgroundPool.execute {
+                    runCatching { warm(r, until, fetchEdges = true, bg = true) }.onFailure {
+                        synchronized(warming) { if (background[r.infoHash] == until) background.remove(r.infoHash) }
+                        states[r.infoHash]?.let { state -> runCatching { state.cool() } }
+                    }
+                }
+            }
+            if (submitted.isFailure) synchronized(warming) { background.remove(r.infoHash) }
+        }
+    }
+
+    /** الورقة أُغلقت أو بدأ تشغيل: التسخين الخلفي كله يهدأ. «المقترح» يبقى لمدته (غالبًا هو ما يُشغَّل). */
+    fun coolBackground() {
+        val hashes = synchronized(warming) { background.keys.toList().also { background.clear() } }
+        for (hash in hashes) states[hash]?.let { runCatching { it.cool() } }
+    }
+    private fun warm(request: TorrentRequest, until: Long, fetchEdges: Boolean, bg: Boolean) {
         val hash = request.infoHash
-        val stopped = { shutdown.get() || synchronized(warming) { warming[hash] != until } }
+        val stopped = { shutdown.get() || synchronized(warming) { (if (bg) background[hash] else warming[hash]) != until } }
         if (stopped() || !nativeAvailable()) return
         val state = synchronized(states) {
             if (hash in permanentActive) return
@@ -188,11 +235,17 @@ class TorrentEngine internal constructor(
         }
         if (!state.warm(until)) return
         val handle = state.handle(stopped, request)
-        state.limitWhileWarm(handle)
+        // مقبض موجود يعود كما هو؛ إن هدّأه تسخين سابق (cool ← pause) فهو موقوف: إعادة التسخين تستأنفه
+        runCatching { handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
+        state.limitWhileWarm(handle, if (bg) TorrentPrefetch.BACKGROUND_RATE else -1)
         val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
         val selected = inspect(state, info, request)
-        val pieces = if (fetchEdges && directory.usableSpace >= MIN_FREE_BYTES)
-            TorrentPrefetch.warmPieces(TorrentPolicy.edges(selected, info.pieceLength()), info.pieceLength(), warmPiecesAllowed()) else emptyList()
+        if (stopped()) return
+        val edges = TorrentPolicy.edges(selected, info.pieceLength())
+        val pieces = if (!fetchEdges || directory.usableSpace < MIN_FREE_BYTES) emptyList()
+            // الخلفي: أول قطعة فقط وبميزانية أصغر؛ الفهرس للمقترح وحده
+            else if (bg) TorrentPrefetch.warmPieces(edges.take(1), info.pieceLength(), warmPiecesAllowed(), TorrentPrefetch.BACKGROUND_BUDGET)
+            else TorrentPrefetch.warmPieces(edges, info.pieceLength(), warmPiecesAllowed())
         state.prefetched(selected, info, pieces)
     }
     private fun saveDhtState(force: Boolean) {
@@ -334,6 +387,19 @@ class TorrentEngine internal constructor(
     /** Routing-table size: 0 for a long time means the device cannot reach the BitTorrent network at all. */
     fun dhtNodes(): Long = if (managerHolder.isInitialized()) runCatching { manager.dhtNodes() }.getOrDefault(0L) else 0L
     /** Live swarm facts for a ticket: what Stremio shows while buffering. Null before the session exists. */
+    /**
+     * حقائق مقاسة لتورنت في المحرك الآن (مُسخَّن أو يعمل): حجم القطعة من البيانات الوصفية، والسرب كما رآه المحرك
+     * (أكبر من رد المتتبع num_complete والباذرين المعروفين list_seeds) والمتصلون. null قبل البيانات الوصفية.
+     * لـ«المقترح» في ورقة السيرفرات: زمن أول قطعة ≈ حجم القطعة ÷ المعدل، والمعلن في عنوان الإضافة قد يكون قديمًا.
+     */
+    fun facts(uri: Uri): TorrentFacts? {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
+        if (!managerHolder.isInitialized()) return null
+        val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
+        val info = runCatching { handle.torrentFile() }.getOrNull()?.takeIf { it.isValid } ?: return null
+        val status = runCatching { handle.status() }.getOrNull() ?: return null
+        return TorrentFacts(info.pieceLength(), maxOf(status.numComplete(), status.listSeeds()), status.numPeers())
+    }
     fun stats(uri: Uri): TorrentStats? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
         if (!managerHolder.isInitialized()) return null
@@ -403,14 +469,17 @@ class TorrentEngine internal constructor(
         // تسخين آخر يُنزّل قطعًا ولم يُختر يتوقف فلا يزاحم المختار. تسخين البيانات فقط (الخيار الثاني،
         // الحلقة التالية) يبقى: لا يزاحم، وacquire يتكرر مع كل قفزة فلا يصح أن يقطعه.
         val others = synchronized(warming) {
+            background.remove(request.infoHash)
+            // التشغيل بدأ: التسخين الخلفي كله يهدأ (لا يزاحم المختار)، بقطع أو بلا قطع
+            val bg = background.keys.toList().also { background.clear() }
             warming.remove(request.infoHash)
-            warming.keys.filter { (states[it]?.warmedPieces ?: 0) > 0 }.onEach { warming.remove(it) }
+            bg + warming.keys.filter { (states[it]?.warmedPieces ?: 0) > 0 }.onEach { warming.remove(it) }
         }
         for (hash in others) states[hash]?.let { other -> runCatching { pruner.execute { runCatching { other.cool() } } } }
         return try {
             val handle = state.handle(stopped, request)
             // مشغّل حقيقي: بلا حد اتصالات التسخين المسبق، ويعمل حتى لو أوقفه تسخين/خمول سابق قبل اكتمال metadata
-            runCatching { handle.swig().set_max_connections(-1); handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
+            runCatching { handle.swig().set_max_connections(-1); handle.setDownloadLimit(-1); handle.unsetFlags(TorrentFlags.AUTO_MANAGED); handle.resume() }
             val info = waitFor(stopped, METADATA_TIMEOUT_MS, "Torrent metadata unavailable") { handle.torrentFile()?.takeIf { it.isValid } }
             state.metadataReady()
             val selected = inspect(state, info, request)
@@ -603,9 +672,12 @@ class TorrentEngine internal constructor(
             idleAt = now
             pauseIfStillIdle(now)
         }
-        /** المسخَّن لا يأخذ اتصالات المشغّل (الحد العام 96). */
-        fun limitWhileWarm(handle: TorrentHandle) = synchronized(monitor) {
-            if (refs == 0) runCatching { handle.swig().set_max_connections(PREFETCH_CONNECTIONS) }
+        /** المسخَّن لا يأخذ اتصالات المشغّل (الحد العام 96)، والخلفي سرعته محدودة أيضًا ([rate] بايت/ث، -1 بلا حد). */
+        fun limitWhileWarm(handle: TorrentHandle, rate: Int = -1) = synchronized(monitor) {
+            if (refs == 0) runCatching {
+                handle.swig().set_max_connections(if (rate > 0) BACKGROUND_CONNECTIONS else PREFETCH_CONNECTIONS)
+                handle.setDownloadLimit(rate)
+            }
         }
         fun prefetched(file: TorrentFile, info: TorrentInfo, pieces: List<Int>) = synchronized(monitor) {
             // المشغّل سبقنا إليه (أو أُعيد البناء): هو صاحب الأولويات الآن
@@ -896,6 +968,7 @@ class TorrentEngine internal constructor(
         private const val ONE_SECOND_NS = 1_000_000_000L
         private const val PREFETCH_HOLD_MS = 90_000L
         private const val PREFETCH_CONNECTIONS = 24
+        private const val BACKGROUND_CONNECTIONS = 12
         private const val DHT_STATE_FILE = "dht.state"
         private const val MAX_DHT_STATE_BYTES = 512 * 1024
         private const val DHT_SAVE_INTERVAL_MS = 5L * 60 * 1000

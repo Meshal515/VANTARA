@@ -88,6 +88,8 @@ data class TorrentStats(
     /** خط البدء: أول مشارك متصل وأول بيانات من الشبكة (elapsedRealtime، 0 = لم يحدث). */
     val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
 )
+/** ما قاسه المحرك لتورنت: حجم القطعة، والسرب (باذرون معروفون، -1 مجهول)، والمتصلون الآن. */
+data class TorrentFacts(val pieceLength: Int, val swarmSeeds: Int, val peers: Int)
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
 /** Pure bounds/selection rules, shared by native loader and regression tests. */
@@ -232,6 +234,10 @@ object TorrentPolicy {
  */
 object TorrentPrefetch {
     const val MAX = 2
+    /** التسخين الخلفي للصفوف الظاهرة (غير «المقترح»): عددها، وسرعة كل واحد، وميزانية قطعته الأولى. */
+    const val BACKGROUND_MAX = 4
+    const val BACKGROUND_RATE = 1024 * 1024
+    const val BACKGROUND_BUDGET = 8L * 1024 * 1024
     /** طرفا الملف (3 قطع) لا يُجلبان مسبقًا إن تجاوزا هذا الحجم: بيانات الجوّال. */
     const val MAX_EDGE_BYTES = 12L * 1024 * 1024
     private val seedersMark = Regex("👤\\s*([0-9]{1,7})")
