@@ -10,6 +10,11 @@ on:
       - 'android/app/libtorrent-natives.lock'
       - 'android/app/src/androidTest/java/com/vantara/addons/torrent/MkvSubtitleRegressionDeviceTest.kt'
   workflow_dispatch:
+    inputs:
+      natives:
+        description: 'libtorrent: patched (lock file) | stock (jlibtorrent as published) — same test, A/B'
+        type: string
+        default: 'patched'
 permissions:
   contents: read
 concurrency:
@@ -37,6 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           lock=android/app/libtorrent-natives.lock
+          if [ "${{ inputs.natives }}" = stock ]; then echo "A/B: stock jlibtorrent requested"; exit 0; fi
           if [ ! -f "$lock" ]; then echo "no lock: stock jlibtorrent"; exit 0; fi
           dir="$RUNNER_TEMP/lt-natives"
           grep -v '^#' "$lock" | while read -r abi url sha; do
