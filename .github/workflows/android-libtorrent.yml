@@ -1,0 +1,96 @@
+name: Android libtorrent (VANTARA patched)
+# يبني libjlibtorrent.so لأندرويد (arm64-v8a وx86_64) من وصفة jlibtorrent 2.0.12.9 نفسها (NDK r28c، Boost 1.88،
+# OpenSSL 3.6.0، libtorrent cb6fe6b9c) مع تعديلي VANTARA فقط: 0001 (سقف مهلة الكتلة العالقة) و0002 (تحوّط محدود
+# للكتل العالقة في القطعة المنتظرة). غلاف JNI المولّد محفوظ في مستودع jlibtorrent، فلا SWIG ولا تغيير في واجهة Kotlin.
+# التعديلات معطلة ما لم يضبطها التطبيق بمتغيرات البيئة (VANTARA_LT_*). لا ينشر شيئًا: المخرجات artifacts مع SHA-256.
+on:
+  push:
+    branches: ['ccr-e88a4b6c-3dl430']
+    paths:
+      - 'tools/libtorrent-patches/0001-vantara-stall-cap.patch'
+      - 'tools/libtorrent-patches/0002-vantara-urgent-hedge.patch'
+      - '.github/workflows/android-libtorrent.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-libtorrent-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  NDK_VERSION: r28c
+  ANDROID_API: '26'
+  BOOST_DOT: 1.88.0
+  BOOST_US: 1_88_0
+  OPENSSL_VERSION: 3.6.0
+  LIBTORRENT_REVISION: cb6fe6b9c28735b42edd77740a554d1709acad02
+  JLIBTORRENT_REF: release/2.0.12.9
+jobs:
+  native:
+    name: libjlibtorrent.so (${{ matrix.abi }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { abi: arm64, jni: arm64-v8a, openssl: android-arm64, clang: aarch64-linux-android }
+          - { abi: x86_64, jni: x86_64, openssl: android-x86_64, clang: x86_64-linux-android }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Sources (Boost, NDK, OpenSSL, libtorrent + VANTARA patches, jlibtorrent)
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /src /openssl-${{ matrix.openssl }} && sudo chown -R "$USER" /src /openssl-${{ matrix.openssl }}
+          cd /src
+          wget -nv -O boost.tar.gz "https://archives.boost.io/release/${BOOST_DOT}/source/boost_${BOOST_US}.tar.gz"
+          tar xzf boost.tar.gz && (cd "boost_${BOOST_US}" && ./bootstrap.sh >/dev/null)
+          wget -nv -O ndk.zip "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+          unzip -qq ndk.zip && mv "android-ndk-${NDK_VERSION}" android-ndk && rm ndk.zip
+          wget -nv -O openssl.tar.gz "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
+          tar xzf openssl.tar.gz && mv "openssl-${OPENSSL_VERSION}" openssl-src
+          git clone -q https://github.com/arvidn/libtorrent
+          cd libtorrent
+          git fetch -q origin RC_2_0
+          git reset -q --hard "$LIBTORRENT_REVISION"
+          git submodule update --init -q
+          for p in 0001-vantara-stall-cap 0002-vantara-urgent-hedge; do
+            patch -p1 --no-backup-if-mismatch < "$GITHUB_WORKSPACE/tools/libtorrent-patches/$p.patch"
+          done
+          # التعديلان وصلا فعلًا (لا بناء صامت للنسخة الأصلية)
+          test "$(grep -c 'VANTARA_LT_STALL_CAP_MS\|VANTARA_LT_HEDGE_MS' src/torrent.cpp)" -ge 2
+          cd /src
+          git clone -q --depth 1 --branch "$JLIBTORRENT_REF" https://github.com/frostwire/frostwire-jlibtorrent
+          test -s frostwire-jlibtorrent/swig/libtorrent_jni.cpp
+      - name: OpenSSL (${{ matrix.openssl }})
+        run: |
+          set -euo pipefail
+          export ANDROID_TOOLCHAIN=/src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64
+          export AR=$ANDROID_TOOLCHAIN/bin/llvm-ar RANLIB=$ANDROID_TOOLCHAIN/bin/llvm-ranlib
+          export CC=$ANDROID_TOOLCHAIN/bin/${{ matrix.clang }}${ANDROID_API}-clang
+          export PATH=$ANDROID_TOOLCHAIN/bin:$PATH
+          cd /src/openssl-src
+          ./Configure ${{ matrix.openssl }} no-shared no-makedepend no-static-engine no-stdio no-posix-io no-threads no-ui-console no-zlib no-zlib-dynamic -fno-strict-aliasing -fvisibility=hidden -O3 -fPIC --prefix=/openssl-${{ matrix.openssl }} >/dev/null
+          make -j"$(nproc)" build_libs >/dev/null
+          make install_sw >/dev/null
+      - name: Build libjlibtorrent.so (no SWIG; committed JNI wrapper)
+        run: |
+          set -euo pipefail
+          cd /src/frostwire-jlibtorrent/swig
+          export CONTINUE_BUILD=1 PROCEED_WITH_BUILD=1
+          ./build-android-${{ matrix.abi }}.sh --build-only 2>&1 | grep -E 'error|warning: unused|\.so|failed|^\.\.\.' | tail -40 || true
+          lib=bin/release/android/${{ matrix.jni }}/libjlibtorrent.so
+          test -s "$lib"
+          mkdir -p "$GITHUB_WORKSPACE/out/${{ matrix.jni }}"
+          cp "$lib" "$GITHUB_WORKSPACE/out/${{ matrix.jni }}/libjlibtorrent.so"
+          /src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -d "$lib" | grep -E 'NEEDED|SONAME'
+          # التعديلات داخل المكتبة المبنية فعلًا
+          strings "$lib" | grep -q VANTARA_LT_STALL_CAP_MS
+          strings "$lib" | grep -q VANTARA_LT_HEDGE_MS
+          (cd "$GITHUB_WORKSPACE/out" && sha256sum "${{ matrix.jni }}/libjlibtorrent.so" | tee "${{ matrix.jni }}.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libjlibtorrent-vantara-${{ matrix.jni }}
+          path: out/
+          retention-days: 90
