@@ -194,10 +194,12 @@ function throttleProxy(target, bps, delayMs) {
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
-test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges) both finish without starving each other', { skip, timeout: 120000 }, async t => {
+test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges) both finish without starving each other', { skip, timeout: 180000 }, async t => {
   // التسخين في ويندوز يقرأ أول الملف وآخره معًا. كان كل قارئ يضع النافذة على موضعه وحده: قطعة الآخر تصير «لا تُنزَّل»
-  // (وضع التركيز) أو أدنى أولوية بلا موعد، وwaitPiece لا يعيد الأولويات. قبل الإصلاح، 6 جولات بهذا الإعداد: 5 علقت
-  // (الرأس أكثر من 60 ث، أو الذيل 16.5 ث بانتظار أن يبلغه التنزيل المتسلسل)؛ بعده 9 جولات أسوؤها 8.2 ث والمثالي 5 ث.
+  // (وضع التركيز) أو أدنى أولوية بلا موعد، وwaitPiece لا يعيد الأولويات، فيعلق.
+  // الحكم ببصمة التجويع لا بالزمن: قطعة ينتظرها قارئ ولم تُطلب من الشبكة أصلًا (blocks = -1) أكثر من 4 ث. الزمن الكلي
+  // يتأثر ببطء قرص مشغّل CI في ويندوز (read_piece بمتوسط 294ms وأقصى 808ms في البناء 82، وRC-T7)، فلا يميّز السببين.
+  // عينات لينكس قبل الإصلاح: «w=120 لمدة 11.2 ث blk=-1» و«w=3 لمدة 4.1 ث blk=-1»؛ بعده أطول blk=-1 كان 143ms.
   const { base, magnet, data } = await fixture(t);
   const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
   assert.ok(seedPeer, `the seeder magnet names its loopback peer: ${magnet}`);
@@ -208,14 +210,26 @@ test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges)
   assert.equal(added.status, 200, JSON.stringify(added.body));
   const head = 8 * 1024 * 1024, tail = 2 * 1024 * 1024;
   const started = performance.now();
-  const timed = range => request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: range }, raw: true, timeout: 30000 })
+  const starved = [];
+  let reading = true, maxRead = 0;
+  const sampler = (async () => {
+    while (reading) {
+      await sleep(250);
+      const d = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
+      if (!d?.waiting) continue;
+      maxRead = Math.max(maxRead, d.reads?.max_ms ?? 0);
+      if (d.waiting.piece >= 0 && d.waiting.ms > 4000 && d.waiting.blocks === -1) starved.push(`piece ${d.waiting.piece} waited ${d.waiting.ms}ms unrequested`);
+    }
+  })();
+  const timed = range => request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: range }, raw: true, timeout: 120000 })
     .then(r => ({ r, ms: Math.round(performance.now() - started) }));
-  const [first, last] = await Promise.all([timed(`bytes=0-${head - 1}`), timed(`bytes=${data.length - tail}-${data.length - 1}`)]);
-  t.diagnostic(`head ${first.ms}ms, tail ${last.ms}ms (ideal ≈ ${Math.round((head + tail) / (2 * 1024 * 1024) * 1000)}ms)`);
+  const [first, last] = await Promise.all([timed(`bytes=0-${head - 1}`), timed(`bytes=${data.length - tail}-${data.length - 1}`)])
+    .finally(() => { reading = false; });
+  await sampler;
+  t.diagnostic(`head ${first.ms}ms, tail ${last.ms}ms (network ideal ≈ ${Math.round((head + tail) / (2 * 1024 * 1024) * 1000)}ms), slowest piece read from disk ${maxRead}ms`);
   assert.ok(first.r.body.equals(data.subarray(0, head)), 'head bytes exact');
   assert.ok(last.r.body.equals(data.subarray(data.length - tail)), 'tail bytes exact');
-  // 13 ث: ضعفا المثالي ونصف، وأقصر من أقصر تعليق قيس قبل الإصلاح (16.4 ث)
-  assert.ok(Math.max(first.ms, last.ms) < 13000, `a reader starved: head ${first.ms}ms, tail ${last.ms}ms`);
+  assert.deepEqual(starved, [], 'a reader waited on a piece nobody requested');
 });
 
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
