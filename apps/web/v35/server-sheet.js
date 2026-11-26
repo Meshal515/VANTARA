@@ -643,9 +643,11 @@ export function createServerSheet(body, o) {
 
   let topId = null;
   // onTop: «المقترح» تورنت ثبت 400ms (لا مع كل تحديث للصفوف): المحرك يسخّنه قبل غيره. مرة لكل مقترح.
-  let topTimer = 0, warmedTop = null;
+  // المؤقت يُعدّ من ظهور المقترح لا من آخر تحديث: الورقة تُحدَّث مع كل حدث من المحرك (أسرع من 400ms ما دامت
+  // المصادر تتوالى)، وكان كل update يلغيه ويعيده، فلا يبدأ التسخين حتى تهدأ الورقة. كذلك الصفوف الخلفية.
+  let topTimer = 0, warmedTop = null, topPending = null;
   // الصفوف الظاهرة غير «المقترح»: تسخين خلفي بترتيب warmRows، بعد أن تثبت 400ms، وحين تتغير فقط
-  let rowsTimer = null, rowsKey = '';
+  let rowsTimer = null, rowsKey = '', rowsPending = null;
   // الفأرة على صف تورنت 120ms: يُسخَّن هو (الضغط غالبًا بعد نصف ثانية)، والخروج من الصفوف يعيد «المقترح».
   // الفأرة وحدها (pointerType mouse): اللمس لا يمر فوق الصفوف، وتطبيق الجوال يبقى كما هو
   let hoverTimer = null, hovered = null;
@@ -671,14 +673,24 @@ export function createServerSheet(body, o) {
   const announceRows = (ids) => {
     if (!o.onWarmRows) return;
     const key = ids.join('|');
+    if (key === rowsPending) return;
     clearTimeout(rowsTimer);
-    if (key === rowsKey) return;
-    rowsTimer = setTimeout(() => { if (destroyed) return; rowsKey = key; o.onWarmRows(ids); }, 400);
+    rowsPending = key === rowsKey ? null : key;
+    if (rowsPending == null) return;
+    rowsTimer = setTimeout(() => { rowsPending = null; if (destroyed) return; rowsKey = key; o.onWarmRows(ids); }, 400);
   };
   const announceTop = (top) => {
+    const id = o.onTop && top && view(top).torrent && top.id !== warmedTop ? top.id : null;
+    if (id === topPending) return;
     clearTimeout(topTimer);
-    if (!o.onTop || !top || !view(top).torrent || top.id === warmedTop) return;
-    topTimer = setTimeout(() => { if (destroyed || topId !== top.id) return; warmedTop = top.id; o.onTop(top); }, 400);
+    topPending = id;
+    if (id == null) return;
+    topTimer = setTimeout(() => {
+      topPending = null;
+      if (destroyed || topId !== id) return;
+      warmedTop = id;
+      o.onTop(routeById(id) ?? top);
+    }, 400);
   };
   function row(r) {
     const d = view(r);
