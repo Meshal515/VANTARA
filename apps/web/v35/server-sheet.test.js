@@ -503,6 +503,36 @@ it('المقترح تورنت يُعلن للتسخين مرة واحدة بعد
   } finally { vi.useRealTimers(); }
 });
 
+it('المقترح الثابت يُسخَّن بعد 400ms من ظهوره ولو تتابعت تحديثات الورقة (لا يجوّعه وصول السيرفرات)', () => {
+  // الورقة تُحدَّث مع كل حدث من المحرك (سيرفر يصل، فحص يكتمل، حقائق كل 1.5 ث)، أسرع من 400ms ما دامت المصادر
+  // تتوالى. كان كل update يلغي مؤقت «المقترح» ويعيد عدّه، فلا يبدأ التسخين حتى تهدأ الورقة (عينة المالك:
+  // التسخين بدأ 0.7 و4.7 ث فقط قبل الضغط والورقة مفتوحة أطول). وكذلك الصفوف الخلفية.
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onTop = vi.fn(), onWarmRows = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onTop, onWarmRows });
+    const t = tor('Show.S01E01.1080p.WEB.x264\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'tt', quality: 1080, infoHash: 'c'.repeat(40) });
+    const extra = Array.from({ length: 12 }, (_, i) => tor(`Show.S01E01.720p.WEB.x264-G${i}\n👤 ${40 + i} 💾 700 MB ⚙️ Nyaa`, { id: `x${i}`, quality: 720, infoHash: String(i % 10).repeat(40) }));
+    // سيرفر جديد كل 100ms على مدى 3 ث، و«المقترح» نفسه لا يتغير
+    for (let i = 0; i < 30; i++) {
+      ui.update({ routes: [t, ...extra.slice(0, Math.min(extra.length, Math.floor(i / 2)))], settled: false, status: { text: String(i) } });
+      vi.advanceTimersByTime(100);
+      if (i === 4) expect(onTop).toHaveBeenCalledTimes(1);
+    }
+    expect(onTop).toHaveBeenCalledTimes(1);
+    expect(onTop.mock.calls[0][0].id).toBe('tt');
+    // الصفوف الخلفية: قائمتها ثبتت في آخر 600ms (الاثنا عشر وصلوا) والتحديثات ما زالت كل 100ms، فأُعلنت مرة
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+    // والقائمة نفسها في تحديثات لاحقة لا تُعاد
+    for (let i = 0; i < 10; i++) {
+      ui.update({ routes: [t, ...extra], settled: false, status: { text: `s${i}` } });
+      vi.advanceTimersByTime(100);
+    }
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
 it('حقائق المحرك (حجم القطعة والسرب المقاس) تنقل «المقترح» بين المتقاربين ولا تحرك الصفوف', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick: vi.fn() });

@@ -1036,7 +1036,9 @@ class PlayerActivity : Activity() {
         val mediaFactory = playbackDataSourceFactory(c)
         // تورنت من أول الحلقة: أول صورة من الرأس بلا انتظار الفهرس، والذيل ينزل بعده. الاستئناف والغرفة والمقطع
         // يحتاجون القفز من البداية فيبقون بالفهرس
-        val deferCues = c.url.startsWith("vantara-torrent:") && positionMs < 1_000 && together == null && clip == null
+        val torrent = c.url.startsWith("vantara-torrent:")
+        val begin = if (torrent) PlaybackStart.torrent(positionMs, shared = together != null || clip != null) else positionMs
+        val deferCues = torrent && begin == 0L && together == null && clip == null
         cuesDeferred = deferCues
         if (c.url.startsWith("vantara-torrent:")) runCatching {
             com.vantara.addons.torrent.TorrentEngine.get(this).deferTail(android.net.Uri.parse(c.url), deferCues)
@@ -1059,7 +1061,7 @@ class PlayerActivity : Activity() {
         }
         // جودة اختارها المستخدم تخص السيرفر السابق؛ السيرفر الجديد يبدأ تلقائيًا
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
-        player.setMediaSource(media.mediaSource, positionMs.coerceAtLeast(0))
+        player.setMediaSource(media.mediaSource, begin.coerceAtLeast(0))
         player.prepare()
         // في غرفة لم تبدأ: لا تشغيل تلقائي (كان يُحسب ضغطة «تشغيل» من المضيف فيبدأ الغرفة قبل «ابدأ»)
         setPlayingQuietly(clip == null && together?.mayAutoplay() != false)

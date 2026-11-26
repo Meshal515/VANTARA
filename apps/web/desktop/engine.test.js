@@ -409,6 +409,28 @@ it('يجهّز أفضل تورنت في الخلفية قبل الضغط على 
   } finally { vi.useRealTimers(); }
 });
 
+it('التسخين الاحتياطي لا يتأجل ما دامت المرشحات تصل (مؤقته يُعدّ من أول مرشح جاهز)', async () => {
+  vi.useFakeTimers();
+  try {
+    const f = fixture(), prewarms = [];
+    f.bridge.prewarmTorrent = async args => { prewarms.push(args); return { prewarmed: true }; };
+    // الإضافة تنشر مرشحًا كل 400ms على مدى 3.2 ث (أقصر من مهلة 1200ms): كان كل مرشح يعيد عدّ المهلة
+    f.source.streams = async (_server, publish) => {
+      for (let i = 0; i < 8; i++) {
+        publish([{ ...f.stream, infoHash: String(i).repeat(40), title: `حي ${i}\n👤 ${500 - i} 💾 1.4 GB` }]);
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+      return [];
+    };
+    void f.engine.prepare({ session: 's', copies: [{ sourceId: 'addon|torrentio', id: 'tt123', requestedSeason: 2 }], episode: 1 });
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(prewarms).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(prewarms).toHaveLength(1);
+    await f.engine.closeSession({session:'s'});
+  } finally { vi.useRealTimers(); }
+});
+
 it('تسخين ويندوز يتبع «المقترح» من الورقة ولا يعود لترتيب المحرك بعده', async () => {
   vi.useFakeTimers();
   try {

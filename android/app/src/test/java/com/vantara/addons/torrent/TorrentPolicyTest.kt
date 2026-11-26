@@ -135,4 +135,15 @@ class TorrentPolicyTest {
         // أكبر رقم كتلة لا يفيض
         assertFalse(TurboRead.validBlock(Int.MAX_VALUE, 16 * b))
     }
+    @Test fun turboCoversTheSameBytesWhateverThePieceSize() {
+        val mb = 1024 * 1024
+        // سقف 32MB: قطعتان من 16MB، وثمانٍ من 4MB (كانت قطعتين = 8MB فيقف عند الثالثة بعد الاستئناف)
+        assertEquals(2, TurboRead.piecesPerOpen(16 * mb))
+        assertEquals(8, TurboRead.piecesPerOpen(4 * mb))
+        assertEquals(32, TurboRead.piecesPerOpen(mb))
+        // لا أقل من قطعتين (الرأس وما بعد المرفقات)، ولا أكثر من 64 مهما صغرت القطعة
+        assertEquals(2, TurboRead.piecesPerOpen(32 * mb))
+        assertEquals(64, TurboRead.piecesPerOpen(16 * 1024))
+        assertEquals(2, TurboRead.piecesPerOpen(0))
+    }
 }

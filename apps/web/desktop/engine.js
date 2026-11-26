@@ -35,8 +35,10 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
   const schedulePrewarm = s => {
     // الورقة أعلنت «المقترح» (warm): هو ما يُسخَّن، لا أول ترتيب المحرك هنا (كان يختلف عنه فيُرمى التسخين)
     if (!bridge?.prewarmTorrent || s.playing || s.sheetTop) return;
-    clearTimeout(s.prewarmTimer);
+    // مؤقت جارٍ يختار الأفضل لحظة انطلاقه: إعادة عدّه مع كل مرشح يصل كانت تؤجله ما دامت المرشحات تتوالى
+    if (s.prewarmTimer) return;
     s.prewarmTimer = setTimeout(() => {
+      s.prewarmTimer = null;
       if (!current(s) || s.playing) return;
       const c = choices(s)[0];
       if (!c?.infoHash) return;
@@ -300,7 +302,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const c = choices(s, route)[0];
       if (!c?.infoHash) return { warming: false };
       if (hover) { void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'hover' })).catch(() => {}); return { warming: true }; }
-      s.sheetTop = true; clearTimeout(s.prewarmTimer);
+      s.sheetTop = true; clearTimeout(s.prewarmTimer); s.prewarmTimer = null;
       const key = `${c.infoHash}|${c.fileIdx ?? ''}`;
       if (s.prewarmKey !== key) { s.prewarmKey = key; void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'top' })).catch(() => {}); }
       return { warming: true };
