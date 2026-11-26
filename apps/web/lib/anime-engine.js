@@ -672,10 +672,15 @@ export function watchFacts(session, onFacts, { every = 1500, span = 20000, read 
  * و`stop()` عند إغلاق الورقة: يهدّئ الخلفي ويترك «المقترح» لمدته (غالبًا هو ما يُشغَّل).
  */
 export function topWarmer(onFacts, options) {
-  let watch = null, session = null, ended = false;
+  let watch = null, session = null, ended = false, refresh = null, last = null;
+  // المحرك يمسك التسخين 90 ث ثم يهدّئه (وقد يُخلى). الورقة المفتوحة أطول من ذلك (عينة الجهاز: 100.7 ث) تجدّده كل
+  // دقيقة، فيبقى «المقترح» دافئًا حتى الضغط أو الإغلاق
+  const every = options?.refreshMs ?? 60000;
   return {
     top(s, route) {
       if (ended || !s || !route) return;
+      last = { s, route };
+      if (!refresh) refresh = setInterval(() => { if (!ended && last) void warm(last.s, last.route); }, every);
       void warm(s, route);
       if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
       watch.poke();
@@ -688,7 +693,7 @@ export function topWarmer(onFacts, options) {
     },
     stop() {
       if (!ended && session) void warmBackground(session, [], { stop: true });
-      ended = true; watch?.stop(); watch = null; session = null;
+      ended = true; clearInterval(refresh); refresh = null; last = null; watch?.stop(); watch = null; session = null;
     },
   };
 }
