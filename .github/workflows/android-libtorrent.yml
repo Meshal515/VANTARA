@@ -103,8 +103,10 @@ jobs:
           # التعديلات داخل المكتبة المبنية فعلًا
           strings "$lib" | grep -q VANTARA_LT_STALL_CAP_MS
           strings "$lib" | grep -q VANTARA_LT_HEDGE_MS
-          /src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm -D "$lib" | grep -q Java_com_vantara_addons_torrent_NativeReadHint_set0
-          /src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm -D "$lib" | grep -q Java_com_vantara_addons_torrent_NativeReadHint_clear0
+          # المخرجات كاملة أولًا: grep -q يغلق الأنبوب عند أول تطابق فيخرج llvm-nm بـ74 (EX_IOERR) ويُفشل pipefail الخطوة
+          symbols="$(/src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm -D "$lib")"
+          grep -q Java_com_vantara_addons_torrent_NativeReadHint_set0 <<<"$symbols"
+          grep -q Java_com_vantara_addons_torrent_NativeReadHint_clear0 <<<"$symbols"
           (cd "$GITHUB_WORKSPACE/out" && sha256sum "${{ matrix.jni }}/libjlibtorrent.so" | tee "${{ matrix.jni }}.sha256")
       - uses: actions/upload-artifact@v4
         with:
