@@ -138,17 +138,27 @@ class TorrentEngine internal constructor(
      * واتصال بالمشاركين لـ[PREFETCH_HOLD_MS]، و[fetchEdges] يجلب طرفي الملف أيضًا. لا يشغّل فيديو،
      * ولا يحجز قارئًا (لا يُحسب في MAX_ACTIVE_STATES)، ويُلغى حين تُغلق الجلسة التذكرة.
      */
-    fun prefetch(uri: Uri, fetchEdges: Boolean) {
+    fun prefetch(uri: Uri, fetchEdges: Boolean, priority: Boolean = false) {
         if (shutdown.get()) return
         val request = uri.host?.let(tickets::get)?.request ?: return
         val hash = request.infoHash
         val until = System.currentTimeMillis() + PREFETCH_HOLD_MS
+        var evicted: String? = null
         synchronized(warming) {
             val now = System.currentTimeMillis()
             warming.entries.removeIf { it.value < now }
-            if (hash in warming || warming.size >= TorrentPrefetch.MAX) return
+            // «المقترح» في ورقة السيرفرات (priority) هو ما سيُشغَّل غالبًا: يأخذ مكانه ولو كان الترتيب الأصلي سخّن غيره.
+            // إن كان يُسخَّن أصلًا بلا قطع (الخيار الثاني: بيانات فقط) يُعاد تسخينه بالقطع؛ الخيط القديم يتوقف وحده
+            // (warming[hash] != until). عينات الجهاز (26 نوفمبر): 4 من 7 تشغيلات «لم يُسخَّن هذا الخيار».
+            if (hash in warming && !priority) return
+            if (hash !in warming && warming.size >= TorrentPrefetch.MAX) {
+                if (!priority) return
+                evicted = warming.entries.minByOrNull { it.value }?.key
+                evicted?.let { warming.remove(it) }
+            }
             warming[hash] = until
         }
+        evicted?.let { old -> states[old]?.let { runCatching { it.cool() } } }
         val submitted = runCatching {
             prefetcher.execute {
                 runCatching { warm(request, until, fetchEdges) }
