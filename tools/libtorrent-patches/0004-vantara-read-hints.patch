@@ -200,7 +200,7 @@ index 6f017e6..371ff8b 100644
  		if (now - m_last_second_tick < seconds(1)) return;
  
 diff --git a/src/torrent.cpp b/src/torrent.cpp
-index a8cdff6..9ee7d85 100644
+index a8cdff6..bd059d3 100644
 --- a/src/torrent.cpp
 +++ b/src/torrent.cpp
 @@ -56,6 +56,8 @@ POSSIBILITY OF SUCH DAMAGE.
@@ -239,7 +239,7 @@ index a8cdff6..9ee7d85 100644
  		// TODO: 3 assert there are no outstanding async operations on this
  		// torrent
  
-@@ -11281,6 +11296,182 @@ namespace {
+@@ -11281,6 +11296,214 @@ namespace {
  	}
  #endif // TORRENT_DISABLE_STREAMING
  
@@ -336,8 +336,11 @@ index a8cdff6..9ee7d85 100644
 +
 +	void torrent::vantara_frontier(std::set<peer_connection*>& with_requests)
 +	{
-+		int constexpr frontier_blocks = 4;
++		int constexpr frontier_blocks = 8;
 +		int constexpr max_owners = 3;
++		// a block whose holder delivers later than the best alternative by this much is
++		// duplicated at once, not after the frontier stands still
++		std::int64_t constexpr early_margin_ms = 150;
 +		int budget = 12;
 +		if (m_vantara_hints.empty() || !has_picker()) return;
 +		std::vector<peer_connection*> candidates;
@@ -383,29 +386,58 @@ index a8cdff6..9ee7d85 100644
 +				piece_block const block(h.piece, b);
 +				bool const requested = st == piece_picker::block_info::state_requested;
 +				int const owners = blocks.empty() ? 0 : int(blocks[b].num_peers);
-+				// only once the frontier stands still: the pickers already request these
-+				// blocks first (vantara_reorder); an early duplicate only costs bandwidth
-+				if (!stalled || owners >= max_owners) continue;
++				if (owners >= max_owners) continue;
++				// expected delivery (ms): the blocks ahead in the peer's queue at its measured
++				// rate. An idle peer is not a fast one (the slow peer is idle because the
++				// pickers avoid it); unknown speed counts as 500 ms plus 100 ms per block.
++				auto const eta = [&](peer_connection const* c, std::int64_t const ahead) {
++					int const rate = c->statistics().download_payload_rate();
++					return rate > 0 ? ahead * block_bytes * 1000 / rate : 500 + (ahead - 1) * 100;
++				};
++				std::int64_t holder_eta = std::numeric_limits<std::int64_t>::max();
++				peer_connection const* holder = nullptr;
++				if (requested && !blocks.empty() && blocks[b].peer != nullptr)
++				{
++					holder = static_cast<peer_connection const*>(blocks[b].peer->connection);
++					if (holder != nullptr)
++					{
++						auto const& dq = holder->download_queue();
++						auto const& rq = holder->request_queue();
++						auto const it = std::find_if(dq.begin(), dq.end(), aux::has_block(block));
++						std::int64_t ahead;
++						if (it != dq.end()) ahead = (it - dq.begin()) + 1;
++						else
++						{
++							auto const jt = std::find_if(rq.begin(), rq.end(), aux::has_block(block));
++							ahead = std::int64_t(dq.size()) + (jt != rq.end() ? (jt - rq.begin()) + 1 : std::int64_t(rq.size()) + 1);
++						}
++						holder_eta = eta(holder, ahead);
++					}
++				}
 +				peer_connection* best = nullptr;
 +				std::int64_t best_score = std::numeric_limits<std::int64_t>::max();
 +				for (auto* c : candidates)
 +				{
-+					if (!c->has_piece(h.piece)) continue;
++					if (c == holder || !c->has_piece(h.piece)) continue;
 +					auto const& dq = c->download_queue();
 +					auto const& rq = c->request_queue();
 +					if (std::find_if(dq.begin(), dq.end(), aux::has_block(block)) != dq.end()) continue;
 +					if (std::find_if(rq.begin(), rq.end(), aux::has_block(block)) != rq.end()) continue;
-+					std::int64_t const queued = std::int64_t(dq.size() + rq.size());
-+					int const rate = c->statistics().download_payload_rate();
-+					// expected delivery (ms) of one more block: its queue at its measured rate.
-+					// An idle peer is not a fast one (the slow peer is idle because the pickers
-+					// avoid it); unknown speed counts as 500 ms plus 100 ms per queued block.
-+					std::int64_t const score = rate > 0
-+						? (queued + 1) * block_bytes * 1000 / rate
-+						: 500 + queued * 100;
++					std::int64_t const score = eta(c, std::int64_t(dq.size() + rq.size()) + 1);
 +					if (score < best_score) { best = c; best_score = score; }
 +				}
 +				if (best == nullptr) continue;
++				// a requested block: duplicate when its holder is clearly slower than the
++				// best alternative, or once the frontier stands still. An unrequested one:
++				// the pickers take it in this order already; step in only when stalled.
++				bool const slower = requested && holder_eta != std::numeric_limits<std::int64_t>::max()
++					&& holder_eta > best_score + early_margin_ms;
++				// cold start: nobody's speed is measured yet, so a frontier block held by a
++				// peer of unknown speed races a second peer at once (the slow peer is one of
++				// them, and its blocks are exactly the reader's next ones). One extra copy each.
++				bool const race = requested && holder != nullptr && owners < 2
++					&& holder->statistics().download_payload_rate() == 0;
++				if (!stalled && !slower && !race) continue;
 +				request_flags_t const flags = peer_connection::time_critical
 +					| (requested ? peer_connection::busy : request_flags_t{});
 +				if (best->add_request(block, flags))
