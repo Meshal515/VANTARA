@@ -84,6 +84,8 @@ class TorrentEngine internal constructor(
     /** تورنتات فشل تحقق قطعة قُرئت منها قبل التحقق ([TurboRead]): موثقة فقط ما بقي المحرك. */
     private val verifiedOnly = ConcurrentHashMap.newKeySet<String>()
     private val turboListeners = java.util.concurrent.CopyOnWriteArraySet<(String) -> Unit>()
+    /** معرّف قارئ libtorrent لتلميح القراءة ([NativeReadHint]): لكل فتح من المشغّل رقم، و0 للتسخين. */
+    private val readerIds = java.util.concurrent.atomic.AtomicInteger(0)
     /** المشغّل يُبلَّغ بهوية التورنت (infoHash) حين يفشل تحقق قطعة قرأ منها قبل التحقق، فيعيد تجهيز المصدر. */
     fun addTurboListener(listener: (String) -> Unit) { turboListeners.add(listener) }
     fun removeTurboListener(listener: (String) -> Unit) { turboListeners.remove(listener) }
@@ -587,6 +589,16 @@ class TorrentEngine internal constructor(
          * بعدها موثق دائمًا.
          */
         private val firstLimit = TurboRead.piecesPerOpen(pieceLength)
+        /** تلميح القراءة (0004): موضع هذا الفتح داخل قطعته، يُحدَّث كل [HINT_STRIDE_BLOCKS] كتل أو عند قطعة جديدة. */
+        private val readerId = readerIds.incrementAndGet()
+        private var hintPiece = -1
+        private var hintBlock = -1
+        private fun hint(plan: PieceRead) {
+            val block = plan.offset / TurboRead.BLOCK_BYTES
+            if (plan.piece == hintPiece && block >= hintBlock && block - hintBlock < HINT_STRIDE_BLOCKS) return
+            hintPiece = plan.piece; hintBlock = block
+            state.readHint(readerId, plan.piece, plan.offset)
+        }
         private val firstPieces = ArrayList<Int>(firstLimit)
         private var earlyLeft = if (preview) 0L else TurboRead.MAX_BYTES_PER_OPEN
         /** القراءة من القرص والإغلاق تحت قفل واحد: الإغلاق من خيط آخر ينتظر قراءة جارية (ملّي ثوانٍ من ذاكرة النظام). */
@@ -629,6 +641,7 @@ class TorrentEngine internal constructor(
             }
             state.prioritize(file, position, pieceLength)
             val stop = { closed.get() || cancelled() }
+            hint(plan)
             val ask = earlyAsk(plan)
             // null: كتل متصلة من الموضع مكتوبة قبل أن تكتمل القطعة الموثقة ([TurboRead])
             val verified = state.piece(plan.piece, stop, ask)
@@ -658,6 +671,7 @@ class TorrentEngine internal constructor(
         fun close() {
             if (!closed.compareAndSet(false, true)) return
             synchronized(diskLock) { runCatching { disk?.close() }; disk = null }
+            if (!preview) state.clearHint(readerId)
             state.drop()
         }
     }
@@ -741,6 +755,13 @@ class TorrentEngine internal constructor(
             earlyPieces.remove(piece).also { if (it) earlyFailures++ }
         }
         fun earlyRead(bytes: Int) = synchronized(monitor) { earlyBytes += bytes; Unit }
+        /** تلميح القراءة إلى libtorrent (async_call؛ لا ينتظر خيط الشبكة). */
+        fun readHint(reader: Int, piece: Int, offset: Int) = synchronized(monitor) {
+            torrent?.takeIf { it.isValid }?.let { NativeReadHint.set(it, reader, piece, offset) }; Unit
+        }
+        fun clearHint(reader: Int) = synchronized(monitor) {
+            torrent?.takeIf { it.isValid }?.let { NativeReadHint.clear(it, reader) }; Unit
+        }
         val fileBytes: Long get() = file?.size ?: 0L
         val pieceBytes: Int get() = pieceLength
         /** للتشخيص: متى صارت بيانات التورنت جاهزة، وأي قطعة ينتظرها القارئ الآن ومنذ متى (elapsedRealtime). */
@@ -794,6 +815,7 @@ class TorrentEngine internal constructor(
         private fun pauseIfStillIdle(since: Long) = synchronized(monitor) {
             if (refs != 0 || idleAt != since) return@synchronized
             torrent?.takeIf { it.isValid }?.let { handle ->
+                NativeReadHint.clear(handle, WARM_READER)
                 handle.pause(); handle.clearPieceDeadlines(); deadlined.clear()
                 window.forEach { handle.piecePriority(it, Priority.IGNORE) }
                 aheadRange.forEach { handle.piecePriority(it, Priority.IGNORE) }
@@ -835,6 +857,9 @@ class TorrentEngine internal constructor(
                 current.piecePriority(head, Priority.SEVEN)
                 current.setPieceDeadline(head, 0)
                 deadlined += head
+                // حلقة حزمة الموسم تبدأ داخل قطعة يشاركها ملف سابق: كتل بدايتها أولًا لا كتل نهاية الحلقة السابقة
+                val start = (file.offset / info.pieceLength()).toInt()
+                NativeReadHint.set(current, WARM_READER, head, if (head == start) (file.offset % info.pieceLength()).toInt() else 0)
             }
             for (piece in pieces.drop(1)) current.piecePriority(piece, Priority.FIVE)
             warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size
@@ -1131,6 +1156,9 @@ class TorrentEngine internal constructor(
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         /** قطع ناقصة بلا موعد تُتتبع كتلها للخيار B في وقت واحد (ذوات الموعد تُتتبع دائمًا). */
         private const val MAX_TRACKED_PIECES = 64
+        /** تلميح القراءة (0004): قارئ التسخين، ويُحدَّث تلميح الفتح كل 4 كتل (64KB) يتقدمها. */
+        private const val WARM_READER = 0
+        private const val HINT_STRIDE_BLOCKS = 4
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024
         private const val MAX_ACTIVE_BYTES = 8L * 1024 * 1024 * 1024
         private const val MAX_IDLE_BYTES = 64L * 1024 * 1024

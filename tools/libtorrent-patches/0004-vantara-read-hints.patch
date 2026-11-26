@@ -200,7 +200,7 @@ index 6f017e6..371ff8b 100644
  		if (now - m_last_second_tick < seconds(1)) return;
  
 diff --git a/src/torrent.cpp b/src/torrent.cpp
-index a8cdff6..7aad06a 100644
+index a8cdff6..9ee7d85 100644
 --- a/src/torrent.cpp
 +++ b/src/torrent.cpp
 @@ -56,6 +56,8 @@ POSSIBILITY OF SUCH DAMAGE.
@@ -239,7 +239,7 @@ index a8cdff6..7aad06a 100644
  		// TODO: 3 assert there are no outstanding async operations on this
  		// torrent
  
-@@ -11281,6 +11296,179 @@ namespace {
+@@ -11281,6 +11296,182 @@ namespace {
  	}
  #endif // TORRENT_DISABLE_STREAMING
  
@@ -383,8 +383,9 @@ index a8cdff6..7aad06a 100644
 +				piece_block const block(h.piece, b);
 +				bool const requested = st == piece_picker::block_info::state_requested;
 +				int const owners = blocks.empty() ? 0 : int(blocks[b].num_peers);
-+				// a requested block is duplicated only once the frontier stands still
-+				if (requested && (!stalled || owners >= max_owners)) continue;
++				// only once the frontier stands still: the pickers already request these
++				// blocks first (vantara_reorder); an early duplicate only costs bandwidth
++				if (!stalled || owners >= max_owners) continue;
 +				peer_connection* best = nullptr;
 +				std::int64_t best_score = std::numeric_limits<std::int64_t>::max();
 +				for (auto* c : candidates)
@@ -396,10 +397,12 @@ index a8cdff6..7aad06a 100644
 +					if (std::find_if(rq.begin(), rq.end(), aux::has_block(block)) != rq.end()) continue;
 +					std::int64_t const queued = std::int64_t(dq.size() + rq.size());
 +					int const rate = c->statistics().download_payload_rate();
-+					// idle first, then known-fast, then the shortest queue of unknown speed
-+					std::int64_t const score = queued == 0 ? 0
-+						: rate > 0 ? (queued + 1) * block_bytes * 1000 / rate
-+						: std::int64_t(1000000) + queued;
++					// expected delivery (ms) of one more block: its queue at its measured rate.
++					// An idle peer is not a fast one (the slow peer is idle because the pickers
++					// avoid it); unknown speed counts as 500 ms plus 100 ms per queued block.
++					std::int64_t const score = rate > 0
++						? (queued + 1) * block_bytes * 1000 / rate
++						: 500 + queued * 100;
 +					if (score < best_score) { best = c; best_score = score; }
 +				}
 +				if (best == nullptr) continue;
