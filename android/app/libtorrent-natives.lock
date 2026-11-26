@@ -1,0 +1,6 @@
+# libtorrent مخصص لأندرويد (tools/libtorrent-patches 0001+0002، وصفة jlibtorrent 2.0.12.9، بتحسين المترجم).
+# مبني ومنشور من .github/workflows/android-libtorrent.yml (إصدار مسبق ثابت). بناء Debug يتحقق من البصمة قبل الاستعمال.
+# مطابقة ABI: 3838/3838 دالة JNI لكل معالج. حذف هذا الملف = jlibtorrent الأصلي.
+# المعالج  الرابط  SHA-256
+arm64-v8a https://github.com/Meshal515/VANTARA/releases/download/libtorrent-vantara-2.0.12-p1/arm64-v8a-libjlibtorrent.so 99d8a6796c8b50c22b93a930c05d0155a10ccddcfb0f5e40831acce76a383db2
+x86_64 https://github.com/Meshal515/VANTARA/releases/download/libtorrent-vantara-2.0.12-p1/x86_64-libjlibtorrent.so 746babbea2bad2ef9747572c39142c684e0266ec2143fd092d81b590c3f54fb6
