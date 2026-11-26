@@ -425,6 +425,8 @@ for (const path of ["android/app/src/main/kotlin/com/vantara/anime/player/togeth
 // تقريرا تدقيق الإضافات ومشاهدة معًا (طلب المالك، 15 نوفمبر)
 for (const path of ["docs/audits/TOGETHER_AUDIT_2026-11-15.md", "docs/audits/ADDONS_AUDIT_2026-11-15.md"]) seams.add(path);
 // مصادر المانجا في ويندوز كالـAPK: متصفح Chromium مخفي يحل صفحات تحقق المواقع، وهوية متصفح حقيقية (طلب المالك، 15 نوفمبر)
+// اختبار سياسة التورنت (ذيل الملف بالحجم، 26 نوفمبر)
+seams.add("android/app/src/test/java/com/vantara/addons/torrent/TorrentPolicyTest.kt");
 // تشخيص بدء ويندوز (26 نوفمبر): قيمة prewarmed في التتبع الآمن، وإعادة لقطة التتبع للوحة المشغّل بعد preparing
 for (const path of ["apps/desktop/src/startup-trace.mjs", "apps/desktop/src/startup-trace.test.mjs"]) seams.add(path);
 for (const path of ["apps/desktop/source-browser.cjs", "apps/desktop/source-browser.test.cjs", "apps/desktop/source-smoke.cjs", "apps/desktop/main.cjs", "apps/desktop/src/services.mjs", "apps/desktop/src/services.test.mjs", "apps/web/desktop/source-fetcher.js", ".github/workflows/windows-debug.yml"]) seams.add(path);
