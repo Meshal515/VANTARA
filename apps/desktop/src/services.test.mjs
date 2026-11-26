@@ -172,7 +172,7 @@ test('rqbit 500 «initializing» is retried by the proxy and never reaches the p
   assert.ok(events.some(e=>e.stage==='engine-file-initializing'));
 });
 test('a prewarmed torrent is adopted by playback: one engine add, paused while waiting, resumed on play',async t=>{
-  const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
   const requests=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}}),{prewarmed:true});
   assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}}),{prewarmed:true});
@@ -182,6 +182,12 @@ test('a prewarmed torrent is adopted by playback: one engine add, paused while w
   const all=await requests();
   assert.equal(all.filter(r=>r.url.startsWith('/torrents?')).length,1,'playback reuses the prewarmed engine and torrent');
   assert.ok(all.findIndex(r=>r.url.endsWith('/start'))>all.findIndex(r=>r.url.endsWith('/pause')));
+  // تشخيص الجلسة يصل كاملًا بعد preparing (اللوحة تفتح معه): مراحل التسخين واختيار المصدر «مُسخَّن»
+  const mine=events.filter(e=>e.session==='prewarmed');
+  const opened=mine.findIndex(e=>e.type==='playback/preparing');
+  const after=mine.slice(opened).filter(e=>e.type==='playback/diagnostic').map(e=>`${e.stage}${e.mode?`:${e.mode}`:''}`);
+  assert.ok(after.includes('source-selected:prewarmed'),after.join(','));
+  assert.ok(after.includes('engine-ready:cold')||after.includes('engine-ready:cache'),after.join(','));
 });
 test('playing a different torrent discards the prewarm instead of competing with it',async t=>{
   const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
