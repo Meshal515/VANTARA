@@ -223,6 +223,7 @@ struct Torrent {
     std::map<uint64_t, Reader> readers;
     std::set<int> deadlined;
     int windowStart = -1;
+    bool focused = false;        // تركيز البدء: القطع ذات الموعد وحدها حتى تكتمل المنتظرة (TorrentPolicy.focusStart)
     int waitingPiece = -1;
     clk::time_point waitingSince;
     std::map<int, std::shared_ptr<std::vector<char>>> pieceCache;  // read_piece (حتى 6 قطع)
@@ -532,6 +533,7 @@ public:
             reposition(t, *ti, fileIndex, piece, readerId);
             std::shared_ptr<std::vector<char>> data = waitPiece(t, piece);
             if (!data) return false;
+            reposition(t, *ti, fileIndex, piece, readerId, true);
             int64_t const take = std::min<int64_t>({int64_t(data->size()) - inPiece, to - pos + 1});
             if (take <= 0) return false;
             if (!send(data->data() + inPiece, size_t(take))) return false;
@@ -671,7 +673,11 @@ private:
 
     // TorrentEngine.prioritize: نافذة 12 قطعة بمواعيد متدرجة + الطرفان المعلّقان + ما بعدها بأولوية عادية،
     // وما قبل موضع القراءة لا يُطلب (رجوع/قفز لا يهدر السرعة على ما خلف المشاهدة).
-    void reposition(std::shared_ptr<Torrent> const& t, lt::torrent_info const& ti, int fileIndex, int piece, uint64_t readerId) {
+    // تركيز البدء (كـTorrentPolicy.focusStart في الـAPK): عند أول نافذة أو قفزة والقطعة المنتظرة ناقصة، تُطلب القطع ذات
+    // الموعد والطرفان فقط. فتح النافذة وما بعدها دفعة واحدة يملأ طابور كل مشارك بكتل لا ينتظرها المشغّل، فكتل القطعة
+    // المنتظرة العالقة عند مشارك بطيء لا تُنقذ إلا خلفها. محاكي السرب (40 مشاركًا، 1MB): أول قطعة 3.9 ← 1.8 ث بعد
+    // تسخين قصير. [widen]: القطعة المنتظرة وصلت، فتُفتح النافذة كاملة.
+    void reposition(std::shared_ptr<Torrent> const& t, lt::torrent_info const& ti, int fileIndex, int piece, uint64_t readerId, bool widen = false) {
         std::lock_guard<std::mutex> lock(m_);
         t->readers[readerId] = Reader{piece, clk::now()};
         // القارئ الأحدث يقود النافذة (mpv يفتح قارئًا جديدًا عند القفز)
@@ -679,15 +685,19 @@ private:
         clk::time_point latest{};
         for (auto const& [id, r] : t->readers) if (r.at >= latest) { latest = r.at; primary = id; }
         if (primary != readerId) return;
-        if (piece == t->windowStart) return;
+        if (widen ? (!t->focused || piece != t->windowStart) : piece == t->windowStart) return;
+        int const prevStart = t->windowStart;
+        bool const jump = prevStart < 0 || piece < prevStart || piece >= prevStart + std::max(policy::CRITICAL, 1);
+        bool const focus = policy::CRITICAL > 0 && !t->h.have_piece(lt::piece_index_t(piece)) && (jump || (t->focused && piece == prevStart));
         t->windowStart = piece;
+        t->focused = focus;
         auto const& files = ltc::files(ti);
         int64_t const offset = files.file_offset(lt::file_index_t(fileIndex));
         int64_t const size = files.file_size(lt::file_index_t(fileIndex));
         int const first = int(offset / ti.piece_length());
         int const last = int((offset + size - 1) / ti.piece_length());
         std::vector<int> window;
-        for (int p = piece; p <= std::min(last, piece + policy::WINDOW - 1); ++p) window.push_back(p);
+        for (int p = piece; p <= std::min(last, piece + (focus ? policy::CRITICAL : policy::WINDOW) - 1); ++p) window.push_back(p);
         std::vector<int> pending;
         for (int p : edgePieces(ti, fileIndex)) if (std::find(window.begin(), window.end(), p) == window.end() && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
         std::vector<int> const critical = policy::CRITICAL > 0 && int(window.size()) > policy::CRITICAL
@@ -699,7 +709,7 @@ private:
         for (int p : t->deadlined) if (!keep.count(p)) t->h.reset_piece_deadline(lt::piece_index_t(p));
         std::vector<lt::download_priority_t> prio(size_t(ti.num_pieces()), lt::dont_download);
         int const aheadEnd = std::min(last, piece + std::max(policy::AHEAD_PIECES, policy::WINDOW));
-        for (int p = piece; p <= last; ++p) prio[size_t(p)] = p <= aheadEnd ? lt::download_priority_t(4) : lt::low_priority;
+        if (!focus) for (int p = piece; p <= last; ++p) prio[size_t(p)] = p <= aheadEnd ? lt::download_priority_t(4) : lt::low_priority;
         for (int p : edgePieces(ti, fileIndex)) if (p >= first) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
         for (int p : window) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
         for (auto const& [p, deadline] : wanted) prio[size_t(p)] = deadline == 0 ? lt::top_priority : lt::download_priority_t(6);
