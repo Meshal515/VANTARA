@@ -47,16 +47,19 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   // جودة واحدة: أعلى عشرة أسراب ظاهرة (المالك، 27 نوفمبر: أعلى 5 من كل جودة من أعلى جودتين، والجودة الواحدة ضعفها)
   expect(sheet.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv').length).toBe(10);
   expect(sheet.querySelectorAll('.ss-group--direct > .an-srv-grid .an-srv').length).toBe(0);
-  const more=sheet.querySelector('.an-srv-group details');
-  expect(more.open).toBeFalsy();
-  expect(more.querySelector('summary').textContent).toContain('63');
-  expect(more.querySelectorAll('.an-srv').length).toBe(63);
-  more.open=true;
+  // «عرض N من النسخ الإضافية»: زر بارتفاع ثابت، وصفوفها لا تُبنى حتى تُفتح، ويبقى مفتوحًا مع كل سيرفر يصل
+  const more=sheet.querySelector('.ss-group--torrent .ss-more-btn');
+  const extra=()=>sheet.querySelectorAll('.ss-group--torrent .ss-more-grid .an-srv').length;
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  expect(more.textContent).toBe('عرض 63 من النسخ الإضافية');
+  expect(extra()).toBe(0);
+  more.onclick({stopPropagation(){}});
+  expect(extra()).toBe(63);
   state.listeners.get('route')({session:state.session,route:{...state.routes[0],state:'FAILED',runtimeReady:false}});
   await vi.advanceTimersByTimeAsync(1);
-  expect(more.querySelector('summary').textContent).toContain('62');
-  expect(more.querySelectorAll('.an-srv').length).toBe(62);
-  expect(more.open).toBe(true);
+  expect(extra()).toBe(62);
+  expect(more.getAttribute('aria-expanded')).toBe('true');
+  expect(more.textContent).toBe('إخفاء النسخ الإضافية');
   await first.onclick();
   await vi.advanceTimersByTimeAsync(0);
   expect(state.pick).toHaveBeenCalled();
