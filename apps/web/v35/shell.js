@@ -85,6 +85,8 @@ import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
 import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
+import { openLatestStore } from '../lib/latest-store.js';
+import { migrateLatest } from '../lib/latest-migrate.js';
 import { ambiguousNames, canonicalRefOf, learnAliases, noteAmbiguousNames, noteOfficialIds, noteRefAliases, officialIdMap, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
@@ -255,6 +257,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
   connectUpdates((path, opts) => sync.translation(path, opts));
   connectSourceReports((path, opts) => sync.translation(path, opts));
+  // آخر التحديثات المحلي (المرحلة 3): نسخ ما يراه الحساب اليوم حرفيًا إلى مخزنه الدائم ومثبّتًا (لا تصفير). في الخلفية بعد
+  // جاهزية الحساب وبعد أول رسم؛ قراءة فقط من الخادم، ونقطة استئناف بعد كل صفحة، والمكتمل لا يُعاد.
+  void Promise.resolve(sync.ready).catch(() => {}).then(() => setTimeout(() => {
+    let store; try { store = openLatestStore({ account: sync.user?.userId ?? 'local' }); } catch { return; }
+    void migrateLatest({ store, send: (path) => sync.translation(path) }).catch(() => { /* تكمل في التشغيل التالي من حيث وقفت */ });
+  }, 4000));
   onChapters(observeMangaChapters);
   // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد
   try { trimArtCache(); } catch { /* اختياري */ }
