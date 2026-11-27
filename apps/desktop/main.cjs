@@ -219,6 +219,10 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if (!mangaEngineReportOption) setTimeout(() => { void mangaEngine.warmUp().then((on) => on && mangaEngine.autoUpdate()).catch(() => {}); }, 8000).unref?.();
   }
   register('open-external', ({ url }) => openSettings(url));
+  // آخر التحديثات المحلي: SQLite في مجلد بيانات المستخدم (يبقى بعد التحديث)، قاعدة لكل حساب. يُفتح عند أول طلب.
+  let latestStore = null;
+  register('latest-store', (request = {}) => { latestStore ??= require('./latest-store.cjs').createSqliteLatestStore({ dir: path.join(app.getPath('userData'), 'latest') }); return latestStore.call(request); });
+  app.on('will-quit', () => latestStore?.close());
   register('open-update-page', async ({ url } = {}) => {
     await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
     return true;
