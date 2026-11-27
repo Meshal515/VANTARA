@@ -296,6 +296,7 @@ export function renderAddonsHub({
   let alive = true, gen = 0;
   const installed = {}; // p -> بيانات المحرك المثبتة كما هي
   const pending = {}; // p -> اختيارات بانتظار الاستعادة
+  const broken = {}; // p -> حزم مثبتة لا تُقرأ
   const indexes = {}; // p -> Map(url -> عناصر الفهرس)
   let siteRows = [];
   const regList = () => { try { return registry.list?.() || []; } catch { return []; } };
@@ -358,6 +359,7 @@ export function renderAddonsHub({
       };
     };
     for (const m of installed[p] || []) { if (m?.installed === false || m?.installed === null) continue; const r = vm(m); if (r.id) have.set(r.id, r); }
+    for (const m of broken[p] || []) { const r = vm({ ...m, name: m.name || m.pkg }); if (r.id && !have.has(r.id)) have.set(r.id, { ...r, bad: 'تعذّرت قراءة الحزمة على الجهاز؛ احذفها وثبّتها من جديد', broken: true }); }
     for (const m of pending[p] || []) { const r = vm({ ...m, pendingRestore: true }); if (r.id && !have.has(r.id)) have.set(r.id, r); }
     // ما يعلنه الفهرس مثبتًا ولم تذكره قائمة المحرك (مصادر كانت مدمجة) يظهر مثبتًا كما في المدير السابق
     for (const [pkg, { x, url }] of byPkg) if (!have.has(pkg) && (x.installed || x.builtin)) have.set(pkg, vm({ ...x, name: x.name, version: x.installed || x.version, pendingRestore: x.pendingRestore }, url));
@@ -381,6 +383,8 @@ export function renderAddonsHub({
       if (!alive || run !== gen) return;
       installed[p] = Array.isArray(res?.installed) ? res.installed.map((x) => ({ ...x })) : (installed[p] || []);
       pending[p] = Array.isArray(res?.pending) ? res.pending.map((x) => ({ ...x })) : [];
+      // حزم مثبتة تالفة (CloudStream: unreadable): تظهر بسببها ويُتاح حذفها، لا تختفي
+      broken[p] = Array.isArray(res?.unreadable) ? res.unreadable.filter((x) => x?.pkg).map((x) => ({ ...x })) : [];
       S.repos[p] = (res?.repos || []).filter((r) => httpUrl(r?.url)).map((r) => repoVm(p, r));
       indexes[p] ??= new Map();
       for (const url of [...indexes[p].keys()]) if (!S.repos[p].some((r) => r.url === url)) indexes[p].delete(url);

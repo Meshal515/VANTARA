@@ -216,3 +216,19 @@ it('فتح الإضافة يمرر للقشرة السجل الذي يحتاجه
   expect(record._store.family).toBe('cloudstream');
   root.close();
 });
+
+it('حزمة CloudStream تالفة (unreadable) تظهر بسببها وتُحذف، لا تختفي', async () => {
+  setup();
+  const cs = {
+    list: async () => ({ repos: [], installed: [], unreadable: [{ pkg: 'Broken', error: 'PACKAGE_METADATA_UNREADABLE' }] }),
+    add: async () => ({}), remove: async () => ({}), extensions: async () => [], install: async () => {}, enable: async () => {},
+    uninstall: vi.fn(async () => ({ ok: true })),
+  };
+  const root = mount({ cloudstreamRepositories: cs, initialState: { stack: [{ v: 'hub' }, { v: 'cloudstream' }] } });
+  await tick(20);
+  const it0 = root.hub.S.items.cloudstream.find((x) => x.id === 'Broken');
+  expect(it0.bad).toContain('تعذّرت قراءة الحزمة');
+  await root.hub.A.del('cloudstream|Broken');
+  expect(cs.uninstall).toHaveBeenCalledWith('Broken');
+  root.close();
+});
