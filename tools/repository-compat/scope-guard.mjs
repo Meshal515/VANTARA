@@ -26,6 +26,8 @@ for (const path of [".github/workflows/apk-room-shots.yml", ".github/workflows/w
 for(const path of deliverySeams)seams.add(path);
 // Owner-authorized source page (13 Nov 2026): one source page with the official work identity. Exact files only.
 for(const path of ['apps/web/v35/source-identity.js','apps/web/v35/source-identity.test.js','apps/web/v35/source-mode.test.js'])seams.add(path);
+// VantaraList (27 نوفمبر): خطة هوية المانجا الموحدة وقياس تغطيتها
+for(const path of ['docs/plans/2026-11-27-vantaralist.ar.md','docs/plans/2026-11-27-vantaralist-teamx-coverage.json'])seams.add(path);
 // Owner-authorized discovery fixes, reviewed and tested in b8253ccf. Exact files only.
 const discoveryGroupOneSeams=[
   "android/app/src/main/kotlin/com/vantara/anime/AnimeEngine.kt",
