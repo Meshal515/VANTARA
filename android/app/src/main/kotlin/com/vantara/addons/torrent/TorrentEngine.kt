@@ -86,6 +86,25 @@ class TorrentEngine internal constructor(
     private val turboListeners = java.util.concurrent.CopyOnWriteArraySet<(String) -> Unit>()
     /** معرّف قارئ libtorrent لتلميح القراءة ([NativeReadHint]): لكل فتح من المشغّل رقم، و0 للتسخين. */
     private val readerIds = java.util.concurrent.atomic.AtomicInteger(0)
+    /**
+     * فشل تحقق [piece] (hash_failed_alert): جيل الثقة يزيد (مخزن TorrentDataSource يرمي ما جاء قبل التحقق بلا قفل)، وإن كان
+     * المشغّل قد قرأ منها مبكرًا يصير التورنت موثقًا فقط ويُبلَّغ المشغّل فيعيد التجهيز من بيانات موثقة (ما سُلّم قبل الفشل
+     * لا يُسترجع، فالتعافي إعادة تجهيز). نقطة واحدة لتنبيه libtorrent ولاختبار التعافي على الجهاز.
+     */
+    internal fun pieceHashFailed(hash: String, piece: Int) {
+        val state = states[hash] ?: return
+        state.trust.incrementAndGet()
+        if (state.hashFailed(piece)) unverifiedFailed(hash)
+    }
+    /** للاختبار على الجهاز: فشل تحقق كما يصل من libtorrent، لتورنت هذه التذكرة. */
+    @androidx.annotation.VisibleForTesting
+    internal fun simulateHashFailure(uri: Uri, piece: Int) {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return
+        pieceHashFailed(hash, piece)
+    }
+    /** القطع التي قرأ منها المشغّل قبل التحقق ولم يُحسم تحققها بعد (للاختبار). */
+    @androidx.annotation.VisibleForTesting
+    internal fun earlyPiecesOf(uri: Uri): List<Int> = uri.host?.let(tickets::get)?.request?.infoHash?.let { states[it]?.earlyPiecesNow() }.orEmpty()
     /** المشغّل يُبلَّغ بهوية التورنت (infoHash) حين يفشل تحقق قطعة قرأ منها قبل التحقق، فيعيد تجهيز المصدر. */
     fun addTurboListener(listener: (String) -> Unit) { turboListeners.add(listener) }
     fun removeTurboListener(listener: (String) -> Unit) { turboListeners.remove(listener) }
@@ -112,11 +131,7 @@ class TorrentEngine internal constructor(
                     when (alert) {
                         is BlockFinishedAlert -> { states[alert.handle().infoHash().toHex()]?.blockWritten(alert.pieceIndex(), alert.blockIndex()); return }
                         is PieceFinishedAlert -> { states[alert.handle().infoHash().toHex()]?.pieceVerified(alert.pieceIndex()); return }
-                        is HashFailedAlert -> {
-                            val failedHash = alert.handle().infoHash().toHex()
-                            if (states[failedHash]?.hashFailed(alert.pieceIndex()) == true) unverifiedFailed(failedHash)
-                            return
-                        }
+                        is HashFailedAlert -> { pieceHashFailed(alert.handle().infoHash().toHex(), alert.pieceIndex()); return }
                         else -> Unit
                     }
                     if (alert !is ReadPieceAlert) return
@@ -492,7 +507,8 @@ class TorrentEngine internal constructor(
             warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0,
             firstPeerAt = state?.firstPeerAt ?: 0L, firstPayloadAt = state?.firstPayloadAt ?: 0L,
             turbo = turboAllowed(hash), earlyBytes = state?.earlyBytes ?: 0L, earlyFailures = state?.earlyFailures ?: 0,
-            hintsSent = state?.hintsSent ?: 0, hintsFailed = state?.hintsFailed ?: 0, waits = state?.waits() ?: emptyList())
+            hintsSent = state?.hintsSent ?: 0, hintsFailed = state?.hintsFailed ?: 0, waits = state?.waits() ?: emptyList(),
+            engineReads = state?.reads?.get() ?: 0L)
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -636,8 +652,8 @@ class TorrentEngine internal constructor(
         }
         /** آخر read أعاد بايتات قبل التحقق (الخطة B): مخزن TorrentDataSource يعلّمها. */
         @Volatile var lastEarly = false; private set
-        /** القراءة المبكرة ما زالت موثوقة لهذا التورنت (لم يفشل تحقق قطعة قُرئت مبكرًا): وإلا يُرمى ما في المخزن منها. */
-        fun earlyTrusted(): Boolean = !closed.get() && state.infoHash !in verifiedOnly
+        /** جيل الثقة الآن (قراءة ذرية واحدة، بلا قفل ولا libtorrent): يتغير مع كل فشل تحقق، فيُرمى ما في المخزن قبل التحقق. */
+        fun trustGeneration(): Int = state.trust.get()
         /** كم بايتًا من [position] قبل مرفقات MKV التي تُعطى أصفارًا (مخزن TorrentDataSource لا يعبرها)؛ بلا حد إن لم تكن. */
         fun unskipped(position: Long): Long {
             val range = state.head?.skip ?: return Long.MAX_VALUE
@@ -645,6 +661,7 @@ class TorrentEngine internal constructor(
         }
         fun read(position: Long, target: ByteArray, offset: Int, count: Int): Int {
             if (closed.get()) throw InterruptedIOException("Torrent reader closed")
+            state.reads.incrementAndGet()
             val head = state.head
             // مرفقات MKV (خطوط الترجمة): Media3 يتخطاها بقراءتها كلها؛ نعطيه أصفارًا بلا تنزيل (MkvHead)
             head?.skip?.let { range ->
@@ -774,6 +791,11 @@ class TorrentEngine internal constructor(
         }
         fun pieceVerified(piece: Int) = synchronized(monitor) { written.remove(piece); earlyPieces.remove(piece); Unit }
         /** فشل تحقق [piece]: libtorrent يعيد تنزيل كتلها. true إن كان المشغّل قد قرأ منها قبل التحقق. */
+        /** جيل الثقة بالقراءة المبكرة: يزيد مع كل فشل تحقق. يُقرأ بلا قفل (مخزن TorrentDataSource يقارنه قبل التسليم). */
+        val trust = java.util.concurrent.atomic.AtomicInteger(0)
+        /** كل read وصل المحرك (Lease.read)، للتشخيص والاختبار: كلفة القراءات الصغيرة قبل المخزن وبعده. */
+        val reads = java.util.concurrent.atomic.AtomicLong(0)
+        fun earlyPiecesNow(): List<Int> = synchronized(monitor) { earlyPieces.toList() }
         fun hashFailed(piece: Int): Boolean = synchronized(monitor) {
             written.remove(piece)
             earlyPieces.remove(piece).also { if (it) earlyFailures++ }

@@ -93,6 +93,8 @@ data class TorrentStats(
     val hintsSent: Int = 0, val hintsFailed: Int = 0,
     /** آخر انتظارات القراء الأطول من ثانية ([ReadWait]). */
     val waits: List<ReadWait> = emptyList(),
+    /** كل read وصل المحرك (بعد مخزن TorrentDataSource). */
+    val engineReads: Long = 0L,
 )
 /**
  * انتظار قارئ لقطعة تجاوز ثانية: لحظة الثانية الأولى، كم كتلة يعرفها المحرك مكتوبة ([known]، من block_finished_alert)
