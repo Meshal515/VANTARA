@@ -52,6 +52,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -256,7 +257,48 @@ struct Torrent {
     int trust = 0;
     int earlyFailures = 0;
     int64_t earlyBytes = 0;
+    // DeepTrace: خط زمني من الإضافة (مللي ثانية، ساعة رتيبة) لكل علامة أول مرة، وعدّادات الاكتشاف، و«مُعاد» إن جاء
+    // الطلب لتورنت موجود (تسخين سابق أو دفء بعد الإغلاق)
+    clk::time_point addedAt = clk::now();
+    std::map<std::string, int64_t> marks;
+    int trackerAnnounces = 0, trackerReplies = 0, trackerPeers = 0, trackerErrors = 0, dhtReplies = 0, dhtPeers = 0;
+    int adds = 0;
+    // كل انتظار لقطعة/كتلة فوق 50ms مقسومًا على أسبابه بحالة libtorrent الفعلية (عيّنة كل 200ms)، آخر 48
+    // المدد بالميكروثانية: المقاطع تقسم الفترة كلها فمجموعها = المدة بالضبط (التقريب لكل مقطع كان يفرّق بينهما)
+    struct WaitRecord { uint64_t request = 0; int piece = -1; int block = -1; bool early = false; int64_t startMs = 0, totalUs = 0; std::map<std::string, int64_t> byReasonUs; };
+    std::deque<WaitRecord> waits;
 };
+
+/** ما ينتظره قارئ الآن، من libtorrent نفسه (لا تخمين): يُستدعى والقفل محرَّر (استدعاءات متزامنة مع خيط الشبكة). */
+static std::string waitReason(lt::torrent_handle const& h, int piece, int block) {
+    try {
+        if (h.have_piece(lt::piece_index_t(piece))) return "piece-read";            // متحققة: بانتظار القراءة من القرص
+        lt::torrent_status const st = h.status({});
+        if (st.num_peers == 0) return st.list_peers == 0 ? "no-peer-known" : "no-peer-connected";
+        std::vector<lt::partial_piece_info> queue;
+        h.get_download_queue(queue);
+        std::string reason = "piece-not-requested";
+        for (auto const& q : queue) {
+            if (int(static_cast<std::int32_t>(q.piece_index)) != piece) continue;
+            int b = block;
+            if (b < 0) { for (int i = 0; i < q.blocks_in_piece; ++i) if (q.blocks[i].state != lt::block_info::finished) { b = i; break; } }
+            if (b < 0) return "piece-verify";                                        // كل الكتل مكتوبة: التحقق
+            b = std::min(b, q.blocks_in_piece - 1);
+            switch (q.blocks[b].state) {
+                case lt::block_info::requested: return "block-requested";            // طُلبت من مشارك ولم تصل
+                case lt::block_info::writing: return "disk-write";
+                case lt::block_info::finished: return block >= 0 ? "early-gap" : "piece-verify";
+                default: reason = "block-not-requested";
+            }
+        }
+        // لم تُطلب: هل كل المتصلين يخنقوننا؟
+        std::vector<lt::peer_info> peers;
+        h.get_peer_info(peers);
+        bool unchoked = false;
+        for (auto const& p : peers) if (!bool(p.flags & lt::peer_info::remote_choked)) { unchoked = true; break; }
+        return unchoked ? reason : "all-peers-choking";
+    } catch (...) { return "unknown"; }
+}
 
 static void applyOverrides(lt::settings_pack& s, std::string const& raw) {
     std::stringstream in(raw);
@@ -331,7 +373,7 @@ public:
         if (allowPrivate_) { s.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true); s.set_bool(lt::settings_pack::enable_dht, false); s.set_bool(lt::settings_pack::enable_upnp, false); s.set_bool(lt::settings_pack::enable_natpmp, false); }
         s.set_str(lt::settings_pack::listen_interfaces, (allowPrivate_ ? "127.0.0.1:" : "0.0.0.0:") + std::to_string(listenPort) + (allowPrivate_ ? "" : ",[::]:" + std::to_string(listenPort)));
         s.set_str(lt::settings_pack::user_agent, std::string("VANTARA/") + VERSION + " libtorrent/" + lt::version());
-        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | lt::alert_category::block_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
+        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | lt::alert_category::block_progress | lt::alert_category::tracker | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
         // تجارب القياس فقط: VANTARA_LT_SETTINGS="اسم=قيمة,..." بأسماء settings_pack نفسها، فوق إعدادات الـAPK.
         // بلا المتغير لا يتغير شيء. كل إعداد يُطبع على stderr حتى يُعرف ما قيس.
         if (const char* raw = std::getenv("VANTARA_LT_SETTINGS")) applyOverrides(s, raw);
@@ -428,6 +470,7 @@ public:
             t->id = nextId_++;
             byHash_[hash] = t; byId_[t->id] = t;
         }
+        { std::lock_guard<std::mutex> lock(m_); ++t->adds; }
         for (auto const& peer : initialPeers) connectPeer(t->h, peer);
         // اختبار فقط: باذر محلي معروف (يُقبل حصرًا مع --allow-private-peers)
         if (allowPrivate_ && !testPeer_.empty()) connectPeer(t->h, testPeer_);
@@ -440,7 +483,14 @@ public:
             std::lock_guard<std::mutex> lock(m_);
             selectFile(*t, *ti, onlyFile);
         }
-        return {200, describe(*t, *ti, listOnly)};
+        std::string body = describe(*t, *ti, listOnly);
+        markPeers(t);
+        {
+            // DeepTrace: كيف وصلت Metadata (أو أنها كانت موجودة: adds > 1 = تورنت مُعاد)، بلا عناوين ولا بصمة
+            std::lock_guard<std::mutex> lock(m_);
+            if (!body.empty() && body.back() == '}') { body.pop_back(); body += ",\"vantara\":{\"timeline\":" + timelineJsonLocked(*t) + "}}"; }
+        }
+        return {200, body};
     }
 
     Result stats(int id) {
@@ -521,6 +571,7 @@ public:
             }
             o << ",\"early\":{\"written_pieces\":" << t->written.size() << ",\"written_blocks\":" << blocks << ",\"stale\":" << stale << ",\"pending\":" << t->early.size()
               << ",\"bytes\":" << t->earlyBytes << ",\"failures\":" << t->earlyFailures << ",\"trust\":" << t->trust << ",\"verified_only\":" << (t->verifiedOnly ? 1 : 0) << "}";
+            o << ",\"timeline\":" << timelineJsonLocked(*t) << ",\"waits\":" << waitsJsonLocked(*t);
         }
         o << ",\"readers\":[";
         // كل قارئ مفتوح: قطعته، ومنذ متى، وهل نُزّلت، وهل قراءتها من القرص جارية، وأولويتها وموعدها (أين يعلق إن علق)
@@ -609,7 +660,7 @@ public:
     // ── البث: Range فوق قطع متحقق منها فقط ──
     // يعيد false إن انقطع الاتصال أو أُزيل التورنت.
     template <class Send>
-    bool stream(std::shared_ptr<Torrent> const& t, int fileIndex, int64_t from, int64_t to, uint64_t readerId, Send&& send) {
+    bool stream(std::shared_ptr<Torrent> const& t, int fileIndex, int64_t from, int64_t to, uint64_t readerId, Send&& send, uint64_t request = 0) {
         auto ti = t->h.torrent_file();
         if (!ti) return false;
         auto const& files = ltc::files(*ti);
@@ -643,7 +694,7 @@ public:
                 firstPieces.insert(piece);
                 int64_t const pieceSize = ti->piece_size(lt::piece_index_t(piece));
                 int64_t const want = std::min<int64_t>({to - pos + 1, pieceSize - inPiece, earlyLeft, 1 << 20});
-                int64_t const span = waitEarly(t, piece, inPiece, want);
+                int64_t const span = waitEarly(t, piece, inPiece, want, request ? request : readerId);
                 if (span > 0) {
                     std::vector<char> buf(static_cast<std::size_t>(span));
                     if (readSpan(t->h, piece, inPiece, buf)) {
@@ -655,7 +706,7 @@ public:
                     earlyLeft = 0;  // القرص لم يعطِ ما أعلن libtorrent كتابته: هذا الطلب موثق فقط من الآن
                 } else if (span < 0) return false;
             }
-            std::shared_ptr<std::vector<char>> data = waitPiece(t, piece);
+            std::shared_ptr<std::vector<char>> data = waitPiece(t, piece, request ? request : readerId);
             if (!data) return false;
             reposition(t, *ti, fileIndex, piece, readerId, true, rangeLast);
             int64_t const take = std::min<int64_t>({int64_t(data->size()) - inPiece, to - pos + 1});
@@ -706,8 +757,10 @@ private:
         std::unique_lock<std::mutex> lock(m_);
         while (!t->h.torrent_file()) {
             if (stopping_ || !byId_.count(t->id)) return false;
+            lock.unlock(); markPeers(t); lock.lock();
             if (cv_.wait_until(lock, std::min(deadline, clk::now() + 200ms)) == std::cv_status::timeout && clk::now() >= deadline) return !!t->h.torrent_file();
         }
+        markLocked(*t, "metadata");
         return true;
     }
 
@@ -893,13 +946,44 @@ private:
         t->deadlined = keep;
     }
 
+    /** انتظار واحد لقطعة/كتلة يُقسَم على أسبابه (DeepTrace): الزمن منذ العيّنة السابقة يُحسب لسببها، ثم يُعاد السؤال. */
+    struct WaitTrace {
+        uint64_t request = 0; int piece = -1; int block = -1; bool early = false;
+        clk::time_point start = clk::now(), last = clk::now(); std::string reason = "start"; std::map<std::string, int64_t> ms; bool sampled = false;
+    };
+    void sampleWait(std::shared_ptr<Torrent> const& t, WaitTrace& w, std::unique_lock<std::mutex>& lock) {
+        auto const now = clk::now();
+        if (w.sampled && now - w.last < 200ms) return;
+        w.ms[w.reason] += std::chrono::duration_cast<std::chrono::microseconds>(now - w.last).count();
+        w.last = now; w.sampled = true;
+        lock.unlock();
+        std::string const reason = waitReason(t->h, w.piece, w.block);
+        lock.lock();
+        w.reason = reason;
+    }
+    void endWaitLocked(Torrent& t, WaitTrace& w) {
+        auto const now = clk::now();
+        if (now - w.start < 50ms) return;
+        w.ms[w.reason] += std::chrono::duration_cast<std::chrono::microseconds>(now - w.last).count();
+        // قبل أول عيّنة (أقل من 200ms) لا سبب مقاس: يبقى «لم يُقس» صراحة لا يُنسب لسبب
+        if (auto it = w.ms.find("start"); it != w.ms.end()) { w.ms["unsampled"] += it->second; w.ms.erase(it); }
+        Torrent::WaitRecord r;
+        r.request = w.request; r.piece = w.piece; r.block = w.block; r.early = w.early; r.byReasonUs = w.ms;
+        for (auto const& [k, v] : w.ms) r.totalUs += v;
+        r.startMs = std::chrono::duration_cast<std::chrono::milliseconds>(w.start - t.addedAt).count();
+        t.waits.push_back(std::move(r));
+        while (t.waits.size() > 48) t.waits.pop_front();
+    }
+
     /**
      * الخيار B: كم بايتًا متصلًا من [inPiece] (حتى [want]) كُتبت كتله ولم تتحقق القطعة بعد. 0 = اقرأ الموثق (تحققت القطعة،
      * أو التورنت موثق فقط)، -1 = أُزيل التورنت أو توقف الخادم. يسجّل القطعة «مبكرة» قبل القراءة من القرص (فشل يصل بين
      * التسجيل والقراءة يُكشف ولا يمر).
      */
-    int64_t waitEarly(std::shared_ptr<Torrent> const& t, int piece, int inPiece, int64_t want) {
+    int64_t waitEarly(std::shared_ptr<Torrent> const& t, int piece, int inPiece, int64_t want, uint64_t request = 0) {
         std::unique_lock<std::mutex> lock(m_);
+        WaitTrace w; w.request = request; w.piece = piece; w.block = inPiece / policy::BLOCK; w.early = true;
+        struct Done { Engine* e; Torrent& t; WaitTrace& w; ~Done() { e->endWaitLocked(t, w); } } done{this, *t, w};
         for (;;) {
             if (stopping_ || !byId_.count(t->id)) return -1;
             if (t->verifiedOnly || t->pieceCache.count(piece) || t->h.have_piece(lt::piece_index_t(piece))) return 0;
@@ -917,6 +1001,7 @@ private:
                 }
             }
             if (t->waitingPiece != piece) { t->waitingPiece = piece; t->waitingSince = clk::now(); }
+            sampleWait(t, w, lock);
             cv_.wait_for(lock, 100ms);
         }
     }
@@ -942,9 +1027,11 @@ private:
         } catch (...) { return false; }
     }
 
-    std::shared_ptr<std::vector<char>> waitPiece(std::shared_ptr<Torrent> const& t, int piece) {
+    std::shared_ptr<std::vector<char>> waitPiece(std::shared_ptr<Torrent> const& t, int piece, uint64_t request = 0) {
         std::unique_lock<std::mutex> lock(m_);
         bool waited = false;
+        WaitTrace w; w.request = request; w.piece = piece;
+        struct Done { Engine* e; Torrent& t; WaitTrace& w; ~Done() { e->endWaitLocked(t, w); } } done{this, *t, w};
         for (;;) {
             if (stopping_ || !byId_.count(t->id)) return nullptr;
             auto cached = t->pieceCache.find(piece);
@@ -991,6 +1078,7 @@ private:
                 t->waitingPiece = piece; t->waitingSince = clk::now();
             }
             waited = true;
+            sampleWait(t, w, lock);
             cv_.wait_for(lock, policy::DIRECT_READ && t->directRetry.count(piece) && !t->directFailed.count(piece) ? 150ms : 250ms);
         }
     }
@@ -1089,6 +1177,54 @@ private:
         return false;
     }
     // تحقق القطعة أو فشله يحسم كتلها؛ فشل قطعة سُلّم منها قبل التحقق = التورنت موثق فقط وجيل الثقة يزيد
+    /** علامة أول مرة (ومعها تعديل العدّادات) لتورنت مقبضه [handle]، من خيط التنبيهات. */
+    void markHandle(lt::torrent_handle const& handle, char const* name, std::function<void(Torrent&)> count = {}) {
+        std::lock_guard<std::mutex> lock(m_);
+        for (auto& [id, t] : byId_) {
+            if (t->h != handle) continue;
+            markLocked(*t, name);
+            if (count) count(*t);
+            return;
+        }
+    }
+    static void markLocked(Torrent& t, std::string const& name) {
+        if (!t.marks.count(name)) t.marks[name] = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t.addedAt).count();
+    }
+    /** المشاركون المعروفون والمتصلون أول مرة (من حالة التورنت، بلا قفل). */
+    void markPeers(std::shared_ptr<Torrent> const& t) {
+        try {
+            lt::torrent_status const st = t->h.status({});
+            std::lock_guard<std::mutex> lock(m_);
+            if (st.list_peers > 0) markLocked(*t, "peer-known");
+            if (st.num_peers > 0) markLocked(*t, "peer-connected");
+        } catch (...) {}
+    }
+    std::string timelineJsonLocked(Torrent const& t) const {
+        std::ostringstream o;
+        o << "{\"marks\":{";
+        bool first = true;
+        for (auto const& [k, v] : t.marks) { o << (first ? "" : ",") << '"' << k << "\":" << v; first = false; }
+        o << "},\"adds\":" << t.adds << ",\"tracker_announces\":" << t.trackerAnnounces << ",\"tracker_replies\":" << t.trackerReplies
+          << ",\"tracker_peers\":" << t.trackerPeers << ",\"tracker_errors\":" << t.trackerErrors << ",\"dht_replies\":" << t.dhtReplies
+          << ",\"dht_peers\":" << t.dhtPeers << "}";
+        return o.str();
+    }
+    std::string waitsJsonLocked(Torrent const& t) const {
+        std::ostringstream o;
+        o << '[';
+        bool first = true;
+        for (auto const& w : t.waits) {
+            o << (first ? "" : ",") << "{\"request\":" << w.request << ",\"piece\":" << w.piece << ",\"block\":" << w.block << ",\"early\":" << (w.early ? "true" : "false")
+              << ",\"start_ms\":" << w.startMs << ",\"total_ms\":" << (w.totalUs / 1000.0) << ",\"by_reason\":{";
+            bool f2 = true;
+            for (auto const& [k, v] : w.byReasonUs) { o << (f2 ? "" : ",") << '"' << k << "\":" << (v / 1000.0); f2 = false; }
+            o << "}}";
+            first = false;
+        }
+        o << ']';
+        return o.str();
+    }
+
     void pieceSettled(lt::torrent_handle const& handle, int piece, bool failed) {
         std::lock_guard<std::mutex> lock(m_);
         for (auto& [id, t] : byId_) {
@@ -1170,10 +1306,15 @@ private:
             bool notify = false;
             for (lt::alert* a : alerts) {
                 if (auto* r = lt::alert_cast<lt::read_piece_alert>(a)) { storePiece(r); notify = true; }
-                else if (auto* b = lt::alert_cast<lt::block_finished_alert>(a)) { if (blockWritten(b->handle, int(static_cast<std::int32_t>(b->piece_index)), b->block_index)) notify = true; continue; }
-                else if (auto* f = lt::alert_cast<lt::piece_finished_alert>(a)) { pieceSettled(f->handle, int(static_cast<std::int32_t>(f->piece_index)), false); notify = true; continue; }
+                else if (auto* b = lt::alert_cast<lt::block_finished_alert>(a)) { markHandle(b->handle, "first-block"); if (blockWritten(b->handle, int(static_cast<std::int32_t>(b->piece_index)), b->block_index)) notify = true; continue; }
+                else if (auto* tr = lt::alert_cast<lt::tracker_reply_alert>(a)) { markHandle(tr->handle, "tracker-reply", [&](Torrent& t) { ++t.trackerReplies; t.trackerPeers += tr->num_peers; }); continue; }
+                else if (auto* dr = lt::alert_cast<lt::dht_reply_alert>(a)) { markHandle(dr->handle, "dht-reply", [&](Torrent& t) { ++t.dhtReplies; t.dhtPeers += dr->num_peers; }); continue; }
+                else if (auto* ta = lt::alert_cast<lt::tracker_announce_alert>(a)) { markHandle(ta->handle, "tracker-announce", [&](Torrent& t) { ++t.trackerAnnounces; }); continue; }
+                else if (auto* te = lt::alert_cast<lt::tracker_error_alert>(a)) { markHandle(te->handle, "tracker-error", [&](Torrent& t) { ++t.trackerErrors; }); continue; }
+                else if (auto* f = lt::alert_cast<lt::piece_finished_alert>(a)) { markHandle(f->handle, "first-piece"); pieceSettled(f->handle, int(static_cast<std::int32_t>(f->piece_index)), false); notify = true; continue; }
                 else if (auto* h = lt::alert_cast<lt::hash_failed_alert>(a)) { pieceSettled(h->handle, int(static_cast<std::int32_t>(h->piece_index)), true); notify = true; continue; }
-                else if (lt::alert_cast<lt::piece_finished_alert>(a) || lt::alert_cast<lt::metadata_received_alert>(a) || lt::alert_cast<lt::torrent_removed_alert>(a) || lt::alert_cast<lt::hash_failed_alert>(a)) notify = true;
+                else if (auto* mr = lt::alert_cast<lt::metadata_received_alert>(a)) { markHandle(mr->handle, "metadata"); notify = true; }
+                else if (lt::alert_cast<lt::piece_finished_alert>(a) || lt::alert_cast<lt::torrent_removed_alert>(a) || lt::alert_cast<lt::hash_failed_alert>(a)) notify = true;
                 else if (auto* e = lt::alert_cast<lt::torrent_error_alert>(a)) { std::cerr << "torrent error: " << e->message() << '\n'; notify = true; }
                 if (debug_ && (lt::alert_cast<lt::peer_error_alert>(a) || lt::alert_cast<lt::peer_disconnected_alert>(a) || lt::alert_cast<lt::peer_connect_alert>(a) || lt::alert_cast<lt::listen_failed_alert>(a) || lt::alert_cast<lt::listen_succeeded_alert>(a)))
                     std::cerr << "[vantara-torrent] " << a->message() << '\n';
@@ -1327,11 +1468,14 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
             asio::write(sock, asio::buffer(o.str()), ec);
             if (ec || req.method == "HEAD") return;
             uint64_t const reader = engine.newReader();
+            // DeepTrace: رقم الطلب كما يعدّه سطح المكتب (rangeSequence) فيربط انتظاره هنا بطلبه هناك
+            uint64_t label = 0;
+            if (auto lb = req.headers.find("x-vantara-request"); lb != req.headers.end()) { try { label = std::stoull(lb->second); } catch (...) {} }
             engine.stream(t, fileIndex, from, to, reader, [&](char const* data, size_t n) {
                 boost::system::error_code e;
                 asio::write(sock, asio::buffer(data, n), e);
                 return !e;
-            });
+            }, label);
             engine.dropReader(t, reader);
             return;
         }

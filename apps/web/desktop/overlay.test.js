@@ -337,6 +337,16 @@ it('تشخيص البدء في ويندوز: من الضغط، ومُسخَّن 
   expect(diagnosticText({ trace: [{ stage: 'source-selected', ms: 0, mode: 'cold' }] })).toContain('البدء: بارد (بلا تسخين)');
 });
 
+it('DeepTrace في نص التشخيص: كيف وصلت Metadata، وعلى ماذا انتظر كل طلب مرتبًا من الأكبر', () => {
+  const text = diagnosticText({ tapAt: 0, openAt: 0, stages: {}, trace: [
+    { stage: 'source-selected', ms: 0, mode: 'cold' },
+    { stage: 'engine-metadata', ms: 28500, mode: 'cold', detail: { peerKnownMs: 900, peerConnectedMs: 21000, metadataMs: 28400, trackerReplies: 3, trackerPeers: 40, dhtReplies: 1, dhtPeers: 12, trackerErrors: 2 } },
+    { stage: 'range-wait', ms: 41000, detail: { requestId: 1, piece: 3, totalMs: 12222, notRequestedMs: 509, requestedMs: 11000, diskWriteMs: 713 } },
+  ] });
+  expect(text).toContain('engine-metadata  +28.50 ث  (cold · أول مشارك معروف 900ms، أول اتصال 21000ms، Metadata 28400ms، متتبع 3 رد/40 مشارك، DHT 1/12، أخطاء متتبع 2)');
+  expect(text).toContain('طلب 1 القطعة 3: 12222ms = طُلبت ولم تصل 11000ms + كتابة القرص 713ms + لم تُطلب الكتلة 509ms');
+});
+
 it('الشريط بثلاث طبقات: الجاهز على القرص تحت تخزين المشغّل، وسطر «جاهز على القرص» في الشبكة', () => {
   const { view } = fixture();
   view.update({ ready: true, paused: true, position: 60000, duration: 1440000, bufferedMs: 120000, diskMs: 780000, net: { openAt: 0, stages: { 'engine-start': 10 }, peers: 20, diskAheadMs: 720000 } });

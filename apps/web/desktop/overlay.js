@@ -63,6 +63,23 @@ const badgeOf = (q) => (!q ? 'HD' : q >= 2000 ? '4K' : q >= 1000 ? 'FHD' : q >= 
  * والمشغّل بزمنها. `net` من player.js: { tapAt, openAt, stages, trace: [{ stage, ms, mode, waitMs }] }.
  * مراحل المحرك تُقاس من اختيار المصدر في عملية الخدمات (ساعة واحدة)، وما قبله «قبل الضغط» (التسخين).
  */
+// DeepTrace: ما يقوله المحرك عن Metadata وعن سبب كل انتظار، بأسماء مفهومة (المدد بالمللي ثانية من إضافة التورنت)
+const META_LABELS = [['peerKnownMs', 'أول مشارك معروف'], ['peerConnectedMs', 'أول اتصال'], ['trackerReplyMs', 'رد متتبع'], ['dhtReplyMs', 'رد DHT'], ['metadataMs', 'Metadata'], ['firstBlockMs', 'أول كتلة']];
+const WAIT_LABELS = [['noPeerKnownMs', 'لا مشارك معروف'], ['noPeerConnectedMs', 'لا مشارك متصل'], ['chokedMs', 'كل المشاركين يخنقون'], ['notRequestedMs', 'لم تُطلب الكتلة'], ['requestedMs', 'طُلبت ولم تصل'], ['diskWriteMs', 'كتابة القرص'], ['verifyMs', 'التحقق'], ['earlyGapMs', 'فجوة قبل الموضع'], ['pieceReadMs', 'قراءة القرص'], ['unsampledMs', 'لم يُقس'], ['unknownMs', 'غير معروف']];
+function detailText(e) {
+  const d = e.detail ?? {};
+  if (e.stage === 'engine-metadata') {
+    const marks = META_LABELS.filter(([k]) => Number.isFinite(d[k])).map(([k, label]) => `${label} ${d[k]}ms`);
+    const counts = [Number.isFinite(d.trackerReplies) ? `متتبع ${d.trackerReplies} رد/${d.trackerPeers ?? 0} مشارك` : null, Number.isFinite(d.dhtReplies) ? `DHT ${d.dhtReplies}/${d.dhtPeers ?? 0}` : null, d.trackerErrors ? `أخطاء متتبع ${d.trackerErrors}` : null];
+    return [...marks, ...counts].filter(Boolean).join('، ');
+  }
+  if (e.stage === 'range-wait') {
+    const parts = WAIT_LABELS.filter(([k]) => d[k] > 0).sort((a, b) => d[b[0]] - d[a[0]]).map(([k, label]) => `${label} ${d[k]}ms`);
+    return `طلب ${d.requestId} القطعة ${d.piece}: ${d.totalMs}ms = ${parts.join(' + ') || '—'}`;
+  }
+  return null;
+}
+
 export function diagnosticText(net = {}) {
   const st = net.stages ?? {}, trace = net.trace ?? [];
   const s = (ms) => `${(ms / 1000).toFixed(2)} ث`;
@@ -84,7 +101,7 @@ export function diagnosticText(net = {}) {
     lines.push('مراحل المحرك (من اختيار المصدر):');
     for (const e of trace) {
       const rel = e.ms - anchor.ms;
-      const extra = [e.mode && e.stage !== 'source-selected' ? e.mode : null, Number.isFinite(e.waitMs) ? `انتظار ${Math.round(e.waitMs)}ms` : null].filter(Boolean).join(' · ');
+      const extra = [e.mode && e.stage !== 'source-selected' ? e.mode : null, Number.isFinite(e.waitMs) ? `انتظار ${Math.round(e.waitMs)}ms` : null, detailText(e)].filter(Boolean).join(' · ');
       lines.push(`  ${e.stage}  ${rel < 0 ? `قبل الضغط ${s(-rel)}` : `+${s(rel)}`}${extra ? `  (${extra})` : ''}`);
     }
   }

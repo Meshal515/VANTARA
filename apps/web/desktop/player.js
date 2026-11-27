@@ -22,7 +22,8 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   const NET_FIELDS={downloadSpeed:'torrentBps',peers:'peers',seeds:'seeds',aheadMs:'aheadMs',inputBps:'inputBps',videoBps:'videoBps',videoHeight:'videoHeight'};
   function freshNet(prev){return {openAt:Date.now(),tapAt:engine.playRequestedAt?.({session})??null,stages:{},trace:[],server:prev?.server??null};}
   // تشخيص البدء من عملية الخدمات (startup-trace.mjs): المرحلة وزمنها بساعتها، وأرقام آمنة فقط
-  function addTrace(prev,event){const next={...(prev??freshNet(null))};next.trace=[...(next.trace??[]),{stage:String(event.stage),ms:Number(event.elapsedMs)||0,...(event.mode?{mode:String(event.mode)}:{}),...(Number.isFinite(event.waitMs)?{waitMs:event.waitMs}:{})}].slice(-80);return next;}
+  // كل حقل رقمي نظّفه سجل البدء في الخدمات (startup-trace) يبقى مع حدثه: تفصيل Metadata وأسباب الانتظار (DeepTrace)
+  function addTrace(prev,event){const next={...(prev??freshNet(null))};const detail={};for(const [k,v] of Object.entries(event))if(!['type','stage','elapsedMs','session','mode','waitMs'].includes(k)&&Number.isFinite(v))detail[k]=v;next.trace=[...(next.trace??[]),{stage:String(event.stage),ms:Number(event.elapsedMs)||0,...(event.mode?{mode:String(event.mode)}:{}),...(Number.isFinite(event.waitMs)?{waitMs:event.waitMs}:{}),...(Object.keys(detail).length?{detail}:{})}].slice(-80);return next;}
   function mergeNet(prev,event){const next={...(prev??freshNet(null))};for(const [from,to] of Object.entries(NET_FIELDS))if(Number.isFinite(event[from])&&event[from]>=0)next[to]=event[from];return next;}
   function markStage(prev,stage){const next={...(prev??freshNet(null))};if(next.stages[stage]==null)next.stages={...next.stages,[stage]:Date.now()-next.openAt};return next;}
   const httpsArt=url=>typeof url==='string'&&/^https:\/\//i.test(url)?url:null;
