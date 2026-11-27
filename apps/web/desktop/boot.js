@@ -130,6 +130,7 @@ export function installDesktopBridges(g = globalThis) {
   };
   engine.addListener('playerError', error => show(`تعذر التشغيل: ${message(error)}`, true));
   engine.addListener('desktopNotice',event=>show(message(event.message),true));
+  let engineSlow = 0;
   g.VantaraDesktop.onEvent(event => {
     if (event.type === 'playback/preparing') { activeSession = event.session; ready = false; show('يبدأ المحرك ويجهّز بيانات الفيديو…'); }
     if (event.session === activeSession) {
@@ -149,8 +150,9 @@ export function installDesktopBridges(g = globalThis) {
       const mb = n => Math.round((Number(n) || 0) / 1048576);
       if (event.stage === 'download') show(event.total ? `يجهّز محرك إضافات المانجا لأول مرة… ${mb(event.received)} من ${mb(event.total)}MB` : 'يجهّز محرك إضافات المانجا لأول مرة…');
       else if (event.stage === 'extract') show('يفك محرك إضافات المانجا…');
-      else if (event.stage === 'installed' || event.stage === 'starting') show('يشغّل محرك إضافات المانجا…');
-      else if (event.stage === 'running' && status) status.hidden = true;
+      // التشغيل المعتاد عند كل فتح للتطبيق يتم بهدوء (بلاغ المالك 27 نوفمبر): الرسالة فقط إن طال فعلًا (>4ث)
+      else if (event.stage === 'installed' || event.stage === 'starting') { clearTimeout(engineSlow); engineSlow = setTimeout(() => show('يشغّل محرك إضافات المانجا…'), 4000); }
+      else if (event.stage === 'running') { clearTimeout(engineSlow); if (status) status.hidden = true; }
     }
     if (event.type === 'manga-extensions/changed') g.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed'));
     // إضافة Mihon طلب موقعها تحققًا بيد إنسان (جسر Cloudflare في المحرك): «تحتاج تحقق» وزر «تحقق» كالمصادر المدمجة
