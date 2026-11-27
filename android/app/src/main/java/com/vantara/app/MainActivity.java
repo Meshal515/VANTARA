@@ -26,6 +26,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(com.vantara.usage.UsagePlugin.class);
         registerPlugin(com.vantara.verification.VerificationPlugin.class);
         registerPlugin(com.vantara.notify.NotifyPlugin.class);
+        // مخزن «آخر التحديثات» الدائم (SQLite في filesDir)
+        registerPlugin(com.vantara.plugins.LatestStorePlugin.class);
         super.onCreate(savedInstanceState);
     }
 

@@ -102,3 +102,20 @@ describe('خلفية ويندوز (SQLite)', () => {
     expect(desktop.mergeEvent(a, b)).toEqual(mergeEvent(a, b));
   });
 });
+
+describe('أندرويد (LatestStorePlugin.kt) يطابق ويندوز', () => {
+  const kt = require('node:fs').readFileSync(join(__dirname, '../../../android/app/src/main/kotlin/com/vantara/plugins/LatestStorePlugin.kt'), 'utf8');
+  const norm = (s) => s.replace(/\s+/g, ' ').trim();
+  it('نص المخطط نفسه وإصداره', () => {
+    const schema = kt.match(/val SCHEMA = """([\s\S]*?)"""/)[1];
+    expect(norm(schema)).toBe(norm(desktop.SCHEMA));
+    expect(Number(kt.match(/const val SCHEMA_VERSION = (\d+)/)[1])).toBe(desktop.SCHEMA_VERSION);
+  });
+  it('أسماء العمليات نفسها في القناتين، ولا حذف في أي منهما', () => {
+    const ktMethods = [...kt.match(/val METHODS = setOf\(([^)]*)\)/)[1].matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
+    const js = require('node:fs').readFileSync(join(__dirname, '../../desktop/latest-store.cjs'), 'utf8');
+    const deskMethods = [...js.match(/const METHODS = new Set\(\[([^\]]*)\]\)/)[1].matchAll(/'(\w+)'/g)].map((m) => m[1]).sort();
+    expect(ktMethods).toEqual(deskMethods);
+    expect(ktMethods.join()).not.toMatch(/delete|prune|clear|drop|remove/i);
+  });
+});
