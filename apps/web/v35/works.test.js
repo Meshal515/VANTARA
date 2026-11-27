@@ -326,3 +326,21 @@ describe('البحث: صيغ الاستعلام وقرب النتيجة (بلا�
     expect(searchScore(work('The Savior’s Bucket List'), "The Savior's Bucket List")).toBe(4);
   });
 });
+
+import { safeAlternates } from './works.js';
+describe('safeAlternates — لا يُعرض فصل من عمل آخر أبدًا (P0، رجل المنشار/Lookism)', () => {
+  const row = { sourceId: 'ar.mangalek', number: 232, chapter: { url: '/manga/chainsaw-man/232/' } };
+  const lookism = { sourceId: 'ar.teamx', number: 232, chapter: { url: '/series/lookism/232/' } };
+  const otherSite = { sourceId: 'ar.azora', number: 232, chapter: { url: '/manga/chainsaw-man/232/' } };
+  const mirror = { sourceId: 'ar.mangastarz', number: 232, chapter: { url: 'https://starzmanga.net/manga/chainsaw-man/232/' } };
+  const mirrorWrongPath = { sourceId: 'ar.mangalink', number: 232, chapter: { url: '/manga/lookism/232/' } };
+  it('يرفض نسخة مصدر آخر بنفس الرقم (قد تكون دمجًا خاطئًا)', () => {
+    expect(safeAlternates(row, [lookism, otherSite])).toEqual([]);
+  });
+  it('يقبل مرآة الموقع نفسه بنفس مسار الفصل فقط', () => {
+    expect(safeAlternates(row, [lookism, mirror, mirrorWrongPath])).toEqual([mirror]);
+  });
+  it('فصل بلا رابط: لا بدائل', () => {
+    expect(safeAlternates({ ...row, chapter: {} }, [mirror])).toEqual([]);
+  });
+});

@@ -1076,6 +1076,25 @@ export async function scanLatestChapterUpdates({ onUpdate = () => {}, shouldCont
 
 export { mirrorFamily } from '../lib/catalog.js';
 
+const chapterPath = (url) => {
+  if (typeof url !== 'string' || !url) return '';
+  try { return new URL(url, 'https://source.invalid').pathname.replace(/\/+$/, ''); } catch { return ''; }
+};
+/**
+ * بدائل تلقائية آمنة لفصل تعذّر من مصدره (P0، بلاغ المالك 27 نوفمبر: «رجل المنشار 232» من مانجا ليك عُرض فصلًا
+ * من Lookism). كان القارئ يبدّل بصمت إلى «نفس الرقم» عند أي مصدر في البطاقة؛ ونسخة دُمجت في البطاقة خطأً تعني
+ * صفحات عمل آخر. التبديل الصامت مسموح فقط بين مرايا الموقع نفسه (قاعدة بيانات واحدة) وبنفس مسار الفصل؛
+ * أي مصدر آخر لا يُستعمل إلا باختيار المستخدم الصريح من ورقة المصدر.
+ */
+export function safeAlternates(row, candidates = []) {
+  const path = chapterPath(row?.chapter?.url);
+  if (!path) return [];
+  const family = mirrorFamily(row.sourceId);
+  return candidates.filter((alt) => alt && alt.sourceId !== row.sourceId
+    && mirrorFamily(alt.sourceId) === family
+    && chapterPath(alt.chapter?.url) === path);
+}
+
 /** خطأ المحرك → حالة التشخيص وسبب قصير يُعرض بدل «ما ردّ». */
 export function failureOf(error) {
   const message = String(error?.message ?? error ?? '').trim();

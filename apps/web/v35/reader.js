@@ -22,7 +22,7 @@ import { applyAppearance } from './appearance.js';
 import { readStructure } from './experience.js';
 import { countLabel } from './plural.js';
 import { AUTO_READ_RATIO, HISTORY_READ_RATIO, chapterKeyOf, isChapterRead, markChapter, positionFor, progressFor, shouldAutoMark } from './reading.js';
-import { editionRows, sourceLabel, sourceRank } from './works.js';
+import { editionRows, safeAlternates, sourceLabel, sourceRank } from './works.js';
 import {
   PRIORITY,
   chapterLabel,
@@ -475,7 +475,7 @@ export function openSmartReader(deps, ctx) {
       return { row, pages: await pagesOf(row) };
     } catch (error) {
       // اخترت مصدرًا بنفسك؟ فصوله من عنده أو خطأٌ صريح، لا بديل صامت
-      for (const alt of ctx.sourceLocked ? [] : otherSources(row)) {
+      for (const alt of ctx.sourceLocked ? [] : autoAlternates(row)) {
         try {
           return { row: alt, pages: await pagesOf(alt) };
         } catch {
@@ -857,7 +857,7 @@ export function openSmartReader(deps, ctx) {
    */
   async function pageFromOtherSource(seg, index, token) {
     if (ctx.sourceLocked) return false;
-    const alts = otherSources(seg.row).sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId));
+    const alts = autoAlternates(seg.row).sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId));
     for (const alt of alts) {
       try {
         const pages = await pagesOf(alt);
@@ -888,7 +888,7 @@ export function openSmartReader(deps, ctx) {
     const bad = badSources.get(key) ?? new Set();
     bad.add(row.sourceId);
     badSources.set(key, bad);
-    const next = otherSources(row)
+    const next = autoAlternates(row)
       .filter((r) => !bad.has(r.sourceId))
       .sort((a, b) => sourceRank(a.sourceId) - sourceRank(b.sourceId))[0];
     if (!next) return false;
@@ -1828,6 +1828,8 @@ export function openSmartReader(deps, ctx) {
       .map((e) => editionRows(work, e.sourceId).find((r) => r.number === row.number))
       .filter(Boolean);
   }
+  /** ما يُستبدل تلقائيًا: مرايا الموقع نفسه بنفس مسار الفصل فقط (لا عمل آخر أبدًا). البقية في ورقة المصدر باختيارك. */
+  const autoAlternates = (row) => safeAlternates(row, otherSources(row));
   function openSourceSheet() {
     const here = state.row;
     const others = otherSources(here);
