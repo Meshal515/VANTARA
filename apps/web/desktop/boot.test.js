@@ -117,3 +117,17 @@ it('إضافة Mihon طلب موقعها تحققًا (جسر Cloudflare في ا
   expect(verifySource).not.toHaveBeenCalled();
   desktopChallenges.clear('olympustaff.com');
 });
+
+import { bridgeLegacySources } from './boot.js';
+it('صفر مصادر مدمجة في ويندوز: الحزمة المثبّتة إضافةً تأخذ المعرّف القديم ويختفي محرك الويب لها (لا تكرار)', () => {
+  const web = [{ id: 'eu.kanade.tachiyomi.extension.ar.teamx', lang: 'ar', label: 'Team X (ويب)' }, { id: 'eu.kanade.tachiyomi.extension.ar.azora', lang: 'ar' }];
+  const mine = [
+    { id: 'eu.kanade.tachiyomi.extension.ar.teamx#4110737012647435874', pkg: 'eu.kanade.tachiyomi.extension.ar.teamx', lang: 'ar', user: true },
+    { id: 'eu.kanade.tachiyomi.extension.all.other#7', pkg: 'eu.kanade.tachiyomi.extension.all.other', lang: 'en', user: true },
+  ];
+  const { list, map } = bridgeLegacySources(web, mine);
+  expect(map.get('eu.kanade.tachiyomi.extension.ar.teamx')).toBe('eu.kanade.tachiyomi.extension.ar.teamx#4110737012647435874');
+  expect(list.filter((s) => s.id === 'eu.kanade.tachiyomi.extension.ar.teamx')).toEqual([expect.objectContaining({ user: true, nativeId: 'eu.kanade.tachiyomi.extension.ar.teamx#4110737012647435874' })]);
+  expect(list.some((s) => s.id === 'eu.kanade.tachiyomi.extension.ar.azora' && !s.user)).toBe(true);
+  expect(list.some((s) => s.id === 'eu.kanade.tachiyomi.extension.all.other#7')).toBe(true);
+});

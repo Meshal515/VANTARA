@@ -65,6 +65,32 @@ export function createDesktopVerification(bridge, challenges = desktopChallenges
   });
 }
 
+/**
+ * «صفر مصادر مدمجة» في ويندوز (نظير LegacySourceIds.kt): حزمة مدمجة سابقًا (مصدر ويب بمعرّف `pkg`) ثُبّتت إضافة Mihon
+ * (`pkg#id`) ⇒ مصدرها بلغة الويب نفسها (العربي افتراضًا) يظهر بالمعرّف القديم `pkg` ويختفي مصدر الويب، فالمكتبة والتقدّم
+ * والتنزيلات تبقى بلا إعادة كتابة. `map`: المعرّف القديم ← الحقيقي.
+ */
+export function bridgeLegacySources(web = [], mine = []) {
+  const webById = new Map(web.map((s) => [String(s?.id ?? ''), s]));
+  const byPkg = new Map();
+  for (const s of mine) { const pkg = String(s?.pkg ?? String(s?.id ?? '').split('#')[0]); if (!byPkg.has(pkg)) byPkg.set(pkg, []); byPkg.get(pkg).push(s); }
+  const map = new Map();
+  const chosen = new Set();
+  for (const [pkg, list] of byPkg) {
+    const def = webById.get(pkg);
+    if (!def) continue;
+    const lang = String(def.lang ?? 'ar').toLowerCase();
+    const pick = list.find((s) => String(s.lang ?? '').toLowerCase() === lang) ?? list.find((s) => String(s.lang ?? '').toLowerCase() === 'ar') ?? list[0];
+    map.set(pkg, String(pick.id));
+    chosen.add(pick);
+  }
+  const list = [
+    ...web.filter((s) => !map.has(String(s?.id ?? ''))),
+    ...mine.map((s) => (chosen.has(s) ? { ...s, id: String(s.pkg ?? String(s.id).split('#')[0]), nativeId: String(s.id) } : s)),
+  ];
+  return { list, map };
+}
+
 export function installDesktopBridges(g = globalThis) {
   if (!isDesktop(g)) return null;
   if (g.VantaraDesktopBridges) return g.VantaraDesktopBridges;
@@ -83,6 +109,12 @@ export function installDesktopBridges(g = globalThis) {
   const MANGA_METHODS=new Set([...WEB_METHODS,...(native?REPO_METHODS:[])]);
   const engineSource=id=>/^[A-Za-z][\w]*(?:\.[\w]+)+#-?\d{1,20}$/.test(String(id??''));
   const engineMedia=url=>/^vantara-engine:\/\/suwayomi\//.test(String(url??''));
+  let legacy=new Map(),legacyAt=0;
+  const legacyMap=async()=>{
+    if(Date.now()-legacyAt<30_000)return legacy;
+    try{const [web,mine]=await Promise.all([webCall('sources',{}).catch(()=>({sources:[]})),native('sources',{})]);legacy=bridgeLegacySources(web?.sources??[],mine?.sources??[]).map;legacyAt=Date.now();}catch{/* يبقى الأخير */}
+    return legacy;
+  };
   const webCall=async(method,args)=>{
     const runtime=getRuntime();await runtime.ready;await runtime.addons.ready;
     if(['image','cover'].includes(method)){
@@ -100,10 +132,18 @@ export function installDesktopBridges(g = globalThis) {
   const ExtensionEngine=new Proxy({}, {has(_,method){return MANGA_METHODS.has(method);},get(_,method){if(method==='then'||!MANGA_METHODS.has(method))return undefined;return async (args={})=>{
     if(native&&REPO_METHODS.includes(method))return native(method,args);
     if(native&&method==='sources'){
-      // مصادر الويب ومصادر المحرك معًا؛ تعذّر أحدهما لا يُخفي الآخر
+      // مصادر الويب ومصادر المحرك معًا؛ تعذّر أحدهما لا يُخفي الآخر. حزمة مدمجة سابقًا ثُبّتت إضافةً تأخذ معرّفها القديم
+      // ويختفي محرك الويب لها («صفر مصادر مدمجة»، bridgeLegacySources)
       const [web,mine]=await Promise.allSettled([webCall('sources',args),native('sources',args)]);
       if(web.status==='rejected'&&mine.status==='rejected')throw web.reason;
-      return {sources:[...(web.value?.sources??[]),...(mine.value?.sources??[])],stateRecovered:mine.value?.stateRecovered===true};
+      const bridged=bridgeLegacySources(web.value?.sources??[],mine.value?.sources??[]);
+      legacy=bridged.map;legacyAt=Date.now();
+      return {sources:bridged.list,stateRecovered:mine.value?.stateRecovered===true};
+    }
+    // معرّف قديم لحزمة صارت إضافة: إلى المحرك بمعرّفها الحقيقي
+    if(native&&args?.sourceId!=null&&!engineSource(args.sourceId)){
+      const real=(await legacyMap()).get(String(args.sourceId));
+      if(real)return native(method,{...args,sourceId:real});
     }
     if(native&&method==='image'&&engineMedia(args.page?.imageUrl))return native('image',args);
     if(native&&method==='cover'&&engineMedia(args.url))return {path:args.url};

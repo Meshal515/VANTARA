@@ -56,7 +56,17 @@ function noteInstalled(list) {
  */
 onEntitlementChange(async (decision) => {
 	const plugin = globalThis.Capacitor?.Plugins?.ExtensionEngine;
-	if (!plugin) return;
+	if (!plugin) {
+		// ويندوز: لا migrateBuiltins أصلي؛ الترحيل نفسه بالتثبيت من Keiyoushi عبر محرك Mihon المحلي
+		const desktop = desktopPlugin('ExtensionEngine');
+		if (!desktop) return;
+		try {
+			const { sources: list } = await desktop.sources();
+			if (entitlement() !== decision) return;
+			await migrateDesktopBuiltins(desktop, decision, visiblePackages(list ?? [], decision), list ?? []);
+		} catch { /* يُعاد عند التغيير التالي */ }
+		return;
+	}
 	try {
 		const { sources: list } = await plugin.sources();
 		noteInstalled(list);
@@ -82,6 +92,31 @@ export async function migrateBuiltins(plugin, decision, pkgs) {
 	for (const pkg of out?.migrated ?? []) installedPackages.add(String(pkg));
 	if (out?.migrated?.length) sourcesChanged();
 	return out;
+}
+
+/** مستودع Keiyoushi الرسمي وبصمة توقيعه (BuiltinSourceRefresh.kt): المصدر الوحيد للحزم المدمجة سابقًا. */
+export const KEIYOUSHI = Object.freeze({ url: 'https://raw.githubusercontent.com/keiyoushi/extensions/repo', fingerprint: '9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2' });
+const desktopRetryAt = new Map();
+/**
+ * «صفر مصادر مدمجة» في ويندوز (قرار المالك 27 نوفمبر): ما يستعمله الحساب من المدمجة (visiblePackages بعد
+ * usedPackagesFrom) يُثبَّت إضافة Mihon من Keiyoushi بالمعرّف نفسه، والجسر (desktop/boot.js) يقدّمها بمعرّفها القديم
+ * فلا يُكتب صف واحد في المكتبة. فوج معروف فقط. فشل حزمة لا يوقف غيرها ولا يخفيها (تبقى على محرك الويب) ويُعاد بعد 10 دقائق.
+ */
+export async function migrateDesktopBuiltins(plugin, decision, pkgs, list = [], now = Date.now()) {
+	if (typeof plugin?.installExtension !== 'function' || typeof plugin?.addRepo !== 'function' || !pkgs.length) return null;
+	if (decision.state === 'unknown' && !decision.standalone) return null;
+	const installed = new Set((list ?? []).filter((s) => s?.user).map((s) => packageOf(s.id)));
+	const todo = pkgs.filter((pkg) => !installed.has(pkg) && (desktopRetryAt.get(pkg) ?? 0) <= now);
+	if (!todo.length) return null;
+	try { await plugin.addRepo({ url: KEIYOUSHI.url, fingerprint: KEIYOUSHI.fingerprint }); }
+	catch (error) { if (!/exist|موجود|مضاف/i.test(String(error?.message ?? ''))) { for (const pkg of todo) desktopRetryAt.set(pkg, now + 10 * 60_000); return { migrated: [], failed: todo }; } }
+	const migrated = [], failed = [];
+	for (const pkg of todo) {
+		try { await plugin.installExtension({ repo: KEIYOUSHI.url, pkg }); migrated.push(pkg); installedPackages.add(pkg); }
+		catch { failed.push(pkg); desktopRetryAt.set(pkg, now + 10 * 60_000); }
+	}
+	if (migrated.length) sourcesChanged();
+	return { migrated, failed };
 }
 
 /** الجسر الأصلي، أو جسر الـPWA في المتصفح، أو `null`. يُقرأ عند كل نداء. */
