@@ -79,3 +79,23 @@ export async function migrateLatest({ store, send, pageLimit = 100, maxPages = 4
   await store.setMeta(MIGRATION_KEY, state);
   return state;
 }
+
+/**
+ * مرآة متزايدة للخادم أثناء فترة المقارنة (المرحلة 6): ما يكتشفه الخادم بعد الهجرة يصل للمخزن المحلي أيضًا، فلا يصير
+ * العرض المحلي أفقر من اليوم. يجلب من رأس الخط الزمني ويتوقف عند أول صفحة كل أحداثها معروفة. مثبّت كالمهاجَر.
+ */
+export async function mirrorServer({ store, send, section, maxPages = 5, pageLimit = 100 }) {
+  let before = null, added = 0;
+  for (let i = 0; i < maxPages; i++) {
+    const q = new URLSearchParams({ section, limit: String(pageLimit), ...(before ? { before } : {}) });
+    const res = await send(`/v1/updates?${q}`);
+    if (res?.status !== 200 || !Array.isArray(res.body?.events)) return { added, ok: false };
+    const events = res.body.events;
+    const known = await Promise.all(events.map((e) => store.getEvent(e.id)));
+    const fresh = events.filter((_, k) => !known[k]);
+    if (fresh.length) { await store.putEvents(fresh, { pinned: true, origin: 'server' }); await raiseMarks(store, fresh); added += fresh.length; }
+    if (!res.body.next || fresh.length < events.length) break;
+    before = res.body.next;
+  }
+  return { added, ok: true };
+}

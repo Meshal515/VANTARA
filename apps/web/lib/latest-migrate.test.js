@@ -98,3 +98,18 @@ describe('هجرة آخر التحديثات: لا تصفير، حرفيًا', (
     for (const [, opts] of send.mock.calls) expect(opts?.method ?? 'GET').toBe('GET');
   });
 });
+
+describe('المرآة المتزايدة للخادم (فترة المقارنة)', () => {
+  it('تجلب الجديد فقط من الرأس وتتوقف عند أول صفحة معروفة، مثبّتًا', async () => {
+    const { mirrorServer } = await import('./latest-migrate.js');
+    const store = fresh(); const { data, send } = server({ manga: 250, anime: 0 });
+    await migrateLatest({ store, send });
+    data.manga.unshift(ev('manga', 900, { id: 'brand-new', at: 20_000 }), ev('manga', 901, { id: 'brand-new-2', at: 19_999 }));
+    send.mockClear();
+    const r = await mirrorServer({ store, send, section: 'manga' });
+    expect(r).toEqual({ added: 2, ok: true });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await store.timeline('manga', { limit: 2 })).events.map((e) => e.id)).toEqual(['brand-new', 'brand-new-2']);
+    expect((await store.getEvent('brand-new')).pinned).toBe(true);
+  });
+});

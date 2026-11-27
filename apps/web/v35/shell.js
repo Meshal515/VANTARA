@@ -84,9 +84,10 @@ import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
-import { connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
+import { connectLocalTimeline, connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
 import { openLatestStore } from '../lib/latest-store.js';
-import { migrateLatest } from '../lib/latest-migrate.js';
+import { migrateLatest, mirrorServer } from '../lib/latest-migrate.js';
+import { startLatestRunner } from '../lib/latest-runner.js';
 import { ambiguousNames, canonicalRefOf, learnAliases, noteAmbiguousNames, noteOfficialIds, noteRefAliases, officialIdMap, refsOf, splitRefs } from '../lib/manga-alias-store.js';
 import { connectSourceReports, playbackHealth } from '../lib/source-report.js';
 import { agoAr, latestGroups, mountTimeline } from './updates-view.js';
@@ -261,7 +262,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // جاهزية الحساب وبعد أول رسم؛ قراءة فقط من الخادم، ونقطة استئناف بعد كل صفحة، والمكتمل لا يُعاد.
   void Promise.resolve(sync.ready).catch(() => {}).then(() => setTimeout(() => {
     let store; try { store = openLatestStore({ account: sync.user?.userId ?? 'local' }); } catch { return; }
-    void migrateLatest({ store, send: (path) => sync.translation(path) }).catch(() => { /* تكمل في التشغيل التالي من حيث وقفت */ });
+    const send = (path) => sync.translation(path);
+    let done = false;
+    connectLocalTimeline({ store, ready: () => done, mirror: (section) => mirrorServer({ store, send, section }) });
+    void migrateLatest({ store, send }).then((st) => { done = st.done === true; }).catch(() => { /* تكمل في التشغيل التالي من حيث وقفت */ });
+    // المحرك المحلي: والتطبيق مفتوح فقط، بعد اكتمال الهجرة، دورة ثم راحة 30 دقيقة (المرحلة 5)
+    startLatestRunner({ store, ready: () => done });
   }, 4000));
   onChapters(observeMangaChapters);
   // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد

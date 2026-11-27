@@ -26,6 +26,7 @@ describe('محوّل Mihon', () => {
     expect(page).toEqual({ items: [{ ref: { url: '/m/1', title: 'ون بيس', thumbnailUrl: 'https://c/1.jpg' }, title: 'ون بيس', cover: 'https://c/1.jpg', url: '/m/1' }], hasNext: true });
     expect(engine.chapters).not.toHaveBeenCalled();
     expect(await p.units(page.items[0].ref)).toEqual([{ number: 1120, season: null, publishedAt: 1700 }, { number: 1119, season: null }]);
+    expect(engine.chapters).toHaveBeenCalledWith('pkg#1', page.items[0].ref, { fresh: true });
   });
 });
 

@@ -1,0 +1,51 @@
+/**
+ * تشغيل محرك «آخر التحديثات» المحلي (خطة 27 نوفمبر): **والتطبيق مفتوح فقط** (قرار المالك 1). دورة كاملة، ثم راحة
+ * 30 دقيقة تبدأ بعد نهاية الدورة، ولا دورة والتطبيق في الخلفية. يبدأ فقط بعد اكتمال الهجرة (لا تصفير).
+ *
+ * الهوية: المانجا `ext:` + العنوان الموحّد، كما في الخادم حرفيًا، فتندمج بالمهاجَر. الأنمي والسينما هويتهما رسمية في
+ * الخادم (AniList وIMDb)؛ حتى يُربط حلّال الهوية لا تُنشئ مصادرهما أحداثًا (التكرار أسوأ من التأخير)، وتبقى صفحاتها
+ * محفوظة كخط أساس.
+ * السياسة: ما يبني المكتبة العامة فقط (`buildsLibrary`)، ولا كبار ولا إيتشي ولا عمل محجوب، قبل أي طلب فصول.
+ */
+import { normalizeTitle } from './catalog.js';
+import { adultManga, ecchiManga, isBlockedKey } from './adult-filter.js';
+import { buildsLibrary } from './source-policy.js';
+import * as manga from './extension-engine.js';
+import { animeProviders, mangaProviders } from '../addons/latest-providers.js';
+import { createLatestEngine } from './latest-engine.js';
+
+export const REST_MS = 30 * 60_000;
+
+export function latestIdentity(p, item) {
+  if (p.section !== 'manga') return null;
+  const key = normalizeTitle(item?.title);
+  return key ? `ext:${key}` : null;
+}
+export function latestAllowed(p, item) {
+  if (p.section !== 'manga') return true;
+  const key = normalizeTitle(item?.title);
+  return buildsLibrary(p.key) && !adultManga(item?.ref ?? item) && !ecchiManga(item?.ref ?? item) && !isBlockedKey(`ext:${key}`);
+}
+
+export async function installedProviders({ plugins = globalThis.Capacitor?.Plugins } = {}) {
+  const out = [];
+  try { out.push(...mangaProviders({ engine: manga, sources: await manga.sources() })); } catch { /* لا محرك مانجا هنا (الويب) */ }
+  try { out.push(...await animeProviders({ plugin: plugins?.AnimeEngine })); } catch { /* لا محرك أنمي هنا */ }
+  return out;
+}
+
+/** يبدأ الحلقة ويرجع دالة إيقاف. `ready()` = اكتملت الهجرة. */
+export function startLatestRunner({ store, ready, doc = globalThis.document, restMs = REST_MS, firstDelayMs = 60_000, providers = installedProviders, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  const engine = createLatestEngine({ store, providers, identify: async (p, i) => latestIdentity(p, i), allow: latestAllowed });
+  let timer = null, stopped = false;
+  const visible = () => !doc || doc.visibilityState !== 'hidden';
+  const schedule = (ms) => { clearTimer(timer); if (!stopped) timer = setTimer(tick, ms); };
+  async function tick() {
+    if (stopped) return;
+    if (!ready() || !visible()) { schedule(60_000); return; }
+    try { await engine.runCycle(); } catch { /* دورة فاشلة لا توقف التي بعدها */ }
+    schedule(restMs);
+  }
+  schedule(firstDelayMs);
+  return { stop() { stopped = true; clearTimer(timer); }, runNow: () => engine.runCycle() };
+}

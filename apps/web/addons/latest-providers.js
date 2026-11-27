@@ -39,7 +39,8 @@ export function mangaProviders({ engine, sources }) {
       };
     },
     async units(ref) {
-      const chapters = await engine.chapters(s.id, ref);
+      // fresh: ويندوز والويب يخزّنان قائمة الفصول 30 دقيقة؛ الكاشف يحتاج الحالية (الطلب لمرشح فعلي فقط)
+      const chapters = await engine.chapters(s.id, ref, { fresh: true });
       return (chapters ?? []).map((c) => ({ number: chapterNumberOf(c), season: null, ...(Number(c?.dateUpload) > 0 ? { publishedAt: Number(c.dateUpload) } : {}) })).filter((u) => Number.isFinite(u.number) && u.number >= 0); // غير المرقّم (-1) لا ينشئ حدثًا
     },
   }));
