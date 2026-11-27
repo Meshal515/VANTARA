@@ -40,7 +40,7 @@ class CandidatePreparationTimingTest {
         p.report(ready(original))
         monotonicMs = 8_000 // Waiting to select/prepare a player is outside this measurement.
 
-        val expected = original.copy(preparationMs = 575)
+        val expected = original.copy(preparationMs = 575, firstCandidateMs = 575)
         assertEquals(expected, p.candidate(original.id))
         assertEquals(expected, p.candidatesOf(requireNotNull(p.routeOf(original.id)).id).single())
         assertEquals(expected, p.best())
@@ -55,7 +55,7 @@ class CandidatePreparationTimingTest {
             monotonicMs = 1_200L + index * 100L
             val original = candidate("candidate-$index", source)
             p.adopt(source, listOf(original))
-            val expected = original.copy(preparationMs = 200L + index * 100L)
+            val expected = original.copy(preparationMs = 200L + index * 100L, firstCandidateMs = 200L)
             assertEquals(expected, p.candidate(original.id))
             assertEquals(expected, p.session.find(original.id))
         }
@@ -71,8 +71,8 @@ class CandidatePreparationTimingTest {
         p.report(ready(refreshed))
         p.adopt(original.sourceId, listOf(original))
 
-        assertEquals(refreshed.copy(preparationMs = 100), p.candidate(original.id))
-        assertEquals(original.copy(preparationMs = 100), p.session.find(original.id))
+        assertEquals(refreshed.copy(preparationMs = 100, firstCandidateMs = 100), p.candidate(original.id))
+        assertEquals(original.copy(preparationMs = 100, firstCandidateMs = 100), p.session.find(original.id))
         assertEquals(1, p.session.remaining)
     }
 
@@ -105,6 +105,17 @@ class CandidatePreparationTimingTest {
         assertEquals(0L, p.candidate("one")?.preparationMs)
     }
 
+    @Test fun `first candidate of the session is stamped on every later candidate (diagnostics: slow extraction vs late choice)`() {
+        val p = prepared()
+        monotonicMs = 1_400
+        p.report(ready(candidate("fast")))
+        monotonicMs = 9_000
+        p.report(ready(candidate("slow").copy(server = "Other")))
+        assertEquals(400L, p.candidate("fast")?.firstCandidateMs)
+        assertEquals(8_000L, p.candidate("slow")?.preparationMs)
+        assertEquals(400L, p.candidate("slow")?.firstCandidateMs)
+    }
+
     @Test fun `terminal session refuses late reports without replacing recorded timing`() {
         val p = prepared()
         monotonicMs = 1_125
@@ -115,7 +126,7 @@ class CandidatePreparationTimingTest {
         p.report(ready(original.copy(label = "Late")))
         p.adopt("native", listOf(candidate("late")))
 
-        assertEquals(original.copy(preparationMs = 125), p.candidate("one"))
+        assertEquals(original.copy(preparationMs = 125, firstCandidateMs = 125), p.candidate("one"))
         assertNull(p.candidate("late"))
         assertEquals(1, p.session.remaining)
     }

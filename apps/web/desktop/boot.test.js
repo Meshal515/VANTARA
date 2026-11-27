@@ -76,7 +76,8 @@ it('ويندوز بمحرك Suwayomi: وظائف المستودعات تُعلن
   expect(await ExtensionEngine.cover({ sourceId: 'x', url: 'vantara-engine://suwayomi/manga/1/thumbnail' })).toEqual({ path: 'vantara-engine://suwayomi/manga/1/thumbnail' });
   // مصادر الويب تفشل في بيئة الاختبار (لا runtime): مصادر المحرك تبقى ظاهرة
   const listed = await ExtensionEngine.sources();
-  expect(listed.sources.map((s) => s.id)).toContain('eu.kanade.tachiyomi.extension.ar.teamx#7154');
+  // صفر مصادر مدمجة: Team X المثبّتة إضافةً تظهر بمعرّفها القديم (المكتبة لا تنقطع) ومعرّفها الحقيقي في nativeId
+  expect(listed.sources).toContainEqual(expect.objectContaining({ id: 'eu.kanade.tachiyomi.extension.ar.teamx', nativeId: 'eu.kanade.tachiyomi.extension.ar.teamx#7154' }));
 });
 
 it('التحقق في ويندوز بشكل إضافة الـAPK: المضيف المحجوب يُعلن، وbegin يفتح الصفحة الظاهرة ثم يزيله', async () => {
@@ -116,4 +117,18 @@ it('إضافة Mihon طلب موقعها تحققًا (جسر Cloudflare في ا
   expect(desktopChallenges.pending().map((x) => x.host)).toContain('olympustaff.com');
   expect(verifySource).not.toHaveBeenCalled();
   desktopChallenges.clear('olympustaff.com');
+});
+
+import { bridgeLegacySources } from './boot.js';
+it('صفر مصادر مدمجة في ويندوز: الحزمة المثبّتة إضافةً تأخذ المعرّف القديم ويختفي محرك الويب لها (لا تكرار)', () => {
+  const web = [{ id: 'eu.kanade.tachiyomi.extension.ar.teamx', lang: 'ar', label: 'Team X (ويب)' }, { id: 'eu.kanade.tachiyomi.extension.ar.azora', lang: 'ar' }];
+  const mine = [
+    { id: 'eu.kanade.tachiyomi.extension.ar.teamx#4110737012647435874', pkg: 'eu.kanade.tachiyomi.extension.ar.teamx', lang: 'ar', user: true },
+    { id: 'eu.kanade.tachiyomi.extension.all.other#7', pkg: 'eu.kanade.tachiyomi.extension.all.other', lang: 'en', user: true },
+  ];
+  const { list, map } = bridgeLegacySources(web, mine);
+  expect(map.get('eu.kanade.tachiyomi.extension.ar.teamx')).toBe('eu.kanade.tachiyomi.extension.ar.teamx#4110737012647435874');
+  expect(list.filter((s) => s.id === 'eu.kanade.tachiyomi.extension.ar.teamx')).toEqual([expect.objectContaining({ user: true, nativeId: 'eu.kanade.tachiyomi.extension.ar.teamx#4110737012647435874' })]);
+  expect(list.some((s) => s.id === 'eu.kanade.tachiyomi.extension.ar.azora' && !s.user)).toBe(true);
+  expect(list.some((s) => s.id === 'eu.kanade.tachiyomi.extension.all.other#7')).toBe(true);
 });

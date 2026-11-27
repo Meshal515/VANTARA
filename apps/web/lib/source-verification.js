@@ -23,6 +23,7 @@ export function verificationMessage(result={}) {
     launch_failed:'تعذّر فتح صفحة التحقق. تقدر تعيد المحاولة يدويًا.',
     interrupted:'توقفت جلسة التحقق قبل اكتمالها.',
     proxy_unavailable:'تعذّر فتح مسار شبكة المصدر لصفحة التحقق. حدّث Android System WebView.',
+    still_challenged:'الموقع لم يقبل التحقق بعد. افتحه مرة ثانية وأكمل التحدي حتى تظهر صفحة الموقع.',
   };
   return Object.hasOwn(messages,result.reason)?messages[result.reason]:'لم يكتمل التحقق. تقدر تحاول مرة ثانية.';
 }
@@ -43,7 +44,9 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
       try{listener(snapshot);}catch{/* Observers cannot break verification. */}
     }
   }
-  function require(item){if(closed||!validHost(item?.host))return;const host=item.host.toLowerCase(),old=pending.get(host);if(!old&&pending.size>=24)pending.delete(pending.keys().next().value);pending.set(host,{...old,...item,...(['expired','failed','cancelled'].includes(item.state)?{message:verificationMessage(item)}:{}),host});render();}
+  // CF01: نجاح التحقق = نجاح الطلب الأصلي بعده. تحدٍّ جديد يصل أثناء إعادة الطلب يعني أن الموقع لم يقبل الجلسة
+  const rechallenged=new Set();
+  function require(item){if(closed||!validHost(item?.host))return;const host=item.host.toLowerCase(),old=pending.get(host);if(old?.verifying&&item.state==='required'){rechallenged.add(host);return;}if(!old&&pending.size>=24)pending.delete(pending.keys().next().value);pending.set(host,{...old,...item,...(['expired','failed','cancelled'].includes(item.state)?{message:verificationMessage(item)}:{}),host});render();}
   async function begin(host){
     if(closed||!plugin||!pending.has(host))return {ok:false,error:'التحقق غير متاح لهذا المصدر'};
     if(active.has(host))return active.get(host);
@@ -59,15 +62,23 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
           const message=verificationMessage(failure);
           require({...item,state:failure.state,reason:failure.reason,message});return {...failure,ok:false,error:message};
         }
-        pending.delete(host);render();
-        // One callback per explicitly opened verification, never per state event.
-        try {
-          const retried=item.kind!=='cloudstream'&&typeof item.retry==='function'?await item.retry():null;
-          return retried??{ok:true,...result};
-        } catch {
-          // Verification succeeded; a separate content error is not another challenge.
-          return {ok:false,verified:true,error:'اكتمل التحقق، لكن تعذّر إعادة تحميل المحتوى'};
+        const canRetry=item.kind!=='cloudstream'&&typeof item.retry==='function';
+        if(!canRetry){pending.delete(host);render();return {ok:true,...result};}
+        // يبقى في «تحتاج تحقق» حتى يثبت الطلب الأصلي نجاحه (لا «تم» كاذبة)
+        rechallenged.delete(host);pending.set(host,{...item,verifying:true});render();
+        let retried,contentError=false;
+        try { retried=await item.retry(); } catch { contentError=true; }
+        if(closed)return {ok:false,cancelled:true};
+        if(rechallenged.has(host)){
+          rechallenged.delete(host);
+          const message=verificationMessage({state:'failed',reason:'still_challenged'});
+          pending.set(host,{...item,verifying:false,state:'failed',reason:'still_challenged',message});render();
+          return {ok:false,state:'failed',reason:'still_challenged',error:message};
         }
+        pending.delete(host);render();
+        // Verification succeeded; a separate content error is not another challenge.
+        if(contentError)return {ok:false,verified:true,error:'اكتمل التحقق، لكن تعذّر إعادة تحميل المحتوى'};
+        return retried??{ok:true,...result};
       }catch{if(!closed)require({...item,message:'تعذّر التحقق من المصدر. تقدر تحاول مرة ثانية.'});return {ok:false,error:'تعذّر التحقق'};}
       finally{active.delete(host);render();}
     })();active.set(host,job);render();return job;

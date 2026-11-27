@@ -19,7 +19,7 @@ const TEXT_LIMIT = 8 * 1024 * 1024;
 /** رد الجسر حين لا يمر التحقق: رقم لا تستعمله Cloudflare ولا FlareSolverr، فيعرفه المحرك (suwayomi-engine) سببًا. */
 const NOT_SOLVED_STATUS = 409;
 
-function createCloudflareBridge({ solve, cookies, request, userAgent, onChallenge = () => {}, now = Date.now, maxTimeoutMs = MAX_TIMEOUT_MS }) {
+function createCloudflareBridge({ solve, cookies, request, userAgent, isChallenge = () => false, onChallenge = () => {}, now = Date.now, maxTimeoutMs = MAX_TIMEOUT_MS }) {
   const token = crypto.randomBytes(24).toString('hex');
   let server = null, listening = null, port = 0;
 
@@ -44,24 +44,40 @@ function createCloudflareBridge({ solve, cookies, request, userAgent, onChalleng
     const target = publicHttpUrl(input?.url);
     if (!target) return [400, { status: 'error', message: 'url not allowed' }];
     const timeout = Math.min(Math.max(Number(input?.maxTimeout) || 60_000, 5_000), maxTimeoutMs);
+    const post = cmd === 'request.post';
+    // الصفحة من جلسة Chromium نفسها (كوكي التحقق المحفوظ + بصمة المتصفح)
+    const viaBrowser = () => request({ url: target.href, method: post ? 'POST' : 'GET', body: post ? String(input?.postData ?? '') : null,
+      headers: post ? { 'content-type': 'application/x-www-form-urlencoded' } : {}, limit: TEXT_LIMIT, timeout }).catch(() => null);
+    const challenged = (res) => !res || isChallenge({ status: res.status, headers: res.headers ?? {}, text: Buffer.from(res.body ?? []).subarray(0, 64 * 1024).toString('utf8') });
+    // الصور والوسائط لا تُسلَّم نصًا (Suwayomi لا يقبلها ردًا): لها الكوكي وحده كما كان
+    const textual = (res) => !/^(image|video|audio)\//i.test(String(res?.headers?.['content-type'] ?? ''));
+    const jarNow = async () => (await Promise.resolve(cookies(target.href)).catch(() => [])) ?? [];
+    const done = (jar, message, res) => [200, {
+      status: 'ok', message, startTimestamp: started, endTimestamp: now(), version: 'vantara-1',
+      solution: { url: res?.url ?? target.href, status: res?.status ?? 200, headers: {}, cookies: jar.map(shape), userAgent,
+        // جذر حلقة «تحقق ← يدور ← يطلب التحقق مجددًا» (بلاغ المالك 27 نوفمبر): Cloudflare يربط كوكي التحقق ببصمة المتصفح،
+        // فطلب Java بالكوكي وحده يُرفض ويعود التحدي. الصفحة نفسها من Chromium تُسلَّم دائمًا (flareSolverrAsResponseFallback)
+        ...(res && !input?.returnOnlyCookies ? { response: Buffer.from(res.body ?? []).toString('utf8') } : {}) },
+    }];
+    // مسار سريع بلا نافذة: جلسة محقَّقة من قبل (محفوظة على القرص) تجلب الصفحة مباشرة. «not detected» مع الصفحة
+    // يجعل Suwayomi يستعمل الصفحة نفسها بدل إعادة الطلب بـJava (وهي ما يرفضه الموقع)
+    const direct = await viaBrowser();
+    if (!challenged(direct) && textual(direct)) return done(await jarNow(), 'Challenge not detected!', direct);
     // صفحة GET نفسها، وإلا أصل الموقع: التحقق للمضيف كله
-    const passed = await withTimeout(Promise.resolve(solve(cmd === 'request.get' ? target.href : `${target.origin}/`)).catch(() => false), timeout);
+    const passed = await withTimeout(Promise.resolve(solve(post ? `${target.origin}/` : target.href)).catch(() => false), timeout);
     if (!passed) {
       onChallenge(target.hostname.toLowerCase());
       return [NOT_SOLVED_STATUS, { status: 'error', message: 'Challenge not solved: needs a person' }];
     }
-    const jar = (await Promise.resolve(cookies(target.href)).catch(() => [])) ?? [];
-    const done = (message, extra = {}) => [200, {
-      status: 'ok', message, startTimestamp: started, endTimestamp: now(), version: 'vantara-1',
-      solution: { url: target.href, status: 200, headers: {}, cookies: jar.map(shape), userAgent, ...extra },
-    }];
-    if (jar.some((c) => c.name === 'cf_clearance')) return done('Challenge solved!');
-    if (input?.returnOnlyCookies) return done('Challenge not detected!');
-    // مرّ المتصفح بلا كوكي تحقق (الحماية تمنع بصمة Java وحدها): الرد نفسه من جلسة المتصفح، نصًا فقط
-    const res = await request({ url: target.href, method: cmd === 'request.post' ? 'POST' : 'GET', body: cmd === 'request.post' ? String(input?.postData ?? '') : null,
-      headers: cmd === 'request.post' ? { 'content-type': 'application/x-www-form-urlencoded' } : {}, limit: TEXT_LIMIT, timeout }).catch(() => null);
-    if (!res) return done('Challenge not detected!');
-    return done('Challenge not detected!', { url: res.url ?? target.href, status: res.status, response: Buffer.from(res.body ?? []).toString('utf8') });
+    const jar = await jarNow();
+    const res = await viaBrowser();
+    if (res && !challenged(res) && textual(res)) return done(jar, 'Challenge not detected!', res);
+    if (res && !challenged(res)) return done(jar, 'Challenge solved!', null);
+    // تعذّر جلب الصفحة عبر المتصفح (شبكة): الاحتياط القديم، الكوكي وحده
+    if (!res) return done(jar, jar.some((c) => c.name === 'cf_clearance') ? 'Challenge solved!' : 'Challenge not detected!', null);
+    // المتصفح المخفي مرّ لكن الطلب نفسه ما زال يُتحدّى: يحتاج إنسانًا، لا «تم» كاذبة
+    onChallenge(target.hostname.toLowerCase());
+    return [NOT_SOLVED_STATUS, { status: 'error', message: 'Challenge not solved: needs a person' }];
   }
 
   function onRequest(req, res) {

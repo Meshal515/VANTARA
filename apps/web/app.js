@@ -53,7 +53,7 @@ import {
 } from './lib/updater.js';
 import { showToast } from './lib/toast.js';
 import { REPORT_KINDS, REPORT_KIND_LABELS, submitReport } from './lib/report.js';
-import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, writeLocalChoices } from './lib/source-entitlement.js';
+import { assertChoiceContext, decide, readLocalChoices, setChoiceOwner, setChoiceWriter, setEntitlement, usedPackagesFrom, writeLocalChoices } from './lib/source-entitlement.js';
 import { startExtensionSync } from './lib/extension-sync.js';
 import {
   NOTIFICATION_LABELS,
@@ -96,8 +96,16 @@ function refreshSourceEntitlement() {
     standalone,
     account: userId ? sync.rows('accounts', (row) => row.user_id === userId)[0] ?? null : null,
     settings: standalone ? readLocalChoices() : userId ? sync.row('settings', userId)?.data ?? null : null,
+    // ما يستعمله الحساب فعلًا، بعد اكتمال المزامنة فقط (قبلها «غير معروف» فلا يختفي شيء لحظة الإقلاع)
+    used: syncLoaded && userId ? usedPackagesFrom({
+      library: sync.rows('library', (r) => r.user_id === userId),
+      progress: sync.rows('progress', (r) => r.user_id === userId),
+      chapterMarks: sync.rows('chapter_marks', (r) => r.user_id === userId),
+      works: sync.rows('works'),
+    }) : null,
   }));
 }
+let syncLoaded = false;
 setChoiceWriter(async (fields, context) => {
   const local = !syncConfigured();
   const userId = sync.user?.userId;
@@ -110,7 +118,7 @@ setChoiceWriter(async (fields, context) => {
   refreshSourceEntitlement();
 });
 refreshSourceEntitlement();
-void sync.ready.then(refreshSourceEntitlement, () => {});
+void sync.ready.then(() => { syncLoaded = true; refreshSourceEntitlement(); }, () => {});
 
 const state = {
   route: { name: 'gate' },

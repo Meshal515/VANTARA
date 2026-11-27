@@ -350,3 +350,49 @@ it('preserves older bridge source access while keeping unknown storage evidence 
   expect(list.repos).toHaveLength(1);
   expect((await engine.sources()).map(source => source.id)).toEqual([DILAR]);
 });
+
+import { describe as describeD, expect as expectD, it as itD } from 'vitest';
+import { KEIYOUSHI, migrateDesktopBuiltins } from './extension-engine.js';
+describeD('ترحيل المدمجة في ويندوز (قرار المالك 27 نوفمبر)', () => {
+  const plugin = () => { const calls = []; return { calls, addRepo: async (a) => { calls.push(['repo', a]); }, installExtension: async (a) => { calls.push(['install', a.pkg]); if (a.pkg.endsWith('broken')) throw new Error('x'); } }; };
+  itD('يثبّت ما يستعمله الحساب فقط من Keiyoushi بمفتاحه المثبّت، ويتخطى المثبّت', async () => {
+    const p = plugin();
+    const out = await migrateDesktopBuiltins(p, { state: 'legacy', used: new Set(['a.b.teamx', 'a.b.azora', 'a.b.broken']) }, ['a.b.teamx', 'a.b.azora', 'a.b.broken'], [{ id: 'a.b.azora#1', user: true }], 0);
+    expectD(p.calls[0]).toEqual(['repo', { url: KEIYOUSHI.url, fingerprint: KEIYOUSHI.fingerprint }]);
+    expectD(out).toEqual({ migrated: ['a.b.teamx'], failed: ['a.b.broken'] });
+  });
+  itD('حساب لم يصل صفه: لا ترحيل', async () => {
+    const p = plugin();
+    expectD(await migrateDesktopBuiltins(p, { state: 'unknown' }, ['a.b.teamx'], [], 0)).toBeNull();
+    expectD(p.calls).toEqual([]);
+  });
+  itD('الفاشل يُعاد بعد 10 دقائق لا قبلها', async () => {
+    const p = plugin();
+    await migrateDesktopBuiltins(p, { state: 'legacy', used: new Set(['a.b.broken']) }, ['a.b.broken'], [], 1_000);
+    expectD(await migrateDesktopBuiltins(p, { state: 'legacy', used: new Set(['a.b.broken']) }, ['a.b.broken'], [], 2_000)).toBeNull();
+  });
+});
+
+import { migrateBuiltins as migrateBuiltinsR } from './extension-engine.js';
+describeD('آلية الترحيل الآمنة في أندرويد', () => {
+  itD('حزمة تعذّر ترحيلها بنسختها المثبّتة تُثبَّت بأحدث إصدار موقّع من Keiyoushi', async () => {
+    const calls = [];
+    const plugin = {
+      migrateBuiltins: async () => ({ migrated: ['a.b.teamx'], skipped: [], failed: ['a.b.mangalek'] }),
+      addRepo: async (a) => { calls.push(['repo', a.url]); },
+      installExtension: async (a) => { calls.push(['install', a.repo, a.pkg]); },
+    };
+    const out = await migrateBuiltinsR(plugin, { state: 'legacy', used: new Set(['a.b.teamx', 'a.b.mangalek']) }, ['a.b.teamx', 'a.b.mangalek']);
+    expectD(out.rescued).toEqual(['a.b.mangalek']);
+    expectD(calls).toEqual([['repo', KEIYOUSHI.url], ['install', KEIYOUSHI.url, 'a.b.mangalek']]);
+  });
+});
+describeD('لا ترحيل قبل معرفة الاستعمال', () => {
+  itD('حساب قديم والمزامنة لم تكتمل: لا يُثبَّت شيء (وإلا ثُبّتت الـ19 كلها)', async () => {
+    const calls = [];
+    const p = { addRepo: async () => calls.push('repo'), installExtension: async () => calls.push('install'), migrateBuiltins: async () => { calls.push('native'); return {}; } };
+    expectD(await migrateDesktopBuiltins(p, { state: 'legacy', used: null }, ['a.b.teamx'], [], 0)).toBeNull();
+    expectD(await migrateBuiltinsR(p, { state: 'legacy', used: null }, ['a.b.teamx'])).toBeNull();
+    expectD(calls).toEqual([]);
+  });
+});

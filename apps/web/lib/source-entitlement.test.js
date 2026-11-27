@@ -163,3 +163,32 @@ describe('الحالة الحالية للتطبيق', () => {
     expect(entitlement().state).toBe('legacy');
   });
 });
+
+import { decide as decide2, usedPackagesFrom, visible as visible2 } from './source-entitlement.js';
+describe('لا «19 جاهزة»: الحساب القديم يرى المدمج الذي يستعمله فقط (قرار المالك 27 نوفمبر)', () => {
+  const legacyAccount = { created_at: Date.UTC(2026, 5, 1) };
+  const def = (pkg) => ({ id: `eu.kanade.tachiyomi.extension.${pkg}` });
+  const works = [{ series_ref: 'w1', source_id: 'eu.kanade.tachiyomi.extension.ar.mangalek', editions_json: JSON.stringify([{ sourceId: 'eu.kanade.tachiyomi.extension.ar.teamx@ar' }]) }, { series_ref: 'w9', source_id: 'eu.kanade.tachiyomi.extension.ar.azora' }];
+  const used = usedPackagesFrom({ library: [{ series_ref: 'w1', source_id: 'eu.kanade.tachiyomi.extension.ar.mangalek' }], progress: [], works });
+  it('الاستعمال: المكتبة ونسخ أعمالها، لا أعمال غيرها', () => {
+    expect([...used].sort()).toEqual(['eu.kanade.tachiyomi.extension.ar.mangalek', 'eu.kanade.tachiyomi.extension.ar.teamx']);
+  });
+  it('المستعمل يظهر، وغير المستعمل يختفي', () => {
+    const d = decide2({ account: legacyAccount, used });
+    expect(visible2(def('ar.mangalek'), d)).toBe(true);
+    expect(visible2(def('ar.teamx'), d)).toBe(true);
+    expect(visible2(def('ar.azora'), d)).toBe(false);
+  });
+  it('قبل اكتمال المزامنة (الاستعمال مجهول) لا يختفي شيء', () => {
+    expect(visible2(def('ar.azora'), decide2({ account: legacyAccount, used: null }))).toBe(true);
+  });
+  it('الإضافة الصريحة تُظهر، والإزالة الصريحة تُخفي ولو مستعملًا', () => {
+    const settings = { srcpkg_eu_kanade_tachiyomi_extension_ar_azora: { pkg: 'eu.kanade.tachiyomi.extension.ar.azora', on: true }, srcpkg_eu_kanade_tachiyomi_extension_ar_mangalek: { pkg: 'eu.kanade.tachiyomi.extension.ar.mangalek', on: false } };
+    const d = decide2({ account: legacyAccount, settings, used });
+    expect(visible2(def('ar.azora'), d)).toBe(true);
+    expect(visible2(def('ar.mangalek'), d)).toBe(false);
+  });
+  it('المكتبة المحذوفة لا تُعدّ استعمالًا', () => {
+    expect(usedPackagesFrom({ library: [{ series_ref: 'x', source_id: 'eu.kanade.tachiyomi.extension.ar.lava', removed: 1 }] }).size).toBe(0);
+  });
+});

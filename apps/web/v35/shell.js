@@ -22,7 +22,7 @@ import { createSheetController } from './sheet-lifecycle.js';
 import { createDownloadsUI } from './downloads.js';
 import { capabilities as downloadCapabilities } from '../lib/downloads/index.js';
 import { defaultUnitKey, mangaUnitNumber } from '../lib/downloads/model.js';
-import { renderAddons } from './addons-view.js';
+import { renderAddonsHub } from './addons-hub.js';
 import { renderSourceMode } from './source-mode.js';
 import { resolveSourceIdentity, withOfficialIdentity } from './source-identity.js';
 import { getAddonRuntime } from '../addons/runtime.js';
@@ -51,7 +51,7 @@ import { frameIdFromLink } from '../lib/frame.js';
 import { createMajlis } from './majlis.js';
 import { createFriends } from './friends.js';
 import { rankFriendsReading } from './friends-reading.js';
-import { createFeedSnapshot } from './feed-snapshot.js';
+import { acceptSearchResults, createFeedSnapshot } from './feed-snapshot.js';
 import { createRoom } from './majlis-chat.js';
 import { prepareRoomAvatar } from './media-encode.js';
 import { endpoints } from '../lib/config.js';
@@ -4974,32 +4974,46 @@ export function mountV35(deps, { page = 'home' } = {}) {
     discoverSearch('');
     q('discoverSearch').focus();
   }
+  /**
+   * نتائج البحث تصل تباعًا من المصادر. كانت تمر بـ«لقطة الخلاصة» (feed-snapshot) فتُجمَّد أول دفعة (أسرع مصدر،
+   * وأحدها يعيد «بوروتو» لأي كلمة) وتختبئ النتائج الصحيحة خلف زر «200 نتائج جديدة» (بلاغ المالك 27 نوفمبر).
+   * الآن: القائمة تتبع الترتيب بالصلة ما لم تلمسها؛ بعد اللمس أو التمرير يُلحق الجديد في آخرها بلا قفز تحت الإصبع.
+   * وأول رسمة تنتظر حتى 600ms كي لا تستقر على مصدر واحد.
+   */
   async function runSearch(term, grid, stillWanted) {
     grid.replaceChildren(...skeletonCards(6));
     grid.parentNode?.querySelector('.search-refresh')?.remove();
     const snapshot = createFeedSnapshot({ key: (item) => canonicalRefOf(String(item.id)) });
     // حارس أخير في البحث: عمل للكبار لا يظهر مهما كان مساره. عمل بلا نسخة عربية يظهر بوسم لغته (قرار المالك، 16 نوفمبر)
     const arabicOnly = (items) => items.filter((w) => !w._work || !isAdult(w._work));
-    const paintSnapshot = (items) => {
-      renderGrid(grid, snapshot.accept(arabicOnly(items)));
-      let refresh = grid.parentNode?.querySelector('.search-refresh');
-      if (snapshot.pending && !refresh) {
-        refresh = el('button', 'feed-refresh search-refresh');
-        refresh.type = 'button';
-        refresh.onclick = () => { if (stillWanted() !== term) return; renderGrid(grid, snapshot.refresh()); refresh.remove(); };
-        grid.after(refresh);
-      }
-      if (refresh) refresh.textContent = `${snapshot.pending} نتائج جديدة`;
+    let touched = false;
+    const touch = () => { touched = true; };
+    grid.addEventListener('pointerdown', touch, { once: true, passive: true });
+    const scroller = grid.closest('.page') ?? globalThis;
+    const y0 = scroller.scrollTop ?? globalThis.scrollY ?? 0;
+    const onScroll = () => { if (Math.abs((scroller.scrollTop ?? globalThis.scrollY ?? 0) - y0) > 24) touch(); };
+    scroller.addEventListener?.('scroll', onScroll, { passive: true });
+    const paint = (items) => {
+      if (stillWanted() !== term) return;
+      renderGrid(grid, acceptSearchResults(snapshot, arabicOnly(items), { touched }));
     };
+    const started = performance.now();
+    let early = null, earlyTimer = 0;
     try {
       const { items } = await browseLive({ query: term }, ({ items: partial }) => {
-        if (stillWanted() === term && partial.length) paintSnapshot(partial);
+        if (stillWanted() !== term || !partial.length) return;
+        early = partial;
+        const wait = 600 - (performance.now() - started);
+        if (wait <= 0) paint(partial);
+        else earlyTimer ||= setTimeout(() => { earlyTimer = 0; if (early) paint(early); }, wait);
       });
+      clearTimeout(earlyTimer);
       if (stillWanted() !== term) return 0;
-      if (items.length) paintSnapshot(items);
+      if (items.length) paint(items);
       else emptyState(grid, { icon: 'search', title: 'لا نتائج', text: 'جرّب اسمًا آخر، أو الاسم بالإنجليزي.' });
       return items.length;
     } catch {
+      clearTimeout(earlyTimer);
       if (stillWanted() !== term) return 0;
       emptyState(grid, {
         icon: 'offline',
@@ -5007,6 +5021,9 @@ export function mountV35(deps, { page = 'home' } = {}) {
         title: 'تعذّر البحث الآن',
         action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void runSearch(term, grid, stillWanted) },
       });
+    } finally {
+      scroller.removeEventListener?.('scroll', onScroll);
+      grid.removeEventListener('pointerdown', touch);
     }
   }
   // البحث قبل أن تكتب ليس صفحة فارغة: آخر ما بحثت عنه، والتصنيفات، والرائج
@@ -5502,7 +5519,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       // UX06: كل انتظار قبل الرسم يعقبه فحص الجيل والصفحة والحساب، فلا تحل واجهة متأخرة مكان وجهة أحدث
       const cloudstreamRepos = await addons.cloudstreamRepositories?.();
       if(run!==addonViewGeneration || currentPage()!=='utility' || (sync.user?.userId??'local')!==profile)return;
-      addonHubView = renderAddons({ initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, readySources: engine.readySources?.() ?? null, animeRepositories: animeRepositories(), cloudstreamRepositories: cloudstreamRepos, sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if((sync.user?.userId??'local')!==profile)return; /* SRC2: المصدر المثبت يدخل البحث وصفحة العمل ولو غادرت صفحة الإضافات قبل الإشعار؛ إعادة فتحها فقط إن بقيت فيها */ resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run!==addonViewGeneration || currentPage()!=='utility')return; if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
+      addonHubView = renderAddonsHub({ profile, initialState: addonHubState?.context===addonHubContext ? addonHubState.value : {}, registry: addons.registry, verification: sourceVerification, repositories: engine.repositories?.() ?? null, /* صفر مصادر مدمجة (قرار المالك 27 نوفمبر): لا «مصادر جاهزة» في أي منصة؛ التثبيت من المستودع في أندرويد وويندوز، والمتصفح للتتبع فقط */ readySources: null, animeRepositories: animeRepositories(), cloudstreamRepositories: cloudstreamRepos, sites: engine.sites?.() ?? null, onSourcesChanged: async ({preserveAddonsView=false}={}) => { if((sync.user?.userId??'local')!==profile)return; /* SRC2: المصدر المثبت يدخل البحث وصفحة العمل ولو غادرت صفحة الإضافات قبل الإشعار؛ إعادة فتحها فقط إن بقيت فيها */ resetSources(); await withPhaseDeadline(Promise.resolve().then(()=>addons.reloadSources?.()),15_000,'ADDON_RELOAD_TIMEOUT').catch(()=>{}); if(run!==addonViewGeneration || currentPage()!=='utility')return; if(run===addonViewGeneration && currentPage()==='utility' && (sync.user?.userId??'local')===profile && !preserveAddonsView)void openAddons(); }, filter: ['manga', 'anime', 'cinema'].includes(root.dataset.section) ? root.dataset.section : 'all', pulse: addons.pulse, latestOf, mountCover: (box, work) => mountImage(box, work), onProbe: (addon, options) => addons.diagnose(addon.key, options), onOpenSource: openAddonSource, onOpenNativeSource: openNativeAddonSource, onBack: goBack, onCheck: (addon, options) => diagnoseManagedAddon(addon, {runtime:addons,...options}), playbackHealth: (section) => sync.translation('/v1/diag/sources?days=7').then((r) => (r.status === 200 ? playbackHealth(r.body?.rows ?? [], { section }) : null)) });
       q('utilityBody').replaceChildren(addonHubView);
     } catch {
       if(run!==addonViewGeneration || currentPage()!=='utility')return;

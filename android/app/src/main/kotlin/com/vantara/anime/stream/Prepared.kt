@@ -30,6 +30,8 @@ class PreparedEpisode(
     fun wholeEpisode(): Int? = number.takeIf { it > 0f && it % 1f == 0f }?.toInt()
 
     private val preparationStartedAt = monotonicClock()
+    /** أول مرشح في الجلسة من أي سيرفر (للتشخيص: الاستخراج البطيء ≠ اختيار سيرفر وصل متأخرًا). */
+    private var firstCandidateAt: Long? = null
     /** اسم الحلقة كما وجدها أول مصدر: كل المصادر الأخرى تُطابق عليه (EpisodeAlign) فلا تختلط حلقتان في ورقة واحدة. */
     val episodeAnchor = java.util.concurrent.atomic.AtomicReference<String?>(null)
     private val primaryQuality = HashMap<String, Int?>()
@@ -96,9 +98,11 @@ class PreparedEpisode(
             // A cancelled/terminal preparation cannot publish late adapter results.
             if (terminal || job?.isCancelled == true) return
             val rid = "${r.sourceId}|${r.key}"
+            if (r.candidates.isNotEmpty() && firstCandidateAt == null) firstCandidateAt = monotonicClock()
+            val first = firstCandidateAt?.let { (it - preparationStartedAt).coerceAtLeast(0) }
             val measured = r.candidates.map { candidate ->
                 candidate.copy(preparationMs = candidates[candidate.id]?.preparationMs
-                    ?: (monotonicClock() - preparationStartedAt).coerceAtLeast(0))
+                    ?: (monotonicClock() - preparationStartedAt).coerceAtLeast(0), firstCandidateMs = first)
             }
             val old = byId[rid]
             val code = old?.code ?: uniqueCode(ServerCodes.code(r.server), r.quality, rid)

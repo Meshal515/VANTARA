@@ -70,17 +70,19 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     @Volatile var launchedAt = 0L
 
     private var preparationMs: Long? = null
+    private var firstCandidateMs: Long? = null
     private var audioOnlyAt = 0L
     /** تقرير الذهب: أول مسارات من الحاوية (onTracksChanged)، وتهيئة مفكك الفيديو (onVideoDecoderInitialized). */
     private var tracksAt = 0L
     private var decoderName: String? = null
     private var decoderInitAt = 0L
     private var decoderInitMs = 0L
-    @Synchronized fun start(preparationMs: Long? = null) {
+    @Synchronized fun start(preparationMs: Long? = null, firstCandidateMs: Long? = null) {
         reads.clear(); seeks.clear(); events.clear(); opening.clear(); active.clear()
         count = 0; openAt = now(); readyAt = 0; frameAt = 0; audioOnlyAt = 0
         tracksAt = 0; decoderName = null; decoderInitAt = 0; decoderInitMs = 0
         this.preparationMs = preparationMs
+        this.firstCandidateMs = firstCandidateMs
         event("فتح المصدر")
     }
 
@@ -235,7 +237,10 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             t?.let { "بيانات التورنت ${rel(it.metadataAt)}" }, t?.let { "أول مشارك ${rel(it.firstPeerAt)}" }, t?.let { "أول بيانات ${rel(it.firstPayloadAt)}" }, t?.let { "أول قطعة ${rel(it.firstPieceAt)}" },
             "أول بايت ${rel(firstByte)}", "جاهز ${rel(readyAt)}", "أول صورة ${rel(frameAt)}",
         ).joinToString(" · "))
-        appendLine("الاستخراج وتجهيز السيرفر: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر المرشح، قبل الفحص والمشغّل)")
+        appendLine("أول سيرفر ظهر بعد: ${firstCandidateMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من أي سيرفر)")
+        appendLine("السيرفر المشغَّل ظهر بعد: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر هذا المرشح، قبل الفحص والمشغّل)")
+        val gap = if (preparationMs != null && firstCandidateMs != null) preparationMs!! - firstCandidateMs!! else null
+        if (gap != null && gap >= 1000) appendLine("الانتظار بعد أول سيرفر حتى المشغَّل: ${secs(gap)} ث (الاختناق في الاختيار لا الاستخراج)")
         appendLine("تهيئة المشغّل: ${if (readyAt > 0) "${secs(readyAt - openAt)} ث" else "لم تكتمل"} · أول صورة: ${if (frameAt > 0) "${secs(frameAt - openAt)} ث" else if (audioOnlyAt > 0) "صوت فقط — لا إطار منتظر" else "لم تظهر"}")
         appendLine("طلبات القراءة (${reads.size}):")
         for (r in reads) appendLine("  ${r.n}) ${rel(r.at)} ${where(r.position, t?.fileBytes)} → ${bytes(r.bytes)}" +

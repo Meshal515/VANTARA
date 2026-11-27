@@ -247,9 +247,72 @@ export async function fetchAnimeDetail(id, opts = {}) {
   return parseDetail(await request(DETAIL_QUERY, { id: Number(id) }, { priority: 'user', ...opts }));
 }
 
+// ── البحث المتسامح (بلاغ المالك: «one p» بلا نتائج) ──
+// AniList يطابق كلمات كاملة فقط: «one p» و«onepiece» و«atack on titan» تعود فارغة (قيس 27 نوفمبر).
+// حين تخلو الصفحة الأولى: حتى 3 طلبات «مجسّة» بالكلمات المكتملة الأطول، ثم ترتيب محلي بالصلة عبر كل الأسماء.
+const foldText = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+const wordsOf = (s) => foldText(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+const compactOf = (s) => wordsOf(s).join('');
+function trigrams(s) {
+  const t = ` ${s} `; const out = new Set();
+  for (let i = 0; i < t.length - 2; i++) out.add(t.slice(i, i + 3));
+  return out;
+}
+const dice = (a, b) => {
+  if (!a || !b) return 0;
+  const A = trigrams(a), B = trigrams(b); let n = 0;
+  for (const g of A) if (B.has(g)) n++;
+  return (2 * n) / (A.size + B.size);
+};
+/** صلة الاستعلام بالاسم 0..1: كل كلمة بادئةٌ لكلمة في الاسم = 1، والمضغوط داخل المضغوط = 0.95، وإلا تشابه ثلاثيات الحروف. */
+export function nameScore(query, name) {
+  const q = wordsOf(query), n = wordsOf(name);
+  if (!q.length || !n.length) return 0;
+  if (q.every((w) => n.some((x) => x.startsWith(w)))) return 1;
+  const cq = q.join(''), cn = n.join('');
+  if (cq.length >= 4 && cn.includes(cq)) return 0.95;
+  // أخطاء إملائية: أفضل تشابه بين الاستعلام كاملًا وبادئة الاسم بطوله تقريبًا
+  return Math.max(dice(cq, cn), dice(cq, cn.slice(0, cq.length + 2)));
+}
+const LOOSE_MIN = 0.55;
+export function looseProbes(query) {
+  const words = wordsOf(query);
+  const probes = [];
+  const add = (p) => { if (p && !probes.includes(p) && p !== foldText(query).trim()) probes.push(p); };
+  if (words.length > 1) add(words.slice(0, -1).join(' '));
+  for (const w of [...words].sort((a, b) => b.length - a.length)) if (w.length >= 4) add(w);
+  const c = compactOf(query);
+  if (words.length === 1 && c.length >= 6) add(c.slice(0, 3));
+  return probes.slice(0, 3);
+}
+/** ترتيب نتائج المجسّات بالصلة: بلا تكرار، وما دون العتبة لا يُعرض (منع الدمج الخاطئ أهم من كثرة النتائج). */
+export function rankLoose(query, items) {
+  const seen = new Set(); const out = [];
+  items.forEach((it, i) => {
+    if (!it || seen.has(it.id)) return;
+    seen.add(it.id);
+    const score = Math.max(...[it.title, it.romaji, it.native, ...(it.synonyms ?? [])].map((n) => nameScore(query, n)));
+    if (score >= LOOSE_MIN) out.push({ it, score, i });
+  });
+  return out.sort((a, b) => b.score - a.score || a.i - b.i).map((x) => x.it);
+}
+async function looseFallback(query, probe) {
+  const found = [];
+  for (const p of looseProbes(query)) {
+    found.push(...await probe(p).catch(() => []));
+    const ranked = rankLoose(query, found);
+    if (ranked.length && nameScore(query, ranked[0].title) >= 0.9) return ranked;
+  }
+  return rankLoose(query, found);
+}
+
 export async function searchAnime({ search, genre, page = 1 } = {}, opts = {}) {
   const data = await request(SEARCH_QUERY, { search: search || undefined, genre: genre || undefined, page }, { priority: 'user', ...opts });
-  return { items: list(data?.Page), hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
+  const items = list(data?.Page);
+  const q = String(search ?? '').trim();
+  if (items.length || page !== 1 || !q) return { items, hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
+  const loose = await looseFallback(q, async (p) => list((await request(SEARCH_QUERY, { search: p, genre: genre || undefined, page: 1 }, { priority: 'user', ...opts }))?.Page));
+  return { items: loose, hasNext: false };
 }
 
 /**
@@ -318,7 +381,12 @@ export async function discoverAnime(filters = {}, opts = {}) {
   // ما لم يُختر يُحذف من المتغيّرات تمامًا: null الصريح يربك AniList في بعض الحقول
   const vars = Object.fromEntries(Object.entries(discoverVariables(filters)).filter(([, v]) => v != null));
   const data = await request(DISCOVER_QUERY, vars, opts);
-  return { items: list(data?.Page), hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
+  const items = list(data?.Page);
+  const q = String(filters.search ?? '').trim();
+  if (items.length || (vars.page ?? 1) !== 1 || !q) return { items, hasNext: Boolean(data?.Page?.pageInfo?.hasNextPage) };
+  // البحث المتسامح نفسه مع الفلاتر كما هي (الترتيب بالشهرة داخل المجسّة)
+  const loose = await looseFallback(q, async (p) => list((await request(DISCOVER_QUERY, { ...vars, search: p, page: 1, sort: ['POPULARITY_DESC'] }, opts))?.Page));
+  return { items: loose, hasNext: false };
 }
 
 /** «منذ 3 ساعات» / «بعد يومين» بعربية سليمة. */
