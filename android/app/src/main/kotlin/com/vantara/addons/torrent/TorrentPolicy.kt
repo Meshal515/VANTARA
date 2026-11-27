@@ -87,6 +87,8 @@ data class TorrentStats(
     val warmedAt: Long = 0L, val warmedPieces: Int = 0, val swaps: Int = 0,
     /** خط البدء: أول مشارك متصل وأول بيانات من الشبكة (elapsedRealtime، 0 = لم يحدث). */
     val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
+    /** تقرير الذهب: إضافة التورنت للجلسة، وMetadata من ملف محفوظ، وأول مشارك معروف (elapsedRealtime، 0 = لم يحدث). */
+    val addedAt: Long = 0L, val metadataCached: Boolean = false, val firstKnownAt: Long = 0L,
     /** الخيار B ([TurboRead]): مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
     val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
     /** تلميح القراءة (0004): كم مرة وصل libtorrent وكم مرة فشل (مكتبة بلا الدالتين). */
@@ -105,6 +107,8 @@ data class TorrentStats(
 data class ReadWait(
     val piece: Int, val block: Int, val blocks: Int, val known: Int, val engine: Int, val atOffset: Boolean,
     val ms: Long, val early: Boolean, val tail: Boolean,
+    /** نهاية الانتظار (elapsedRealtime): ينسبه تقرير الذهب إلى مرحلته. 0 = غير معروفة. */
+    val endAt: Long = 0L,
 ) {
     val untracked: Boolean get() = engine > known + 2
 }
