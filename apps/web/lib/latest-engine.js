@@ -39,7 +39,7 @@ export async function runPool(jobs, { concurrency = 12, perHost = 2 } = {}) {
 const withTimeout = (p, ms) => new Promise((resolve, reject) => { const t = setTimeout(() => reject(Object.assign(new Error('انتهت مهلة المصدر'), { code: 'SOURCE_TIMEOUT' })), ms); Promise.resolve(p).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); }); });
 
 export function createLatestEngine({
-  store, providers, identify, allow = () => true, now = () => Date.now(),
+  store, providers, identify, allow = () => true, now = () => Date.now(), skipWork = null, onEvents = null,
   concurrency = 12, perHost = 2, topK = 3, unitBudget = 60, fanOut = 4, timeoutMs = 20_000,
 }) {
   let running = null;
@@ -78,7 +78,7 @@ export function createLatestEngine({
     });
     await store.putEvents(events, { origin: 'local' });
     await raise(fresh[fresh.length - 1]);
-    stats.events += events.length;
+    stats.events += events.length; stats.created.push(...events);
     return events;
   }
 
@@ -89,6 +89,8 @@ export function createLatestEngine({
     // العمل الواحد يُفحص مرة في الدورة: مصادره الأخرى يغطيها الانتشار (فحصان متوازيان كانا يطرقان الموقعين ويكرران القرار)
     if (seen.has(work)) { stats.deduped++; return; }
     seen.add(work);
+    // إشارة صديق حديثة لهذا العمل من هذا المصدر: الفصل معروف، لا يُطلب مرة ثانية (الخيط الثاني)
+    if (skipWork && await skipWork(p, work)) { stats.friendSkip++; return; }
     stats.unitCalls++;
     const units = await withTimeout(p.units(item.ref), timeoutMs);
     const created = await decideUnits(p, item, work, units, stats);
@@ -116,7 +118,7 @@ export function createLatestEngine({
   /** دورة واحدة كاملة. ترجع إحصاءها (عدد الطلبات بالضبط لإثبات الحد). */
   async function runCycle() {
     const seen = new Set();
-    const stats = { deduped: 0, providers: 0, latestCalls: 0, unitCalls: 0, fanOut: 0, events: 0, baselined: 0, firstSeen: 0, skipped: 0, unidentified: 0, errors: 0, carried: 0 };
+    const stats = { created: [], friendSkip: 0, deduped: 0, providers: 0, latestCalls: 0, unitCalls: 0, fanOut: 0, events: 0, baselined: 0, firstSeen: 0, skipped: 0, unidentified: 0, errors: 0, carried: 0 };
     const list = await providers();
     stats.providers = list.length;
     const candidates = [];
@@ -148,7 +150,9 @@ export function createLatestEngine({
     await store.setMeta('engine.carry', later.map((c) => ({ key: c.p.key, url: c.item.url, priority: c.priority })));
     stats.carried = later.length;
     await runPool(now_.map((c) => ({ key: `${c.p.key}|${c.item.url}`, host: c.p.host, run: () => check(c.p, c.item, list, stats, seen).catch(() => { stats.errors++; }) })), { concurrency, perHost });
-    await store.setMeta('engine.lastCycle', { at: now(), ...stats });
+    const { created, ...summary } = stats;
+    await store.setMeta('engine.lastCycle', { at: now(), ...summary });
+    if (created.length && onEvents) { try { await onEvents(created); } catch { /* الخيطان لا يوقفان الكشف */ } }
     return stats;
   }
 

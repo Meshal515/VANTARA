@@ -13,6 +13,7 @@ import { buildsLibrary } from './source-policy.js';
 import * as manga from './extension-engine.js';
 import { animeProviders, mangaProviders } from '../addons/latest-providers.js';
 import { createLatestEngine } from './latest-engine.js';
+import { friendFresh, pullSignals, pushThreads, recordLocalEvents, restoreBackup } from './latest-threads.js';
 
 export const REST_MS = 30 * 60_000;
 
@@ -35,15 +36,34 @@ export async function installedProviders({ plugins = globalThis.Capacitor?.Plugi
 }
 
 /** يبدأ الحلقة ويرجع دالة إيقاف. `ready()` = اكتملت الهجرة. */
-export function startLatestRunner({ store, ready, doc = globalThis.document, restMs = REST_MS, firstDelayMs = 60_000, providers = installedProviders, setTimer = setTimeout, clearTimer = clearTimeout }) {
-  const engine = createLatestEngine({ store, providers, identify: async (p, i) => latestIdentity(p, i), allow: latestAllowed });
+export function startLatestRunner({ store, ready, send = null, doc = globalThis.document, restMs = REST_MS, firstDelayMs = 60_000, providers = installedProviders, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let current = [];
+  const engine = createLatestEngine({
+    store, providers: async () => current, identify: async (p, i) => latestIdentity(p, i), allow: latestAllowed,
+    // الخيط الثاني: إشارة صديق حديثة تُغني عن طلب الفصول؛ وما يكشفه هذا الجهاز يُحفظ للنسخة ويُنشر إشارةً
+    skipWork: (p, work) => friendFresh(store, p.key, work), onEvents: (events) => recordLocalEvents(store, events),
+  });
+  /** الخيطان حول الدورة: الاستعادة مرة، والإشارات قبلها، والرفع بعدها. فشلهما لا يوقف الكشف. */
+  async function threadsBefore() {
+    if (!send) return;
+    try { await restoreBackup(store, send); } catch { /* المحاولة في الدورة التالية */ }
+    try {
+      const installed = new Set(current.map((p) => p.key));
+      await pullSignals(store, send, { installed, allow: (section, key, title) => latestAllowed({ section, key }, { title, ref: { title } }) });
+    } catch { /* المحاولة في الدورة التالية */ }
+  }
   let timer = null, stopped = false;
   const visible = () => !doc || doc.visibilityState !== 'hidden';
   const schedule = (ms) => { clearTimer(timer); if (!stopped) timer = setTimer(tick, ms); };
   async function tick() {
     if (stopped) return;
     if (!ready() || !visible()) { schedule(60_000); return; }
-    try { await engine.runCycle(); } catch { /* دورة فاشلة لا توقف التي بعدها */ }
+    try {
+      current = await providers();
+      await threadsBefore();
+      await engine.runCycle();
+      if (send) await pushThreads(store, send).catch(() => {});
+    } catch { /* دورة فاشلة لا توقف التي بعدها */ }
     schedule(restMs);
   }
   schedule(firstDelayMs);

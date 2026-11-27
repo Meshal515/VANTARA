@@ -267,7 +267,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     connectLocalTimeline({ store, ready: () => done, mirror: (section) => mirrorServer({ store, send, section }) });
     void migrateLatest({ store, send }).then((st) => { done = st.done === true; }).catch(() => { /* تكمل في التشغيل التالي من حيث وقفت */ });
     // المحرك المحلي: والتطبيق مفتوح فقط، بعد اكتمال الهجرة، دورة ثم راحة 30 دقيقة (المرحلة 5)
-    startLatestRunner({ store, ready: () => done });
+    startLatestRunner({ store, ready: () => done, send: (path, opts) => sync.translation(path, opts) });
   }, 4000));
   onChapters(observeMangaChapters);
   // أجهزة امتلأ تخزينها بكاش الصور (قبل سقفه) تتحرر من أول إقلاع، فتُحفظ الإعدادات من جديد
