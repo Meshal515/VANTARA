@@ -404,10 +404,16 @@ test('libtorrent host DeepTrace: the add reply carries the Metadata timeline, an
     assert.ok(Math.abs(sum - w.total_ms) <= 0.05, `reasons add up to the wait: ${sum} vs ${w.total_ms}`);
     for (const k of Object.keys(w.by_reason)) assert.ok(known.has(k), `known reason: ${k}`);
   }
-  // سرب يرسل ببطء: معظم الانتظار «طُلبت ولم تصل» (لا «لم تُطلب» ولا القرص)
+  // سرب يرسل ببطء. المحرك المنشور (رقع 0001/0002/0004) يطلب كتلة الموضع فورًا: معظم الانتظار «طُلبت ولم تصل».
+  // libtorrent الأصلي (اختبار لينكس في CI) لا يطلبها حتى يفرغ طابور المشارك: معظمه «لم تُطلب» (CI 91: 19.95 ث، منها
+  // طُلبت 5.35 ث فقط). التشخيص يفرق بينهما، وفي الحالتين السبب جدولة أو شبكة مقاسة، لا «غير معروف» ولا القرص
   const total = (k) => mine.reduce((a, w) => a + (w.by_reason[k] ?? 0), 0);
   const all = mine.reduce((a, w) => a + w.total_ms, 0);
-  assert.ok(total('block-requested') >= all * 0.5, `a slow peer shows as block-requested: ${total('block-requested')}/${all}`);
+  const scheduling = total('piece-not-requested') + total('block-not-requested');
+  t.diagnostic(`requested ${Math.round(total('block-requested'))}ms · not requested ${Math.round(scheduling)}ms of ${Math.round(all)}ms`);
+  if (build.patched) assert.ok(total('block-requested') >= all * 0.5, `patched: a slow peer shows as block-requested: ${total('block-requested')}/${all}`);
+  assert.ok(total('block-requested') + scheduling >= all * 0.7, `the wait is explained by the network or scheduling: ${total('block-requested') + scheduling}/${all}`);
+  assert.ok(total('unknown') + total('unsampled') <= all * 0.05, `almost nothing unexplained: ${total('unknown') + total('unsampled')}/${all}`);
   assert.ok(Number.isFinite(diag.timeline.marks['first-block']), 'first written block time');
 });
 
