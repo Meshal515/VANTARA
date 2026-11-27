@@ -66,7 +66,9 @@ test('native stages describe metadata, one selected file, and first-frame decodi
   const {services,events}=await fixture(t);
   await services.startPlayback({session:'stages',candidate:{infoHash:hash,fileIdx:0}});
   const stages=events.filter(e=>e.type==='playback/stage').map(e=>e.stage);
-  assert.ok(stages.includes('engine-start'));assert.ok(stages.includes('metadata'));assert.ok(stages.includes('file-selected'));assert.ok(stages.includes('first-frame'));
+  assert.ok(stages.includes('engine-start'));assert.ok(stages.includes('metadata'));assert.ok(stages.includes('file-selected'));assert.ok(stages.includes('player-ipc-ready'));
+  // جاهزية IPC لا تُسمّى أول إطار: «first-frame» كان يُطلق قبل أي فك (عينة المالك: 0.15 ث مقابل 10.30 ث)
+  assert.ok(!stages.includes('first-frame'),'IPC readiness is not a first frame');
   assert.ok(events.filter(e=>e.type==='playback/stage').every(e=>!JSON.stringify(e).includes('http')));
 });
 test('تعاد محاولات metadata على أخطاء مؤقتة فقط، وليس عند بيانات غير صالحة',()=>{

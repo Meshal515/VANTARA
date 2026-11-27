@@ -320,13 +320,18 @@ it('بلا غرفة: زر الأصدقاء يفتح الدعوة كما هو',()
 });
 
 it('تشخيص البدء في ويندوز: من الضغط، ومُسخَّن أو بارد، ومراحل المحرك بزمنها وما قبل الضغط', () => {
-  const text = diagnosticText({ tapAt: 1000, openAt: 1400, stages: { 'player-start': 2600, 'first-frame': 5600 }, trace: [
+  const text = diagnosticText({ tapAt: 1000, openAt: 1400, stages: { 'player-start': 2600, 'player-ipc-ready': 2700, ready: 5600, 'playback-advancing': 5900 }, trace: [
     { stage: 'engine-ready', ms: 900 }, { stage: 'prewarm-edges', ms: 4000 }, { stage: 'source-selected', ms: 6000, mode: 'prewarmed' },
     { stage: 'range-first-byte', ms: 6450, mode: 'torrent', waitMs: 420 },
   ] });
   expect(text).toContain('البدء: مُسخَّن (بدأ قبل الضغط)');
   expect(text).toContain('من الضغط حتى بدء الخدمة: 0.40 ث');
-  expect(text).toContain('حتى أول صورة: 6.00 ث');
+  // جاهزية IPC ليست أول صورة (عينة المالك 0.4.90: «أول صورة» 0.15 ث وأول إطار مفكوك 10.30 ث)
+  expect(text).toContain('حتى جاهزية المشغّل (IPC): 3.10 ث');
+  expect(text).toContain('حتى أول إطار مفكوك: 6.00 ث');
+  expect(text).toContain('حتى تقدّم التشغيل: 6.30 ث');
+  expect(text).toContain('أول صورة معروضة على الشاشة: غير مقاسة');
+  expect(text).not.toContain('حتى أول صورة: 3.10 ث');
   expect(text).toContain('engine-ready  قبل الضغط 5.10 ث');
   expect(text).toContain('range-first-byte  +0.45 ث  (torrent · انتظار 420ms)');
   expect(diagnosticText({ trace: [{ stage: 'source-selected', ms: 0, mode: 'cold' }] })).toContain('البدء: بارد (بلا تسخين)');

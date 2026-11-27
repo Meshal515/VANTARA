@@ -74,7 +74,11 @@ export function diagnosticText(net = {}) {
     'VANTARA ويندوز · تشخيص البدء',
     `البدء: ${mode}`,
     `من الضغط حتى بدء الخدمة: ${tap != null ? s(tap) : '—'}`,
-    `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى أول صورة: ${fromTap('first-frame') !== '—' ? fromTap('first-frame') : fromTap('ready')}`,
+    `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى جاهزية المشغّل (IPC): ${fromTap('player-ipc-ready')}`,
+    // ما يثبته كل سطر: أول إطار مفكوك = playback-restart من mpv مع أبعاد فيديو صالحة؛ تقدّم التشغيل = أول تقدّم لـtime-pos
+    // بعدها بلا إيقاف ولا تخزين. عرض الإطار على السطح لا يقيسه mpv عبر IPC هنا: يُقال «غير مقاسة» ولا يُقدَّر
+    `حتى أول إطار مفكوك: ${fromTap('ready')} · حتى تقدّم التشغيل: ${fromTap('playback-advancing')}`,
+    'أول صورة معروضة على الشاشة: غير مقاسة',
   ];
   if (anchor) {
     lines.push('مراحل المحرك (من اختيار المصدر):');

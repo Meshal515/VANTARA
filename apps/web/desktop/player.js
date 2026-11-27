@@ -16,7 +16,7 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
   let seekDone=0,link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA',subtitleCommandRevision=0,loadProgress=0,loadEpoch=0,lastVolume=100;
   // مراحل المحرك الفعلية ← نسبة امتلاء شعار شاشة التحميل (كما يقيس الـAPK البيانات التي وصلت لا وقتًا وهميًا)
-  const STAGE_PROGRESS={'engine-start':.06,'cache-selected':.1,'metadata':.16,'engine-ready':.22,'file-selected':.3,'downloading':.4,'player-start':.7,'first-frame':.95};
+  const STAGE_PROGRESS={'engine-start':.06,'cache-selected':.1,'metadata':.16,'engine-ready':.22,'file-selected':.3,'downloading':.4,'player-start':.7,'player-ipc-ready':.8};
   // قياس المشغل للوحة «الشبكة» كالـAPK (PlayerActivity.showNetwork): كل حقل يُحدّث من حدثه ويبقى آخر قيمة معروفة.
   // stages: زمن كل مرحلة منذ فتح الجلسة (تجهيز ← المحرك ← التحميل ← المشغل ← أول إطار).
   const NET_FIELDS={downloadSpeed:'torrentBps',peers:'peers',seeds:'seeds',aheadMs:'aheadMs',inputBps:'inputBps',videoBps:'videoBps',videoHeight:'videoHeight'};

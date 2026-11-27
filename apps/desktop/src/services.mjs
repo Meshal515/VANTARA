@@ -1085,7 +1085,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(event.name==='eof-reached'&&typeof event.data==='boolean'&&state.ready&&state.ended!==event.data){state.ended=event.data;emit(state,{type:'playback/ended',ended:event.data,...state.progress});}
           const metric={'demuxer-cache-duration':'aheadMs','cache-speed':'inputBps','video-bitrate':'videoBps'}[event.name];
           if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
-          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
+          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused&&!state.advancing&&state.progress.position>state.firstPosition){state.advancing=true;state.trace.once('playback-advancing',{position:state.progress.position});emit(state,{type:'playback/stage',stage:'playback-advancing'});}
+            if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
           if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);
             // أول توقف للتخزين بعد بدء العرض: الشبكة أبطأ مما بدأنا به، فالاستئناف ينتظر ثلاث ثوانٍ (لا تقطيع متكرر)
@@ -1095,7 +1096,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       }
     });
     await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate','eof-reached'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
-    emit(state,{type:'playback/stage',stage:'first-frame'});
+    // جاهزية IPC (المراقبة مسجلة) لا أول إطار: كان اسمها «first-frame» فعرضتها اللوحة «أول صورة» قبل أي فك (عينة المالك
+    // 0.4.90: 0.15 ث وأول إطار مفكوك 10.30 ث). أول إطار مفكوك = playback/ready (playback-restart وأبعاد الفيديو)
+    state.trace.once('player-ipc-ready');
+    emit(state,{type:'playback/stage',stage:'player-ipc-ready'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     state.resolveCommands(true);
     // تمنع بقاء شاشة سوداء إلى الأبد عندما لا يُنتج المصدر إطارًا.
