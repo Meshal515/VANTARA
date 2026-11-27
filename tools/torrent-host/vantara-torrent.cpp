@@ -271,6 +271,15 @@ struct Torrent {
 };
 
 /** ما ينتظره قارئ الآن، من libtorrent نفسه (لا تخمين): يُستدعى والقفل محرَّر (استدعاءات متزامنة مع خيط الشبكة). */
+// مللي ثانية بثلاث منازل بالضبط من الميكروثانية الصحيحة. لا double عبر ostream: دقته الافتراضية 6 أرقام معنوية، فانتظار
+// 12763.876ms كان يُكتب 12763.8 وأسبابه (أصغر منه) بمنازلها كاملة، فلا يساوي مجموعها المجموع (Windows Debug 92).
+static std::string msExact(int64_t us) {
+    if (us < 0) us = 0;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%lld.%03lld", static_cast<long long>(us / 1000), static_cast<long long>(us % 1000));
+    return buf;
+}
+
 static std::string waitReason(lt::torrent_handle const& h, int piece, int block) {
     try {
         if (h.have_piece(lt::piece_index_t(piece))) return "piece-read";            // متحققة: بانتظار القراءة من القرص
@@ -1241,9 +1250,9 @@ private:
         bool first = true;
         for (auto const& w : t.waits) {
             o << (first ? "" : ",") << "{\"request\":" << w.request << ",\"piece\":" << w.piece << ",\"block\":" << w.block << ",\"early\":" << (w.early ? "true" : "false")
-              << ",\"start_ms\":" << w.startMs << ",\"total_ms\":" << (w.totalUs / 1000.0) << ",\"by_reason\":{";
+              << ",\"start_ms\":" << w.startMs << ",\"total_ms\":" << msExact(w.totalUs) << ",\"by_reason\":{";
             bool f2 = true;
-            for (auto const& [k, v] : w.byReasonUs) { o << (f2 ? "" : ",") << '"' << k << "\":" << (v / 1000.0); f2 = false; }
+            for (auto const& [k, v] : w.byReasonUs) { o << (f2 ? "" : ",") << '"' << k << "\":" << msExact(v); f2 = false; }
             o << "}}";
             first = false;
         }
