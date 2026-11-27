@@ -667,6 +667,11 @@ class PlayerActivity : Activity() {
                 if (frameAt == 0L) { frameAt = SystemClock.elapsedRealtime(); android.util.Log.i("VantaraStartup", startupLine()) }
                 if (StartupReveal.hideOnFirstFrame(first, player.playbackState == Player.STATE_READY)) loading(false)
                 recordStartupOutput()
+                // P0 (المالك، 27 نوفمبر): بدأ بلا فهرس، فأول قفزة كانت تنتظر Cues من آخر الملف (11 ث، والمدة --:--). أول صورة
+                // ظهرت: الفهرس يُجلب الآن في الخلفية فتكون إعادة التجهيز عند القفزة من كتل مكتوبة
+                if (first && cuesDeferred) current?.url?.takeIf { it.startsWith("vantara-torrent:") }?.let { url ->
+                    runCatching { com.vantara.addons.torrent.TorrentEngine.get(this@PlayerActivity).fetchCues(android.net.Uri.parse(url)) }
+                }
             }
             override fun onAudioPositionAdvancing(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
                 if (!current(eventTime)) return

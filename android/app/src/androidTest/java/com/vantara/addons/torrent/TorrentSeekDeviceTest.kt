@@ -137,6 +137,8 @@ class TorrentSeekDeviceTest {
             }
             val started = waitFor(player!!, 90_000) { p -> p.playbackState == Player.STATE_READY && frames.get() > 0 }
             report.put("startReadyMs", if (started) SystemClock.elapsedRealtime() - t0 else -1).put("startError", failure.get())
+            // PlayerActivity: أول صورة لمصدر بلا فهرس ← Cues في الخلفية (TorrentEngine.fetchCues)
+            if (started && deferred) report.put("fetchCues", engine.fetchCues(uri))
             if (!started) return listOf("${report.getString("mode")}: لم يبدأ خلال 90 ث (${state(player!!, engine, uri)}) ${failure.get()}")
             Thread.sleep(3000)
             val plan: List<Pair<String, (Long, Long) -> Long>> = listOf(

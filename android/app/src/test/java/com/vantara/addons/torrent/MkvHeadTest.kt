@@ -85,6 +85,39 @@ class MkvHeadTest {
         assertArrayEquals(file, seen)
     }
 
+    /**
+     * P0 (المالك، 27 نوفمبر): أول قفزة بعد البدء بلا فهرس انتظرت 11 ث لقراءة Cues من آخر الملف. موضع Cues في SeekHead الذي
+     * يمر بالقارئ أصلًا: يُقرأ منه بلا قراءة إضافية، أيًّا كان حجم الدفعات (الرأس ومحتواه في دفعة واحدة أو مقطّعًا).
+     */
+    @Test fun `the Cues position is read from the SeekHead bytes that already passed`() {
+        fun seek(id: Long, position: Long): ByteArray = ByteArrayOutputStream().also { e ->
+            element(MkvHead.SEEK_ID, java.math.BigInteger.valueOf(id).toByteArray().dropWhile { it == 0.toByte() }.toByteArray(), e, sizeBytes = 1)
+            element(MkvHead.SEEK_POSITION, java.math.BigInteger.valueOf(position).toByteArray().dropWhile { it == 0.toByte() }.toByteArray(), e, sizeBytes = 1)
+        }.toByteArray()
+        val cuesRelative = 1_903_456_789L
+        val out = ByteArrayOutputStream()
+        element(MkvHead.EBML, ByteArray(20) { 1 }, out, sizeBytes = 1)
+        listOf(0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF).forEach(out::write)
+        val segmentData = out.size().toLong()
+        val head = ByteArrayOutputStream()
+        element(MkvHead.SEEK, seek(0x1549A966L, 4100), head, sizeBytes = 1)
+        element(MkvHead.SEEK, seek(MkvHead.CUES, cuesRelative), head, sizeBytes = 1)
+        element(MkvHead.SEEK_HEAD, head.toByteArray(), out, sizeBytes = 1)
+        element(0xECL, ByteArray(30), out, sizeBytes = 1)
+        element(0x1549A966L, ByteArray(40) { 3 }, out)
+        element(MkvHead.CLUSTER, ByteArray(3000) { 7 }, out)
+        val file = out.toByteArray()
+        for (chunk in listOf(1, 7, 64, 4096)) {
+            val h = MkvHead()
+            play(file, chunk, h)
+            assertEquals("chunk=$chunk", segmentData + cuesRelative, h.cuesAt)
+        }
+        // بلا SeekHead (أو Cues غير مذكور فيه): لا موضع، لا تخمين
+        val plain = MkvHead()
+        play(anime(100).first, 4096, plain)
+        assertEquals(-1L, plain.cuesAt)
+    }
+
     @Test fun `a file that is not MKV is never touched`() {
         val head = MkvHead()
         val mp4 = ByteArray(5000) { (it % 251).toByte() }.also { "\u0000\u0000\u0000\u0018ftypmp42".toByteArray().copyInto(it) }

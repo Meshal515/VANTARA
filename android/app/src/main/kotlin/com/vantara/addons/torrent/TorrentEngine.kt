@@ -329,6 +329,16 @@ class TorrentEngine internal constructor(
         tickets[token] = Ticket(request)
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
+    /**
+     * أول صورة ظهرت لمصدر بدأ بلا فهرس ([deferTail]): Cues يُجلب الآن في الخلفية، فأول قفزة (إعادة تجهيز بالفهرس في
+     * PlayerActivity) تقرؤه من كتل مكتوبة بدل انتظاره (11 ث بقطع 16MB، المالك 27 نوفمبر). موضعه من SeekHead ([MkvHead.cuesAt])،
+     * وتلميح القراءة عنده فتُطلب كتله أولًا (0004)؛ بلا موضع معروف: قطعتا الذيل كما كان قبل التأجيل.
+     */
+    fun fetchCues(uri: Uri): Boolean {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return false
+        tailDeferred.remove(hash)
+        return states[hash]?.fetchCues() ?: false
+    }
     /** المشغّل يبدأ هذا المصدر بلا فهرس (أول صورة من الرأس) [on]، أو يحتاج الفهرس الآن (قفزة، استئناف). */
     fun deferTail(uri: Uri, on: Boolean) {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return
@@ -760,6 +770,25 @@ class TorrentEngine internal constructor(
         }
         fun earlyRead(bytes: Int) = synchronized(monitor) { earlyBytes += bytes; Unit }
         /** تلميح القراءة إلى libtorrent (async_call؛ لا ينتظر خيط الشبكة). */
+        /** قطع Cues المطلوبة في الخلفية ([fetchCues])؛ تبقى بمواعيدها في كل prioritize حتى تُنزَّل. */
+        private var cuesPieces: List<Int> = emptyList()
+        fun fetchCues(): Boolean = synchronized(monitor) {
+            val f = file ?: return@synchronized false
+            val handle = torrent?.takeIf { it.isValid } ?: return@synchronized false
+            if (pieceLength <= 0) return@synchronized false
+            val at = head?.cuesAt?.takeIf { it in 0 until f.size }
+            val last = ((f.offset + f.size - 1) / pieceLength).toInt()
+            val start = at?.let { ((f.offset + it) / pieceLength).toInt() } ?: TorrentPolicy.edges(f, pieceLength).drop(1).minOrNull() ?: return@synchronized false
+            val end = at?.let { minOf(last, ((f.offset + it + CUES_FETCH_BYTES - 1) / pieceLength).toInt()) } ?: last
+            cuesPieces = (start..end).toList()
+            for ((i, piece) in cuesPieces.withIndex()) if (!handle.havePiece(piece)) {
+                handle.piecePriority(piece, Priority.SIX)
+                handle.setPieceDeadline(piece, CUES_DEADLINE_MS + i * 250)
+                deadlined += piece
+            }
+            if (at != null) NativeReadHint.set(handle, CUES_READER, start, ((f.offset + at) % pieceLength).toInt())
+            true
+        }
         fun readHint(reader: Int, piece: Int, offset: Int) = synchronized(monitor) {
             torrent?.takeIf { it.isValid }?.let { if (NativeReadHint.set(it, reader, piece, offset)) hintsSent++ else hintsFailed++ }; Unit
         }
@@ -825,6 +854,8 @@ class TorrentEngine internal constructor(
             if (refs != 0 || idleAt != since) return@synchronized
             torrent?.takeIf { it.isValid }?.let { handle ->
                 NativeReadHint.clear(handle, WARM_READER)
+                NativeReadHint.clear(handle, CUES_READER)
+                cuesPieces = emptyList()
                 handle.pause(); handle.clearPieceDeadlines(); deadlined.clear()
                 window.forEach { handle.piecePriority(it, Priority.IGNORE) }
                 aheadRange.forEach { handle.piecePriority(it, Priority.IGNORE) }
@@ -906,7 +937,7 @@ class TorrentEngine internal constructor(
             if (selected != null && selected != file.index && refs > 1) throw IOException("Another file from this torrent is already playing")
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
-                selected = file.index; initialized = true; window = emptyList(); focused = false; aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
+                selected = file.index; initialized = true; window = emptyList(); focused = false; aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L; cuesPieces = emptyList()
                 head = if (file.path.endsWith(".mkv", ignoreCase = true)) MkvHead() else null
                 this.file = file; pieceLength = info.pieceLength()
                 lastPiece = info.numPieces() - 1; lastPieceBytes = if (lastPiece >= 0) info.pieceSize(lastPiece) else 0
@@ -943,7 +974,7 @@ class TorrentEngine internal constructor(
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val tailWaits = hash in tailDeferred
-            val pending = if (tailWaits) emptyList() else TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
+            val pending = if (tailWaits) emptyList() else (TorrentPolicy.edges(file, pieceLength) + cuesPieces).distinct().filter { it !in next && !handle.havePiece(it) }
             // مع libtorrent المخصص: قطعتان فقط بموعد (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7 فيقسم السرعة عليها)،
             // وبقية النافذة أولوية 6 بلا موعد. المكتبة الأصلية: النافذة كلها كما كانت (القياس: الضيقة وحدها لا تفيدها).
             val critical = if (PATCHED) next.take(CRITICAL_PIECES) else next
@@ -1184,6 +1215,12 @@ class TorrentEngine internal constructor(
         private const val MAX_WAITS = 8
         /** تلميح القراءة (0004): قارئ التسخين، ويُحدَّث تلميح الفتح كل 4 كتل (64KB) يتقدمها. */
         private const val WARM_READER = 0
+        /** قارئ Cues في الخلفية ([fetchCues]): لا يصطدم بقراء المشغّل (من 1) ولا بالتسخين (0). */
+        private const val CUES_READER = -1
+        /** Cues نادرًا ما يتجاوز 1MB (168KB في لقطة المالك لملف 1.9GB). */
+        private const val CUES_FETCH_BYTES = 2L * 1024 * 1024
+        /** بعد قطع التشغيل الحرجة (موعدها 0): لا يزاحم ما يُعرض الآن. */
+        private const val CUES_DEADLINE_MS = 1000
         private const val HINT_STRIDE_BLOCKS = 4
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024
         private const val MAX_ACTIVE_BYTES = 8L * 1024 * 1024 * 1024
