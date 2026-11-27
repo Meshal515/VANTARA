@@ -1189,7 +1189,8 @@ export function renderAddonsHub({
   root.reload = () => { void refresh(); };
   root.hub = { S, A, render, refresh };
   render({ flip: false });
-  attachBar();
+  // المستدعي يُلحق الجذر بالصفحة متزامنًا بعد الرجوع: الربط في المهمة الدقيقة نفسها، فلا إطار بشريط غير منسّق ولا سباق مؤقت
+  queueMicrotask(attachBar);
   void refresh().then(() => { if (alive && Number.isFinite(initialState.scrollY)) setScroll(initialState.scrollY); });
   return root;
 }

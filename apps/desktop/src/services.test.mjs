@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs, PREWARM_ROLES } from './services.mjs';
+import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs, PREWARM_ROLES, peerPort } from './services.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 
 const hash = 'a'.repeat(40);
@@ -907,4 +907,11 @@ test('المحرك الدائم: تشغيلان متتاليان على عملي
   // بعد مهلة الدفء: يُحذف بملفه
   await new Promise(r=>setTimeout(r,700));
   assert.ok((await requests()).includes('/torrents/0/delete'));
+});
+
+test('منفذ المشاركين حر لـUDP أيضًا: نطاق UDP محجوز في ويندوز (Hyper-V) يُتخطى بدل ربط uTP وDHT الفاشل بصمت', async () => {
+  const picks = [50001, 50002, 50003]; const tried = [];
+  const got = await peerPort(async () => picks.shift(), async (p) => { tried.push(p); return p !== 50001; });
+  assert.equal(got, 50002);
+  assert.deepEqual(tried, [50001, 50002]);
 });

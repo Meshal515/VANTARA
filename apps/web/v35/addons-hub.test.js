@@ -153,8 +153,10 @@ it('الرجوع داخل المدير أولًا، والإغلاق يعيد ش
   setup();
   const bar = document.querySelector('.page-top');
   const root = mount({ repositories: manga(), initialState: { stack: [{ v: 'hub' }, { v: 'mihon' }] } });
-  await tick();
+  // يُربط في المهمة الدقيقة نفسها، لا بمؤقت (كان 16ms فيفشل تحت ضغط CI)
+  await Promise.resolve();
   expect(bar.classList.contains('y-bar')).toBe(true);
+  await tick();
   expect(document.getElementById('utilityTitle').textContent).toBe('الإضافات');
   expect(root.back()).toBe(true);
   expect(root.hub.S.stack.length).toBe(1);

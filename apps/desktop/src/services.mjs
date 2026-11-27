@@ -6,6 +6,7 @@ import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mj
 import { inspectMp4Index } from './mp4-bootstrap.mjs';
 import https from 'node:https';
 import net from 'node:net';
+import dgram from 'node:dgram';
 import dns from 'node:dns/promises';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -356,6 +357,18 @@ async function getTorrentMetadata(request, sleepFor, isCurrent) {
 async function port() {
   const server=net.createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   const result=server.address().port;await new Promise(resolve=>server.close(resolve));return result;
+}
+/** هل المنفذ متاح لـUDP على كل الواجهات؟ (المحرك يستمع عليها لـuTP وDHT) */
+function udpFree(p) {
+  return new Promise(resolve=>{const s=dgram.createSocket('udp4');s.once('error',()=>{try{s.close();}catch{}resolve(false);});s.bind(p,'0.0.0.0',()=>s.close(()=>resolve(true)));});
+}
+/**
+ * منفذ المشاركين: حر لـTCP **ولـUDP معًا**. ويندوز يحجز نطاقات منافذ (Hyper-V/WSL) قد تشمل UDP دون TCP، فيفشل ربط uTP
+ * وDHT بصمت (WSAEACCES) والمحرك يعمل بنصف اتصالاته. (فشل Windows Debug 94: «sock_bind [uTP] forbidden by its access permissions».)
+ */
+export async function peerPort(pick=port,udp=udpFree,tries=20) {
+  for(let i=0;i<tries;i++){const p=await pick();if(await udp(p))return p;}
+  return pick();
 }
 function cleanEnv() {
   const env={...process.env};
@@ -839,8 +852,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     let lastError=null;
     for(const kind of order){
       for(const dhtPersistence of kind==='rqbit'?[true,false]:[true]) {
-        const apiPort=await port();let listenPort=await port();
-        while(listenPort===apiPort)listenPort=await port();
+        const apiPort=await port();let listenPort=await peerPort();
+        while(listenPort===apiPort)listenPort=await peerPort();
         check();
         state.api=`http://127.0.0.1:${apiPort}`;
         let exited=false;
