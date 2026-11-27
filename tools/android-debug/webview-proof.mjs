@@ -206,9 +206,9 @@ try {
     await assertNoAutomaticVerification(0);
     for (let iteration = 1; iteration <= 30; iteration++) {
       await evaluate(`(()=>{document.querySelector('[data-act="openDrawer"]').click();const b=[...document.querySelectorAll('.drawer-item')].find(b=>b.textContent.trim()==='الإضافات');if(!b)throw new Error('Missing Addons navigation');b.click();return true})()`);
-      await waitFor("document.querySelector('#utility.active .v7-addon')", `Addons renderer cycle ${iteration}`);
-      // Exercise nested dialogs before close so their disposal also runs.
-      await evaluate(`(()=>{document.querySelector('.v7-plus')?.click();return true})()`);
+      await waitFor("document.querySelector('#utility.active .y-root .y > *')", `Addons renderer cycle ${iteration}`);
+      // Exercise nested dialogs before close so their disposal also runs (the hub's ⋮ sheet).
+      await evaluate(`(()=>{document.querySelector('#utility.active .y-bar-tools [data-y="hubMenu"]')?.click();return true})()`);
       await delay(150);
       await evaluate(`(()=>{window.__debugProofShell.handleBack();document.querySelector('[data-act="navTo"][data-arg="home"]').click();return true})()`);
       await waitFor("document.querySelector('#home.active') && !document.querySelector('#utility.active')", `Home return cycle ${iteration}`);

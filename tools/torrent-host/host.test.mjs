@@ -10,11 +10,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
+import dgram from 'node:dgram';
 
 const binary = process.env.VANTARA_TORRENT_HOST_BINARY;
 const skip = binary ? false : 'VANTARA_TORRENT_HOST_BINARY غير محدد';
 const auth = 'vantara:test-secret';
 const port = () => new Promise(resolve => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+// منفذ حر لـTCP ولـUDP معًا: ويندوز يحجز نطاقات UDP (Hyper-V) فيفشل ربط uTP والباذر يخرج 4 (Windows Debug 94)
+const udpFree = (p) => new Promise(resolve => { const s = dgram.createSocket('udp4'); s.once('error', () => { try { s.close(); } catch {} resolve(false); }); s.bind(p, '127.0.0.1', () => s.close(() => resolve(true))); });
+const peerPort = async () => { for (let i = 0; i < 20; i++) { const p = await port(); if (await udpFree(p)) return p; } return port(); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function request(base, path, { method = 'GET', body, headers = {}, raw = false, timeout = 60000 } = {}) {
@@ -55,13 +59,13 @@ async function fixture(t, size = 24 * 1024 * 1024, { seedRate = 0 } = {}) {
   await import('node:fs/promises').then(fs => fs.mkdir(seedDir, { recursive: true }));
   const data = randomBytes(size);
   await writeFile(join(seedDir, 'clip.mp4'), data);
-  const seedPort = await port();
+  const seedPort = await peerPort();
   const seeder = spawn(binary, [`--seed=${join(seedDir, 'clip.mp4')}`, `--listen-port=${seedPort}`, '--piece-size=262144'], { env: { ...process.env, VANTARA_SEED_RATE: String(seedRate) }, stdio: ['ignore', 'pipe', 'inherit'] });
   const magnet = await new Promise((resolve, reject) => {
     let out = ''; seeder.stdout.on('data', c => { out += c; const line = out.split('\n')[0]; if (out.includes('\n')) resolve(line.trim()); });
     seeder.once('exit', code => reject(new Error(`seeder exited ${code}`)));
   });
-  const apiPort = await port(); let listenPort = await port(); while (listenPort === apiPort || listenPort === seedPort) listenPort = await port();
+  const apiPort = await port(); let listenPort = await peerPort(); while (listenPort === apiPort || listenPort === seedPort) listenPort = await peerPort();
   const engine = spawn(binary, [`--api-port=${apiPort}`, `--listen-port=${listenPort}`, `--dir=${cache}`, `--state-dir=${join(dir, 'state')}`, '--allow-private-peers', `--parent-pid=${process.pid}`],
     { env: { ...process.env, RQBIT_HTTP_BASIC_AUTH_USERPASS: auth }, stdio: ['ignore', 'ignore', 'inherit'] });
   const base = `http://127.0.0.1:${apiPort}`;
