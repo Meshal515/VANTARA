@@ -84,3 +84,29 @@ test('closed to everything else: other paths, hosts, methods, bodies, commands a
   assert.equal(status, 404);
   await b.close();
 });
+
+// جذر حلقة «تحقق ← يدور ← يطلب التحقق مجددًا» في ويندوز (بلاغ المالك 27 نوفمبر): الكوكي وحده يُرفض من Java لأن
+// Cloudflare يربطه ببصمة المتصفح؛ الصفحة نفسها من Chromium تُسلَّم، وبلا نافذة إن كانت الجلسة محقَّقة من قبل.
+test('a verified browser session answers with the page itself, without opening a solver window', async () => {
+  const { b, calls } = bridge({ page: { status: 200, url: 'https://site.example/series/', body: Buffer.from('<html>chapters</html>') } });
+  const base = await b.start();
+  const out = await ask(base, { cmd: 'request.get', url: 'https://site.example/series/', returnOnlyCookies: false });
+  assert.equal(out.status, 200);
+  assert.match(out.body.message, /not detected/i, 'Suwayomi then uses the page instead of retrying with Java');
+  assert.equal(out.body.solution.response, '<html>chapters</html>');
+  assert.equal(calls.solve.length, 0, 'no hidden window when the saved session already works');
+  await b.close();
+});
+test('the hidden solver passed but the request itself is still challenged: a person is needed, never a false success', async () => {
+  const challenge = { status: 403, url: 'https://site.example/', headers: {}, body: Buffer.from('<title>Just a moment...</title>') };
+  const calls = { challenge: [], solve: [] };
+  const b = createCloudflareBridge({
+    userAgent: UA, solve: async (u) => { calls.solve.push(u); return true; }, cookies: async () => [CLEARANCE], request: async () => challenge,
+    isChallenge: ({ text }) => /Just a moment/.test(text), onChallenge: (h) => calls.challenge.push(h),
+  });
+  const base = await b.start();
+  const out = await ask(base, { cmd: 'request.get', url: 'https://site.example/series/' });
+  assert.equal(out.status, NOT_SOLVED_STATUS);
+  assert.deepEqual(calls.challenge, ['site.example']);
+  await b.close();
+});

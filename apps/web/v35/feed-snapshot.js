@@ -22,3 +22,11 @@ export function createFeedSnapshot({ key = (item) => item.id } = {}) {
   };
   return api;
 }
+
+/**
+ * سياسة نتائج البحث (لا الخلاصة): قبل أن يلمس المستخدم القائمة تتبع آخر ترتيب بالصلة كاملًا؛ بعد اللمس يُلحق
+ * الجديد في آخرها فقط. لا تجميد لأول دفعة خلف زر «نتائج جديدة» (بلاغ «بوروتو» 27 نوفمبر).
+ */
+export function acceptSearchResults(snapshot, items, { touched = false } = {}) {
+  return snapshot.accept(items, touched ? { append: true } : { refresh: true });
+}

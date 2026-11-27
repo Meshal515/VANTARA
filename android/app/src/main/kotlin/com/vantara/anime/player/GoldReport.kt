@@ -10,13 +10,13 @@ import java.util.Locale
  * دالة نقية: تُختبر بلا جهاز، ولا تقرأ عنوانًا ولا هوية.
  */
 object GoldReport {
-    class Read(val at: Long, val openedAt: Long, val firstByteAt: Long, val position: Long, val bytes: Long)
+    class Read(val at: Long, val openedAt: Long, val firstByteAt: Long, val position: Long, val bytes: Long, val endAt: Long = 0L)
     class Torrent(
         val addedAt: Long = 0L, val metadataCached: Boolean = false, val firstKnownAt: Long = 0L, val firstPeerAt: Long = 0L,
         val metadataAt: Long = 0L, val firstPayloadAt: Long = 0L, val firstPieceAt: Long = 0L,
         val warmedAt: Long = 0L, val warmedPieces: Int = 0, val fileBytes: Long = 0L, val pieceBytes: Int = 0,
         val waits: List<ReadWait> = emptyList(), val waitingPiece: Int = -1, val waitingSince: Long = 0L, val waitingBlocks: Pair<Int, Int>? = null,
-        val peers: Int = 0, val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
+        val peers: Int = 0, val downloadBps: Long = 0L, val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
         val hintsSent: Int = 0, val hintsFailed: Int = 0, val mkvSkipped: Long = 0L, val patched: Boolean = false, val criticalPieces: Int = 0,
     )
     class Input(
@@ -35,8 +35,8 @@ object GoldReport {
 
     private class Kind(val code: String, val ar: String, val where: String?)
 
-    // سبب انتظار القطعة من لقطة الثانية الأولى ([ReadWait]): ما يعرفه المحرك مكتوبًا وما يقوله libtorrent
-    private val NOT_STARTED = Kind("WAIT_PIECE_NOT_STARTED", "لم تبدأ أي كتلة من القطعة بعد ثانية (لم تُطلب أو لا مشارك يرسلها)",
+    // سبب انتظار القطعة من لقطته الأولى ([ReadWait]): ما يعرفه المحرك مكتوبًا وما يقوله libtorrent
+    private val NOT_STARTED = Kind("WAIT_PIECE_NOT_STARTED", "لم تبدأ أي كتلة من القطعة عند أول عيّنة (لم تُطلب أو لا مشارك يرسلها)",
         "TorrentEngine.kt: State.prioritize (setPieceDeadline) ← libtorrent: request_time_critical_pieces")
     private val PARTIAL = Kind("WAIT_BLOCK_RESPONSE", "القطعة تُنزَّل وكتلة القراءة لم تصل بعد",
         "libtorrent: piece_picker (ترتيب الكتل، 0004) ← NativeReadHint.kt")
@@ -47,6 +47,24 @@ object GoldReport {
     private val GAP = Kind("VANTARA_BLOCK_TRACKING_GAP", "كتل على القرص لا يعرفها المحرك (فاتته إشعارات block_finished)",
         "TorrentEngine.kt: State (written ← block_finished_alert)")
     private val WAITS_KINDS = listOf(NOT_STARTED, PARTIAL, COMPLETE, VERIFIED_ONLY, GAP)
+
+    // ما كان المشغّل ينتظره من قراءات (المدة مقاسة؛ سبب بطئها من انتظارات القطع داخلها)
+    private val INDEX_READ = Kind("WAIT_INDEX_READ", "قراءة فهرس الحاوية (Cues) من ذيل الملف",
+        "Media3 MatroskaExtractor (يطلب Cues قبل موضع المتابعة) ← TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize")
+    private val HEAD_READ = Kind("WAIT_HEAD_READ", "قراءة رأس الملف (Tracks)",
+        "Media3 MatroskaExtractor ← TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize")
+    private val POSITION_READ = Kind("WAIT_POSITION_FIRST_BYTE", "انتظار أول بايت عند موضع التشغيل",
+        "TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize (setPieceDeadline)")
+
+    /** طول اتحاد فترات (تتداخل القراءات المتزامنة فلا تُعد مرتين). */
+    private fun union(ranges: List<LongRange>): Long {
+        var total = 0L; var end = Long.MIN_VALUE
+        for (r in ranges.filter { it.last > it.first }.sortedBy { it.first }) {
+            if (r.last <= end) continue
+            total += r.last - maxOf(r.first, end); end = r.last
+        }
+        return total
+    }
 
     private fun kindOf(w: ReadWait): Kind = when {
         w.untracked -> GAP
@@ -107,15 +125,14 @@ object GoldReport {
             Triple("ready", "التخزين حتى الجاهزية (READY)", input.readyAt),
             Triple("rendered", "حتى أول صورة معروضة", if (input.frameAt > 0) input.frameAt else input.audioOnlyAt),
         )
-        var stopped = false
-        for ((id, ar, at) in stages) {
-            if (stopped) break
-            if (!add(id, ar, at, null)) {
-                stopped = true
-                // المرحلة الجارية: من آخر نهاية حتى لحظة التقرير
-                if (input.now > prev) phases += Phase(id, ar, prev, input.now, ongoing = true)
-                integrity += "البدء لم يكتمل: مرحلة «$ar» جارية منذ ${s(input.now - prev)}"
-            }
+        // بترتيب وقوعها لا بترتيب ثابت: Media3 يعرض أول إطار قبل READY عادة، فالمسار الحرج إلى الصورة ينتهي بها
+        val firstMissing = stages.indexOfFirst { it.third <= 0 }
+        for ((id, ar, at) in stages.filterIndexed { i, st -> st.third > 0 && (firstMissing < 0 || i < firstMissing) }.sortedBy { it.third }) add(id, ar, at, null)
+        if (firstMissing >= 0) {
+            val (id, ar, _) = stages[firstMissing]
+            // المرحلة الجارية: من آخر نهاية حتى لحظة التقرير
+            if (input.now > prev) phases += Phase(id, ar, prev, input.now, ongoing = true)
+            integrity += "البدء لم يكتمل: مرحلة «$ar» جارية منذ ${s(input.now - prev)}"
         }
         if (input.frameAt == 0L && input.audioOnlyAt > 0) integrity += "صوت فقط: لا إطار فيديو منتظر"
 
@@ -132,8 +149,8 @@ object GoldReport {
         val ranked = phases.filter { it.ms > 0 && it.cause != null }.sortedByDescending { it.ms }
         val bottleneck = ranked.firstOrNull()
         if (t != null) {
-            integrity += "انتظارات القطع الأقصر من ثانية لا تُسجَّل، وسبب كل انتظار من لقطة ثانيته الأولى"
-            if (waits.size >= 32) integrity += "سجل الانتظارات ممتلئ (آخر 32): سقطت انتظارات أقدم"
+            integrity += "انتظارات القطع الأقصر من 0.1 ث لا تُسجَّل، وسبب كل انتظار من لقطته الأولى"
+            if (waits.size >= 64) integrity += "سجل الانتظارات ممتلئ (آخر 64): سقطت انتظارات أقدم"
             if (!t.metadataCached && t.metadataAt > open && t.firstKnownAt == 0L) integrity += "أول مشارك معروف: لم يُقس في هذه الجلسة"
         }
         if (input.readsFull) integrity += "سجل طلبات القراءة ممتلئ: سقطت طلبات قديمة"
@@ -214,17 +231,30 @@ object GoldReport {
             sum[k] = (sum[k] ?: 0L) + o
             covered += o
             if (w.ms > 2_000) longWait = true
-            ph.evidence += "القطعة ${w.piece}${if (w.tail) " (ذيل الملف)" else ""}: ${w.ms}ms · ${k.ar} · عند الثانية الأولى مكتوب في libtorrent ${w.engine} من ${w.blocks} وعندنا ${w.known}" +
+            ph.evidence += "القطعة ${w.piece}${if (w.tail) " (ذيل الملف)" else ""}: ${w.ms}ms · ${k.ar} · عند أول عيّنة مكتوب في libtorrent ${w.engine} من ${w.blocks} وعندنا ${w.known}" +
                 (if (w.early) " · انتهى بقراءة قبل التحقق" else " · انتهى بالقطعة الموثقة")
         }
-        // الطلبات التي فُتحت في المرحلة وطال أول بايت لها: أين في الملف (الذيل = فهرس الحاوية)
+        // القراءات التي كان المشغّل ينتظرها داخل المرحلة. رأس الملف وذيله (فهرس الحاوية) تُحلَّل كاملة قبل المتابعة، فكل
+        // مدتها انتظار؛ قراءة موضع التشغيل تنتظر حتى أول بايت ثم تتدفق
+        val readKinds = LinkedHashMap<Kind, Long>()
+        val blocking = mutableListOf<LongRange>()
         for (r in input.reads) {
-            if (r.openedAt < ph.start || r.openedAt > ph.end) continue
-            val wait = if (r.firstByteAt > 0) r.firstByteAt - r.openedAt else input.now - r.openedAt
-            if (wait < 300) continue
-            ph.evidence += "طلب قراءة من ${placeOf(r.position, t?.fileBytes ?: 0)} (${bytes(r.position)}): " +
-                if (r.firstByteAt > 0) "أول بايت بعد ${wait}ms" else "لم يصل بايت منذ ${wait}ms"
+            val place = placeOf(r.position, t?.fileBytes ?: 0)
+            val end = if (r.endAt > 0) r.endAt else input.now
+            val until = if (place == "موضع التشغيل") (if (r.firstByteAt > 0) r.firstByteAt else input.now) else end
+            val o = overlap(ph.start, ph.end, r.openedAt, until)
+            if (o < 100) continue
+            val k = when (place) { "ذيل الملف (الفهرس)" -> INDEX_READ; "رأس الملف" -> HEAD_READ; else -> POSITION_READ }
+            readKinds[k] = (readKinds[k] ?: 0L) + o
+            blocking += maxOf(ph.start, r.openedAt)..minOf(ph.end, until)
+            val dur = end - r.openedAt
+            val rate = if (dur > 0 && r.bytes > 0) " بمعدل ${String.format(Locale.US, "%.2f", r.bytes * 1000.0 / dur / (1 shl 20))}MB/ث" else ""
+            ph.evidence += "قراءة من $place (${bytes(r.position)}): ${bytes(r.bytes)} في ${dur}ms$rate" +
+                (if (r.firstByteAt > 0) " · أول بايت بعد ${r.firstByteAt - r.openedAt}ms" else " · لم يصل بايت") +
+                (if (r.endAt <= 0) " · جارية" else "") + " · منها ${o}ms في هذه المرحلة"
         }
+        val readCovered = union(blocking)
+        if (readKinds.isNotEmpty() && t != null && t.downloadBps > 0) ph.evidence += "التحميل الآن ${String.format(Locale.US, "%.2f", t.downloadBps / 1048576.0)}MB/ث"
         if (ph.id == "first-byte" && t != null) firstByteSegments(ph, t, firstByte)
         if (ph.id == "container" && t != null && t.mkvSkipped > 0) ph.evidence += "تخطّى بلا تنزيل ${bytes(t.mkvSkipped)} (مرفقات MKV)"
         if (ph.ongoing && t != null && t.waitingPiece >= 0 && t.waitingSince > 0) {
@@ -236,12 +266,22 @@ object GoldReport {
         }
         val coverage = minOf(1.0, covered.toDouble() / maxOf(1L, ph.ms))
         val total = sum.values.sum()
+        // ما كان المشغّل ينتظره (القراءة) حين لا تغطي انتظارات القطع المسجلة نصف المرحلة: يقول أين ذهب الوقت، لا لماذا
+        val readCoverage = minOf(1.0, readCovered.toDouble() / maxOf(1L, ph.ms))
+        if (readKinds.isNotEmpty() && coverage < 0.5 && readCoverage > coverage) {
+            val (top, ms) = readKinds.maxBy { it.value }
+            val share = ms.toDouble() / readKinds.values.sum()
+            ph.cause = Cause(top.code, top.ar, top.where, share, readCoverage, confidence(readCoverage, share),
+                listOfNotNull(if (readCoverage < 0.7) "${pct(1 - readCoverage)} من المرحلة بلا قراءة منتظرة" else null,
+                    "لماذا بطؤت القراءة: انتظارات القطع داخلها" + if (covered > 0) " (المسجل منها ${pct(coverage)} من المرحلة)" else " (لم يُسجَّل منها شيء)").joinToString(" · "))
+            return
+        }
         if (sum.isNotEmpty() && total > 0) {
             val (top, ms) = sum.maxBy { it.value }
             val share = ms.toDouble() / total
             var conf = confidence(coverage, share)
             var needs: String? = if (coverage < 0.7) "${pct(1 - coverage)} من المرحلة بلا انتظار قطعة مسجل" else null
-            // لقطة الثانية الأولى تقول حال القطعة حينها، لا ما شغل بقية الانتظار
+            // اللقطة الأولى تقول حال القطعة حينها، لا ما شغل بقية الانتظار
             if (longWait) { conf = capped(conf, "STRONGLY_SUPPORTED"); needs = listOfNotNull(needs, "تقسيم الانتظار الطويل بعيّنات دورية (حالة كل كتلة كما في ويندوز)").joinToString(" · ") }
             if (top === PARTIAL || top === NOT_STARTED) needs = listOfNotNull(needs, "هل طُلبت كتلة الموضع من مشارك ومن أيّها").joinToString(" · ")
             ph.cause = Cause(top.code, top.ar, top.where, share, coverage, conf, needs)
@@ -270,7 +310,7 @@ object GoldReport {
         val coverage = minOf(1.0, measured.toDouble() / ph.ms)
         val share = (top.to - top.from).toDouble() / measured
         ph.cause = Cause(top.kind.code, top.kind.ar, top.kind.where, share, coverage, confidence(coverage, share),
-            "سبب الانتظار داخل المقطع: لا انتظار قطعة أطول من ثانية مسجل")
+            "سبب الانتظار داخل المقطع: لا انتظار قطعة أطول من 0.1 ث مسجل")
     }
 
     private fun rendered(ph: Phase, input: Input) {
@@ -297,7 +337,8 @@ object GoldReport {
         appendLine("[المسار الحرج من الضغط]")
         for (p in a.phases) appendLine("  ${p.ar}: ${s(p.ms)}" + (if (a.total > 0) " (${pct(p.ms.toDouble() / a.total)})" else "") +
             (if (p.beforeTap) " · قبل الفتح" else "") + (if (p.ongoing) " · جارية" else ""))
-        appendLine("  المجموع (${a.phases.last().ar}): ${s(a.total)}")
+        appendLine("  المجموع (${a.phases.maxBy { it.end }.ar}): ${s(a.total)}")
+        if (input.frameAt > 0) appendLine("  من الضغط حتى أول صورة معروضة: ${s(input.frameAt - a.origin)}" + if (input.readyAt > 0) " · حتى التشغيل (READY): ${s(input.readyAt - a.origin)}" else "")
         val b = a.bottleneck
         appendLine()
         appendLine("[الاختناق الرئيسي]")

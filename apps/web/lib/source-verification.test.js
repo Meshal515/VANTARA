@@ -144,3 +144,29 @@ it('a CloudStream verification closed by the page (not the user) shows its real 
   expect(await verifySourceDomains({plugin,runtimePlugin,domains:['https://rift.example/']})).toEqual({ok:false,error:message});
  }
 });
+
+describe('CF01: نجاح التحقق = نجاح الطلب الأصلي بعده', () => {
+  it('تحدٍّ جديد أثناء إعادة الطلب يبقي المصدر في «تحتاج تحقق» برسالة صادقة (لا «تم» كاذبة)', async () => {
+    const f = fixture(), c = createSourceVerification(f); await c.ready;
+    c.require({ host: 'source.example', retry: async () => { f.listeners.get('required')({ host: 'source.example', state: 'required' }); return { ok: false }; } });
+    const out = await c.begin('source.example');
+    expect(out).toMatchObject({ ok: false, reason: 'still_challenged' });
+    expect(c.list()).toEqual([expect.objectContaining({ host: 'source.example', state: 'failed', reason: 'still_challenged' })]);
+    c.close();
+  });
+  it('إعادة طلب ناجحة بلا تحدٍّ جديد: يخرج من القائمة', async () => {
+    const f = fixture(), c = createSourceVerification(f); await c.ready;
+    c.require({ host: 'source.example', retry: async () => ({ ok: true }) });
+    expect(await c.begin('source.example')).toEqual({ ok: true });
+    expect(c.list()).toEqual([]);
+    c.close();
+  });
+  it('أثناء إعادة الطلب يبقى ظاهرًا بحالة «يتحقق» (لا يختفي قبل الإثبات)', async () => {
+    const f = fixture(), c = createSourceVerification(f); await c.ready;
+    let during = null;
+    c.require({ host: 'source.example', retry: async () => { during = c.list(); return { ok: true }; } });
+    await c.begin('source.example');
+    expect(during).toEqual([expect.objectContaining({ host: 'source.example', verifying: true })]);
+    c.close();
+  });
+});

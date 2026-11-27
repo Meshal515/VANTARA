@@ -93,7 +93,7 @@ data class TorrentStats(
     val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
     /** تلميح القراءة (0004): كم مرة وصل libtorrent وكم مرة فشل (مكتبة بلا الدالتين). */
     val hintsSent: Int = 0, val hintsFailed: Int = 0,
-    /** آخر انتظارات القراء الأطول من ثانية ([ReadWait]). */
+    /** آخر انتظارات القراء الأطول من 0.1 ث ([ReadWait]). */
     val waits: List<ReadWait> = emptyList(),
     /** كل read وصل المحرك (بعد مخزن TorrentDataSource). */
     val engineReads: Long = 0L,
@@ -113,7 +113,11 @@ data class ReadWait(
     val untracked: Boolean get() = engine > known + 2
 }
 /** ما قاسه المحرك لتورنت: حجم القطعة، والسرب (باذرون معروفون، -1 مجهول)، والمتصلون الآن. */
-data class TorrentFacts(val pieceLength: Int, val swarmSeeds: Int, val peers: Int)
+data class TorrentFacts(
+    val pieceLength: Int, val swarmSeeds: Int, val peers: Int,
+    /** بيانات أول إطار على القرص (CLAUDE.md: إضاءة التسخين بإشارة المحرك): قطعة الرأس موثقة، أو كتل متصلة من بداية الملف. */
+    val ready: Boolean = false,
+)
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)
 
 /** Pure bounds/selection rules, shared by native loader and regression tests. */

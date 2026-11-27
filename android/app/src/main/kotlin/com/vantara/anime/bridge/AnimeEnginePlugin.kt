@@ -282,7 +282,8 @@ class AnimeEnginePlugin : Plugin() {
     }
 
     /**
-     * حقائق تورنتات الجلسة التي في المحرك الآن (المُسخَّنة): `{ facts: { routeId: { pieceLength, seeds, peers } } }`.
+     * حقائق تورنتات الجلسة التي في المحرك الآن (المُسخَّنة): `{ facts: { routeId: { pieceLength, seeds, peers, ready } } }`،
+     * و`ready` إشارة المحرك أن بيانات أول إطار على القرص (TorrentEngine.State.warmReady): برق التسخين في الورقة.
      * الورقة تستعملها في درجة «المقترح» وحدها (لا ترتيب الصفوف). لا اتصال جديد: قراءة حالة فقط.
      */
     @PluginMethod
@@ -294,7 +295,7 @@ class AnimeEnginePlugin : Plugin() {
             for (route in prep.routes()) {
                 val url = prep.candidatesOf(route.id).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url ?: continue
                 val f = torrent.facts(android.net.Uri.parse(url)) ?: continue
-                out.put(route.id, JSObject().put("pieceLength", f.pieceLength).put("seeds", f.swarmSeeds).put("peers", f.peers))
+                out.put(route.id, JSObject().put("pieceLength", f.pieceLength).put("seeds", f.swarmSeeds).put("peers", f.peers).put("ready", f.ready))
             }
         }
         call.resolve(JSObject().put("facts", out))

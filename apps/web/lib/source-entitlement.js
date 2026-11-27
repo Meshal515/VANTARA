@@ -49,6 +49,34 @@ export function isBundled(def) {
   return PKG_RULE.test(packageOf(id));
 }
 
+/**
+ * جدول المعرّفات القديمة للمصادر التي كانت مدمجة (قرار المالك 27 نوفمبر: «صفر مصادر مدمجة»). ليس مصادر ولا كودًا:
+ * المعرّف ولغته فقط، ليصل المعرّف القديم المحفوظ في المكتبة والتقدّم إلى الإضافة المثبّتة من المستودع (نظير
+ * LegacySourceIds.kt في أندرويد)، وليعرف الترحيل ما يُثبَّت. التعريفات نفسها أُزيلت من حزمة الواجهة (defs.json).
+ */
+export const FORMER_BUILTIN_SOURCES = Object.freeze([
+	['eu.kanade.tachiyomi.extension.ar.manga3asq', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangastarz', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangaspark', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangalek', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.hizomanga', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.comicverse', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.lonertranslations', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangaailand', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.manhatok', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.orcamanga', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.xsanomanga', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.yokai', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.azora', 'ar'],
+	['eu.kanade.tachiyomi.extension.all.mangadex', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.lavascans', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangalink', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangalionz', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.teamx', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangaswat', 'ar'],
+].map(([id, lang]) => Object.freeze({ id, lang })));
+export const FORMER_BUILTIN_IDS = new Set(FORMER_BUILTIN_SOURCES.map((s) => s.id));
+
 /** فوج الحساب من صفّه المتزامن، أو null إن لم يصل الصف بعد. */
 export function cohortOf(account) {
   const at = Number(account?.created_at);
@@ -77,10 +105,30 @@ export function choicesOf(settings) {
  * `standalone`: بلا خادم مزامنة ولا حساب (وضع «اقرأ بلا حساب»): لا حساب يثبت أنه جديد، فيبقى كما كان
  * قبل الفصل (المدمجة ظاهرة)، واختياراته محلية.
  */
-export function decide({ account = null, settings = null, standalone = false } = {}) {
+export function decide({ account = null, settings = null, standalone = false, used = null } = {}) {
   const { added, removed } = choicesOf(settings);
   const state = standalone ? 'unknown' : cohortOf(account) ?? 'unknown';
-  return { state, added, removed, standalone: Boolean(standalone) };
+  return { state, added, removed, standalone: Boolean(standalone), used: used ? new Set(used) : null };
+}
+
+/**
+ * الحزم المدمجة سابقًا التي يستعملها الحساب فعلًا (قرار المالك 27 نوفمبر: «لا 19 إضافة جاهزة»، مع حفظ
+ * إضافات المستخدم الحالية): مصدر عمل في المكتبة، أو نسخ عمل له تقدّم أو علامة قراءة. لا شيء يُحذف.
+ */
+export function usedPackagesFrom({ library = [], progress = [], chapterMarks = [], works = [] } = {}) {
+  const pkgs = new Set();
+  const refs = new Set();
+  const add = (id) => { const pkg = packageOf(id); if (pkg && PKG_RULE.test(pkg)) pkgs.add(pkg); };
+  for (const r of library) { if (r?.removed) continue; refs.add(String(r.series_ref ?? '')); add(r?.source_id); }
+  for (const r of [...progress, ...chapterMarks]) refs.add(String(r?.series_ref ?? ''));
+  for (const w of works) {
+    if (!refs.has(String(w?.series_ref ?? ''))) continue;
+    add(w.source_id);
+    let editions = w.editions_json;
+    if (typeof editions === 'string') { try { editions = JSON.parse(editions); } catch { editions = []; } }
+    for (const e of Array.isArray(editions) ? editions : []) add(e?.sourceId ?? e?.source_id);
+  }
+  return pkgs;
 }
 
 /** هل يظهر هذا المصدر لهذا الحساب؟ غير المدمج يظهر دائمًا. */
@@ -89,8 +137,11 @@ export function visible(def, decision = current) {
   const pkg = packageOf(def.id ?? def.sourceId);
   if (decision.removed.has(pkg)) return false;
   if (decision.added.has(pkg)) return true;
-  // يُخفى عن حساب ثبت أنه أُنشئ بعد الفصل فقط؛ القديم وغير المعروف يبقيان كما كانا
-  return decision.state !== 'clean';
+  if (decision.state === 'clean') return false;
+  // الحساب القديم: لا «جاهزة» مثبتة مسبقًا، ويبقى ما يستعمله فعلًا. قبل معرفة الاستعمال (المزامنة لم تكتمل)
+  // يبقى كما كان، فلا تختفي مصادر مستخدم قديم لحظة الإقلاع ثم تعود
+  if (decision.state === 'legacy' && decision.used) return decision.used.has(pkg);
+  return true;
 }
 
 /** حقول `settings.patch` لإضافة حزمة مدمجة سابقًا أو إزالتها من حساب. */
@@ -107,9 +158,9 @@ export function notAddedError(id) {
 
 // ───────────── الحالة الحالية للتطبيق (يضبطها app.js من المزامنة) ─────────────
 
-let current = { state: 'unknown', added: new Set(), removed: new Set(), standalone: false };
+let current = { state: 'unknown', added: new Set(), removed: new Set(), standalone: false, used: null };
 const listeners = new Set();
-const signature = (d) => `${d.state}|${d.standalone ? 1 : 0}|${[...d.added].sort()}|${[...d.removed].sort()}`;
+const signature = (d) => `${d.state}|${d.standalone ? 1 : 0}|${[...d.added].sort()}|${[...d.removed].sort()}|${d.used ? [...d.used].sort() : '?'}`;
 
 export function entitlement() {
   return current;
@@ -117,7 +168,7 @@ export function entitlement() {
 
 /** يضبط القرار الحالي، ويُعلم المشتركين فقط إن تغيّر فعلًا. */
 export function setEntitlement(next) {
-  const value = { state: next?.state ?? 'unknown', added: new Set(next?.added ?? []), removed: new Set(next?.removed ?? []), standalone: Boolean(next?.standalone) };
+  const value = { state: next?.state ?? 'unknown', added: new Set(next?.added ?? []), removed: new Set(next?.removed ?? []), standalone: Boolean(next?.standalone), used: next?.used ? new Set(next.used) : null };
   if (signature(value) === signature(current)) return false;
   current = value;
   for (const fn of listeners) { try { fn(current); } catch { /* مشترك معطوب لا يوقف الباقي */ } }

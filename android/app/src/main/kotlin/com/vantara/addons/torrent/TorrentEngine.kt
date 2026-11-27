@@ -491,7 +491,7 @@ class TorrentEngine internal constructor(
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
         val info = runCatching { handle.torrentFile() }.getOrNull()?.takeIf { it.isValid } ?: return null
         val status = runCatching { handle.status() }.getOrNull() ?: return null
-        return TorrentFacts(info.pieceLength(), maxOf(status.numComplete(), status.listSeeds()), status.numPeers())
+        return TorrentFacts(info.pieceLength(), maxOf(status.numComplete(), status.listSeeds()), status.numPeers(), states[hash]?.warmReady(handle) == true)
     }
     fun stats(uri: Uri): TorrentStats? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
@@ -933,17 +933,32 @@ class TorrentEngine internal constructor(
             // أول قطعة وحدها بموعد فوري، والذيل (أو موضع الاستئناف) بأولوية أقل بلا موعد: ينزل بما يفيض عن الرأس.
             // المالك يضغط غالبًا بعد 2–6 ث من فتح الورقة؛ كان الذيل يقاسم الرأس السرعة في هذه الثواني
             pieces.firstOrNull()?.let { head ->
+                val start = (file.offset / info.pieceLength()).toInt()
+                warmHead = head; warmHeadOffset = if (head == start) (file.offset % info.pieceLength()).toInt() else 0
                 current.piecePriority(head, Priority.SEVEN)
                 current.setPieceDeadline(head, 0)
                 deadlined += head
                 // حلقة حزمة الموسم تبدأ داخل قطعة يشاركها ملف سابق: كتل بدايتها أولًا لا كتل نهاية الحلقة السابقة
-                val start = (file.offset / info.pieceLength()).toInt()
-                NativeReadHint.set(current, WARM_READER, head, if (head == start) (file.offset % info.pieceLength()).toInt() else 0)
+                NativeReadHint.set(current, WARM_READER, head, warmHeadOffset)
             }
             for (piece in pieces.drop(1)) current.piecePriority(piece, Priority.FIVE)
             warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size
             current.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             current.resume()
+        }
+        /** قطعة رأس التسخين وموضع بداية الملف فيها (للإشارة «جاهز»)؛ -1 لم يُسخَّن. */
+        private var warmHead = -1
+        private var warmHeadOffset = 0
+        /**
+         * بيانات أول إطار على القرص: قطعة الرأس موثقة، أو كتل متصلة مكتوبة من بداية الملف بقدر [WARM_READY_BYTES]
+         * (رأس MKV وأول Cluster؛ تُقرأ بالخيار B قبل التحقق). إشارة المحرك نفسها، لا مؤقت ولا عدد مشاركين.
+         */
+        fun warmReady(handle: TorrentHandle): Boolean = synchronized(monitor) {
+            val head = warmHead.takeIf { it >= 0 } ?: return@synchronized false
+            if (runCatching { handle.havePiece(head) }.getOrDefault(false)) return@synchronized true
+            val size = pieceSizeOf(head).takeIf { it > warmHeadOffset } ?: return@synchronized false
+            val need = minOf(WARM_READY_BYTES, size - warmHeadOffset)
+            TurboRead.writtenSpan(written[head], warmHeadOffset, need, size) >= need
         }
         fun handle(cancelled: () -> Boolean, request: TorrentRequest): TorrentHandle {
             synchronized(monitor) {
@@ -1132,7 +1147,8 @@ class TorrentEngine internal constructor(
             var checkedAt = 0L
             var swappedAt = 0L
             var done = -1L
-            // للتشخيص: لقطة الثانية الأولى من انتظار طويل ([ReadWait])، تُسجَّل حين ينتهي
+            // للتشخيص: لقطة أول 0.1 ث من انتظار ([ReadWait])، تُسجَّل حين ينتهي. كانت عند ثانية فاختفت انتظارات قراءة
+            // الفهرس الأقصر منها (عينة المالك 27 نوفمبر: 4.2 ث لـ1.6MB من ذيل الملف بلا انتظار مسجل واحد)
             var probe: IntArray? = null
             fun waited(earlyRead: Boolean) {
                 val p = probe ?: return
@@ -1162,7 +1178,7 @@ class TorrentEngine internal constructor(
                     // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
                     // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).
                     val now = System.nanoTime()
-                    if (probe == null && now - start >= ONE_SECOND_NS) {
+                    if (probe == null && now - start >= WAIT_PROBE_NS) {
                         val bits = written[piece]
                         val queued = runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece } }.getOrNull()
                         val blocks = queued?.blocksInPiece() ?: ((pieceSizeOf(piece) + TurboRead.BLOCK_BYTES - 1) / TurboRead.BLOCK_BYTES)
@@ -1254,7 +1270,10 @@ class TorrentEngine internal constructor(
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         /** قطع ناقصة بلا موعد تُتتبع كتلها للخيار B في وقت واحد (ذوات الموعد تُتتبع دائمًا). */
         private const val MAX_TRACKED_PIECES = 64
-        private const val MAX_WAITS = 32
+        private const val MAX_WAITS = 64
+        /** «جاهز» في ورقة السيرفرات: هذا القدر متصلًا من بداية الملف (أو القطعة كلها إن كانت أصغر). */
+        private const val WARM_READY_BYTES = 4 * 1024 * 1024
+        private val WAIT_PROBE_NS = TimeUnit.MILLISECONDS.toNanos(100)
         /** تلميح القراءة (0004): قارئ التسخين، ويُحدَّث تلميح الفتح كل 4 كتل (64KB) يتقدمها. */
         private const val WARM_READER = 0
         /** قارئ Cues في الخلفية ([fetchCues]): لا يصطدم بقراء المشغّل (من 1) ولا بالتسخين (0). */

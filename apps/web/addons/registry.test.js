@@ -389,3 +389,19 @@ it.each(['baseUrl', 'networkHosts'])('rejects a changed remote %s during reinsta
   await expect(r.reinstall(one.key)).rejects.toThrow('مصدر الإضافة');
   expect(r.list()[0].cacheEpoch).toBe(one.cacheEpoch);
 });
+it("يحفظ ترتيب المستخدم لكل حساب ويستعيده بعد إعادة التحميل، والمفضّلة تبقى أولًا", async () => {
+  const store = createStore({ indexedDB: null });
+  const make = () => createAddonRegistry({ store, transport: { json: async (u) => ({ ...raw(), id: "org." + new URL(u).hostname.split(".")[0], name: new URL(u).hostname }) } });
+  const r = make(); await r.ready;
+  for (const h of ["a", "b", "c"]) await r.install(await r.inspect(`https://${h}.test/manifest.json`));
+  const keys = r.list().map((x) => x.key);
+  await r.order([keys[2], keys[0], keys[1]]);
+  expect(r.list().map((x) => x.key)).toEqual([keys[2], keys[0], keys[1]]);
+  await r.pin(keys[1], true);
+  expect(r.list().map((x) => x.key)).toEqual([keys[1], keys[2], keys[0]]);
+  const again = make(); await again.ready;
+  expect(again.list().map((x) => x.key)).toEqual([keys[1], keys[2], keys[0]]);
+  again.setProfile("other");
+  expect(again.list().map((x) => x.key)).toEqual(keys);
+  await expect(again.order("bad")).rejects.toThrow();
+});

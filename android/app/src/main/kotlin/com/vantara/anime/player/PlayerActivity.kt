@@ -1044,7 +1044,7 @@ class PlayerActivity : Activity() {
         startedAt = System.currentTimeMillis()
         openAt = SystemClock.elapsedRealtime(); readyAt = 0L; frameAt = 0L
         net.markStart()
-        if (BuildConfig.DEBUG) { diag.start(c.preparationMs); videoDecoder = null }
+        if (BuildConfig.DEBUG) { diag.start(c.preparationMs, c.firstCandidateMs); videoDecoder = null }
         together?.onPreparing()
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)

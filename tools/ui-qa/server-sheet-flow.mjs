@@ -48,13 +48,21 @@ push();
 // الوصول: دفعات كل 120ms (تورنت أولًا، ثم المباشر قيد الفحص ثم يصلح أو يتعذّر)، وحقائق تسخين تصل لبعض التورنت
 window.__feed = async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  for (let i = 0; i < torrents.length; i += 8) { routes = [...routes, ...torrents.slice(i, i + 8)]; push(); await wait(120); }
-  for (let i = 0; i < direct.length; i += 5) { routes = [...routes, ...direct.slice(i, i + 5)]; push(); await wait(120); }
+  const torrentsIn = async () => { for (let i = 0; i < torrents.length; i += 8) { routes = [...routes, ...torrents.slice(i, i + 8)]; push(); await wait(120); } };
+  const directIn = async () => { for (let i = 0; i < direct.length; i += 5) { routes = [...routes, ...direct.slice(i, i + 5)]; push(); await wait(120); } };
+  // DIRECT_FIRST=1: CloudStream قبل التورنت (كما يصل على الجهاز أحيانًا)
+  if (window.__directFirst) { await directIn(); await torrentsIn(); } else { await torrentsIn(); await directIn(); }
   for (let i = 0; i < direct.length; i++) {
     const d = direct[i]; const next = i % 4 === 3 ? { ...d, state: 'UNAVAILABLE', reason: 'Cloudflare' } : { ...d, state: 'READY', probed: true, probeMs: 400 + i * 30 };
     routes = routes.map((r) => (r.id === d.id ? next : r)); push(); await wait(60);
   }
   for (let i = 0; i < 30; i += 3) { facts = { ...facts, ['t' + i]: { pieceLength: 2 << 20, seeds: 50 + i, peers: 9, ready: true } }; push(); await wait(150); }
+  // FACTS_LOOP=1: حقائق المحرك تتجدد كل ثانية والسرب المقاس يتغير (كما على الجهاز والورقة مفتوحة)
+  if (window.__factsLoop) for (let n = 0; n < 8; n++) {
+    const next = {};
+    for (let i = 0; i < 60; i += 2) next['t' + i] = { pieceLength: 2 << 20, seeds: 20 + ((i * 37 + n * 53) % 400), peers: 5 + (n % 7), ready: i % 4 === 0 || n > 3 };
+    facts = next; push(); await wait(1000);
+  }
   window.__fed = true;
 };
 // قياس كل إطار
@@ -95,10 +103,13 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch(process.env.VANTARA_CHROMIUM ? { executablePath: process.env.VANTARA_CHROMIUM } : {});
-const context = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+// WV=1: وكيل WebView أندرويد ("; wv)")، فيعمل مسار تسليم الانزلاق (flingHoldRisk) كما على الجهاز
+const userAgent = process.env.WV ? 'Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36' : undefined;
+const context = await browser.newContext({ viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1, ...(userAgent ? { userAgent } : {}) });
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
+await page.addInitScript(({ d, f }) => { window.__directFirst = d; window.__factsLoop = f; }, { d: Boolean(process.env.DIRECT_FIRST), f: Boolean(process.env.FACTS_LOOP) });
 await page.goto(base);
 await page.waitForFunction(() => window.__ui);
 const cdp = await context.newCDPSession(page);

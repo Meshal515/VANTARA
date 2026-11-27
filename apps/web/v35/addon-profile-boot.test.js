@@ -17,7 +17,7 @@ describe('ربط ملف إضافات CloudStream عند الإقلاع', () => {
 describe('فتح مدير الإضافات (UX06 وUX10)', () => {
   const body = (() => { const s = readFileSync(new URL('./shell.js', import.meta.url), 'utf8'); const i = s.indexOf('async function openAddons()'); return s.slice(i, s.indexOf('async function openNativeAddonSource', i)); })();
   it('لا انتظار بين آخر فحص للجيل ورسم المدير', () => {
-    const render = body.indexOf('addonHubView = renderAddons(');
+    const render = body.indexOf('addonHubView = renderAddonsHub(');
     const lastGuard = body.lastIndexOf('if(run!==addonViewGeneration', render);
     expect(lastGuard).toBeGreaterThan(-1);
     expect(body.slice(lastGuard, render)).not.toMatch(/\bawait\b/);

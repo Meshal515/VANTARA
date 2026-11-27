@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- نسخة Debug معكوسة عن Stable: الشعار رمادي بظل أسود على أبيض، فتتميز على المُشغّل. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

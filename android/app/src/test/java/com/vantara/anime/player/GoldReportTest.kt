@@ -12,7 +12,8 @@ class GoldReportTest {
     private val GB = 1L shl 30
     private val MB = 1L shl 20
 
-    private fun read(openedAt: Long, firstByteAt: Long, position: Long, bytes: Long = MB) = GoldReport.Read(openedAt, openedAt, firstByteAt, position, bytes)
+    private fun read(openedAt: Long, firstByteAt: Long, position: Long, bytes: Long = MB, endAt: Long = if (firstByteAt > 0) firstByteAt + 100 else 0L) =
+        GoldReport.Read(openedAt, openedAt, firstByteAt, position, bytes, endAt)
     private fun wait(piece: Int, ms: Long, endAt: Long, engine: Int, known: Int = engine, blocks: Int = 128, early: Boolean = false, tail: Boolean = false, atOffset: Boolean = false) =
         ReadWait(piece = piece, block = 0, blocks = blocks, known = known, engine = engine, atOffset = atOffset, ms = ms, early = early, tail = tail, endAt = endAt)
 
@@ -32,8 +33,8 @@ class GoldReportTest {
         assertEquals("STRONGLY_SUPPORTED", a.bottleneck!!.cause!!.confidence)
         assertTrue(a.bottleneck!!.cause!!.where!!.contains("NativeReadHint.kt"))
         val text = GoldReport.text(input)
-        assertTrue(text, text.contains("طلب قراءة من ذيل الملف (الفهرس)"))
-        assertTrue(text, text.contains("أول بايت بعد 4100ms"))
+        assertTrue(text, text.contains("قراءة من ذيل الملف (الفهرس) (2.00GB): 1.0MB في 4200ms"))
+        assertTrue(text, text.contains("أول بايت بعد 4100ms · منها 4200ms في هذه المرحلة"))
         assertTrue(text, text.contains("القطعة 255 (ذيل الملف): 4000ms"))
         assertTrue(text, text.contains("تقسيم الانتظار الطويل بعيّنات دورية"))
         assertTrue(text, text.contains("تخطّى بلا تنزيل 614KB"))
@@ -99,4 +100,51 @@ class GoldReportTest {
         assertTrue(a.integrity.contains("أول صورة معروضة: لم تُعرض بعد"))
         assertFalse(GoldReport.analyze(GoldReport.Input(tapAt = 0, openAt = 0)).integrity.isEmpty())
     }
+
+    @Test fun `عينة المالك 2 (AV1 متابعة 5_30، 27 نوفمبر) - الحاوية 4_75 ث كانت قراءة الفهرس من ذيل الملف لا «غير معروف»`() {
+        // الأرقام من التقرير الخام: فتح بعد 0.9 ث، الرأس 625KB، الذيل 1.6MB في 4.2 ث، المسارات +6.85، أول صورة +8.1، READY +8.86
+        val input = GoldReport.Input(
+            tapAt = 9_770, openAt = 10_000, preparationMs = 1_600,
+            reads = listOf(
+                read(10_900, 12_100, 0, 625 * 1024L, endAt = 12_400),
+                read(12_500, 13_370, 293_500_000L, 1_677_722L, endAt = 16_700),
+                read(16_700, 0, 625 * 1024L, 0L, endAt = 16_800),
+                read(16_800, 17_366, 62_100_000L, 4_800_000L, endAt = 0L),
+            ),
+            tracksAt = 16_850, readyAt = 18_860, frameAt = 18_100,
+            torrent = GoldReport.Torrent(firstPeerAt = 9_000, metadataAt = 10_890, firstPayloadAt = 11_100, fileBytes = 295_000_000L, pieceBytes = 2 * MB.toInt(),
+                waits = listOf(wait(12575, 1_147, 12_090, engine = 9, blocks = 128, early = true)), peers = 41, downloadBps = 27_600_000L / 8,
+                turbo = true, earlyBytes = 5_200_000L, hintsSent = 98, mkvSkipped = 1_228_800L, patched = true, criticalPieces = 2),
+            now = 19_000,
+        )
+        val a = GoldReport.analyze(input)
+        val b = a.bottleneck!!
+        assertEquals("container", b.id)
+        assertEquals(4_750L, b.ms)
+        assertEquals("WAIT_INDEX_READ", b.cause!!.code)
+        assertEquals("CONFIRMED", b.cause!!.confidence)
+        assertTrue(b.cause!!.needs!!.contains("لماذا بطؤت القراءة"))
+        // أول صورة قبل READY: المسار بترتيب الوقوع
+        assertEquals(listOf("source", "metadata", "first-byte", "container", "rendered", "ready"), a.phases.map { it.id })
+        val text = GoldReport.text(input)
+        assertTrue(text, text.contains("قراءة من ذيل الملف (الفهرس) (279.9MB): 1.6MB في 4200ms بمعدل 0.38MB/ث"))
+        assertTrue(text, text.contains("التحميل الآن 3.29MB/ث"))
+        assertTrue(text, text.contains("من الضغط حتى أول صورة معروضة: 8.33 ث · حتى التشغيل (READY): 9.09 ث"))
+    }
+
+    @Test fun `عينة المالك 1 (HEVC من البداية) - أول صورة قبل READY لا تُحسب مرحلة صفرية`() {
+        val a = GoldReport.analyze(GoldReport.Input(
+            tapAt = 9_930, openAt = 10_000, reads = listOf(read(10_000, 11_874, 0, 3 * MB, endAt = 0L)),
+            tracksAt = 11_900, frameAt = 12_100, readyAt = 12_180,
+            torrent = GoldReport.Torrent(metadataAt = 10_030, firstPeerAt = 10_500, firstPayloadAt = 11_551, fileBytes = 156_000_000L, pieceBytes = 16 * MB.toInt(),
+                waits = listOf(wait(1108, 1_872, 11_872, engine = 0, blocks = 1024, early = true))),
+            now = 12_500,
+        ))
+        assertEquals("first-byte", a.bottleneck!!.id)
+        assertEquals("WAIT_PIECE_NOT_STARTED", a.bottleneck!!.cause!!.code)
+        val rendered = a.phases.first { it.id == "rendered" }
+        assertEquals(200L, rendered.ms)
+        assertEquals("ready", a.phases.last().id)
+    }
 }
+

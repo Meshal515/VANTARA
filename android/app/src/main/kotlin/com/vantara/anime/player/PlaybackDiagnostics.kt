@@ -44,7 +44,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
         /** الخيار B: مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
         val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
-        /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من ثانية. */
+        /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من 0.1 ث. */
         val hintsSent: Int = 0, val hintsFailed: Int = 0,
         val waits: List<com.vantara.addons.torrent.ReadWait> = emptyList(),
         /** تقرير الذهب: إضافة التورنت للجلسة، وMetadata من ملف محفوظ، وأول مشارك معروف. */
@@ -70,17 +70,19 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     @Volatile var launchedAt = 0L
 
     private var preparationMs: Long? = null
+    private var firstCandidateMs: Long? = null
     private var audioOnlyAt = 0L
     /** تقرير الذهب: أول مسارات من الحاوية (onTracksChanged)، وتهيئة مفكك الفيديو (onVideoDecoderInitialized). */
     private var tracksAt = 0L
     private var decoderName: String? = null
     private var decoderInitAt = 0L
     private var decoderInitMs = 0L
-    @Synchronized fun start(preparationMs: Long? = null) {
+    @Synchronized fun start(preparationMs: Long? = null, firstCandidateMs: Long? = null) {
         reads.clear(); seeks.clear(); events.clear(); opening.clear(); active.clear()
         count = 0; openAt = now(); readyAt = 0; frameAt = 0; audioOnlyAt = 0
         tracksAt = 0; decoderName = null; decoderInitAt = 0; decoderInitMs = 0
         this.preparationMs = preparationMs
+        this.firstCandidateMs = firstCandidateMs
         event("فتح المصدر")
     }
 
@@ -188,12 +190,12 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     /** مدخل تقرير الذهب من هذه الجلسة (ساعة واحدة: elapsedRealtime). */
     @Synchronized fun goldInput(t: TorrentFacts?, nowMs: Long = now(), build: String = "—", patched: Boolean = false, critical: Int = 0) = GoldReport.Input(
         tapAt = launchedAt, openAt = openAt, preparationMs = preparationMs,
-        reads = reads.map { GoldReport.Read(it.at, it.openedAt, it.firstByteAt, it.position, it.bytes) },
+        reads = reads.map { GoldReport.Read(it.at, it.openedAt, it.firstByteAt, it.position, it.bytes, it.endAt) },
         tracksAt = tracksAt, readyAt = readyAt, frameAt = frameAt, audioOnlyAt = audioOnlyAt,
         decoder = decoderName, decoderInitAt = decoderInitAt, decoderInitMs = decoderInitMs,
         torrent = t?.let { GoldReport.Torrent(it.addedAt, it.metadataCached, it.firstKnownAt, it.firstPeerAt, it.metadataAt, it.firstPayloadAt, it.firstPieceAt,
             it.warmedAt, it.warmedPieces, it.fileBytes, it.pieceBytes, it.waits, it.waitingPiece, it.waitingSince, it.waitingBlocks,
-            it.peers, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical) },
+            it.peers, it.downloadBps, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical) },
         build = build, now = nowMs, readsFull = count > MAX_READS,
     )
 
@@ -222,7 +224,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             appendLine("المحرك: " + (if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12") +
                 " · تلميح القراءة: " + hints(t))
             if (t.waits.isNotEmpty()) {
-                appendLine("انتظار القطع (أطول من ثانية، الأحدث آخرًا):")
+                appendLine("انتظار القطع (أطول من 0.1 ث، الأحدث آخرًا):")
                 for (w in t.waits) appendLine("  " + wait(w))
             }
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
@@ -235,7 +237,10 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             t?.let { "بيانات التورنت ${rel(it.metadataAt)}" }, t?.let { "أول مشارك ${rel(it.firstPeerAt)}" }, t?.let { "أول بيانات ${rel(it.firstPayloadAt)}" }, t?.let { "أول قطعة ${rel(it.firstPieceAt)}" },
             "أول بايت ${rel(firstByte)}", "جاهز ${rel(readyAt)}", "أول صورة ${rel(frameAt)}",
         ).joinToString(" · "))
-        appendLine("الاستخراج وتجهيز السيرفر: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر المرشح، قبل الفحص والمشغّل)")
+        appendLine("أول سيرفر ظهر بعد: ${firstCandidateMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من أي سيرفر)")
+        appendLine("السيرفر المشغَّل ظهر بعد: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر هذا المرشح، قبل الفحص والمشغّل)")
+        val gap = if (preparationMs != null && firstCandidateMs != null) preparationMs!! - firstCandidateMs!! else null
+        if (gap != null && gap >= 1000) appendLine("الانتظار بعد أول سيرفر حتى المشغَّل: ${secs(gap)} ث (الاختناق في الاختيار لا الاستخراج)")
         appendLine("تهيئة المشغّل: ${if (readyAt > 0) "${secs(readyAt - openAt)} ث" else "لم تكتمل"} · أول صورة: ${if (frameAt > 0) "${secs(frameAt - openAt)} ث" else if (audioOnlyAt > 0) "صوت فقط — لا إطار منتظر" else "لم تظهر"}")
         appendLine("طلبات القراءة (${reads.size}):")
         for (r in reads) appendLine("  ${r.n}) ${rel(r.at)} ${where(r.position, t?.fileBytes)} → ${bytes(r.bytes)}" +
@@ -285,7 +290,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         else -> "لم يُرسل بعد"
     }
 
-    /** انتظار واحد: القطعة والموضع والمدة، وما يعرفه المحرك مكتوبًا مقابل libtorrent لحظة الثانية الأولى، وكيف انتهى. */
+    /** انتظار واحد: القطعة والموضع والمدة، وما يعرفه المحرك مكتوبًا مقابل libtorrent لحظة أول عيّنة، وكيف انتهى. */
     internal fun wait(w: com.vantara.addons.torrent.ReadWait): String =
         "القطعة ${w.piece}" + (if (w.tail) " (آخر الملف)" else "") + " عند الكتلة ${w.block}: ${secs(w.ms)} ث" +
             " · مكتوب عندنا ${w.known} وفي libtorrent ${w.engine} من ${w.blocks}" +
