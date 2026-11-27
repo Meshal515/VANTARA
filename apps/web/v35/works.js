@@ -1322,9 +1322,12 @@ export function reviewStoredEditions(v35work, list, { detail = null } = {}) {
       const linked = editionRef(key);
       if (linked && !graph.sameClass(linked, id)) ok = !graph.contradiction(linked, id, RANK.SOURCE);
       else if (!linked) {
+        // نسخة محفوظة غير مربوطة تبقى بدليل الاسم فقط (مطابق أو توأم أو اسم بديل). كانت تبقى لمجرد أن اسمها ليس
+        // جزءًا من اسم العمل، فنسخة «Lookism» دخلت بطاقة «رجل المنشار» مرة بقيت فيها للأبد (بلاغ المالك 27 نوفمبر).
+        // منع الدمج الخاطئ أهم من رفع الدمج: المُسقطة يُسأل مصدرها من جديد، ولا يُحذف شيء من بيانات المستخدم.
         const title = normalizeTitle(e?.manga?.title);
         ok = !officialConflict(e?.manga, workOfficial, officialOf)
-          && (!title || ![...own].some((m) => isPartName(title, m)) || Boolean(listingEvidence(e?.manga, own, { workOfficial, officialOf })));
+          && (!title || Boolean(listingEvidence(e?.manga, own, { workOfficial, officialOf })));
       }
     }
     if (ok) kept.push(e);

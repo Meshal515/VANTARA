@@ -344,3 +344,16 @@ describe('safeAlternates — لا يُعرض فصل من عمل آخر أبدً�
     expect(safeAlternates({ ...row, chapter: {} }, [mirror])).toEqual([]);
   });
 });
+
+import { reviewStoredEditions } from './works.js';
+describe('النسخ المحفوظة: لا تبقى نسخة عمل آخر في البطاقة (Lookism في رجل المنشار)', () => {
+  const work = { id: 'ext:chainsaw man', title: { english: 'Chainsaw Man', romaji: 'Chainsaw Man' }, _work: { title: 'Chainsaw Man', aliases: ['رجل المنشار'], editions: [{ sourceId: 'ar.mangastarz', manga: { url: '/manga/chainsaw-man/', title: 'Chainsaw Man' } }] } };
+  const own = { sourceId: 'ar.mangastarz', manga: { url: '/manga/chainsaw-man/', title: 'Chainsaw Man' } };
+  const arabic = { sourceId: 'ar.teamx', manga: { url: '/series/csm/', title: 'رجل المنشار' } };
+  const lookism = { sourceId: 'ar.azora', manga: { url: '/series/lookism/', title: 'Lookism' } };
+  it('نسخة باسم عمل آخر بلا دليل تخرج ويُسأل مصدرها من جديد', () => {
+    const { kept, dropped } = reviewStoredEditions(work, [own, arabic, lookism]);
+    expect(kept.map((e) => e.sourceId)).toEqual(['ar.mangastarz', 'ar.teamx']);
+    expect(dropped).toEqual(['ar.azora']);
+  });
+});
