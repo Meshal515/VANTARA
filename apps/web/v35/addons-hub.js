@@ -1541,6 +1541,9 @@ ${D?`
 .y .y-sw::after,.y-sheet .y-sw::after{width:26px;height:26px;top:3px;left:3px}
 .y .y-sw.off::after,.y-sheet .y-sw.off::after{left:23px}
 .y .y-get svg{width:24px!important;height:24px!important}.y .y-get{width:46px;height:46px}
+/* صف إجراءات التفاصيل: كل الأزرار في سطر واحد مهما كان عددها (Stremio خمسة، والأصلية أربعة) */
+.y .y-acts{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
+.y .y-act{min-width:0}
 /* فاصل الأرقام: خط مستقيم لا يلتف مع زاوية زر «تحديثات» */
 .y-overview-stats>div+div{border-inline-start:0!important;position:relative}
 .y-overview-stats>div+div::before{content:'';position:absolute;inset-inline-start:0;top:2px;bottom:2px;width:1px;background:var(--line-strong)}
