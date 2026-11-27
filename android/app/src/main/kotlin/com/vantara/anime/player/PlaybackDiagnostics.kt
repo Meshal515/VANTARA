@@ -21,8 +21,14 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     class Read(val n: Int, val at: Long, val position: Long) {
         var openedAt = 0L; var bytes = 0L; var firstByteAt = 0L; var endAt = 0L
     }
-    class Seek(val at: Long, val fromMs: Long, val toMs: Long) {
+    /**
+     * قفزة واحدة كما طُلبت من SeekGuardPlayer (نقطة كل قفزة: الأزرار والشريط والغرفة). [method]: عادية، أو «إعادة تجهيز
+     * بالفهرس» (مصدر بدأ بلا Cues: setMediaSource جديد فتُمسح الـTimeline والمدة حتى يقرأ الفهرس). [durationMs] المدة
+     * لحظة الطلب، و[unknownSince]/[unknownMs] متى غابت المدة بعدها وكم بقيت غائبة.
+     */
+    class Seek(val at: Long, val fromMs: Long, val toMs: Long, val method: String = "عادية", val durationMs: Long = 0L, val seekable: Boolean = true) {
         var readyAt = 0L; var frameAt = 0L
+        var unknownSince = 0L; var unknownMs = 0L
     }
     /** حقائق التورنت لحظة كتابة التقرير (من TorrentStats)، بالساعة نفسها elapsedRealtime. */
     class TorrentFacts(
@@ -46,6 +52,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     class PlayerFacts(
         val state: Int, val positionMs: Long, val bufferedMs: Long, val durationMs: Long,
         val container: String?, val video: String?, val decoder: String?, val textTracks: Int, val audioTracks: Int,
+        val playWhenReady: Boolean = true,
     )
 
     private val reads = ArrayDeque<Read>()
@@ -107,6 +114,25 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         seeks.lastOrNull()?.takeIf { it.frameAt == 0L }?.frameAt = now()
     }
     /** [readyNow]: قفزة داخل ما هو محمّل أصلًا، فلا يمر المشغّل بالانتظار ولا يصل حدث READY جديد. */
+    /** القفزة لحظة طلبها (قبل أن يبدأ Media3 أو يُعاد التجهيز). [applied] يكمّلها حين يصل حدث القفزة نفسه. */
+    @Synchronized fun seekRequested(fromMs: Long, toMs: Long, method: String, durationMs: Long, seekable: Boolean) {
+        if (openAt == 0L) return
+        seeks.addLast(Seek(now(), fromMs, toMs, method, durationMs, seekable)); while (seeks.size > MAX_SEEKS) seeks.removeFirst()
+        event("قفزة ${clock(fromMs)} ← ${clock(toMs)} ($method)")
+    }
+    /** حدث القفزة من Media3: داخل المحمّل يبقى READY بلا انتقال حالة، فالجاهزية هنا. */
+    @Synchronized fun seekApplied(readyNow: Boolean) {
+        val s = seeks.lastOrNull() ?: return
+        if (readyNow && s.readyAt == 0L) s.readyAt = now()
+    }
+    /** المدة كما يعرفها المشغّل الآن (يُستدعى مع كل تغيّر حالة أو Timeline): يقيس غيابها بعد القفزة الأخيرة. */
+    @Synchronized fun duration(durationMs: Long) {
+        val s = seeks.lastOrNull() ?: return
+        val unknown = durationMs <= 0
+        if (unknown && s.unknownSince == 0L) s.unknownSince = now()
+        if (!unknown && s.unknownSince > 0L) { s.unknownMs += now() - s.unknownSince; s.unknownSince = 0L }
+    }
+
     @Synchronized fun seek(fromMs: Long, toMs: Long, readyNow: Boolean = false) {
         if (openAt == 0L) return
         seeks.addLast(Seek(now(), fromMs, toMs).apply { if (readyNow) readyAt = at }); while (seeks.size > MAX_SEEKS) seeks.removeFirst()
@@ -190,13 +216,35 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             (if (r.endAt > 0) " · مدة ${secs(r.endAt - r.openedAt)} ث" else " · جارية"))
         if (seeks.isNotEmpty()) {
             appendLine("القفزات (${seeks.size}):")
-            seeks.forEachIndexed { i, s -> appendLine("  ${i + 1}) ${clock(s.fromMs)} ← ${clock(s.toMs)}: " +
+            seeks.forEachIndexed { i, s -> appendLine("  ${i + 1}) ${clock(s.fromMs)} ← ${clock(s.toMs)} (${s.method}): " +
                 (if (s.readyAt > 0) "جاهز بعد ${secs(s.readyAt - s.at)} ث" else "لم يجهز بعد (${secs(nowMs - s.at)} ث)") +
-                (if (s.frameAt > 0) " · صورة بعد ${secs(s.frameAt - s.at)} ث" else "")) }
+                (if (s.frameAt > 0) " · صورة بعد ${secs(s.frameAt - s.at)} ث" else "") +
+                " · المدة قبلها ${if (s.durationMs > 0) clock(s.durationMs) else "--:--"}" +
+                (s.unknownMs + if (s.unknownSince > 0) nowMs - s.unknownSince else 0L).let { if (it > 0) " · غابت المدة ${secs(it)} ث" else "" } +
+                reads.filter { it.at >= s.at && (seeks.getOrNull(i + 1)?.at ?: Long.MAX_VALUE) > it.at }.let { rs ->
+                    if (rs.isEmpty()) " · لا طلب قراءة" else " · قراءات: " + rs.joinToString("، ") { r -> "${where(r.position, t?.fileBytes)} ${bytes(r.bytes)}" + if (r.firstByteAt == 0L) " (لم يصل بايت)" else "" }
+                }) }
+            seeks.lastOrNull()?.takeIf { it.readyAt == 0L }?.let { appendLine("  لماذا لم يستأنف: " + stuck(it, t, p, nowMs)) }
         }
         appendLine("الأحداث:")
         for (e in events) appendLine("  $e")
         append("الحكم: ").append(verdict(t, p, nowMs))
+    }
+
+    /** القفزة الأخيرة لم تعد READY: السبب من الحقائق وحدها، بترتيب ما يمنع الاستئناف أولًا. */
+    internal fun stuck(s: Seek, t: TorrentFacts?, p: PlayerFacts, nowMs: Long): String {
+        val after = reads.filter { it.at >= s.at }
+        val why = mutableListOf<String>()
+        if (!p.playWhenReady) why += "التشغيل موقوف (playWhenReady=false)"
+        if (p.durationMs <= 0) why += "المدة غير معروفة: المصدر " + (if (s.method != "عادية") "يُعاد تجهيزه ولم يقرأ الفهرس بعد" else "فقد الـTimeline")
+        when {
+            after.isEmpty() -> why += "لم يفتح المشغّل أي طلب قراءة منذ القفزة (${secs(nowMs - s.at)} ث)"
+            after.last().firstByteAt == 0L -> why += "آخر طلب ${where(after.last().position, t?.fileBytes)} لم يصل منه بايت منذ ${secs(nowMs - after.last().openedAt)} ث"
+        }
+        if (t != null && t.waitingPiece >= 0) why += "المحرك ينتظر القطعة ${t.waitingPiece} منذ ${secs(nowMs - t.waitingSince)} ث" +
+            (t.waitingBlocks?.let { (d, n) -> " ($d/$n كتلة)" } ?: " (لم يبدأ تحميلها)")
+        if (t != null && t.peers == 0) why += "لا مشاركين متصلين"
+        return why.ifEmpty { listOf("الحالة ${p.state} والموضع ${clock(p.positionMs)} وأمامه ${p.bufferedMs / 1000} ث") }.joinToString(" · ")
     }
 
     private fun hints(t: TorrentFacts) = when {

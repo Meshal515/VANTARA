@@ -644,7 +644,7 @@ class PlayerActivity : Activity() {
             .setLoadControl(PlaybackBuffering.create(Runtime.getRuntime().maxMemory()))
             .setSeekBackIncrementMs(SEEK_MS)
             .setSeekForwardIncrementMs(SEEK_MS)
-            .build().let { SeekGuardPlayer(it, ::seekNeedsCues) }
+            .build().let { inner -> SeekGuardPlayer(inner) { to -> noteSeek(inner, to); seekNeedsCues(to) } }
         // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
@@ -818,6 +818,7 @@ class PlayerActivity : Activity() {
         override fun onEvents(player: Player, events: Player.Events) {
             // A seek inside buffered media can stay READY without a state-change callback.
             if (player.playbackState == Player.STATE_READY) seekBudget.reset()
+            if (BuildConfig.DEBUG) diag.duration(player.duration)
         }
 
         override fun onPlaybackStateChanged(state: Int) {
@@ -862,7 +863,7 @@ class PlayerActivity : Activity() {
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
-            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
+            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seekApplied(player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 seekRecovery.seeked(SystemClock.elapsedRealtime())
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
@@ -965,6 +966,13 @@ class PlayerActivity : Activity() {
         sampleUsage()
         updateQualityLabel()
         watchStall()
+    }
+
+    /** تشخيص القفز (نسخة الاختبار): كل قفزة لحظة طلبها، بطريقتها والمدة قبلها (PlaybackDiagnostics.seekRequested). */
+    private fun noteSeek(inner: androidx.media3.exoplayer.ExoPlayer, to: Long) {
+        if (!BuildConfig.DEBUG) return
+        val method = if (cuesDeferred && !inner.isCurrentMediaItemSeekable) "إعادة تجهيز بالفهرس" else "عادية"
+        diag.seekRequested(inner.currentPosition, to, method, inner.duration.takeIf { it > 0 } ?: 0L, inner.isCurrentMediaItemSeekable)
     }
 
     /** المصدر الحالي بدأ بلا فهرس الحاوية (CandidateMediaSources.deferCues) ولم يُعد تجهيزه بعد. */
@@ -2475,6 +2483,7 @@ class PlayerActivity : Activity() {
             player.playbackState, player.currentPosition, player.totalBufferedDuration, player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L,
             f?.containerMimeType, f?.let { listOfNotNull(it.sampleMimeType ?: it.codecs, if (it.width > 0) "${it.width}x${it.height}" else null).joinToString(" ") },
             videoDecoder, groups.count { it.type == C.TRACK_TYPE_TEXT }, groups.count { it.type == C.TRACK_TYPE_AUDIO },
+            playWhenReady = player.playWhenReady,
         )
         val report = diag.report(facts, p)
         body.addView(label("تشخيص (نسخة الاختبار)", 13.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(0, dp(14), 0, dp(4)) })

@@ -78,6 +78,34 @@ class PlaybackDiagnosticsTest {
         assertFalse(unpatched, unpatched.contains("انتظار القطع"))
     }
 
+    /**
+     * P0 (المالك، 27 نوفمبر): «تقديم 10 ثوانٍ» على مصدر بدأ بلا فهرس يعيد تجهيزه، فتغيب المدة ولا يستأنف. التقرير يقول
+     * الطريقة والمدة قبلها وكم غابت، والقراءات بعدها، ولماذا لم يستأنف (ينتظر قطعة الفهرس في آخر الملف).
+     */
+    @Test fun seekReportsMethodDurationReadsAndWhyItDidNotResume() {
+        at(0); diag.start()
+        val head = Any(); diag.initializing(head); diag.opened(head, 0); diag.transferred(head, mb.toInt())
+        at(1_000); diag.state(Player.STATE_READY, 0, 3_000); diag.firstFrame()
+        at(5_000); diag.seekRequested(4_000, 14_000, "إعادة تجهيز بالفهرس", 2_520_000, false)
+        at(5_050); diag.duration(androidx.media3.common.C.TIME_UNSET)
+        val again = Any(); at(5_200); diag.initializing(again); diag.opened(again, 0); diag.transferred(again, 9_000)
+        val tail = Any(); at(5_400); diag.initializing(tail); diag.opened(tail, 317 * mb)
+        at(25_000)
+        val facts = PlaybackDiagnostics.TorrentFacts(
+            peers = 40, seeds = 30, downloadBps = 3_000_000, fileBytes = 318 * mb, pieceBytes = (16 * mb).toInt(),
+            metadataAt = 1_000_000L, firstPieceAt = 0, waitingPiece = 19, waitingSince = 1_000_000L + 5_400, waitingBlocks = 120 to 1024,
+        )
+        val stuck = PlaybackDiagnostics.PlayerFacts(Player.STATE_BUFFERING, 14_000, 0, 0, "video/x-matroska", null, null, 1, 1)
+        val report = diag.report(facts, stuck, clock)
+        assertTrue(report, report.contains("1) 0:04 ← 0:14 (إعادة تجهيز بالفهرس): لم يجهز بعد (20.0 ث) · المدة قبلها 42:00 · غابت المدة 20.0 ث · قراءات: من البداية 9KB، من آخر الملف (317.0MB) 0B (لم يصل بايت)"))
+        assertTrue(report, report.contains("لماذا لم يستأنف: المدة غير معروفة: المصدر يُعاد تجهيزه ولم يقرأ الفهرس بعد · آخر طلب من آخر الملف (317.0MB) لم يصل منه بايت منذ 19.6 ث · المحرك ينتظر القطعة 19 منذ 19.6 ث (120/1024 كتلة)"))
+        // المدة عادت: تُحسب مدة غيابها ولا تبقى تعدّ
+        at(26_000); diag.duration(2_520_000); diag.state(Player.STATE_READY, 14_000, 2_000)
+        val done = diag.report(facts, player(), clock)
+        assertTrue(done, done.contains("(إعادة تجهيز بالفهرس): جاهز بعد 21.0 ث · المدة قبلها 42:00 · غابت المدة 21.0 ث"))
+        assertFalse(done, done.contains("لماذا لم يستأنف"))
+    }
+
     @Test fun namesThePieceThePlayerIsWaitingFor() {
         at(0); diag.start()
         at(30_000)
@@ -87,12 +115,12 @@ class PlaybackDiagnosticsTest {
 
     @Test fun seekInsideLoadedDataIsReadyAtOnceAndFarSeekWaitsForReady() {
         at(0); diag.start()
-        at(20_000); diag.seek(140_000, 150_000, readyNow = true)
-        at(21_000); diag.seek(150_000, 720_000)
+        at(20_000); diag.seekRequested(140_000, 150_000, "عادية", 1_437_000, true); diag.seekApplied(readyNow = true)
+        at(21_000); diag.seekRequested(150_000, 720_000, "عادية", 1_437_000, true); diag.seekApplied(readyNow = false)
         at(26_000); diag.state(Player.STATE_READY, 720_000, 3_000)
         val report = diag.report(null, player(), clock)
-        assertTrue(report, report.contains("1) 2:20 ← 2:30: جاهز بعد 0.0 ث"))
-        assertTrue(report, report.contains("2) 2:30 ← 12:00: جاهز بعد 5.0 ث"))
+        assertTrue(report, report.contains("1) 2:20 ← 2:30 (عادية): جاهز بعد 0.0 ث · المدة قبلها 23:57"))
+        assertTrue(report, report.contains("2) 2:30 ← 12:00 (عادية): جاهز بعد 5.0 ث · المدة قبلها 23:57"))
     }
 
     @Test fun keepsOnlyTheLatestReadsSoTheLogStaysSmall() {
