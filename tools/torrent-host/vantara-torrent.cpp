@@ -307,6 +307,7 @@ public:
         s.set_int(lt::settings_pack::tracker_receive_timeout, 6);
         s.set_int(lt::settings_pack::tracker_completion_timeout, 15);
         s.set_int(lt::settings_pack::request_timeout, 4);
+        if (const char* r = std::getenv("VANTARA_LT_RECONNECT_S")) s.set_int(lt::settings_pack::min_reconnect_time, std::max(1, std::atoi(r)));
         s.set_int(lt::settings_pack::piece_timeout, 8);
         s.set_int(lt::settings_pack::max_out_request_queue, 250);
         s.set_int(lt::settings_pack::request_queue_time, 1);
@@ -559,6 +560,15 @@ public:
         auto t = find(id);
         if (!t) return {404, R"({"error":"not found"})"};
         if (what == "pause") { t->h.pause(); t->paused = true; }
+        else if (what == "idle") {
+            // التسخين انتهى ولم يُضغط تشغيل بعد: لا يُطلب شيء والمشاركون يبقون متصلين (كما أندرويد أثناء مهلة التسخين).
+            // pause كان يقطعهم، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time: متابعة بعد التسخين 53 ث
+            std::vector<lt::download_priority_t> none(size_t(t->h.torrent_file() ? t->h.torrent_file()->num_pieces() : 0), lt::dont_download);
+            t->h.clear_piece_deadlines();
+            if (!none.empty()) t->h.prioritize_pieces(none);
+            std::lock_guard<std::mutex> lock(m_);
+            t->deadlined.clear(); t->windowStart = -1; t->focused = false;
+        }
         else if (what == "test-hash-fail") {
             // للاختبار فقط (--allow-private-peers): فشل تحقق كما يصل من libtorrent لأول قطعة سُلّم منها مبكرًا
             if (!allowPrivate_) return {404, R"({"error":"not found"})"};
