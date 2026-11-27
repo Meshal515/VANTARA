@@ -16,7 +16,10 @@ internal class TorrentDataSource(private val engine: TorrentEngine, private val 
     private var position = 0L
     private var remaining = 0L
     private var started = false
+    /** القراءات الصغيرة من المخزن ([ReadChunk]: لماذا وشروطه)، والكبيرة من المحرك مباشرة. */
+    private val chunk = ReadChunk(CHUNK)
     override fun open(dataSpec: DataSpec): Long {
+        chunk.reset()
         if (cancelled) throw IOException("Torrent reader already closed")
         current = dataSpec.uri
         transferInitializing(dataSpec)
@@ -34,15 +37,36 @@ internal class TorrentDataSource(private val engine: TorrentEngine, private val 
         if (length == 0) return 0
         if (remaining == 0L) return C.RESULT_END_OF_INPUT
         val reader = lease ?: throw IOException("Torrent reader is not open")
-        val count = reader.read(position, buffer, offset, minOf(length.toLong(), remaining).toInt())
-        if (count > 0) { position += count; remaining -= count; bytesTransferred(count) }
+        val want = minOf(length.toLong(), remaining).toInt()
+        val held = if (chunking) chunk.take(position, buffer, offset, want, reader.trustGeneration()) else -1
+        if (held > 0) return delivered(held)
+        // لا يعبر المخزن نطاق الطلب ولا مرفقات MKV (تُعطى أصفارًا بلا تنزيل في Lease.read من بدايتها)
+        val size = minOf(CHUNK.toLong(), remaining, reader.unskipped(position)).toInt()
+        if (!chunking || want >= size) return reader.read(position, buffer, offset, want).also { if (it > 0) delivered(it) }
+        val trust = reader.trustGeneration()
+        val got = chunk.fill(position, size, trust, { b, o, n -> reader.read(position, b, o, n) }) { reader.lastEarly }
+        if (got <= 0) return got
+        // فشل تحقق أثناء الجلب نفسه: الجيل تغيّر فيُرمى ويُطلب موثقًا
+        val n = chunk.take(position, buffer, offset, want, reader.trustGeneration())
+        return if (n > 0) delivered(n) else reader.read(position, buffer, offset, want).also { if (it > 0) delivered(it) }
+    }
+    private fun delivered(count: Int): Int {
+        position += count; remaining -= count; bytesTransferred(count)
         return count
     }
     override fun getUri(): Uri? = current
     override fun close() {
         cancelled = true
+        chunk.reset()
         lease?.close(); lease = null; current = null
         if (started) { started = false; transferEnded() }
+    }
+    companion object {
+        /** كتلة واحدة من المحرك تكفي آلاف قراءات الفهرس الصغيرة. */
+        const val CHUNK = 64 * 1024
+        /** للاختبار على الجهاز فقط: قياس قبل وبعد في التشغيل نفسه (false = كل read إلى المحرك كما قبل المخزن). */
+        @androidx.annotation.VisibleForTesting
+        @Volatile internal var chunking = true
     }
     class Factory(private val engine: TorrentEngine, private val delegate: DataSource.Factory, private val preview: Boolean = false) : DataSource.Factory {
         override fun createDataSource(): DataSource = object : DataSource {
