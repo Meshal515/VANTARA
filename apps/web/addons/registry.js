@@ -53,6 +53,10 @@ export function createAddonRegistry({
   let sessions = 0,
     profileKey = "local";
   const pins = new Map();
+  // ترتيب المستخدم لإضافاته (مدير الإضافات): لكل حساب قائمة مفاتيح؛ ما لم يُرتَّب يأتي بعدها بترتيب تثبيته
+  const orders = new Map();
+  const rank = (key) => { const o = orders.get(profileKey); if (!o) return -1; const i = o.indexOf(key); if (i >= 0) return i; for (const old of entries.get(key)?.formerKeys ?? []) { const j = o.indexOf(old); if (j >= 0) return j; } return -1; };
+  const byRank = (a, b) => { const x = rank(a.key), y = rank(b.key); return x < 0 && y < 0 ? 0 : x < 0 ? 1 : y < 0 ? -1 : x - y; };
   const pinned = (key) => {
     const current = pins.get(JSON.stringify([profileKey, key]));
     if (current !== undefined) return current;
@@ -81,6 +85,10 @@ export function createAddonRegistry({
         typeof pair[1] === "boolean"
       )
         pins.set(...pair);
+    const savedOrder = await store.get("state", "addons.order.v1").catch(() => null);
+    for (const pair of (Array.isArray(savedOrder?.value) ? savedOrder.value : []).slice(-200))
+      if (Array.isArray(pair) && typeof pair[0] === "string" && Array.isArray(pair[1]))
+        orders.set(pair[0], pair[1].filter((k) => typeof k === "string").slice(0, 2000));
     const savedHealth = await store
       .get("state", "addons.health.v1")
       .catch(() => null);
@@ -191,7 +199,7 @@ export function createAddonRegistry({
       })),
       ...entries.values().map(view),
     ]
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned))
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || byRank(a, b))
       .filter(
         (a) =>
           (!filter.content || a.contentTypes?.includes(filter.content)) &&
@@ -355,6 +363,18 @@ export function createAddonRegistry({
       } catch (e) { if (before === undefined) pins.delete(pinKey); else pins.set(pinKey, before); throw e; }
     });
   }
+  /** يحفظ ترتيب المستخدم لإضافاته لهذا الحساب؛ يحدد ترتيب `list()` (ومنه ترتيب المصادر) بعد المفضّلة. */
+  function order(keys) {
+    if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) return Promise.reject(new Error("ترتيب غير صالح"));
+    const next = [...new Set(keys)].slice(0, 2000);
+    return mutate(async () => {
+      const before = orders.get(profileKey);
+      orders.set(profileKey, next);
+      try {
+        if ((await store.set("state", "addons.order.v1", [...orders])) === false) throw new Error("تعذر حفظ الترتيب");
+      } catch (e) { if (before === undefined) orders.delete(profileKey); else orders.set(profileKey, before); throw e; }
+    });
+  }
   function enable(key, value) {
     return mutate(async () => {
       const r = row(key), before = r.enabled;
@@ -473,6 +493,7 @@ export function createAddonRegistry({
     runtimeName,
     flushHealth,
     pin,
+    order,
     setProfile(key) {
       profileKey = String(key ?? "local").slice(0, 160);
     },

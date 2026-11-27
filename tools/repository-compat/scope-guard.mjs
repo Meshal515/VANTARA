@@ -26,6 +26,8 @@ for (const path of [".github/workflows/apk-room-shots.yml", ".github/workflows/w
 for(const path of deliverySeams)seams.add(path);
 // جولة 27 نوفمبر بأمر المالك (P0 هوية الفصول، البحث، فصل الإضافات، تحقق Cloudflare، آخر التحديثات المرحلة 1): ملفات بأسمائها.
 for(const path of ['apps/web/v35/feed-snapshot.js','apps/web/v35/feed-snapshot.test.js','apps/web/lib/update-decision.js','apps/web/lib/update-decision.d.ts','apps/web/lib/update-decision.test.js','docs/design/addons-v1.2.6/README.ar.md','docs/design/addons-v1.2.6/concept.js','docs/plans/2026-11-26-local-latest-updates.ar.md','docs/plans/MASTER_PLAN_20261127.ar.md','docs/plans/REPORT_20261127_NIGHT.ar.md','docs/repository-compat/BUNDLED_SOURCE_SEPARATION.md'])seams.add(path);
+// مدير الإضافات v1.2.6 (27 نوفمبر): ترتيب المستخدم في السجل يحدد ترتيب المصادر بعد المفضّلة
+for(const path of ['apps/web/addons/registry.js','apps/web/addons/registry.test.js','apps/web/v35/addons-hub.js','apps/web/v35/addons-hub.test.js'])seams.add(path);
 // Owner-authorized source page (13 Nov 2026): one source page with the official work identity. Exact files only.
 for(const path of ['apps/web/v35/source-identity.js','apps/web/v35/source-identity.test.js','apps/web/v35/source-mode.test.js'])seams.add(path);
 // Owner-authorized discovery fixes, reviewed and tested in b8253ccf. Exact files only.

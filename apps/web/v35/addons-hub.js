@@ -41,6 +41,9 @@ export const P = {
   globe: '<circle cx="12" cy="12" r="8.25"/><path d="M3.75 12h16.5M12 3.75c2.4 2.3 3.6 5 3.6 8.25S14.4 18 12 20.25C9.6 18 8.4 15.25 8.4 12S9.6 6.05 12 3.75z"/>',
   site: '<path d="M13.5 4.75h5.75v5.75M19.25 4.75 11 13"/><path d="M17.25 13.5v3.75a2 2 0 0 1-2 2H6.75a2 2 0 0 1-2-2V8.75a2 2 0 0 1 2-2h3.75"/>',
   down: '<path d="m6.5 9.5 5.5 5.5 5.5-5.5"/>',
+  up: '<path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"/>',
+  downMove: '<path d="M12 5v14m-5.5-5.5L12 19l5.5-5.5"/>',
+  grip: '<path d="M7 9h10M7 15h10"/>',
   copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="3"/><path d="M15.5 8.5V7a2.5 2.5 0 0 0-2.5-2.5H7A2.5 2.5 0 0 0 4.5 7v6A2.5 2.5 0 0 0 7 15.5h1.5"/>',
   repo: '<rect x="4" y="4.5" width="16" height="15" rx="3.5"/><path d="M4 9.5h16M8.5 14h7"/>',
   shield: '<path d="M12 3.75 5.25 6.4v5.1c0 4.2 2.85 7.35 6.75 8.75 3.9-1.4 6.75-4.55 6.75-8.75V6.4z"/><path d="m9.25 12.1 1.9 1.9 3.6-3.85"/>',
@@ -113,7 +116,7 @@ export function renderAddonsHub({
   // ── تفضيلات العرض المحفوظة على الجهاز (المفضّلة، ألقاب وصور المستودعات، اللغات) ──
   const PREF_KEY = `vantara.addons.hub.v1:${profile}`;
   const pref = (() => { try { return JSON.parse(globalThis.localStorage?.getItem(PREF_KEY) || 'null') || {}; } catch { return {}; } })();
-  pref.provPins ??= []; pref.pins ??= {}; pref.repoMeta ??= {}; pref.langs ??= {};
+  pref.provPins ??= []; pref.pins ??= {}; pref.order ??= {}; pref.repoMeta ??= {}; pref.langs ??= {};
   const savePref = () => { try { globalThis.localStorage?.setItem(PREF_KEY, JSON.stringify(pref)); return true; } catch { return false; } };
 
   const S = {
@@ -142,7 +145,7 @@ export function renderAddonsHub({
   const availFor = (p) => S.avail[p].filter((it) => repoMatches(p, it) && (S.q ? true : langOk(p, it)) && match(it.name));
   const cur = () => S.stack[S.stack.length - 1];
   const pinFirst = (arr) => [...arr.filter((x) => x.pin), ...arr.filter((x) => !x.pin)];
-  const orderGroups = (p, arr, draw, cls) => [true, false].map((pin) => { const list = arr.filter((x) => !!x.pin === pin); return list.length ? `<section class="y-order-section" data-k="order-${p}-${+pin}"><div class="y-order-head"><span>${pin ? 'المفضّلة' : 'البقية'}</span><span>${list.length}</span></div><div class="${cls} y-order-list" data-list="installed">${list.map(draw).join('')}</div></section>` : ''; }).join('');
+  const orderGroups = (p, arr, draw, cls) => [true, false].map((pin) => { const list = arr.filter((x) => !!x.pin === pin); return list.length ? `<section class="y-order-section" data-k="order-${p}-${+pin}"><div class="y-order-head"><span>${pin ? 'المفضّلة' : 'البقية'}</span><span>${list.length}</span></div><div class="${cls} y-order-list" data-list="installed" data-order="${p}" data-pin="${+pin}">${list.map(draw).join('')}</div></section>` : ''; }).join('');
   const match = (n) => !S.q || String(n).toLowerCase().includes(S.q.toLowerCase());
   const upCount = (p) => S.items[p].filter((x) => x.nv).length;
   const challengeOf = (it) => S.challenges.find((c) => (it.site && hostOf(it.site) === c.host) || (c.sourceName && String(c.sourceName).trim().toLowerCase() === String(it.name).trim().toLowerCase()));
@@ -203,14 +206,17 @@ export function renderAddonsHub({
 
   // ── مكوّنات الكمبيوتر (عمود واحد، إجراءات ظاهرة) ──
   const dib = (act, icon, id, tip, cls = '', dis = false) => `<button class="y-ib ${cls}" data-y="${act}" data-id="${esc(id)}" aria-label="${esc(tip)}" data-tip="${esc(tip)}" ${dis ? 'disabled' : ''}>${g(icon, 26)}</button>`;
+  const grpPos = (p, it) => { const grp = S.items[p].filter((x) => !!x.pin === !!it.pin); const i = grp.indexOf(it); return [i === 0, i === grp.length - 1]; };
+  const canOrder = (p) => p !== 'stremio' || typeof registry.order === 'function';
+  const moveBtns = (p, it) => { if (!canOrder(p)) return ''; const [f, l] = grpPos(p, it), k = p + '|' + it.id; return dib('moveUp', 'up', k, 'للأعلى', '', f) + dib('moveDown', 'downMove', k, 'للأسفل', '', l); };
   const pinBtnD = (p, it) => dib('pin', it.pin ? 'pinOn' : 'pin', p + '|' + it.id, it.pin ? 'أزل من المفضّلة' : 'للمفضّلة', it.pin ? 'on' : 'dim');
   const deskExtRow = (p, it) => {
     const k = p + '|' + it.id, b = S.busy[it.id];
-    return `<div class="y-row y-ext-row y-drow ${it.on ? '' : 'is-off'}" data-k="${p}-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b || it.bad || it.nv || it.pending || challengeOf(it) ? extLine(p, it) : esc(it.lang || 'عربي')}${it.repoId ? ` · <span dir="auto">${esc(repoName(p, it))}</span>` : ''}</span></span></button><div class="y-dacts">${pinBtnD(p, it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث v${esc(it.nv)}</button>` : ''}${it.pending && !b ? `<button class="y-dup" data-y="restore" data-id="${esc(k)}">${g('update', 18)}استعد</button>` : ''}${it.bad && !b ? dib('retry', 'retry', k, 'أعد المحاولة') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !copyUrl(p, it))}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}${canToggle(p) ? `<span class="y-dsep"></span>${switchBtn(p, it)}` : '<span class="y-dsep"></span>'}${it.isSite ? dib('open', 'open', k, 'التفاصيل') : dib('enterSource', 'open', k, 'افتح المصدر', '', !it.on || !!it.bad || !!it.pending || !!b)}</div>${prog(it.id)}</div>`;
+    return `<div class="y-row y-ext-row y-drow ${it.on ? '' : 'is-off'}" data-k="${p}-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b || it.bad || it.nv || it.pending || challengeOf(it) ? extLine(p, it) : esc(it.lang || 'عربي')}${it.repoId ? ` · <span dir="auto">${esc(repoName(p, it))}</span>` : ''}</span></span></button><div class="y-dacts">${moveBtns(p, it)}<span class="y-dsep"></span>${pinBtnD(p, it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث v${esc(it.nv)}</button>` : ''}${it.pending && !b ? `<button class="y-dup" data-y="restore" data-id="${esc(k)}">${g('update', 18)}استعد</button>` : ''}${it.bad && !b ? dib('retry', 'retry', k, 'أعد المحاولة') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !copyUrl(p, it))}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}${canToggle(p) ? `<span class="y-dsep"></span>${switchBtn(p, it)}` : '<span class="y-dsep"></span>'}${it.isSite ? dib('open', 'open', k, 'التفاصيل') : dib('enterSource', 'open', k, 'افتح المصدر', '', !it.on || !!it.bad || !!it.pending || !!b)}</div>${prog(it.id)}</div>`;
   };
   const deskStCard = (it) => {
     const k = 'stremio|' + it.id, b = S.busy[it.id];
-    return `<div class="y-row y-drow y-card-d ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : `${TYPE[it.type] || ''}${it.cont ? ' · ' + esc(it.cont) : ''}`}</span></span></button><div class="y-dacts">${pinBtnD('stremio', it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث ${esc(it.nv)}</button>` : ''}${it.conf ? dib('conf', 'sliders', k, 'اضبط') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !it.url)}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${switchBtn('stremio', it).replace('role="switch"', `role="switch" data-tip="${it.on ? 'عطّلها' : 'فعّلها'}"`)}${it.open ? dib('enterSource', 'open', k, 'افتح الكتالوج', '', !it.on) : ''}</div>${prog(it.id)}</div>`;
+    return `<div class="y-row y-drow y-card-d ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : `${TYPE[it.type] || ''}${it.cont ? ' · ' + esc(it.cont) : ''}`}</span></span></button><div class="y-dacts">${moveBtns('stremio', it)}<span class="y-dsep"></span>${pinBtnD('stremio', it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث ${esc(it.nv)}</button>` : ''}${it.conf ? dib('conf', 'sliders', k, 'اضبط') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !it.url)}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${switchBtn('stremio', it).replace('role="switch"', `role="switch" data-tip="${it.on ? 'عطّلها' : 'فعّلها'}"`)}${it.open ? dib('enterSource', 'open', k, 'افتح الكتالوج', '', !it.on) : ''}</div>${prog(it.id)}</div>`;
   };
   const deskProv = (k) => {
     const pin = S.provPins.includes(k), a = S.items[k], up = upCount(k);
@@ -222,7 +228,7 @@ export function renderAddonsHub({
     if (D) return deskStCard(it);
     const k = 'stremio|' + it.id, b = S.busy[it.id];
     return `<div class="y-card ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}">
-  <div class="y-r1"><div style="display:contents" data-y="open" data-id="${esc(k)}">${itLogo(it)}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : it.nv ? `<span class="y-dot"></span><span class="y-up">تحديث ${esc(it.nv)}</span>` : `${TYPE[it.type]}${it.ver ? ' · ' + esc(it.ver) : ''}`}</div></div></div>${switchBtn('stremio', it)}</div>
+  <div class="y-r1">${canOrder('stremio') ? `<button class="y-grip" data-y="grip" data-id="${esc(it.id)}" aria-label="اسحب للترتيب">${g('grip')}</button>` : ''}<div style="display:contents" data-y="open" data-id="${esc(k)}">${itLogo(it)}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : it.nv ? `<span class="y-dot"></span><span class="y-up">تحديث ${esc(it.nv)}</span>` : `${TYPE[it.type]}${it.ver ? ' · ' + esc(it.ver) : ''}`}</div></div></div>${switchBtn('stremio', it)}</div>
   <div class="y-r2">${pinBtn('stremio', it)}${it.conf ? ib('conf', 'sliders', { id: k, label: 'ضبط' }) : ''}${it.nv && !b ? ib('update', 'update', { id: k, label: 'تحديث' }) : ''}<span class="y-sp"></span>${ib('itemMenu', 'more', { id: k, label: 'خيارات' })}${ib('open', 'open', { id: k, label: 'التفاصيل' })}</div>${prog(it.id)}</div>`;
   };
 
@@ -365,7 +371,8 @@ export function renderAddonsHub({
     for (const [pkg, { x, url }] of byPkg) if (!have.has(pkg) && (x.installed || x.builtin)) have.set(pkg, vm({ ...x, name: x.name, version: x.installed || x.version, pendingRestore: x.pendingRestore }, url));
     if (p === 'mihon') for (const s of siteRows) { const id = 'site:' + (s.id ?? s.domain); if (!have.has(id)) have.set(id, { id, name: s.label || s.domain || 'موقع مانجا', ver: '', on: true, pin: pins.has(id), lang: 'موقع مانجا', imgs: [httpUrl(s.iconUrl)].filter(Boolean), site: siteOf(s.url || s.domain), url: '', isSite: true, raw: s }); }
     const prev = new Map(S.items[p].map((x, i) => [x.id, i]));
-    S.items[p] = pinFirst([...have.values()].sort((a, b) => (prev.get(a.id) ?? 1e9) - (prev.get(b.id) ?? 1e9) || a.name.localeCompare(b.name)));
+    const saved = pref.order[p] || [], rk = (id) => { const i = saved.indexOf(id); return i < 0 ? 1e9 : i; };
+    S.items[p] = pinFirst([...have.values()].sort((a, b) => rk(a.id) - rk(b.id) || (prev.get(a.id) ?? 1e9) - (prev.get(b.id) ?? 1e9) || a.name.localeCompare(b.name)));
     const wrong = (x) => (store.kind === 'manga' && x.anime === true) || (store.kind === 'anime' && p === 'aniyomi' && x.anime === false);
     S.avail[p] = [...byPkg.values()].filter(({ x }) => !have.has(nativePackage(x)) && !x.installed && !x.builtin && !adultSource(x) && !x.nsfw && !wrong(x)).map(({ x, url }) => ({
       id: nativePackage(x), pkg: nativePackage(x), name: String(x.name || nativePackage(x)).replace(/^(Tachiyomi|Aniyomi|Mihon):\s*/i, ''), ver: String(x.version ?? ''), lang: langName(x.lang ?? x.language),
@@ -450,7 +457,7 @@ export function renderAddonsHub({
     (root.closest('.v35') || doc.body).append(layer);
     renderBar();
   }
-  let renderedView = '', renderQueued = false;
+  let renderedView = '', renderQueued = false, deferredRender = false, drag = null, hold = null, suppressClickUntil = 0;
   // ما يصل من المحركات أثناء دخول الصفحة أو خروجها يُرسم حين تنتهي حركتها (قاعدة CLAUDE.md: لا بناء وهي تتحرك)
   function scheduleRender() {
     if (renderQueued || !alive) return; renderQueued = true;
@@ -481,6 +488,7 @@ export function renderAddonsHub({
   }
   function render({ flip = true } = {}) {
     if (!alive) return;
+    if (drag) { deferredRender = true; return; }
     const c = cur(), key = c.v + (c.p || '') + (c.id || ''); const same = renderedView === key;
     const before = flip && same ? snap() : null;
     const html = c.v === 'hub' ? views.hub() : c.v === 'stremio' ? views.stremio() : c.v === 'details' ? views.details(c) : views.ext(c.v);
@@ -532,6 +540,7 @@ export function renderAddonsHub({
   const getScroll = () => { const s = scroller(); return s ? s.scrollTop : (win.scrollY || 0); };
   const setScroll = (y) => { const s = scroller(); if (s) s.scrollTop = y; else win.scrollTo?.(0, y); };
   function transition(dir, mutate) {
+    if (drag) finishDrag(drag.id, true); clearHold();
     content.getAnimations?.().forEach((a) => a.cancel());
     mutate(); render({ flip: false });
     if (!RM && content.animate) { const dx = dir === 'in' ? -1 : 1; content.animate([{ opacity: 0, transform: `translateX(${dx * 12}px)` }, { opacity: 1, transform: 'none' }], { duration: 180, easing: EASE }); }
@@ -550,8 +559,9 @@ export function renderAddonsHub({
     const [jp, jid] = S.justToggled.split('|'); S.justToggled = null;
     const it = S.items[jp]?.find((x) => x.id === jid); const r = content.querySelector(jp === 'stremio' ? `[data-k="st-${cssEsc(jid)}"]` : `[data-k="${cssEsc(jp + '-' + jid)}"]`);
     if (!r || !it) return;
-    if (it.on) { r.classList.add('is-off'); setTimeout(() => r.classList.remove('is-off'), M.enter); }
-    [...r.querySelectorAll(':scope>.y-ib,:scope>.y-sw')].forEach((x, n) => x.animate?.([{ opacity: 0, transform: 'scale(.86) translateX(10px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: M.enter + n * 50, easing: EASE, fill: 'backwards' }));
+    // الصف بحالته النهائية كاملة من أول إطار (المعطّلة: تبليط + مفتاح). لا إخفاء مؤجل للأزرار:
+    // كان fill:'backwards' مع تأخير 260ms يُظهر المعطّلة مبلورة بلا مفتاح لثلث ثانية.
+    if (it.on) [...r.querySelectorAll(':scope>.y-ib')].forEach((x) => x.animate?.([{ opacity: 0.4, transform: 'scale(.9)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE }));
   }
   const cssEsc = (s) => (globalThis.CSS?.escape ? globalThis.CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'));
 
@@ -597,6 +607,14 @@ export function renderAddonsHub({
     try { await task(); return true; }
     catch (e) { if (alive) toast(fmtErr(e)); return false; }
     finally { delete S.busy[id]; if (alive) render(); }
+  }
+  // ── الترتيب (لتصل لإضافاتك أسرع): Stremio في السجل نفسه فيتبعه ترتيب المصادر، والبقية محفوظة على الجهاز ──
+  const stepGroup = (p, it, dir) => { const a = S.items[p]; const grp = a.filter((x) => !!x.pin === !!it.pin); const i = grp.indexOf(it), j = i + dir; if (i < 0 || j < 0 || j >= grp.length) return false; [grp[i], grp[j]] = [grp[j], grp[i]]; let n = 0; S.items[p] = pinFirst(a.map((x) => (!!x.pin === !!it.pin ? grp[n++] : x))); return true; };
+  const shiftGroup = (p, it, top) => { const a = S.items[p], grp = a.filter((x) => !!x.pin === !!it.pin); const idx = grp.indexOf(it); if (idx < 0) return; grp.splice(idx, 1); top ? grp.unshift(it) : grp.push(it); let i = 0; S.items[p] = pinFirst(a.map((x) => (!!x.pin === !!it.pin ? grp[i++] : x))); };
+  async function persistOrder(p) {
+    const ids = S.items[p].map((x) => x.id);
+    if (p !== 'stremio') { pref.order[p] = ids; if (!savePref()) toast('حُفظ الترتيب لهذه الجلسة فقط'); return; }
+    try { await registry.order(ids); sourcesChanged({ preserveAddonsView: true, reason: 'order' }); } catch (e) { toast(fmtErr(e)); readStremio(); render(); }
   }
   const find = (key) => { const i = String(key).indexOf('|'); const p = key.slice(0, i), id = key.slice(i + 1); return [p, id, S.items[p]?.find((x) => x.id === id)]; };
   const popPin = (sel) => { if (RM) return; content.querySelectorAll(sel).forEach((b) => b.firstElementChild?.animate?.([{ transform: 'scale(.6) rotate(-20deg)' }, { transform: 'scale(1.18) rotate(4deg)', offset: 0.6 }, { transform: 'none' }], { duration: M.enter, easing: EASE })); };
@@ -758,6 +776,11 @@ export function renderAddonsHub({
       toast(next ? 'في المفضّلة' : 'أُزيلت من المفضّلة');
     },
     open(key) { const [p, id, it] = find(key); if (it) go({ v: 'details', p, id }); },
+    moveUp(key) { const [p, , it] = find(key); if (it && canOrder(p) && stepGroup(p, it, -1)) { render(); void persistOrder(p); } },
+    moveDown(key) { const [p, , it] = find(key); if (it && canOrder(p) && stepGroup(p, it, 1)) { render(); void persistOrder(p); } },
+    toTop(key) { const [p, , it] = find(key); if (!it || !canOrder(p)) return; shiftGroup(p, it, true); dismiss(); render(); void persistOrder(p); },
+    toBottom(key) { const [p, , it] = find(key); if (!it || !canOrder(p)) return; shiftGroup(p, it, false); dismiss(); render(); void persistOrder(p); },
+    async toFirst(key) { const [p, , it] = find(key); if (!it || !canOrder(p)) return; dismiss(); if (!it.pin) await A.pin(key); if (!it.pin) return; shiftGroup(p, it, true); render(); await persistOrder(p); toast('صارت الأولى'); },
     tab(key) {
       const [p, k] = key.split('|'); if (S.tab[p] === k) return; const from = indPos(); S.tab[p] = k; render({ flip: false }); placeInd(from);
       if (!RM) content.querySelector('.y-tb')?.animate?.([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: M.tab, easing: EASE });
@@ -900,7 +923,8 @@ export function renderAddonsHub({
         !st && typeof API[p]?.rollback === 'function' ? `<button data-y="rollback" data-id="${esc(key)}">${g('retry')}ارجع للإصدار السابق</button>` : '',
         st && registry.stage ? `<button data-y="checkUpdate" data-id="${esc(key)}">${g('update')}افحص التحديث</button>` : '',
       ].join('');
-      sheet(`<div class="y-prev">${itLogo(it, 'xl')}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${esc(st ? (TYPE[it.type] || '') + (it.ver ? ' · ' + it.ver : '') : repoName(p, it))}</div></div></div><div class="y-menu">${extra}<button class="red" data-y="askDel" data-id="${esc(key)}">${g('trash')}احذف</button></div>`);
+      const ord = canOrder(p) ? `${it.pin && S.items[p].indexOf(it) === 0 ? '' : `<button data-y="toFirst" data-id="${esc(key)}">${g('pinOn')}اجعلها الأولى</button>`}<button data-y="toTop" data-id="${esc(key)}">${g('up')}للأعلى</button><button data-y="toBottom" data-id="${esc(key)}">${g('downMove')}للأسفل</button>` : '';
+      sheet(`<div class="y-prev">${itLogo(it, 'xl')}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${esc(st ? (TYPE[it.type] || '') + (it.ver ? ' · ' + it.ver : '') : repoName(p, it))}</div></div></div><div class="y-menu">${ord}${extra}<button class="red" data-y="askDel" data-id="${esc(key)}">${g('trash')}احذف</button></div>`);
     },
     async reinstallAs(key) { const [p, , it] = find(key); if (!it) return; dismiss(); const to = it.content === 'cinema' ? 'anime' : 'cinema'; if (await run(it.id, 'install', () => installNative(p, { ...it, content: to }, to))) toast(to === 'cinema' ? 'صارت في السينما' : 'صارت في الأنمي'); },
     async rollback(key) {
@@ -963,11 +987,12 @@ export function renderAddonsHub({
 
   // ── الالتقاط: نقرة، كتابة، إرسال، ضغط ──
   function onClick(e) {
+    if (performance.now() < suppressClickUntil && e.target.closest?.('.y-order-list')) { e.preventDefault(); e.stopPropagation(); return; }
     const t = e.target.closest?.('[data-y]');
     if (!t) return;
     const a = t.dataset.y;
     if (a === 'scrim') { if (e.target === t) dismiss(); return; }
-    if (['url', 'q', 'repoName', 'repoFile', 'addForm', 'raUrl', 'raNick', 'raFile', 'importFile'].includes(a)) return;
+    if (['url', 'q', 'repoName', 'repoFile', 'addForm', 'raUrl', 'raNick', 'raFile', 'importFile', 'grip'].includes(a)) return;
     if (!A[a]) return;
     e.preventDefault(); e.stopPropagation();
     A[a](t.dataset.id, t);
@@ -1035,6 +1060,80 @@ export function renderAddonsHub({
     el.animate([{ transform: `scale(${s})` }, { transform: `scale(${1 + (1 - s) * 0.3})`, offset: 0.55 }, { transform: 'none' }], { duration: M.press, easing: 'ease-out' });
   }
   function pressMove(e) { if (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 10) { pressed.a.cancel(); pressed = null; } }
+  // ── السحب للترتيب (التصور v1.2.6): داخل مجموعة واحدة (المفضّلة أو البقية)، رأسيًا. المقبض في Stremio يبدأ فورًا،
+  // وضغطة مطوّلة على أي صف في البقية. الحركة كلها transform على الصف المسحوب وجيرانه فقط.
+  const feedback = () => { try { navigator.vibrate?.(12); } catch {} };
+  function layoutRect(el) { const r = el.getBoundingClientRect(), tr = win.getComputedStyle(el).transform; let x = 0, y = 0; if (tr && tr !== 'none') { const m = new DOMMatrixReadOnly(tr); x = m.m41; y = m.m42; } return { left: r.left - x, top: r.top - y, right: r.right - x, bottom: r.bottom - y, width: r.width, height: r.height }; }
+  function clearHold() { if (hold) { clearTimeout(hold.timer); hold = null; } }
+  function beginHold(target, x, y, id, kind) {
+    if (drag || hold || sheetEl) return;
+    const card = target.closest?.('.y-order-list[data-list="installed"]>[data-id]');
+    if (!card || (!target.closest('.y-grip') && target.closest('button:not(.y-ext-info),input'))) return;
+    const grid = card.parentElement; if (grid.children.length < 2 || !canOrder(grid.dataset.order)) return;
+    hold = { card, grid, id, kind, x, y, timer: null };
+    if (target.closest('.y-grip')) startDrag(); else hold.timer = setTimeout(startDrag, 320);
+  }
+  function startDrag() {
+    if (!hold) return; const h = hold; clearHold(); const { card, grid } = h; if (!card.isConnected) return;
+    if (pressed) { pressed.a.cancel(); pressed = null; }
+    for (const el of grid.children) el.getAnimations?.().forEach((a) => a.cancel());
+    const r = layoutRect(card);
+    drag = { ...h, order: [...grid.children], offsetY: h.y - r.top, raf: 0 };
+    card.classList.add('drag'); grid.classList.add('is-sorting'); feedback();
+    if (h.kind === 'mouse') try { grid.setPointerCapture(h.id); } catch {}
+    const loop = () => {
+      if (!drag) return; const d = drag, top = 96, bottom = (win.innerHeight || 800) - 64;
+      const dy = d.y < top ? -Math.min(12, (top - d.y) / 7) : d.y > bottom ? Math.min(12, (d.y - bottom) / 7) : 0;
+      const bounds = d.grid.getBoundingClientRect();
+      if (dy && ((dy < 0 && bounds.top < top) || (dy > 0 && bounds.bottom > bottom))) { const s = scroller(); if (s) s.scrollTop += dy; else win.scrollBy(0, dy); moveDrag(); }
+      d.raf = requestAnimationFrame(loop);
+    };
+    drag.raf = requestAnimationFrame(loop);
+  }
+  function moveDrag() {
+    const d = drag; if (!d) return; const { card, grid } = d;
+    const bounds = grid.getBoundingClientRect(), r = layoutRect(card);
+    const clamp = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
+    const rawTop = d.y - d.offsetY, top = clamp(rawTop, bounds.top, bounds.bottom - r.height), cy = rawTop + r.height / 2;
+    const order = [...grid.children], index = order.indexOf(card), others = order.filter((x) => x !== card);
+    let target = null, dist = Infinity;
+    for (const el of others) { const b = layoutRect(el); const delta = cy - (b.top + b.height / 2), before = order.indexOf(el) < index; if ((before && delta <= -3) || (!before && delta >= 3)) { const score = Math.abs(delta); if (score < dist) { target = el; dist = score; } } }
+    if (target) {
+      const before = order.indexOf(target) < index; const old = new Map(others.map((x) => [x, x.getBoundingClientRect()]));
+      others.forEach((x) => x.getAnimations?.().forEach((a) => a.cancel()));
+      grid.insertBefore(card, before ? target : target.nextSibling);
+      if (!RM) others.forEach((x) => { const a = old.get(x), b = layoutRect(x); if (Math.abs(a.top - b.top) + Math.abs(a.left - b.left) > 1) x.animate([{ transform: `translateY(${a.top - b.top}px)` }, { transform: 'none' }], { duration: 150, easing: EASE }); });
+    }
+    const b = layoutRect(card); card.style.transform = `translateY(${top - b.top}px)`;
+  }
+  function moveHold(x, y, id) { if (hold && hold.id === id && Math.hypot(x - hold.x, y - hold.y) > 9) clearHold(); if (drag && drag.id === id) { drag.x = x; drag.y = y; moveDrag(); } }
+  function finishDrag(id, cancel = false) {
+    if (hold && hold.id === id) clearHold(); if (!drag || drag.id !== id) return;
+    const d = drag, { card, grid } = d; drag = null; cancelAnimationFrame(d.raf); suppressClickUntil = performance.now() + 400;
+    if (d.kind === 'mouse' && grid.hasPointerCapture?.(id)) grid.releasePointerCapture(id);
+    const previous = card.getBoundingClientRect();
+    [...grid.children].forEach((x) => x.getAnimations?.().forEach((a) => a.cancel()));
+    card.style.transform = ''; card.classList.remove('drag'); grid.classList.remove('is-sorting');
+    let moved = false;
+    if (cancel) d.order.forEach((x) => grid.append(x));
+    else {
+      const p = grid.dataset.order, ids = [...grid.children].map((x) => x.dataset.id), a = S.items[p], set = new Set(ids), shown = new Map(a.filter((x) => set.has(x.id)).map((x) => [x.id, x]));
+      let i = 0; S.items[p] = pinFirst(a.map((x) => (set.has(x.id) ? shown.get(ids[i++]) : x)));
+      moved = ids.join() !== d.order.map((x) => x.dataset.id).join();
+      if (moved) { feedback(); void persistOrder(p); }
+    }
+    const r = layoutRect(card); if (!RM) card.animate([{ transform: `translateY(${previous.top - r.top}px)` }, { transform: 'none' }], { duration: 160, easing: EASE });
+    if (deferredRender || moved) { deferredRender = false; render({ flip: false }); }
+  }
+  const dDown = (e) => { if (e.pointerType === 'touch' || e.button !== 0) return; beginHold(e.target, e.clientX, e.clientY, e.pointerId, 'mouse'); };
+  const dMove = (e) => { if (e.pointerType === 'touch') return; moveHold(e.clientX, e.clientY, e.pointerId); };
+  const dUp = (e) => { if (e.pointerType === 'touch') return; finishDrag(e.pointerId, e.type !== 'pointerup'); };
+  const tStart = (e) => { if (e.touches.length !== 1) { clearHold(); if (drag) finishDrag(drag.id, true); return; } const tc = e.changedTouches[0]; beginHold(e.target, tc.clientX, tc.clientY, tc.identifier, 'touch'); };
+  const tMove = (e) => { const tc = [...e.changedTouches].find((x) => x.identifier === (drag?.id ?? hold?.id)); if (!tc) return; if (drag && e.cancelable) e.preventDefault(); moveHold(tc.clientX, tc.clientY, tc.identifier); };
+  const tEnd = (e) => { for (const tc of e.changedTouches) { if (drag?.id === tc.identifier && e.cancelable) e.preventDefault(); finishDrag(tc.identifier, e.type === 'touchcancel'); } };
+  root.addEventListener('pointerdown', dDown); root.addEventListener('pointermove', dMove); root.addEventListener('pointerup', dUp); root.addEventListener('pointercancel', dUp); root.addEventListener('lostpointercapture', dUp);
+  root.addEventListener('touchstart', tStart, { passive: true }); root.addEventListener('touchmove', tMove, { passive: false }); root.addEventListener('touchend', tEnd, { passive: false }); root.addEventListener('touchcancel', tEnd, { passive: false });
+  root.addEventListener('contextmenu', (e) => { if (e.target.closest?.('.y-order-list')) e.preventDefault(); });
   // سحب مقبض الورقة لتحت يقفلها
   let grabD = null;
   function grabDown(e) { const gb = e.target.closest?.('.y-sheet .y-grab'); if (!gb || !sheetEl) return; const pan = gb.closest('.y-pan'); grabD = { pan, y: e.clientY, t: performance.now(), dy: 0, id: e.pointerId }; try { gb.setPointerCapture(e.pointerId); } catch {} pan.getAnimations?.().forEach((a) => a.cancel()); }
@@ -1424,9 +1523,24 @@ ${D?`
 .y .y-wide{max-width:900px}
 `:''}
 /* ── تعديلات المالك على v1.2.6 ── */
-/* المفتاح المفعّل داكن لا بلون الثيم ولا أبيض: أسود بحد خفيف ومقبض فاتح */
-.y .y-sw:not(.off),.y-sheet .y-sw:not(.off){background:#000!important;box-shadow:inset 0 0 0 1px var(--line-strong)!important}
-.y .y-sw:not(.off)::after,.y-sheet .y-sw:not(.off)::after{background:var(--text-1)!important}
+/* المفتاح: المعطّل أسود (لا لون الثيم)، والمفعّل تنعكس ألوانه: مسار فاتح ومقبض أسود */
+.y .y-sw.off,.y-sheet .y-sw.off{background:#000!important;box-shadow:inset 0 0 0 1.5px var(--line-strong)!important}
+.y .y-sw.off::after,.y-sheet .y-sw.off::after{background:var(--text-2)!important}
+.y .y-sw:not(.off),.y-sheet .y-sw:not(.off){background:var(--text-1)!important;box-shadow:none!important}
+.y .y-sw:not(.off)::after,.y-sheet .y-sw:not(.off)::after{background:#000!important}
+/* أحجام وتباين أعلى من التصور (طلب المالك بعد التجربة): أيقونات 24px بلون النص الأول، وأسماء وشعارات أكبر */
+.y .y-ib svg,.y-sheet .y-ib svg{width:${sz(26, 24)}px!important;height:${sz(26, 24)}px!important}
+.y .y-ib.dim,.y-sheet .y-ib.dim{color:var(--text-1)!important}
+.y .y-prov>span.y-ib,.y .y-row>span.y-ib{color:var(--text-2)!important}
+.y .y-prov>span.y-ib svg,.y .y-row>span.y-ib svg{width:22px!important;height:22px!important}
+.y .y-grip{color:var(--text-2)!important}.y .y-grip svg{width:22px!important;height:24px!important}
+.y .y-mt{color:var(--text-2)}
+.y .y-card .y-nm,.y .y-ext-row .y-nm,.y .y-avail-row .y-nm{font-size:${sz(18, 17)}px}
+.y .y-card .y-lg,.y .y-ext-row .y-lg,.y .y-avail-row .y-lg{width:${sz(56, 48)}px;height:${sz(56, 48)}px}
+.y .y-sw,.y-sheet .y-sw{width:52px;height:32px;min-width:52px}
+.y .y-sw::after,.y-sheet .y-sw::after{width:26px;height:26px;top:3px;left:3px}
+.y .y-sw.off::after,.y-sheet .y-sw.off::after{left:23px}
+.y .y-get svg{width:24px!important;height:24px!important}.y .y-get{width:46px;height:46px}
 /* فاصل الأرقام: خط مستقيم لا يلتف مع زاوية زر «تحديثات» */
 .y-overview-stats>div+div{border-inline-start:0!important;position:relative}
 .y-overview-stats>div+div::before{content:'';position:absolute;inset-inline-start:0;top:2px;bottom:2px;width:1px;background:var(--line-strong)}

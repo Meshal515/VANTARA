@@ -166,7 +166,7 @@ it('الرجوع داخل المدير أولًا، والإغلاق يعيد ش
   expect(document.querySelector('.page-top-left').innerHTML).toBe('');
 });
 
-it('لا أزرار بلا محرك: لا ترتيب بالسحب ولا لون ثيم ولا نسب تقدّم مزيفة', async () => {
+it('لا أزرار بلا محرك: لا لون ثيم ولا إلغاء ولا نسب تقدّم مزيفة', async () => {
   setup();
   const api = manga();
   let release; api.install = vi.fn(() => new Promise((r) => { release = r; }));
@@ -175,7 +175,7 @@ it('لا أزرار بلا محرك: لا ترتيب بالسحب ولا لون 
   click(root.querySelector('[data-y="install"]'));
   await tick();
   const html = root.innerHTML + document.querySelector('.page-top').innerHTML;
-  for (const fake of ['data-y="grip"', 'data-y="theme"', 'data-y="moveUp"', 'data-y="cancel"']) expect(html).not.toContain(fake);
+  for (const fake of ['data-y="theme"', 'data-y="cancel"']) expect(html).not.toContain(fake);
   expect(root.textContent).not.toMatch(/\d+%/);
   expect(root.querySelector('.y-prog.ind')).toBeTruthy();
   release(); root.close();
@@ -230,5 +230,47 @@ it('حزمة CloudStream تالفة (unreadable) تظهر بسببها وتُح�
   expect(it0.bad).toContain('تعذّرت قراءة الحزمة');
   await root.hub.A.del('cloudstream|Broken');
   expect(cs.uninstall).toHaveBeenCalledWith('Broken');
+  root.close();
+});
+
+it('الترتيب: Stremio يُحفظ في السجل نفسه، والبقية على الجهاز وتعود بعد إعادة الفتح', async () => {
+  const { store } = setup();
+  const rows = ['a', 'b', 'c'].map((k) => ({ key: k, name: k.toUpperCase(), version: '1', capabilities: ['streams'], contentTypes: ['movie'], enabled: true }));
+  const registry = { list: () => rows.map((r) => ({ ...r })), order: vi.fn(async () => {}), pin: async () => {}, enable: async () => {} };
+  let root = mount({ registry, initialState: { stack: [{ v: 'hub' }, { v: 'stremio' }] } });
+  await tick();
+  expect(root.querySelectorAll('[data-y="grip"]').length).toBe(3);
+  root.hub.A.moveDown('stremio|a');
+  await tick();
+  expect(registry.order).toHaveBeenCalledWith(['b', 'a', 'c']);
+  root.close();
+  // سجل بلا ترتيب (إصدار قديم): لا مقبض ولا أزرار ترتيب وهمية
+  root = mount({ registry: { list: registry.list }, initialState: { stack: [{ v: 'hub' }, { v: 'stremio' }] } });
+  await tick();
+  expect(root.querySelector('[data-y="grip"]')).toBeNull();
+  root.close();
+  const api = manga({ installed: [{ pkg: 'p1', name: 'One', version: '1', repo: REPO }, { pkg: 'p2', name: 'Two', version: '1', repo: REPO }] });
+  root = mount({ repositories: api, initialState: { stack: [{ v: 'hub' }, { v: 'mihon' }] } });
+  await tick();
+  root.hub.A.toTop('mihon|p2');
+  expect(root.hub.S.items.mihon.map((x) => x.id).slice(0, 2)).toEqual(['p2', 'p1']);
+  root.close();
+  root = mount({ repositories: api, initialState: { stack: [{ v: 'hub' }, { v: 'mihon' }] } });
+  await tick();
+  expect(root.hub.S.items.mihon.map((x) => x.id).slice(0, 2)).toEqual(['p2', 'p1']);
+  expect([...store.keys()].some((k) => k.startsWith('vantara.addons.hub.v1'))).toBe(true);
+  root.close();
+});
+
+it('المعطّلة بعد الرجوع من التفاصيل: مبلورة ومعها المفتاح من أول إطار (لا إخفاء مؤجل)', async () => {
+  setup();
+  const cs = { list: async () => ({ repos: [], installed: [{ pkg: 'Akwam', name: 'Akwam', version: '3', enabled: true }] }), add: async () => ({}), remove: async () => ({}), extensions: async () => [], install: async () => {}, uninstall: async () => {}, enable: vi.fn(async () => {}) };
+  const root = mount({ cloudstreamRepositories: cs, initialState: { stack: [{ v: 'hub' }, { v: 'cloudstream' }, { v: 'details', p: 'cloudstream', id: 'Akwam' }] } });
+  await tick();
+  await root.hub.A.toggle('cloudstream|Akwam');
+  root.back();
+  const row = root.querySelector('[data-k="cloudstream-Akwam"]');
+  expect(row.classList.contains('is-off')).toBe(true);
+  expect(row.querySelector(':scope>.y-sw')).toBeTruthy();
   root.close();
 });
