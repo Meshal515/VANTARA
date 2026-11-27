@@ -634,6 +634,10 @@ class TorrentEngine internal constructor(
                 done
             } catch (_: IOException) { 0 }
         }
+        /** آخر read أعاد بايتات قبل التحقق (الخطة B): مخزن TorrentDataSource يعلّمها. */
+        @Volatile var lastEarly = false; private set
+        /** القراءة المبكرة ما زالت موثوقة لهذا التورنت (لم يفشل تحقق قطعة قُرئت مبكرًا): وإلا يُرمى ما في المخزن منها. */
+        fun earlyTrusted(): Boolean = !closed.get() && state.infoHash !in verifiedOnly
         /** كم بايتًا من [position] قبل مرفقات MKV التي تُعطى أصفارًا (مخزن TorrentDataSource لا يعبرها)؛ بلا حد إن لم تكن. */
         fun unskipped(position: Long): Long {
             val range = state.head?.skip ?: return Long.MAX_VALUE
@@ -665,6 +669,7 @@ class TorrentEngine internal constructor(
             // null: كتل متصلة من الموضع مكتوبة قبل أن تكتمل القطعة الموثقة ([TurboRead])
             val verified = state.piece(plan.piece, stop, ask)
             val early = if (verified == null && ask != null) readWritten(position, target, offset, ask.span) else 0
+            lastEarly = early > 0
             val length = if (early > 0) {
                 earlyLeft -= early
                 state.earlyRead(early)

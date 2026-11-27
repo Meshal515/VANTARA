@@ -16,19 +16,10 @@ internal class TorrentDataSource(private val engine: TorrentEngine, private val 
     private var position = 0L
     private var remaining = 0L
     private var started = false
-    /**
-     * مخزن القراءات الصغيرة. مستخرج MKV في Media3 يقرأ فهرس Cues عنصرًا عنصرًا (بايت للمعرّف، بايت للحجم، بضعة للقيمة)،
-     * و[DefaultExtractorInput] لا يخزّن: كل واحدة استدعاء read هنا. نقطة الفهرس ~15 بايت بعشرة استدعاءات، و519KB نحو
-     * 350 ألف استدعاء، وكل استدعاء في المحرك (Lease.read: prioritize تحت القفل، havePiece متزامن من libtorrent، القرص)
-     * ~40µs: 14–16 ث ثابتة على المحاكي ولو كان الملف على القرص (TorrentSeekDeviceTest، 27 نوفمبر)، و23–35KB/s على جهاز
-     * المالك (أول قفزة بعد البدء بلا فهرس 14.8 ث، المتابعة 28.5 ث). القراءة الصغيرة تجلب [CHUNK] من المحرك مرة، وما بعدها
-     * من هنا بلا قفل ولا libtorrent. المحرك يعيد ما هو متاح الآن (قد يكون أقل)، فلا انتظار زائد.
-     */
-    private var chunk: ByteArray? = null
-    private var chunkAt = 0L
-    private var chunkLength = 0
+    /** القراءات الصغيرة من المخزن ([ReadChunk]: لماذا وشروطه)، والكبيرة من المحرك مباشرة. */
+    private val chunk = ReadChunk(CHUNK)
     override fun open(dataSpec: DataSpec): Long {
-        chunkLength = 0
+        chunk.reset()
         if (cancelled) throw IOException("Torrent reader already closed")
         current = dataSpec.uri
         transferInitializing(dataSpec)
@@ -47,22 +38,14 @@ internal class TorrentDataSource(private val engine: TorrentEngine, private val 
         if (remaining == 0L) return C.RESULT_END_OF_INPUT
         val reader = lease ?: throw IOException("Torrent reader is not open")
         val want = minOf(length.toLong(), remaining).toInt()
-        val held = chunk
-        if (held != null && chunkLength > 0 && position >= chunkAt && position < chunkAt + chunkLength) {
-            val n = minOf(want.toLong(), chunkAt + chunkLength - position).toInt()
-            System.arraycopy(held, (position - chunkAt).toInt(), buffer, offset, n)
-            return delivered(n)
-        }
-        // لا يعبر المخزن إلى مرفقات MKV (تُعطى أصفارًا بلا تنزيل في Lease.read من بدايتها)
+        val held = chunk.take(position, buffer, offset, want) { reader.earlyTrusted() }
+        if (held > 0) return delivered(held)
+        // لا يعبر المخزن نطاق الطلب ولا مرفقات MKV (تُعطى أصفارًا بلا تنزيل في Lease.read من بدايتها)
         val size = minOf(CHUNK.toLong(), remaining, reader.unskipped(position)).toInt()
         if (want >= size) return reader.read(position, buffer, offset, want).also { if (it > 0) delivered(it) }
-        val target = held ?: ByteArray(CHUNK).also { chunk = it }
-        val got = reader.read(position, target, 0, size)
+        val got = chunk.fill(position, size, { b, o, n -> reader.read(position, b, o, n) }) { reader.lastEarly }
         if (got <= 0) return got
-        chunkAt = position; chunkLength = got
-        val n = minOf(want, got)
-        System.arraycopy(target, 0, buffer, offset, n)
-        return delivered(n)
+        return delivered(chunk.take(position, buffer, offset, want) { true })
     }
     private fun delivered(count: Int): Int {
         position += count; remaining -= count; bytesTransferred(count)
@@ -71,7 +54,7 @@ internal class TorrentDataSource(private val engine: TorrentEngine, private val 
     override fun getUri(): Uri? = current
     override fun close() {
         cancelled = true
-        chunkLength = 0
+        chunk.reset()
         lease?.close(); lease = null; current = null
         if (started) { started = false; transferEnded() }
     }
