@@ -332,7 +332,9 @@ class RuntimeAppIntegrationTest {
             if(blockNext.compareAndSet(true,false)) { entered.countDown();check(release.await(5,TimeUnit.SECONDS)) { "TEST_FACTORY_RELEASE_TIMEOUT" } }
             object: AndroidRuntimeClient.HostHttpTransport {
                 override fun exchange(scope: AndroidRuntimeClient.Scope,request: RuntimeHttpAccess.Request): RuntimeHttpAccess.Response {
-                    calls.incrementAndGet();assertTrue(request.url().startsWith(ORIGIN+"/"))
+                    // The pinned provider requests safeGet(mainUrl) without a trailing slash for the homepage.
+                    // Accept only this exact origin and its paths, never a different host.
+                    calls.incrementAndGet();assertTrue("Unexpected offline Anime4up transport URL: ${request.url()}",request.url()==ORIGIN || request.url().startsWith(ORIGIN+"/"))
                     val html=if(request.url().contains("/episode/"))EPISODE else if(request.url().contains("/anime/vantara-test/"))DETAIL else HTML
                     return RuntimeHttpAccess.Response(request.url(),200,mapOf("Content-Type" to listOf("text/html; charset=utf-8")),html.toByteArray())
                 }
