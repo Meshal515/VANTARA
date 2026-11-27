@@ -45,7 +45,10 @@ class TorrentSeekDeviceTest {
         c.setRequestProperty("User-Agent", "Mozilla/5.0"); c.connectTimeout = 15000; c.readTimeout = 15000
         val streams = JSONObject(c.inputStream.bufferedReader().readText()).optJSONArray("streams") ?: JSONArray()
         return (0 until streams.length()).map { streams.getJSONObject(it) }
-            .filter { it.has("infoHash") && Regex("(?i)\\.mkv|mkv").containsMatchIn(it.optString("title") + it.optString("behaviorHints")) && "1080p" in it.optString("name") + it.optString("title") }
+            // محاكي x86 بلا مفكك HEVC (التشغيل الأول: NO_EXCEEDS_CAPABILITIES في OMX.google.hevc.decoder): H.264 فقط
+            .filter { val t = it.optString("name") + " " + it.optString("title")
+                it.has("infoHash") && Regex("(?i)mkv").containsMatchIn(t + it.optString("behaviorHints")) && Regex("(?i)x264|h\\.?264|avc").containsMatchIn(t) &&
+                    !Regex("(?i)x265|hevc|h\\.?265|10.?bit").containsMatchIn(t) && Regex("1080p|720p").containsMatchIn(t) }
             .maxByOrNull { TorrentPrefetch.seeders(it.optString("title")) ?: 0 }?.let { s ->
                 val sources = s.optJSONArray("sources")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
                 Choice(s.getString("infoHash"), if (s.has("fileIdx")) s.getInt("fileIdx") else null, sources, s.optString("title").lineSequence().first().take(80))
