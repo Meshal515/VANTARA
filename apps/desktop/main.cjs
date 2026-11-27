@@ -154,7 +154,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   const sourceBrowser = session?.fromPartition ? createSourceBrowser({ BrowserWindow, session, net, userAgent: chromeUserAgent(process.versions.chrome), isChallenge: challengePage }) : null;
   // إضافات Mihon (Suwayomi) تحل Cloudflare بالمتصفح نفسه عبر جسر محلي بواجهة FlareSolverr (cf-bridge.cjs)
   const cloudflareBridge = sourceBrowser ? require('./cf-bridge.cjs').createCloudflareBridge({
-    solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent,
+    solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent, isChallenge: challengePage,
     onChallenge: host => publish({ type: 'source-verification/required', host }),
   }) : null;
   if(process.platform==='win32')videoHost=createVideoHost({
