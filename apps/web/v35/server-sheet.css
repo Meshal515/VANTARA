@@ -1613,3 +1613,9 @@ html.room-servers .v35 .ss-info { display: none; }
   text-align: start;
 }
 .v35 .ss-jumps[hidden] { display: none; }
+
+/* حاجز حجز الارتفاع (holdHeight): بعد القائمة لا أصل للصفوف، ولا يُختار مثبِّتًا للتمرير */
+.v35 .ss-hold {
+  overflow-anchor: none;
+  pointer-events: none;
+}

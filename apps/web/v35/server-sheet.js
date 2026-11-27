@@ -455,7 +455,10 @@ export function createServerSheet(body, o) {
   const filters = el('div', 'an-pick-filters');
   tools.append(toolsHead, filters);
   const list = el('div', 'an-srv-list');
-  src.append(tools, list);
+  // حجز ارتفاع القائمة (holdHeight): عنصر بعدها لا أصل للصفوف، فتغيّره لا يوقف تثبيت التمرير في المتصفح
+  const hold = el('div', 'ss-hold');
+  hold.setAttribute('aria-hidden', 'true');
+  src.append(tools, list, hold);
 
   const scroll = el('div', 'an-pick-scroll');
   scroll.append(info, src);
@@ -689,17 +692,31 @@ export function createServerSheet(body, o) {
   // «غير متاح الآن»، «نسخ إضافية») تظهر وتختفي مع تدفق السيرفرات، فيقصر المحتوى والإصبع عند آخره، والمتصفح يقص موضع
   // التمرير إلى الحد الجديد: قفزة للأعلى مع كل تحديث (اهتزاز). الارتفاع الذي بلغته القائمة يبقى محجوزًا ما دام أسفلها
   // ظاهرًا، ويُترك حين يكون أسفلها خارج الشاشة (تقصيره هناك لا يحرّك ما تراه). تغيير المرشّح بيد المستخدم يبدأ من جديد.
+  //
+  // المالك (27 نوفمبر، بعد النشر): «أول ما أنزل يرتفع، أنزل يرتفع… وبعد فترة يهدأ». جذران في الحجز السابق:
+  //  1) أول تقلص بلا حجز: والمحتوى في أقصاه كان الحجز فارغًا (heldPx = الطبيعي)، فيقصر المحتوى في reconcile، ثم يقيس
+  //     holdHeight بـgetBoundingClientRect: تخطيط بالمحتوى المقصوص يقص التمرير فورًا، ثم يُحجز بعد فوات القص. في أول
+  //     الورقة المحتوى قصير والإصبع دائمًا قرب آخره، فكل سيرفر يصل يرفعه؛ ويهدأ حين تطول القائمة (التقلص تحت الشاشة).
+  //  2) الحجز كان min-height على .an-srv-list، أصل كل صف: تغيّر خاصية ارتفاع على أصل العنصر المثبِّت يوقف تثبيت التمرير
+  //     (scroll anchoring) لذلك التخطيط، فيتحرك ما على الشاشة بما يُضاف فوقه في التحديث نفسه.
+  // الآن: يُثبَّت الارتفاع قبل أي تغيير (holdBefore)، في عنصر بعد القائمة لا أصل للصفوف، ثم يُترك منه ما يسعه ما تحت الشاشة.
   let heldPx = 0, heldKey = '';
-  const holdHeight = (key) => {
-    if (key !== heldKey) { heldKey = key; heldPx = 0; list.style.minHeight = ''; return; }
-    // الارتفاع الطبيعي من موضع آخر عنصر (لا بإلغاء الحجز ثم القياس: ذلك تخطيط بالمحتوى المقصوص فيُقص التمرير فورًا)
-    const top = list.getBoundingClientRect?.().top ?? 0;
-    const end = list.lastElementChild?.getBoundingClientRect?.().bottom ?? top;
-    const natural = Math.max(0, end - top);
-    // التقصير بمقدار Δ ينقص أقصى تمرير بمقدار Δ: لا قص ما دام المتبقي تحت الشاشة (D) أكبر منه. يُترك من الحجز ما يسعه D فقط
+  const listHeight = () => list.getBoundingClientRect?.().height ?? 0;
+  /** قبل تغيير القائمة: المحتوى لا يقصر عن الحجز مهما فعلت القائمة، و«ما تحت الشاشة» يُقاس قبل أي تقليص. */
+  const holdBefore = (key) => {
+    if (key !== heldKey) return 0;
     const below = Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0) - (scroll.scrollTop || 0));
+    // الحجز كله مؤقتًا (القائمة + الحاجز ≥ heldPx في كل تخطيط أثناء البناء)؛ التقليص يقع تحت المحتوى ولا يقص التمرير
+    heldPx = Math.max(heldPx, listHeight());
+    hold.style.height = `${Math.round(heldPx)}px`;
+    return below;
+  };
+  const holdHeight = (key, below) => {
+    if (key !== heldKey) { heldKey = key; heldPx = listHeight(); hold.style.height = ''; return; }
+    const natural = listHeight();
+    // التقصير بمقدار Δ ينقص أقصى تمرير بمقدار Δ: لا قص ما دام ما تحت الشاشة قبل التحديث (D) أكبر منه. يُترك ما يسعه D فقط
     heldPx = natural >= heldPx ? natural : natural + Math.max(0, heldPx - natural - below);
-    list.style.minHeight = heldPx > natural ? `${Math.round(heldPx)}px` : '';
+    hold.style.height = heldPx > natural ? `${Math.round(heldPx - natural)}px` : '';
   };
   const reconcile = (parent, nodes) => {
     const before = new Map([...parent.children].map((node, i) => [node, i]));
@@ -1153,6 +1170,13 @@ export function createServerSheet(body, o) {
   }
 
   function render(model) {
+    const below = holdBefore(lastFilterKeyNow());
+    paint(model);
+    holdHeight(lastFilterKeyNow(), below);
+  }
+  const lastFilterKeyNow = () => `${filter.q}|${filter.v}|${filter.a}`;
+
+  function paint(model) {
     last = model;
     measured = model.facts ?? {};
     const routes = oneTorrent(model.routes ?? []);
@@ -1267,7 +1291,6 @@ export function createServerSheet(body, o) {
     ].filter(Boolean);
     reconcile(list, order);
     if (!order.length && routes.length) list.replaceChildren(el('p', 'ss-none', 'لا سيرفر بهذا الاختيار — جرّب جودة أو لغة أو مصدرًا آخر'));
-    holdHeight(filterKey);
 
     // زرّ واحد هادئ: يشغّل المقترح نفسه، أو ينتظر أول جاهز
     best.classList.remove('waiting');
