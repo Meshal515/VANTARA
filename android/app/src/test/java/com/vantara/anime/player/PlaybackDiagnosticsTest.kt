@@ -54,6 +54,30 @@ class PlaybackDiagnosticsTest {
         assertFalse(report.contains("vantara-torrent"))
     }
 
+    /**
+     * لقطة المالك (Reacher، متابعة عند 5:29): فهرس آخر الملف 168KB أخذ 10.4 ث. السطر الجديد يفصل الجذور: كتل على القرص لا
+     * يعرفها المحرك، أو كتلة الموضع لم تُنزَّل، أو تلميح لا يصل libtorrent.
+     */
+    @Test fun reportsHintDeliveryAndHowEachLongWaitEnded() {
+        at(0); diag.start()
+        val waits = listOf(
+            com.vantara.addons.torrent.ReadWait(piece = 122, block = 1010, blocks = 1024, known = 3, engine = 900, atOffset = false, ms = 10_400, early = false, tail = true),
+            com.vantara.addons.torrent.ReadWait(piece = 13, block = 0, blocks = 1024, known = 40, engine = 41, atOffset = false, ms = 1_300, early = true, tail = false),
+        )
+        val facts = PlaybackDiagnostics.TorrentFacts(
+            peers = 62, seeds = 38, downloadBps = 3_700_000, fileBytes = 1966 * mb, pieceBytes = (16 * mb).toInt(),
+            metadataAt = 1_000_000L, firstPieceAt = 0, waitingPiece = -1, waitingSince = 0, waitingBlocks = null,
+            hintsSent = 37, waits = waits,
+        )
+        val report = diag.report(facts, player(), clock)
+        assertTrue(report, report.contains("· تلميح القراءة: وصل 37"))
+        assertTrue(report, report.contains("القطعة 122 (آخر الملف) عند الكتلة 1010: 10.4 ث · مكتوب عندنا 3 وفي libtorrent 900 من 1024 · كتلة الموضع غير معروفة · انتهى بالقطعة الموثقة · فجوة: كتل على القرص لا يعرفها المحرك"))
+        assertTrue(report, report.contains("القطعة 13 عند الكتلة 0: 1.3 ث · مكتوب عندنا 40 وفي libtorrent 41 من 1024 · كتلة الموضع غير معروفة · انتهى بقراءة قبل التحقق · كتلة الموضع لم تُنزَّل بعد"))
+        val unpatched = diag.report(PlaybackDiagnostics.TorrentFacts(1, 1, 1, mb, mb.toInt(), 0, 0, -1, 0, null, hintsFailed = 4), player(), clock)
+        assertTrue(unpatched, unpatched.contains("تلميح القراءة: لا يصل (فشل 4، المكتبة بلا 0004)"))
+        assertFalse(unpatched, unpatched.contains("انتظار القطع"))
+    }
+
     @Test fun namesThePieceThePlayerIsWaitingFor() {
         at(0); diag.start()
         at(30_000)

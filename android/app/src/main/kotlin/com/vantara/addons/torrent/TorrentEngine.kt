@@ -478,7 +478,8 @@ class TorrentEngine internal constructor(
             mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
             warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0,
             firstPeerAt = state?.firstPeerAt ?: 0L, firstPayloadAt = state?.firstPayloadAt ?: 0L,
-            turbo = turboAllowed(hash), earlyBytes = state?.earlyBytes ?: 0L, earlyFailures = state?.earlyFailures ?: 0)
+            turbo = turboAllowed(hash), earlyBytes = state?.earlyBytes ?: 0L, earlyFailures = state?.earlyFailures ?: 0,
+            hintsSent = state?.hintsSent ?: 0, hintsFailed = state?.hintsFailed ?: 0, waits = state?.waits() ?: emptyList())
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -757,8 +758,13 @@ class TorrentEngine internal constructor(
         fun earlyRead(bytes: Int) = synchronized(monitor) { earlyBytes += bytes; Unit }
         /** تلميح القراءة إلى libtorrent (async_call؛ لا ينتظر خيط الشبكة). */
         fun readHint(reader: Int, piece: Int, offset: Int) = synchronized(monitor) {
-            torrent?.takeIf { it.isValid }?.let { NativeReadHint.set(it, reader, piece, offset) }; Unit
+            torrent?.takeIf { it.isValid }?.let { if (NativeReadHint.set(it, reader, piece, offset)) hintsSent++ else hintsFailed++ }; Unit
         }
+        /** للتشخيص: هل يصل تلميح القراءة إلى libtorrent على هذا الجهاز ([readHint]). */
+        @Volatile var hintsSent = 0; private set
+        @Volatile var hintsFailed = 0; private set
+        private val waits = ArrayDeque<ReadWait>()
+        fun waits(): List<ReadWait> = synchronized(monitor) { waits.toList() }
         fun clearHint(reader: Int) = synchronized(monitor) {
             torrent?.takeIf { it.isValid }?.let { NativeReadHint.clear(it, reader) }; Unit
         }
@@ -1050,14 +1056,22 @@ class TorrentEngine internal constructor(
             var checkedAt = 0L
             var swappedAt = 0L
             var done = -1L
+            // للتشخيص: لقطة الثانية الأولى من انتظار طويل ([ReadWait])، تُسجَّل حين ينتهي
+            var probe: IntArray? = null
+            fun waited(earlyRead: Boolean) {
+                val p = probe ?: return
+                waits.addLast(ReadWait(piece, (early?.offset ?: 0) / TurboRead.BLOCK_BYTES, p[2], p[0], p[1], p[3] == 1,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start), earlyRead, piece >= lastPiece - 1))
+                while (waits.size > MAX_WAITS) waits.removeFirst()
+            }
             try { synchronized(monitor) {
                 while (true) {
                     checkCancelled(cancelled)
-                    pieces[piece]?.let { return it }
+                    pieces[piece]?.let { waited(false); return it }
                     if (early != null && hash !in verifiedOnly) {
                         val span = TurboRead.writtenSpan(written[piece], early.offset, early.length, pieceSizeOf(piece))
                         // تُسجَّل قبل أن تُقرأ: فشل تحقق يصل بين هذا السطر والقراءة من القرص يُكشف ولا يمر
-                        if (span > 0) { early.span = span; earlyPieces.add(piece); return null }
+                        if (span > 0) { early.span = span; earlyPieces.add(piece); waited(true); return null }
                     }
                     if (waitingPiece != piece) { waitingPiece = piece; waitingSince = android.os.SystemClock.elapsedRealtime() }
                     if (refs == 0) throw InterruptedIOException("Torrent has no active reader")
@@ -1072,6 +1086,14 @@ class TorrentEngine internal constructor(
                     // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
                     // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).
                     val now = System.nanoTime()
+                    if (probe == null && now - start >= ONE_SECOND_NS) {
+                        val bits = written[piece]
+                        val queued = runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece } }.getOrNull()
+                        val blocks = queued?.blocksInPiece() ?: ((pieceSizeOf(piece) + TurboRead.BLOCK_BYTES - 1) / TurboRead.BLOCK_BYTES)
+                        val engine = queued?.let { it.finished() + it.writing() } ?: if (handle.havePiece(piece)) blocks else 0
+                        val atOffset = early != null && bits?.get(early.offset / TurboRead.BLOCK_BYTES) == true
+                        probe = intArrayOf(bits?.cardinality() ?: 0, engine, blocks, if (atOffset) 1 else 0)
+                    }
                     if (now - checkedAt >= ONE_SECOND_NS) {
                         checkedAt = now
                         val total = runCatching { handle.status().totalPayloadDownload() }.getOrDefault(done)
@@ -1156,6 +1178,7 @@ class TorrentEngine internal constructor(
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         /** قطع ناقصة بلا موعد تُتتبع كتلها للخيار B في وقت واحد (ذوات الموعد تُتتبع دائمًا). */
         private const val MAX_TRACKED_PIECES = 64
+        private const val MAX_WAITS = 8
         /** تلميح القراءة (0004): قارئ التسخين، ويُحدَّث تلميح الفتح كل 4 كتل (64KB) يتقدمها. */
         private const val WARM_READER = 0
         private const val HINT_STRIDE_BLOCKS = 4

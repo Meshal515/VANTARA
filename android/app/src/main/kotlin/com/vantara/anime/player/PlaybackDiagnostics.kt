@@ -38,6 +38,9 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
         /** الخيار B: مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
         val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
+        /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من ثانية. */
+        val hintsSent: Int = 0, val hintsFailed: Int = 0,
+        val waits: List<com.vantara.addons.torrent.ReadWait> = emptyList(),
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -162,7 +165,12 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             if (t.swaps > 0) appendLine("تبديل مشاركين بطيئين عن قطعة عالقة: ${t.swaps}")
             appendLine("قبل التحقق: " + (if (t.turbo) "مسموح" else "موثق فقط") + " · قُرئ ${bytes(t.earlyBytes)}" +
                 if (t.earlyFailures > 0) " · فشل تحقق ${t.earlyFailures} قطعة وأُعيد التشغيل موثقًا" else "")
-            appendLine("المحرك: " + if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (VANTARA 0001+0002، نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12")
+            appendLine("المحرك: " + (if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12") +
+                " · تلميح القراءة: " + hints(t))
+            if (t.waits.isNotEmpty()) {
+                appendLine("انتظار القطع (أطول من ثانية، الأحدث آخرًا):")
+                for (w in t.waits) appendLine("  " + wait(w))
+            }
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }
@@ -190,6 +198,24 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         for (e in events) appendLine("  $e")
         append("الحكم: ").append(verdict(t, p, nowMs))
     }
+
+    private fun hints(t: TorrentFacts) = when {
+        t.hintsSent > 0 -> "وصل ${t.hintsSent}" + if (t.hintsFailed > 0) " · فشل ${t.hintsFailed}" else ""
+        t.hintsFailed > 0 -> "لا يصل (فشل ${t.hintsFailed}، المكتبة بلا 0004)"
+        else -> "لم يُرسل بعد"
+    }
+
+    /** انتظار واحد: القطعة والموضع والمدة، وما يعرفه المحرك مكتوبًا مقابل libtorrent لحظة الثانية الأولى، وكيف انتهى. */
+    internal fun wait(w: com.vantara.addons.torrent.ReadWait): String =
+        "القطعة ${w.piece}" + (if (w.tail) " (آخر الملف)" else "") + " عند الكتلة ${w.block}: ${secs(w.ms)} ث" +
+            " · مكتوب عندنا ${w.known} وفي libtorrent ${w.engine} من ${w.blocks}" +
+            " · كتلة الموضع " + (if (w.atOffset) "معروفة" else "غير معروفة") +
+            " · انتهى " + (if (w.early) "بقراءة قبل التحقق" else "بالقطعة الموثقة") +
+            when {
+                w.untracked -> " · فجوة: كتل على القرص لا يعرفها المحرك"
+                !w.atOffset && w.engine < w.blocks -> " · كتلة الموضع لم تُنزَّل بعد"
+                else -> ""
+            }
 
     // ما حدث قبل فتح المشغّل (التسخين المسبق، بيانات محفوظة) يُكتب «قبل الفتح» لا «—»: البدء الدافئ يُعرف من البارد
     private fun rel(t: Long) = if (t > 0 && openAt > 0 && t >= openAt) String.format(Locale.US, "+%.1f", (t - openAt) / 1000.0) else if (t > 0 && openAt > 0) "قبل الفتح" else "—"
