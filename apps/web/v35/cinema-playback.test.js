@@ -44,17 +44,18 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   // ما يُفحص يبقى بمكانه في قسمه (لا يُطوى ثم يقفز)؛ لا قسم «تُجهَّز بالخلفية»
   // سيرفر HTTP قيد الفحص ينتظر في «قيد الفحص» ولا يحجز مكانًا ظاهرًا (المالك، 15 نوفمبر)
   expect(Boolean(sheet.querySelector('.cn-srv-wait'))).toBe(httpPending);
-  expect(sheet.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv').length).toBe(6);
+  // جودة واحدة: أعلى عشرة أسراب ظاهرة (المالك، 27 نوفمبر: أعلى 5 من كل جودة من أعلى جودتين، والجودة الواحدة ضعفها)
+  expect(sheet.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv').length).toBe(10);
   expect(sheet.querySelectorAll('.ss-group--direct > .an-srv-grid .an-srv').length).toBe(0);
   const more=sheet.querySelector('.an-srv-group details');
   expect(more.open).toBeFalsy();
-  expect(more.querySelector('summary').textContent).toContain('67');
-  expect(more.querySelectorAll('.an-srv').length).toBe(67);
+  expect(more.querySelector('summary').textContent).toContain('63');
+  expect(more.querySelectorAll('.an-srv').length).toBe(63);
   more.open=true;
   state.listeners.get('route')({session:state.session,route:{...state.routes[0],state:'FAILED',runtimeReady:false}});
   await vi.advanceTimersByTimeAsync(1);
-  expect(more.querySelector('summary').textContent).toContain('66');
-  expect(more.querySelectorAll('.an-srv').length).toBe(66);
+  expect(more.querySelector('summary').textContent).toContain('62');
+  expect(more.querySelectorAll('.an-srv').length).toBe(62);
   expect(more.open).toBe(true);
   await first.onclick();
   await vi.advanceTimersByTimeAsync(0);
