@@ -105,7 +105,7 @@ class CandidatePreparationTimingTest {
         assertEquals(0L, p.candidate("one")?.preparationMs)
     }
 
-    @Test fun `first candidate of the session is stamped on every later candidate (diagnostics: slow extraction vs late choice)`() {
+    @Test fun `first candidate of the session is stamped on every later candidate (diagnostics - slow extraction vs late choice)`() {
         val p = prepared()
         monotonicMs = 1_400
         p.report(ready(candidate("fast")))
