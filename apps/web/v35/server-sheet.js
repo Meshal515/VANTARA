@@ -16,6 +16,7 @@ import { parseRelease, swarmTier } from '../addons/release-info.js';
 import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
 import { flingHoldRisk } from './collapse-hero.js';
+import { boltIn } from './motion.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, measuredSeeds, pieceScore, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
@@ -251,7 +252,37 @@ export function factDate(v) {
  */
 /** لمسة على صف بعد تحرّك القائمة بأقل من هذا تُهمل (لا تشغيل بالخطأ). */
 const TAP_GUARD_MS = 450;
-const TOP_PER_QUALITY = 5;
+/** الظاهر من كل قسم (المالك، 27 نوفمبر): 10، وما بعده «عرض N من النسخ/الروابط الإضافية». */
+export const VISIBLE = 10;
+/** التورنت: حتى 5 من كل جودة بالترتيب (4K ثم 1080p ثم ما دونها)، ثم يُكمَل العشرة بالجودة والسرب. */
+export const PER_QUALITY = 5;
+const BOLT = '<svg class="icon ss-bolt" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M13.4 2.2 4.6 13.3a.7.7 0 0 0 .55 1.13h5.6l-1.1 7.2c-.1.66.74 1.02 1.15.5l8.8-11.1a.7.7 0 0 0-.55-1.13h-5.6l1.1-7.2c.1-.66-.74-1.02-1.15-.5Z"/></svg>';
+
+/**
+ * ترتيب التورنت الظاهر: الجودة أولًا ثم السرب داخلها. أول مرور يأخذ حتى [PER_QUALITY] من كل جودة من الأعلى (2 من 4K
+ * ثم 5 من 1080p ثم 720p…)، والثاني يُكمل [VISIBLE] بما بقي. الناتج مرتب بالجودة ثم السرب.
+ */
+export function torrentPlan(items, { quality, seeds }) {
+  const byQ = new Map();
+  for (const r of items) { const q = quality(r) ?? 0; if (!byQ.has(q)) byQ.set(q, []); byQ.get(q).push(r); }
+  const qs = [...byQ.keys()].sort((a, b) => b - a);
+  for (const q of qs) byQ.get(q).sort((a, b) => seeds(b) - seeds(a));
+  const out = [];
+  for (const q of qs) for (const r of byQ.get(q).slice(0, PER_QUALITY)) if (out.length < VISIBLE) out.push(r);
+  for (const q of qs) for (const r of byQ.get(q).slice(PER_QUALITY)) if (out.length < VISIBLE) out.push(r);
+  return out.sort((a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seeds(b) - seeds(a));
+}
+
+/**
+ * الصفوف الظاهرة في قسم: قبل أن يلمس المستخدم الورقة تتبع الخطة كما هي (الترتيب الصحيح وقت الوصول)، وبعد لمسه
+ * تثبت مكانها: ما وصل لاحقًا يملأ المكان الشاغر في آخرها، أو يذهب إلى الإضافية. لا صف يتحرك تحت الإصبع.
+ */
+export function arrange(current, plan, { locked, present }) {
+  if (!locked) return plan.slice(0, VISIBLE);
+  const out = current.filter(present);
+  for (const id of plan) if (out.length < VISIBLE && !out.includes(id)) out.push(id);
+  return out;
+}
 
 export function createServerSheet(body, o) {
   let destroyed = false;
@@ -577,8 +608,6 @@ export function createServerSheet(body, o) {
   const rows = new Map();
   const views = new Map();
   const placed = new Map();
-  const folded = new Map();
-  const sectionAt = new Map();
   let placedSeq = 0;
   let lastFilterKey = '';
   const view = (r) => {
@@ -598,24 +627,37 @@ export function createServerSheet(body, o) {
     return rank(r, m ? { ...view(r), measured: m } : view(r));
   };
 
-  const section = (cls, title, sub) => {
+  const section = (cls, title, sub, noun) => {
     const s = el('section', `an-srv-group ${cls}`);
     const h = el('h4', 'an-srv-q');
+    const ico = el('i', 'ss-group-ico');
+    ico.setAttribute('aria-hidden', 'true');
+    ico.hidden = true;
     const t = el('b', null, title);
     const count = el('span', 'ss-count');
-    h.append(t, count);
+    h.append(ico, t, count);
     if (sub) h.append(el('span', 'ss-sub', sub));
     const grid = el('div', 'an-srv-grid');
-    const more = el('details', 'cn-srv-dead an-srv-more');
-    const summary = el('summary');
-    const moreGrid = el('div', 'an-srv-grid');
-    more.append(summary, moreGrid);
-    s.append(h, grid, more);
-    return { s, count, grid, more, summary, moreGrid };
+    // «عرض N»: زر بارتفاع ثابت (كان details يتغير محتواه وهو مفتوح مع كل سيرفر يصل فتكبر الورقة وتصغر)
+    const more = btn('ss-more-btn');
+    more.hidden = true;
+    more.setAttribute('aria-expanded', 'false');
+    const moreGrid = el('div', 'ss-more-grid');
+    moreGrid.hidden = true;
+    s.append(h, grid, more, moreGrid);
+    const g = { s, ico, count, grid, more, moreGrid, noun, open: false, shown: [], extra: [] };
+    more.onclick = (e) => { e.stopPropagation(); g.open = !g.open; update(last); };
+    return g;
   };
   // نفس أسماء أقسام مشغّل الجوال (تصميم واحد للمنصتين، قرار المالك 15 نوفمبر)
-  const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع');
-  const torrent = section('ss-group--torrent', 'تورنت', 'جودة أعلى · يبدأ أبطأ');
+  const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع', 'الروابط الإضافية');
+  const torrent = section('ss-group--torrent', 'تورنت', 'جودة أعلى · يبدأ أبطأ', 'النسخ الإضافية');
+  // لمسها المستخدم (لمس أو عجلة أو سحب): الصفوف الظاهرة تثبت مكانها ([arrange])
+  let locked = false;
+  const lock = () => { locked = true; };
+  listen(scroll, 'touchstart', lock, { passive: true });
+  listen(scroll, 'wheel', lock, { passive: true });
+  listen(scroll, 'pointerdown', lock, { passive: true });
   const fold = (cls) => {
     const d = el('details', `cn-srv-dead ${cls}`);
     const summary = el('summary');
@@ -750,9 +792,11 @@ export function createServerSheet(body, o) {
     const top = r.id === topId;
     const starting = Boolean(last.busy && picked === r.id);
     const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
+    // CLAUDE.md: الإضاءة بإشارة المحرك أن بيانات أول إطار على القرص (ready)، لا بمؤقت ولا بالمشاركين ولا بالبيانات
+    const warm = Boolean(d.torrent && measured[r.id]?.ready === true);
     // الصف لا يُعاد بناؤه إن لم يتغير ما يُرسم منه (كان كل update يعيد DOM كل صف، ومنها مئات المطوية في «نسخ إضافية»:
     // خُمس كلفة التحديث). البصمة: وصف السيرفر (مفتاح view نفسه) وحالته وما يغيّر سطره وطرفه. اللمس يُربط دائمًا بالحالة الحالية
-    const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}`;
+    const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}|${warm}`;
     b.onclick = () => {
       if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
       return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
@@ -761,16 +805,20 @@ export function createServerSheet(body, o) {
     b.dataset.sig = sig;
     const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
     const open = b.classList.contains('ss-row--open');
-    b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
+    b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}${warm ? ' ss-row--warm' : ''}`;
     b.disabled = pending && !isTryable(r);
     const qb = b.querySelector('.ss-q');
     // جودة غير معروفة (HLS متكيّف أو مصدر لم يعلنها) لا تُكتب «HD»: هذا ادعاء لم يتحقق، والوصف المقروء «تلقائي»
     qb.firstElementChild.textContent = qualityLabel(d.q);
     qb.classList.toggle('ss-q--auto', d.q == null);
     // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
+    const wasWarm = b.dataset.warm === '1';
+    b.dataset.warm = warm ? '1' : '';
     qb.lastElementChild.textContent = '';
-    qb.lastElementChild.innerHTML = glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
+    qb.lastElementChild.innerHTML = warm ? BOLT : glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
     qb.lastElementChild.setAttribute('aria-hidden', 'true');
+    // البرق يدخل بحركة GSAP مرة حين يسخن الصف (motion.js: لا حركة مع تقليل الحركة)
+    if (warm && !wasWarm) boltIn(qb.lastElementChild);
     b.querySelector('.ss-name').textContent = d.name;
     // صورة المصدر (إضافته: CloudStream أو Aniyomi) بجانب اسمه، في خانة محجوزة من البداية فلا يتحرك الاسم حين تصل
     const ico = b.querySelector('.ss-ico');
@@ -834,7 +882,7 @@ export function createServerSheet(body, o) {
       box?.remove();
       b.classList.remove('ss-row--open');
     }
-    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
+    const why = [top ? 'مقترح' : null, warm ? 'جاهز للتشغيل الفوري' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
     return b;
@@ -1008,21 +1056,6 @@ export function createServerSheet(body, o) {
     return hash ? `${hash}|${r.fileIdx ?? ''}` : null;
   };
   const seedersOf = (r) => Number(view(r).info?.seeders) || 0;
-  /**
-   * المقترحة من التورنت (طلب المالك، 27 نوفمبر): أعلى [TOP_PER_QUALITY] أسراب من كل جودة من أعلى جودتين موجودتين
-   * (4K ثم 1080p عادةً)، بالجودة ثم الزارعين، والضعيف (بلا زارعين أو CAM) خارجها. «المقترح» يبقى ظاهرًا ولو خارجها.
-   * مرشّح جودة واحدة: أعلى ضعفها منها. الصف الذي يتحرك تحت الإصبع محميّ بـTAP_GUARD_MS (shiftedAt في reconcile).
-   */
-  const topSwarms = (items, weak) => {
-    const strong = items.filter((r) => isSelectable(r) && !weak(r) && view(r).q != null);
-    const qs = [...new Set(strong.map((r) => view(r).q))].sort((a, b) => b - a).slice(0, 2);
-    const per = qs.length === 1 ? TOP_PER_QUALITY * 2 : TOP_PER_QUALITY;
-    const out = [];
-    for (const q of qs) out.push(...strong.filter((r) => view(r).q === q).sort((a, b) => seedersOf(b) - seedersOf(a) || placed.get(a.id) - placed.get(b.id)).slice(0, per));
-    const top = items.find((r) => r.id === topId);
-    if (top && !out.includes(top)) out.push(top);
-    return out;
-  };
   // كلفة التحديث (قياس 27 نوفمبر، معالج بسرعة الجوال): 161ms لكل update بـ171 سيرفرًا، نصفها هنا: كل سيرفر يقارَن بكل
   // عضو في كل مجموعة سابقة (sameTorrent تعيد التعبيرات النمطية في كل مقارنة). المجموعة تحفظ بصماتها ومفاتيحها، فالشرط
   // نفسه بالضبط (sameTorrent وقيد البصمتين) يصير بحثًا في مجموعة، والبصمة والمفتاح يُحسبان مرة لكل سيرفر
@@ -1059,7 +1092,22 @@ export function createServerSheet(body, o) {
     const ready = shown.filter(isSelectable);
     const anyReady = routes.some(isSelectable);
     const scored = ready.map((r) => ({ r, s: scoreOf(r) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
-    const top = scored[0]?.r ?? null;
+    let top = scored[0]?.r ?? null;
+    // المالك: المقترح أسرع ما يبدأ وأثبته؛ إن كان تورنت فهو الأكبر سربًا من التورنتات الصالحة (المقاس إن وصل المحرك إليه)،
+    // لا تورنت ضعيف تقدّمته أوزان أخرى. المباشر العربي السريع يبقى مقترحًا حيث يتقدّم (الأنمي)
+    if (top && view(top).torrent) {
+      const swarm = (r) => measuredSeeds({ ...view(r), measured: measured[r.id] }) ?? seedersOf(r);
+      // من الظاهرة (خطة التورنت: الجودة أولًا) لا من كل التورنت: 720p بسرب أكبر ليس المقترح فوق 4K و1080p، ولا يُقترح مطويّ
+      const strong = torrentPlan(ready.filter((r) => view(r).torrent && view(r).tier !== 'dead' && view(r).info?.source !== 'CAM'), { quality: (r) => view(r).q, seeds: swarm });
+      // المتقاربة سربًا (ضمن 15% من الأكبر) تفاضلها الدرجة (حجم القطعة المقاس، العربية): القطعة الأصغر تبدأ أسرع
+      // والثبات: فوق 20 GB (حد «حجم معقول» في lib/route-validity.js) يحتاج سرعة عالية طوال المشاهدة، فلا يُقترح ما دام
+      // بين الظاهرة ما هو أخف (ريمكس 61 GB بـ412 زارعًا يبدأ سريعًا ثم يتقطع)
+      const light = strong.filter((r) => !(view(r).info?.size > 20 * 1024 ** 3));
+      const pool = light.length ? light : strong;
+      const most = Math.max(0, ...pool.map(swarm));
+      const near = pool.filter((r) => swarm(r) >= most * 0.85);
+      top = near.sort((a, b) => scoreOf(b) - scoreOf(a) || swarm(b) - swarm(a))[0] ?? top;
+    }
     topId = top?.id ?? null;
     announceTop(top);
 
@@ -1073,74 +1121,66 @@ export function createServerSheet(body, o) {
     const empty = !top && Boolean(model.settled || model.missing || model.error || model.noSources);
     status.hidden = empty;
 
-    // ترتيب ثابت (طلب المالك): صف ظهر لا يتحرك من مكانه ولا يختفي؛ تتغير حالته فقط (يُفحص ← صالح/تعذّر).
-    // الجديد يُضاف تحت الموجود، وما وصل في الدفعة نفسها يُرتّب بالأفضلية. «شغّل الأفضل» و«مقترح» يدلّان
-    // على الأفضل دون نقل الصفوف تحت الإصبع. والقسم الذي ظهر أولًا يبقى أولًا (التورنت يسبق عادةً).
-    // تغيير المرشّح بيد المستخدم يعيد توزيع الظاهر/الإضافي مرة؛ وصول السيرفرات لا يعيده
+    // ترتيب الأقسام والصفوف (المالك، 27 نوفمبر): التورنت ثم المباشر دائمًا (CloudStream وغيرها)، وفي كل قسم 10 ظاهرة ثم
+    // «عرض N من النسخ/الروابط الإضافية». الخطة صحيحة الترتيب وقت الوصول، وبعد أن يلمس المستخدم الورقة تثبت الصفوف
+    // الظاهرة مكانها ([arrange]): الجديد يملأ الشاغر في آخرها أو يذهب إلى الإضافية، ولا صف يتحرك تحت الإصبع.
+    // تغيير المرشّح بيد المستخدم يبدأ الخطة من جديد
     const filterKey = `${filter.q}|${filter.v}|${filter.a}`;
-    if (filterKey !== lastFilterKey) { lastFilterKey = filterKey; folded.clear(); }
+    const refilter = filterKey !== lastFilterKey;
+    if (refilter) { lastFilterKey = filterKey; torrent.shown = []; direct.shown = []; }
     const gone = shown.filter((r) => !isPending(r) && !isSelectable(r));
-    // المكان الظاهر للسيرفر الصالح وحده (طلب المالك 15 نوفمبر): السيرفرات قيد الفحص تصل أولًا مع التسليم التدريجي
-    // وأغلبها يتعذّر، فكانت تحجز الأماكن الظاهرة وتدفع الصالح إلى «نسخ إضافية». ما لم يصلح بعد ينتظر في «قيد الفحص»،
-    // والصالح يُضاف تحت الموجود (لا قفزة). صف ظهر يبقى بمكانه وإن تعذّر بعدها.
-    const live = shown.filter((r) => isSelectable(r) || (placed.has(r.id) && folded.get(r.id) !== false))
-    const waiting = shown.filter((r) => isPending(r) && !placed.has(r.id))
-    const fresh = live.filter((r) => !placed.has(r.id))
-      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? scoreOf(r) : -1e9 }))
-      .sort((a, b) => b.s - a.s || (a.d.torrent && b.d.torrent ? torrentOrder(a, b) : 0));
-    for (const { r } of fresh) placed.set(r.id, ++placedSeq);
-    const bySeq = (a, b) => placed.get(a.id) - placed.get(b.id);
-    const directLive = live.filter((r) => !view(r).torrent).sort(bySeq);
-    const torrentLive = live.filter((r) => view(r).torrent).sort(bySeq);
-
-    const fill = (g, items, cap, weak, pinned = null) => {
-      const main = [];
-      const extra = [];
-      // التورنت (المالك، 27 نوفمبر): الظاهر أعلى 5 أسراب من كل جودة من أعلى جودتين موجودتين، بالجودة ثم السرب
-      if (pinned) {
-        for (const r of pinned) { folded.set(r.id, true); main.push(row(r)); }
-        const shown = new Set(pinned);
-        for (const r of items) if (!shown.has(r)) { folded.set(r.id, false); extra.push(row(r)); }
-        reconcile(g.grid, main);
-        reconcile(g.moreGrid, extra);
-        g.more.hidden = !extra.length;
-        g.summary.textContent = `نسخ إضافية (${extra.length})`;
-        g.count.textContent = String(items.length);
-        g.s.hidden = !items.length;
-        return;
+    for (const r of shown) if (!placed.has(r.id)) placed.set(r.id, ++placedSeq);
+    const shownBefore = new Set([...torrent.shown, ...direct.shown]);
+    // ما يُعرض في قسمه: الصالح، وما ظهر قبلًا ثم تعذّر (يبقى في مكانه بحالته)
+    const live = shown.filter((r) => isSelectable(r) || shownBefore.has(r.id));
+    const waiting = shown.filter((r) => isPending(r) && !shownBefore.has(r.id));
+    const byId = new Map(live.map((r) => [r.id, r]));
+    const quality = (r) => view(r).q;
+    const weakTorrent = (r) => { const d = view(r); return d.tier === 'dead' || d.info?.source === 'CAM'; };
+    const directOrder = (a, b) => {
+      const qa = quality(a) ?? 600, qb = quality(b) ?? 600;
+      const ar = (r) => Number(Boolean(view(r).langs?.some((l) => l.ar)));
+      return qb - qa || ar(b) - ar(a) || scoreOf(b) - scoreOf(a) || placed.get(a.id) - placed.get(b.id);
+    };
+    const paintSection = (g, items, plan, order) => {
+      const ids = arrange(refilter ? [] : g.shown, plan.map((r) => r.id), { locked: locked && !refilter, present: (id) => byId.has(id) });
+      g.shown = ids;
+      const visible = ids.map((id) => byId.get(id));
+      let rest = items.filter((r) => !ids.includes(r.id)).sort(order);
+      // الإضافية المفتوحة تثبت كذلك بعد اللمس: كانت تُرتَّب من جديد مع كل تحديث، فالسرب المقاس الواصل (حقائق التسخين)
+      // أو صف جديد بينها ينقل ما تحت الإصبع (قياس Playwright: 256px). الجديد يُضاف في آخرها
+      if (g.open && locked && !refilter) {
+        const left = new Set(rest.map((r) => r.id));
+        const keep = g.extra.filter((id) => left.has(id));
+        const kept = new Set(keep);
+        rest = [...keep.map((id) => byId.get(id)), ...rest.filter((r) => !kept.has(r.id))];
       }
-      // مكان الصف (ظاهر أو «نسخ إضافية») يُقرَّر مرة حين يظهر، فلا ينتقل بين الاثنين بعدها.
-      // كل سيرفر مباشر صالح يظهر (طلب المالك 15 نوفمبر): كان الظاهر 12 فقط، فيصل سيرفر CloudStream الصالح بعدها مطويًّا
-      // في «نسخ إضافية» ولا يراه أحد. التورنت وحده يبقى بستة إصدارات ظاهرة (عشرات الإصدارات للحلقة نفسها) والضعيف مطويّ.
-      for (const r of items) {
-        let shownHere = folded.get(r.id);
-        if (shownHere == null) {
-          shownHere = !(weak?.(r) || main.length >= cap) || r.id === topId;
-          folded.set(r.id, shownHere);
-        }
-        (shownHere ? main : extra).push(row(r));
-      }
-      reconcile(g.grid, main);
-      reconcile(g.moreGrid, extra);
-      g.more.hidden = !extra.length;
-      g.summary.textContent = `نسخ إضافية (${extra.length})`;
+      g.extra = g.open ? rest.map((r) => r.id) : [];
+      reconcile(g.grid, visible.map(row));
+      g.more.hidden = !rest.length;
+      if (!rest.length) g.open = false;
+      g.more.textContent = g.open ? `إخفاء ${g.noun}` : `عرض ${rest.length} من ${g.noun}`;
+      g.more.setAttribute('aria-expanded', String(g.open));
+      g.moreGrid.hidden = !g.open;
+      // المطويّة لا تُبنى صفوفها حتى تُفتح (كانت مئات الصفوف تُحدَّث مع كل سيرفر يصل)
+      reconcile(g.moreGrid, g.open ? rest.map(row) : []);
       g.count.textContent = String(items.length);
       g.s.hidden = !items.length;
+      const icons = [...new Set(items.map((r) => safeIconUrl(o.sourceIcon?.(r))).filter(Boolean))];
+      const icon = icons[0] ?? null;
+      if (g.ico.dataset.src !== (icon ?? '')) { g.ico.dataset.src = icon ?? ''; g.ico.style.backgroundImage = icon ? `url("${icon.replace(/["\\\n]/g, '')}")` : ''; }
+      g.ico.hidden = !icon;
     };
-    fill(direct, directLive, Infinity);
-    const weakTorrent = (r) => {
-      const d = view(r);
-      return d.tier === 'dead' || d.info?.source === 'CAM';
-    };
-    fill(torrent, torrentLive, 6, weakTorrent, topSwarms(torrentLive, weakTorrent));
+    const torrentLive = live.filter((r) => view(r).torrent);
+    const directLive = live.filter((r) => !view(r).torrent);
+    const seeds = (r) => measuredSeeds({ ...view(r), measured: measured[r.id] }) ?? seedersOf(r);
+    const torrentOrder = (a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seeds(b) - seeds(a) || placed.get(a.id) - placed.get(b.id);
+    paintSection(torrent, torrentLive, torrentPlan(torrentLive.filter((r) => isSelectable(r) && !weakTorrent(r)), { quality, seeds }), torrentOrder);
+    paintSection(direct, directLive, directLive.filter(isSelectable).sort(directOrder), directOrder);
     announceRows(warmRows(torrentLive
-      .filter((r) => r.id !== topId && folded.get(r.id) === true && isSelectable(r))
+      .filter((r) => r.id !== topId && torrent.shown.includes(r.id) && isSelectable(r))
       .map((r) => ({ r, d: view(r), m: measured[r.id] }))));
-    // قسمان يظهران في الوصول نفسه: ما فيه سيرفر صالح أولًا (المباشر عند التساوي)
-    const newGroups = [[direct, directLive], [torrent, torrentLive]].filter(([g, items]) => items.length && !sectionAt.has(g))
-      .sort((a, b) => Number(b[1].some(isSelectable)) - Number(a[1].some(isSelectable)));
-    for (const [g] of newGroups) sectionAt.set(g, ++placedSeq);
-    const groups = [direct, torrent].filter((g) => sectionAt.has(g) && !g.s.hidden).sort((a, b) => sectionAt.get(a) - sectionAt.get(b));
+    const groups = [torrent, direct].filter((g) => !g.s.hidden);
     // ما تعذّر قبل أن يظهر أصلًا: مطويّ في الأسفل
     const neverShown = gone.filter((r) => !live.includes(r));
     reconcile(wait.grid, waiting.map(row));

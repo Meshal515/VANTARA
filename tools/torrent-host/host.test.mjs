@@ -367,6 +367,50 @@ test('libtorrent host: after pause then start, the same peers reconnect in secon
   assert.ok(afterIdle < 15000, `idle resumes in seconds: ${Math.round(afterIdle)}ms`);
 });
 
+test('libtorrent host DeepTrace: the add reply carries the Metadata timeline, and a wait is split into its real causes under the desktop request id', { skip, timeout: 120000 }, async t => {
+  // عينات المالك (ويندوز 0.4.90): Metadata 28.5 ث، وانتظار أول بايت 12.2 ث، بلا سبب في السجل. المحرك يقول الآن متى عُرف
+  // أول مشارك واتصل ووصلت Metadata، وعلى أي شيء انتظر كل طلب بحالة libtorrent نفسها (لا تخمين)
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 128 * 1024, 60);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  // بصمة ما بُني معه المحرك فعلًا (لا ما في المستودع)
+  const build = (await request(base, '/')).body.build;
+  t.diagnostic(`build: ${JSON.stringify(build)}`);
+  assert.equal(typeof build.patched, 'boolean'); assert.equal(typeof build.read_hints, 'boolean');
+  assert.equal(build.reconnect_s, 2); assert.equal(build.early_read_mb, 32); assert.equal(build.idle, true);
+  if (build.patched) { assert.equal(build.stall_cap_ms, 1000); assert.equal(build.hedge_ms, 750); }
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200);
+  const tl = added.body.vantara?.timeline;
+  t.diagnostic(`timeline: ${JSON.stringify(tl)}`);
+  assert.ok(tl, 'the add reply carries the timeline');
+  assert.ok(Number.isFinite(tl.marks.metadata), 'metadata time is recorded');
+  assert.ok(Number.isFinite(tl.marks['peer-connected']) && tl.marks['peer-connected'] <= tl.marks.metadata + 250, 'first connected peer before metadata');
+  assert.equal(tl.adds, 1);
+  assert.ok(!/\d+\.\d+\.\d+\.\d+|[a-f0-9]{40}/i.test(JSON.stringify(tl)), 'no address and no info hash in the timeline');
+  // قراءة من منتصف الملف بباذر 128KB/s: تنتظر، والانتظار يُسجَّل برقم طلب سطح المكتب
+  const at = Math.floor(data.length * 0.6);
+  const r = await request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: `bytes=${at}-${at + 299999}`, 'x-vantara-request': '7' }, raw: true, timeout: 60000 });
+  assert.ok(r.body.equals(data.subarray(at, at + 300000)));
+  const diag = (await request(base, `/torrents/${added.body.id}/diag`)).body;
+  const mine = diag.waits.filter((w) => w.request === 7);
+  t.diagnostic(`waits: ${JSON.stringify(mine.slice(0, 4))}`);
+  assert.ok(mine.length > 0, 'the wait is recorded under the desktop request id');
+  const known = new Set(['unsampled', 'piece-read', 'no-peer-known', 'no-peer-connected', 'piece-not-requested', 'block-not-requested', 'block-requested', 'disk-write', 'early-gap', 'piece-verify', 'all-peers-choking', 'unknown']);
+  for (const w of mine) {
+    const sum = Object.values(w.by_reason).reduce((a, b) => a + b, 0);
+    assert.ok(Math.abs(sum - w.total_ms) <= 0.05, `reasons add up to the wait: ${sum} vs ${w.total_ms}`);
+    for (const k of Object.keys(w.by_reason)) assert.ok(known.has(k), `known reason: ${k}`);
+  }
+  // سرب يرسل ببطء: معظم الانتظار «طُلبت ولم تصل» (لا «لم تُطلب» ولا القرص)
+  const total = (k) => mine.reduce((a, w) => a + (w.by_reason[k] ?? 0), 0);
+  const all = mine.reduce((a, w) => a + w.total_ms, 0);
+  assert.ok(total('block-requested') >= all * 0.5, `a slow peer shows as block-requested: ${total('block-requested')}/${all}`);
+  assert.ok(Number.isFinite(diag.timeline.marks['first-block']), 'first written block time');
+});
+
 test('libtorrent host: written blocks are tracked from libtorrent before a piece verifies, and settle when it does (option B, step 1)', { skip, timeout: 120000 }, async t => {
   // ويندوز: الخادم يسلّم القطع الموثقة كاملة فقط، فـ6.5KB من فهرس MKV تنتظر قطعة 16MB (bench: 7.2 ث من 10.3 حتى أول صورة).
   // الخطوة 1 من الخيار B كما في أندرويد: كتل كل قطعة غير موثقة كما أعلنها libtorrent بعد كتابتها (block_finished_alert)،

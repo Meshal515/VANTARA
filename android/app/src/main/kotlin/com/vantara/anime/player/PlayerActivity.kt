@@ -656,7 +656,7 @@ class PlayerActivity : Activity() {
                 return id == activeMediaId
             }
             override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
-                if (BuildConfig.DEBUG && current(eventTime)) videoDecoder = decoderName
+                if (BuildConfig.DEBUG && current(eventTime)) { videoDecoder = decoderName; diag.decoderInitialized(decoderName, initializationDurationMs) }
             }
             override fun onRenderedFirstFrame(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
                 if (!current(eventTime)) return
@@ -924,6 +924,7 @@ class PlayerActivity : Activity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             if (player.currentMediaItem?.mediaId == activeMediaId) {
+                if (BuildConfig.DEBUG && !tracks.isEmpty) diag.tracks()
                 startup.tracks(activeMediaId, tracks.containsType(C.TRACK_TYPE_VIDEO), tracks.containsType(C.TRACK_TYPE_AUDIO))
                 recordStartupOutput()
             }
@@ -2480,7 +2481,8 @@ class PlayerActivity : Activity() {
             val blocks = if (it.waitingPiece >= 0 && url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).pieceBlocks(android.net.Uri.parse(url), it.waitingPiece) }.getOrNull() else null
             PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps, it.firstPeerAt, it.firstPayloadAt,
                 turbo = it.turbo, earlyBytes = it.earlyBytes, earlyFailures = it.earlyFailures,
-                hintsSent = it.hintsSent, hintsFailed = it.hintsFailed, waits = it.waits)
+                hintsSent = it.hintsSent, hintsFailed = it.hintsFailed, waits = it.waits,
+                addedAt = it.addedAt, metadataCached = it.metadataCached, firstKnownAt = it.firstKnownAt)
         }
         val f = player.videoFormat
         val groups = player.currentTracks.groups
@@ -2490,7 +2492,7 @@ class PlayerActivity : Activity() {
             videoDecoder, groups.count { it.type == C.TRACK_TYPE_TEXT }, groups.count { it.type == C.TRACK_TYPE_AUDIO },
             playWhenReady = player.playWhenReady,
         )
-        val report = diag.report(facts, p)
+        val report = diag.report(facts, p, build = "${BuildConfig.VERSION_NAME} · ${if (BuildConfig.DEBUG) "Debug" else "Stable"} · ${BuildConfig.VERSION_CODE} · native ${BuildConfig.VANTARA_NATIVE.take(12)}")
         body.addView(label("تشخيص (نسخة الاختبار)", 13.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(0, dp(14), 0, dp(4)) })
         body.addView(label(diag.verdict(facts, p), 14f, Tone.TEXT, bold = true).apply { setPadding(0, 0, 0, dp(6)) })
         body.addView(label(report.lines().drop(1).dropLast(1).joinToString("\n"), 11.5f, Tone.TEXT_2).apply {

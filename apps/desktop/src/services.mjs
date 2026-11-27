@@ -637,7 +637,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(!reader)return;reader.cursor=cursor;
         const mode=reader.source??'torrent';
         state.trace.once('http-first-byte',{bytes:size,waitMs:performance.now()-reader.at,mode});
-        if(!reader.firstByte){reader.firstByte=true;const waitMs=performance.now()-reader.at;state.rangeWaitMs=(state.rangeWaitMs??0)+waitMs;state.trace.record('range-first-byte',{requestId:reader.requestId,cursor,waitMs,mode});}
+        if(!reader.firstByte){reader.firstByte=true;const waitMs=performance.now()-reader.at;state.rangeWaitMs=(state.rangeWaitMs??0)+waitMs;state.trace.record('range-first-byte',{requestId:reader.requestId,cursor,waitMs,mode});if(mode==='torrent'&&waitMs>=50)void traceRangeWait(state,reader.requestId);}
         if(mode==='cache')state.cacheBytesRead=(state.cacheBytesRead??0)+size;
         else state.trace.once('first-useful-piece',{requestedPiece:Math.floor(((state.win?.fileOffset??0)+cursor-size)/(state.win?.pieceLength||1))});
         if(state.latestDemand===reader){state.demandFlowAt=Date.now();if(state.win)state.win.readPos=cursor;}
@@ -663,6 +663,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(torrent){
           if(replay?.sent)requestHeaders.Range=`bytes=${start}-${replay.range.end}`;
           requestHeaders.Authorization=`Basic ${Buffer.from(state.auth).toString('base64')}`;
+          // DeepTrace: المحرك يسجّل انتظار هذا الطلب برقمه (vantara-torrent: x-vantara-request)
+          requestHeaders['x-vantara-request']=String(reader.requestId);
           // rqbit يرد 500 «invalid state: initializing» حتى يفتح تخزين الملف (ثوانٍ بعد الإضافة، خاصة في حزم المواسم).
           // نعيد الطلب بدل تمرير نص الخطأ إلى mpv، فهو يقرأه كفيديو ويفشل فورًا.
           const notReadyUntil=performance.now()+30000;
@@ -743,6 +745,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!warm&&h.fallbackFrom){state.trace.record('engine-fallback');emit(state,{type:'playback/stage',stage:'engine-fallback',from:h.fallbackFrom,to:h.kind});}
     // المحرك الدائم كان جاهزًا (لا تشغيل عملية ولا تحميل DHT): يظهر في التشخيص «cache» لا «cold»
     state.trace.record('engine-ready',{mode:warm?'cache':'cold'});
+    // DeepTrace: ما بُني معه المحرك المحمَّل فعلًا (لا ما في المستودع)، مرة لكل محرك. rqbit بلا build: لا شيء
+    if(h.kind==='libtorrent'){
+      h.buildInfo??=localJSON(h.api,'/',{auth:h.auth,timeout:1500}).then(r=>r?.build??null,()=>null);
+      const b=await h.buildInfo;assertSession(state);
+      if(b)state.trace.record('engine-build',{patched:b.patched?1:0,readHints:b.read_hints?1:0,stallCapMs:b.stall_cap_ms,hedgeMs:b.hedge_ms,earlyReadMb:b.early_read_mb,reconnectS:b.reconnect_s,criticalPieces:b.critical_pieces});
+    }
     emit(state,{type:'playback/stage',stage:'engine-ready',engine:h.kind});
 
     emit(state,{type:'playback/stage',stage:'metadata'});
@@ -780,6 +788,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
     // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
     if(!added)added=await addTorrent(state,options,'');assertSession(state);
+    traceMetadata(state,added);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
     if(state.replayStore){
@@ -881,6 +890,29 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
    * يتصل فورًا بمن أعطوه البيانات قبل ثوانٍ بدل بحث DHT/متتبّعات جديد. رفض 400 مع المشاركين يعاد مرة
    * واحدة بدونهم: خطأ صيغة الاستعلام يُرفض قبل تسجيل أي تورنت، وإن سُجّل فـrqbit يرد بنفس الرقم.
    */
+  // DeepTrace: أسماء علامات المحرك وأسباب الانتظار إلى حقول سجل البدء الرقمية (startup-trace يرفض غيرها)
+  const META_MARKS={"metadata": "metadataMs", "peer-known": "peerKnownMs", "peer-connected": "peerConnectedMs", "tracker-announce": "trackerAnnounceMs", "tracker-reply": "trackerReplyMs", "dht-reply": "dhtReplyMs", "tracker-error": "trackerErrorMs", "first-block": "firstBlockMs"};
+  const WAIT_REASONS={"no-peer-known": "noPeerKnownMs", "no-peer-connected": "noPeerConnectedMs", "piece-not-requested": "notRequestedMs", "block-not-requested": "notRequestedMs", "all-peers-choking": "chokedMs", "block-requested": "requestedMs", "disk-write": "diskWriteMs", "piece-verify": "verifyMs", "early-gap": "earlyGapMs", "piece-read": "pieceReadMs", "unsampled": "unsampledMs", "unknown": "unknownMs"};
+  /** كيف وصلت Metadata (من رد الإضافة نفسه، بلا طلب إضافي): متى عُرف أول مشارك واتصل ورد المتتبع وDHT. */
+  function traceMetadata(state,reply){
+    const tl=reply?.vantara?.timeline;if(!tl||typeof tl!=='object')return;
+    const fields={adds:tl.adds,trackerReplies:tl.tracker_replies,trackerPeers:tl.tracker_peers,trackerErrors:tl.tracker_errors,dhtReplies:tl.dht_replies,dhtPeers:tl.dht_peers};
+    for(const [mark,key] of Object.entries(META_MARKS))if(Number.isFinite(tl.marks?.[mark]))fields[key]=tl.marks[mark];
+    state.trace.record('engine-metadata',{...fields,mode:tl.adds>1?'reused':'cold'});
+  }
+  /** على ماذا انتظر طلب HTTP (من المحرك بحالة libtorrent، خارج المسار الحرج): مجموع كل انتظاراته مقسومًا على أسبابها. */
+  async function traceRangeWait(state,requestId){
+    if(state.engineKind!=='libtorrent'||!Number.isSafeInteger(state.torrentId))return;
+    try{
+      const diag=await localJSON(state.api,`/torrents/${state.torrentId}/diag`,{auth:state.auth,signal:state.controller.signal,timeout:3000});
+      const mine=(Array.isArray(diag?.waits)?diag.waits:[]).filter(w=>w?.request===requestId);
+      if(!mine.length||state.stopped)return;
+      const fields={requestId,waits:mine.length,piece:mine[0].piece,totalMs:0};
+      for(const w of mine){fields.totalMs+=Number(w.total_ms)||0;for(const [reason,ms] of Object.entries(w.by_reason??{})){const key=WAIT_REASONS[reason];if(key&&Number.isFinite(ms))fields[key]=(fields[key]??0)+ms;}}
+      for(const k of Object.keys(fields))if(typeof fields[k]==='number')fields[k]=Math.round(fields[k]);
+      state.trace.record('range-wait',fields);
+    }catch{}
+  }
   async function addTorrent(state,options,extra) {
     const w=state.win,base=`/torrents?only_files=${w.index}${extra}`;
     const request=peers=>localJSON(state.api,peers.length?`${base}&initial_peers=${encodeURIComponent(peers.join(','))}`:base,{...options,body:w.magnet,timeout:120000});
@@ -1085,9 +1117,13 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(event.name==='eof-reached'&&typeof event.data==='boolean'&&state.ready&&state.ended!==event.data){state.ended=event.data;emit(state,{type:'playback/ended',ended:event.data,...state.progress});}
           const metric={'demuxer-cache-duration':'aheadMs','cache-speed':'inputBps','video-bitrate':'videoBps'}[event.name];
           if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
-          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
+          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused&&!state.advancing&&state.progress.position>state.firstPosition){state.advancing=true;state.trace.once('playback-advancing',{position:state.progress.position});emit(state,{type:'playback/stage',stage:'playback-advancing'});}
+            if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
           if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);
+            // DeepTrace: قبل أول إطار، mpv متوقف ينتظر بيانات (لا الفك): بداية كل انتظار ونهايته بمدته
+            if(!state.ready){if(event.data&&state.cacheWaitAt==null){state.cacheWaitAt=performance.now();state.trace.record('player-cache-wait-start');}
+              else if(!event.data&&state.cacheWaitAt!=null){state.trace.record('player-cache-wait-end',{waitMs:performance.now()-state.cacheWaitAt});state.cacheWaitAt=null;}}
             // أول توقف للتخزين بعد بدء العرض: الشبكة أبطأ مما بدأنا به، فالاستئناف ينتظر ثلاث ثوانٍ (لا تقطيع متكرر)
             if(event.data&&state.ready&&!state.rebufferWait){state.rebufferWait=true;void ipcCommand(state,['set_property','cache-pause-wait',REBUFFER_CACHE_WAIT_SECONDS]).catch(()=>{});}}
 
@@ -1095,7 +1131,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       }
     });
     await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate','eof-reached'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
-    emit(state,{type:'playback/stage',stage:'first-frame'});
+    // جاهزية IPC (المراقبة مسجلة) لا أول إطار: كان اسمها «first-frame» فعرضتها اللوحة «أول صورة» قبل أي فك (عينة المالك
+    // 0.4.90: 0.15 ث وأول إطار مفكوك 10.30 ث). أول إطار مفكوك = playback/ready (playback-restart وأبعاد الفيديو)
+    state.trace.once('player-ipc-ready');
+    emit(state,{type:'playback/stage',stage:'player-ipc-ready'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     state.resolveCommands(true);
     // تمنع بقاء شاشة سوداء إلى الأبد عندما لا يُنتج المصدر إطارًا.

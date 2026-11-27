@@ -239,12 +239,21 @@ class AnimeEnginePlugin : Plugin() {
      * «المقترح» في ورقة السيرفرات صار تورنت: يُسخَّن الآن (بيانات + أول قطعة + الفهرس، حسب الباقة) قبل غيره، لأن
      * الترتيب الأصلي (Streams.rank) يختلف عن ترتيب الورقة فكان يسخّن خيارًا آخر. لا شيء لجلسة التنزيل.
      */
+    /**
+     * محرك التورنت خارج خيط Capacitor: الجسر ينفّذ طرق كل الإضافات على خيط واحد (CapacitorPlugins)، وهذه الطرق تنادي
+     * libtorrent متزامنة (manager.find وstatus، وcool() ينتظر قفل الحالة الذي يمسكه خيط التسخين وهو في libtorrent).
+     * فكان pick (اختيار سيرفر من الورقة) ينتظر في الطابور خلفها: «يبدأ…» يدور حتى يهدأ التسخين وتجهز السيرفرات.
+     */
+    private fun offBridge(call: PluginCall, block: () -> Unit) {
+        scope.launch { try { block() } catch (t: Throwable) { call.reject(t.message ?: t.javaClass.simpleName) } }
+    }
+
     @PluginMethod
-    fun warm(call: PluginCall) {
+    fun warm(call: PluginCall) = offBridge(call) {
         val session = call.getString("session") ?: ""
         val prep = engine.prepared(session)
         val route = call.getString("route")
-        if (prep == null || route == null || session.startsWith(com.vantara.anime.AnimeEngine.DOWNLOAD_SESSION_PREFIX)) return call.resolve(JSObject().put("warming", false))
+        if (prep == null || route == null || session.startsWith(com.vantara.anime.AnimeEngine.DOWNLOAD_SESSION_PREFIX)) return@offBridge call.resolve(JSObject().put("warming", false))
         val url = prep.rank(prep.notRejected(prep.candidatesOf(route))).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url
         if (url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(context).prefetch(android.net.Uri.parse(url), fetchEdges = true, priority = true) }
         call.resolve(JSObject().put("warming", url != null))
@@ -255,7 +264,7 @@ class AnimeEnginePlugin : Plugin() {
      * قائمة فارغة أو `stop` تهدّئ الخلفي كله (إغلاق الورقة). لا شيء لجلسة التنزيل.
      */
     @PluginMethod
-    fun warmBackground(call: PluginCall) {
+    fun warmBackground(call: PluginCall) = offBridge(call) {
         val session = call.getString("session") ?: ""
         val torrent = com.vantara.addons.torrent.TorrentEngine.get(context)
         val prep = engine.prepared(session)
@@ -263,7 +272,7 @@ class AnimeEnginePlugin : Plugin() {
         val routes = (0 until (list?.length() ?: 0)).mapNotNull { list?.optString(it)?.takeIf { s -> s.isNotBlank() } }
         if (prep == null || call.getBoolean("stop", false) == true || routes.isEmpty() || session.startsWith(com.vantara.anime.AnimeEngine.DOWNLOAD_SESSION_PREFIX)) {
             runCatching { torrent.coolBackground() }
-            return call.resolve(JSObject().put("warming", 0))
+            return@offBridge call.resolve(JSObject().put("warming", 0))
         }
         val uris = routes.take(16).mapNotNull { route ->
             prep.rank(prep.notRejected(prep.candidatesOf(route))).firstOrNull { it.url.startsWith("vantara-torrent:") }?.url?.let(android.net.Uri::parse)
@@ -277,7 +286,7 @@ class AnimeEnginePlugin : Plugin() {
      * الورقة تستعملها في درجة «المقترح» وحدها (لا ترتيب الصفوف). لا اتصال جديد: قراءة حالة فقط.
      */
     @PluginMethod
-    fun torrentFacts(call: PluginCall) {
+    fun torrentFacts(call: PluginCall) = offBridge(call) {
         val out = JSObject()
         val prep = engine.prepared(call.getString("session") ?: "")
         if (prep != null) runCatching {

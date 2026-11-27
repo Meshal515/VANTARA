@@ -47,6 +47,8 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من ثانية. */
         val hintsSent: Int = 0, val hintsFailed: Int = 0,
         val waits: List<com.vantara.addons.torrent.ReadWait> = emptyList(),
+        /** تقرير الذهب: إضافة التورنت للجلسة، وMetadata من ملف محفوظ، وأول مشارك معروف. */
+        val addedAt: Long = 0L, val metadataCached: Boolean = false, val firstKnownAt: Long = 0L,
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -69,9 +71,15 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
 
     private var preparationMs: Long? = null
     private var audioOnlyAt = 0L
+    /** تقرير الذهب: أول مسارات من الحاوية (onTracksChanged)، وتهيئة مفكك الفيديو (onVideoDecoderInitialized). */
+    private var tracksAt = 0L
+    private var decoderName: String? = null
+    private var decoderInitAt = 0L
+    private var decoderInitMs = 0L
     @Synchronized fun start(preparationMs: Long? = null) {
         reads.clear(); seeks.clear(); events.clear(); opening.clear(); active.clear()
         count = 0; openAt = now(); readyAt = 0; frameAt = 0; audioOnlyAt = 0
+        tracksAt = 0; decoderName = null; decoderInitAt = 0; decoderInitMs = 0
         this.preparationMs = preparationMs
         event("فتح المصدر")
     }
@@ -138,6 +146,11 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         seeks.addLast(Seek(now(), fromMs, toMs).apply { if (readyNow) readyAt = at }); while (seeks.size > MAX_SEEKS) seeks.removeFirst()
         event("قفزة ${clock(fromMs)} ← ${clock(toMs)}" + if (readyNow) " (داخل المحمّل)" else "")
     }
+    @Synchronized fun tracks() { if (openAt != 0L && tracksAt == 0L) { tracksAt = now(); event("المسارات معروفة (قُرئت الحاوية)") } }
+    @Synchronized fun decoderInitialized(name: String, initializationMs: Long) {
+        if (openAt == 0L || decoderInitAt != 0L) return
+        decoderName = name; decoderInitAt = now(); decoderInitMs = initializationMs.coerceAtLeast(0)
+    }
     @Synchronized fun audioOnly() { if (openAt != 0L && audioOnlyAt == 0L) { audioOnlyAt = now(); event("صوت فقط: بدأ إخراج الصوت، لا إطار فيديو منتظر") } }
     @Synchronized fun error(message: String) {
         val safe = message.replace(Regex("""https?://[^\s"'<>]+""", RegexOption.IGNORE_CASE), "[url]")
@@ -172,9 +185,24 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         else "أطول مرحلة: حتى أول بايت ${secs(prep)} ث (تجهيز التورنت وأول قطعة)"
     }
 
-    /** نص كامل للنسخ: حقائق فقط، بلا عنوان العمل ولا روابط ولا هويات. */
-    @Synchronized fun report(t: TorrentFacts?, p: PlayerFacts, nowMs: Long = now()): String = buildString {
+    /** مدخل تقرير الذهب من هذه الجلسة (ساعة واحدة: elapsedRealtime). */
+    @Synchronized fun goldInput(t: TorrentFacts?, nowMs: Long = now(), build: String = "—", patched: Boolean = false, critical: Int = 0) = GoldReport.Input(
+        tapAt = launchedAt, openAt = openAt, preparationMs = preparationMs,
+        reads = reads.map { GoldReport.Read(it.at, it.openedAt, it.firstByteAt, it.position, it.bytes) },
+        tracksAt = tracksAt, readyAt = readyAt, frameAt = frameAt, audioOnlyAt = audioOnlyAt,
+        decoder = decoderName, decoderInitAt = decoderInitAt, decoderInitMs = decoderInitMs,
+        torrent = t?.let { GoldReport.Torrent(it.addedAt, it.metadataCached, it.firstKnownAt, it.firstPeerAt, it.metadataAt, it.firstPayloadAt, it.firstPieceAt,
+            it.warmedAt, it.warmedPieces, it.fileBytes, it.pieceBytes, it.waits, it.waitingPiece, it.waitingSince, it.waitingBlocks,
+            it.peers, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical) },
+        build = build, now = nowMs, readsFull = count > MAX_READS,
+    )
+
+    /** نص كامل للنسخ: تقرير الذهب أولًا ثم الحقائق الخام، بلا عنوان العمل ولا روابط ولا هويات. */
+    @Synchronized fun report(t: TorrentFacts?, p: PlayerFacts, nowMs: Long = now(), build: String = "—"): String = buildString {
         appendLine("تشخيص VANTARA (نسخة الاختبار)")
+        appendLine(GoldReport.text(goldInput(t, nowMs, build, engine(), critical())))
+        appendLine()
+        appendLine("[التفاصيل الخام]")
         val needBps = if (t != null && p.durationMs > 0 && t.fileBytes > 0) t.fileBytes * 1000 / p.durationMs else 0L
         appendLine("المشغّل: ${listOfNotNull(p.container, p.video, p.decoder?.let { "المفكك $it" }).joinToString(" · ").ifEmpty { "—" }}")
         appendLine("المسارات: ترجمة ${p.textTracks} · صوت ${p.audioTracks} · الموضع ${clock(p.positionMs)} · أمامه ${p.bufferedMs / 1000} ث")
@@ -246,6 +274,10 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         if (t != null && t.peers == 0) why += "لا مشاركين متصلين"
         return why.ifEmpty { listOf("الحالة ${p.state} والموضع ${clock(p.positionMs)} وأمامه ${p.bufferedMs / 1000} ث") }.joinToString(" · ")
     }
+
+    // حقائق المحرك الثابتة؛ خارج الجهاز (اختبارات JVM) لا تُحمَّل مكتبته
+    private fun engine() = runCatching { com.vantara.addons.torrent.TorrentEngine.PATCHED }.getOrDefault(false)
+    private fun critical() = runCatching { com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES }.getOrDefault(0)
 
     private fun hints(t: TorrentFacts) = when {
         t.hintsSent > 0 -> "وصل ${t.hintsSent}" + if (t.hintsFailed > 0) " · فشل ${t.hintsFailed}" else ""

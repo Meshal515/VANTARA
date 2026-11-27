@@ -320,16 +320,40 @@ it('بلا غرفة: زر الأصدقاء يفتح الدعوة كما هو',()
 });
 
 it('تشخيص البدء في ويندوز: من الضغط، ومُسخَّن أو بارد، ومراحل المحرك بزمنها وما قبل الضغط', () => {
-  const text = diagnosticText({ tapAt: 1000, openAt: 1400, stages: { 'player-start': 2600, 'first-frame': 5600 }, trace: [
+  const text = diagnosticText({ tapAt: 1000, openAt: 1400, stages: { 'player-start': 2600, 'player-ipc-ready': 2700, ready: 5600, 'playback-advancing': 5900 }, trace: [
     { stage: 'engine-ready', ms: 900 }, { stage: 'prewarm-edges', ms: 4000 }, { stage: 'source-selected', ms: 6000, mode: 'prewarmed' },
     { stage: 'range-first-byte', ms: 6450, mode: 'torrent', waitMs: 420 },
   ] });
   expect(text).toContain('البدء: مُسخَّن (بدأ قبل الضغط)');
   expect(text).toContain('من الضغط حتى بدء الخدمة: 0.40 ث');
-  expect(text).toContain('حتى أول صورة: 6.00 ث');
+  // جاهزية IPC ليست أول صورة (عينة المالك 0.4.90: «أول صورة» 0.15 ث وأول إطار مفكوك 10.30 ث)
+  expect(text).toContain('حتى جاهزية المشغّل (IPC): 3.10 ث');
+  expect(text).toContain('حتى أول إطار مفكوك: 6.00 ث');
+  expect(text).toContain('حتى تقدّم التشغيل: 6.30 ث');
+  expect(text).toContain('أول صورة معروضة على الشاشة: غير مقاسة');
+  expect(text).not.toContain('حتى أول صورة: 3.10 ث');
   expect(text).toContain('engine-ready  قبل الضغط 5.10 ث');
   expect(text).toContain('range-first-byte  +0.45 ث  (torrent · انتظار 420ms)');
   expect(diagnosticText({ trace: [{ stage: 'source-selected', ms: 0, mode: 'cold' }] })).toContain('البدء: بارد (بلا تسخين)');
+});
+
+it('DeepTrace في نص التشخيص: كيف وصلت Metadata، وعلى ماذا انتظر كل طلب مرتبًا من الأكبر', () => {
+  const text = diagnosticText({ tapAt: 0, openAt: 0, stages: {}, trace: [
+    { stage: 'source-selected', ms: 0, mode: 'cold' },
+    { stage: 'engine-metadata', ms: 28500, mode: 'cold', detail: { peerKnownMs: 900, peerConnectedMs: 21000, metadataMs: 28400, trackerReplies: 3, trackerPeers: 40, dhtReplies: 1, dhtPeers: 12, trackerErrors: 2 } },
+    { stage: 'range-wait', ms: 41000, detail: { requestId: 1, piece: 3, totalMs: 12222, notRequestedMs: 509, requestedMs: 11000, diskWriteMs: 713 } },
+  ] });
+  expect(text).toContain('engine-metadata  +28.50 ث  (cold · أول مشارك معروف 900ms، أول اتصال 21000ms، Metadata 28400ms، متتبع 3 رد/40 مشارك، DHT 1/12، أخطاء متتبع 2)');
+  expect(text).toContain('طلب 1 القطعة 3: 12222ms = طُلبت ولم تصل 11000ms + كتابة القرص 713ms + لم تُطلب الكتلة 509ms');
+});
+
+it('بصمة البناء أول التقرير: إصدار التطبيق وقناته وبناؤه والـcommit، وما بُني معه المحرك المحمَّل فعلًا', () => {
+  const text = diagnosticText({ app: { version: '0.4.91', channel: 'debug', build: 91, sourceSha: 'b54b5495aabbccdd' }, trace: [
+    { stage: 'engine-build', ms: 10, detail: { patched: 1, readHints: 1, stallCapMs: 1000, hedgeMs: 750, earlyReadMb: 32, reconnectS: 2, criticalPieces: 2 } },
+  ] });
+  expect(text).toContain('البناء: 0.4.91 · debug · 91 · b54b5495aabb');
+  expect(text).toContain('المحرك المحمَّل: رقع libtorrent نعم (سقف التعليق 1000ms، التحوّط 750ms) · تلميح القراءة نعم · قراءة مبكرة 32MB · إعادة اتصال 2 ث · قطع حرجة 2');
+  expect(diagnosticText({})).toContain('المحرك المحمَّل: غير معروف');
 });
 
 it('الشريط بثلاث طبقات: الجاهز على القرص تحت تخزين المشغّل، وسطر «جاهز على القرص» في الشبكة', () => {

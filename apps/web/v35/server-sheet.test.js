@@ -354,6 +354,8 @@ it('a better server arriving later never moves the rows already shown (no jump u
   // سيرفر أفضل (1080p وأسرع) يصل، وما كان يُفحص يتعذّر: الصفّان الظاهران بمكانهما والجديد تحتهما،
   // والمتعذّر لم يحجز مكانًا ظاهرًا أصلًا
   const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
+  // بعد أن يلمس المستخدم الورقة تثبت الصفوف الظاهرة (قبله تتبع الترتيب الصحيح: الاختبار التالي)
+  body.querySelector('.an-pick-scroll').dispatchEvent(new body.ownerDocument.defaultView.Event('pointerdown'));
   ui.update({ routes: [a, a2, { ...b, state: 'UNAVAILABLE' }, best], settled: false, status: { text: '…' } });
   expect(rows().slice(0, 2)).toEqual([rowA, rowA2]);
   expect(rows()).toHaveLength(3);
@@ -398,24 +400,36 @@ it('each direct row shows its source picture beside the name, in a slot reserved
 });
 
 
-it('كل سيرفر مباشر صالح ظاهر مهما كثر (المالك، 15 نوفمبر)، والتورنت أعلى 5 أسراب من كل جودة من أعلى جودتين (27 نوفمبر)', () => {
+it('كل قسم 10 ظاهرة ثم «عرض N من الإضافية» (المالك، 27 نوفمبر): المباشر بالجودة، والتورنت جودة واحدة يُكمل العشرة بالسرب', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceId });
   const direct = Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, sourceId: 'witanime', server: `host${i}`, quality: 1080, state: 'READY', probed: true, probeMs: 500 + i }));
   const torrents = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, sourceId: TORR, sourceName: 'Torrentio', quality: 1080, state: 'READY', runtimeReady: true, label: `Show.S01E01.1080p.WEB-DL-G${i}.mkv\n👤 ${100 + i} 💾 1.${i} GB ⚙️ Nyaa` }));
   const cam = { id: 'cam', sourceId: TORR, sourceName: 'Torrentio', quality: 720, state: 'READY', runtimeReady: true, label: 'Show.S01E01.HDCAM.mkv\n👤 3 💾 700 MB ⚙️ Nyaa' };
   ui.update({ routes: [...direct, ...torrents, cam], settled: true, status: { text: '' } });
-  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(20);
-  expect(body.querySelector('.ss-group--direct .ss-more-copies, .ss-group--direct details:not([hidden])')).toBeNull();
+  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row').length).toBe(10);
+  const more = body.querySelector('.ss-group--direct .ss-more-btn');
+  expect(more.hidden).toBe(false);
+  expect(more.textContent).toBe('عرض 10 من الروابط الإضافية');
+  // المطويّة لا تُبنى حتى تُفتح، والفتح يعرضها تحت الظاهرة دون أن يحرّكها
+  expect(body.querySelectorAll('.ss-group--direct .ss-more-grid .ss-row').length).toBe(0);
+  const firstTen = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
+  more.onclick({ stopPropagation() {} });
+  expect(body.querySelectorAll('.ss-group--direct .ss-more-grid .ss-row').length).toBe(10);
+  const same = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')].map((n, i) => n === firstTen[i]);
+  expect(same()).toEqual(Array(10).fill(true));
+  expect(more.textContent).toBe('إخفاء الروابط الإضافية');
+  more.onclick({ stopPropagation() {} });
   // جودة واحدة: أعلى عشرة منها (ضعف الخمسة)، والضعيف (CAM) خارجها
-  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')).toHaveLength(10);
+  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row').length).toBe(10);
   expect(body.querySelector('.ss-group--torrent > .an-srv-grid').textContent).not.toContain('CAM');
-  // وما يصل بعدها صالحًا يظهر كذلك، تحت الموجود
+  // ما يصل بعدها بجودة أقل يذهب إلى الإضافية، والظاهر لا يتغير
   ui.update({ routes: [...direct, ...torrents, cam, { id: 'late', sourceId: 'witanime', server: 'late', quality: 720, state: 'READY', probed: true, probeMs: 900 }], settled: true, status: { text: '' } });
-  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(21);
+  expect(same()).toEqual(Array(10).fill(true));
+  expect(more.textContent).toBe('عرض 11 من الروابط الإضافية');
 });
 
-it('المقترحة: أعلى 5 أسراب 4K ثم أعلى 5 أسراب 1080p بالترتيب، و720p والأضعف في «نسخ إضافية» (المالك، 27 نوفمبر)', () => {
+it('التورنت: حتى 5 من كل جودة بالترتيب (4K ثم 1080p) والسرب داخلها، والباقي في «عرض N من النسخ الإضافية» (المالك، 27 نوفمبر)', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick() {} });
   const mk = (q, i, seeds) => ({ id: `${q}-${i}`, sourceId: TORR, sourceName: 'Torrentio', quality: q, state: 'READY', runtimeReady: true, infoHash: `${q}${i}`.padEnd(40, '0'),
@@ -429,8 +443,10 @@ it('المقترحة: أعلى 5 أسراب 4K ثم أعلى 5 أسراب 1080p 
   ui.update({ routes, settled: true, status: { text: '' } });
   const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')].map((b) => `${b.querySelector('.ss-q b').textContent} ${b.querySelector('.an-srv-seeds')?.textContent}`);
   expect(shown).toEqual(['4K 86', '4K 15', '4K 12', '4K 11', '4K 10', '1080p 120', '1080p 60', '1080p 40', '1080p 33', '1080p 9']);
-  expect(body.querySelector('.ss-group--torrent .an-srv-more summary').textContent).toBe('نسخ إضافية (6)');
-  // سرب أقوى يصل لاحقًا يأخذ مكانه في الخمسة
+  expect(body.querySelector('.ss-group--torrent .ss-more-btn').textContent).toBe('عرض 6 من النسخ الإضافية');
+  // المقترح تورنت: الأكبر سربًا لا الأضعف
+  expect(body.querySelector('.ss-row--top .an-srv-seeds').textContent).toBe('120');
+  // قبل أن يلمس المستخدم الورقة: سرب أقوى يصل لاحقًا يأخذ مكانه الصحيح في الخمسة
   ui.update({ routes: [...routes, mk(2160, 9, 300)], settled: true, status: { text: '' } });
   const again = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')].map((b) => b.querySelector('.an-srv-seeds')?.textContent);
   expect(again.slice(0, 5)).toEqual(['300', '86', '15', '12', '11']);

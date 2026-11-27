@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { goldReport } from '../lib/deeptrace.js';
 import { syncGlass } from '../v35/glass.js';
 
 // Glass (خيار المظهر): نافذة الأدوات صفحة مستقلة، فتقرأ الاختيار نفسه وتتبعه إن تغيّر من النافذة الرئيسية.
@@ -63,6 +64,23 @@ const badgeOf = (q) => (!q ? 'HD' : q >= 2000 ? '4K' : q >= 1000 ? 'FHD' : q >= 
  * والمشغّل بزمنها. `net` من player.js: { tapAt, openAt, stages, trace: [{ stage, ms, mode, waitMs }] }.
  * مراحل المحرك تُقاس من اختيار المصدر في عملية الخدمات (ساعة واحدة)، وما قبله «قبل الضغط» (التسخين).
  */
+// DeepTrace: ما يقوله المحرك عن Metadata وعن سبب كل انتظار، بأسماء مفهومة (المدد بالمللي ثانية من إضافة التورنت)
+const META_LABELS = [['peerKnownMs', 'أول مشارك معروف'], ['peerConnectedMs', 'أول اتصال'], ['trackerReplyMs', 'رد متتبع'], ['dhtReplyMs', 'رد DHT'], ['metadataMs', 'Metadata'], ['firstBlockMs', 'أول كتلة']];
+const WAIT_LABELS = [['noPeerKnownMs', 'لا مشارك معروف'], ['noPeerConnectedMs', 'لا مشارك متصل'], ['chokedMs', 'كل المشاركين يخنقون'], ['notRequestedMs', 'لم تُطلب الكتلة'], ['requestedMs', 'طُلبت ولم تصل'], ['diskWriteMs', 'كتابة القرص'], ['verifyMs', 'التحقق'], ['earlyGapMs', 'فجوة قبل الموضع'], ['pieceReadMs', 'قراءة القرص'], ['unsampledMs', 'لم يُقس'], ['unknownMs', 'غير معروف']];
+function detailText(e) {
+  const d = e.detail ?? {};
+  if (e.stage === 'engine-metadata') {
+    const marks = META_LABELS.filter(([k]) => Number.isFinite(d[k])).map(([k, label]) => `${label} ${d[k]}ms`);
+    const counts = [Number.isFinite(d.trackerReplies) ? `متتبع ${d.trackerReplies} رد/${d.trackerPeers ?? 0} مشارك` : null, Number.isFinite(d.dhtReplies) ? `DHT ${d.dhtReplies}/${d.dhtPeers ?? 0}` : null, d.trackerErrors ? `أخطاء متتبع ${d.trackerErrors}` : null];
+    return [...marks, ...counts].filter(Boolean).join('، ');
+  }
+  if (e.stage === 'range-wait') {
+    const parts = WAIT_LABELS.filter(([k]) => d[k] > 0).sort((a, b) => d[b[0]] - d[a[0]]).map(([k, label]) => `${label} ${d[k]}ms`);
+    return `طلب ${d.requestId} القطعة ${d.piece}: ${d.totalMs}ms = ${parts.join(' + ') || '—'}`;
+  }
+  return null;
+}
+
 export function diagnosticText(net = {}) {
   const st = net.stages ?? {}, trace = net.trace ?? [];
   const s = (ms) => `${(ms / 1000).toFixed(2)} ث`;
@@ -70,21 +88,31 @@ export function diagnosticText(net = {}) {
   const fromTap = (k) => (st[k] != null ? s((tap ?? 0) + st[k]) : '—');
   const anchor = trace.find((e) => e.stage === 'source-selected');
   const mode = anchor?.mode === 'prewarmed' ? 'مُسخَّن (بدأ قبل الضغط)' : anchor ? 'بارد (بلا تسخين)' : 'غير معروف';
+  const app = net.app ?? {};
+  const build = trace.find((e) => e.stage === 'engine-build')?.detail;
   const lines = [
     'VANTARA ويندوز · تشخيص البدء',
+    // بصمة البناء: لا يُفترض أن آخر كود في الفرع هو المثبّت على الجهاز
+    `البناء: ${app.version ?? '—'} · ${app.channel ?? '—'} · ${app.build ?? '—'} · ${app.sourceSha ? app.sourceSha.slice(0, 12) : '—'}`,
+    build ? `المحرك المحمَّل: رقع libtorrent ${build.patched ? 'نعم' : 'لا'} (سقف التعليق ${build.stallCapMs}ms، التحوّط ${build.hedgeMs}ms) · تلميح القراءة ${build.readHints ? 'نعم' : 'لا'} · قراءة مبكرة ${build.earlyReadMb}MB · إعادة اتصال ${build.reconnectS} ث · قطع حرجة ${build.criticalPieces}` : 'المحرك المحمَّل: غير معروف (rqbit أو قبل التشغيل)',
     `البدء: ${mode}`,
     `من الضغط حتى بدء الخدمة: ${tap != null ? s(tap) : '—'}`,
-    `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى أول صورة: ${fromTap('first-frame') !== '—' ? fromTap('first-frame') : fromTap('ready')}`,
+    `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى جاهزية المشغّل (IPC): ${fromTap('player-ipc-ready')}`,
+    // ما يثبته كل سطر: أول إطار مفكوك = playback-restart من mpv مع أبعاد فيديو صالحة؛ تقدّم التشغيل = أول تقدّم لـtime-pos
+    // بعدها بلا إيقاف ولا تخزين. عرض الإطار على السطح لا يقيسه mpv عبر IPC هنا: يُقال «غير مقاسة» ولا يُقدَّر
+    `حتى أول إطار مفكوك: ${fromTap('ready')} · حتى تقدّم التشغيل: ${fromTap('playback-advancing')}`,
+    'أول صورة معروضة على الشاشة: غير مقاسة',
   ];
   if (anchor) {
     lines.push('مراحل المحرك (من اختيار المصدر):');
     for (const e of trace) {
       const rel = e.ms - anchor.ms;
-      const extra = [e.mode && e.stage !== 'source-selected' ? e.mode : null, Number.isFinite(e.waitMs) ? `انتظار ${Math.round(e.waitMs)}ms` : null].filter(Boolean).join(' · ');
+      const extra = [e.mode && e.stage !== 'source-selected' ? e.mode : null, Number.isFinite(e.waitMs) ? `انتظار ${Math.round(e.waitMs)}ms` : null, detailText(e)].filter(Boolean).join(' · ');
       lines.push(`  ${e.stage}  ${rel < 0 ? `قبل الضغط ${s(-rel)}` : `+${s(rel)}`}${extra ? `  (${extra})` : ''}`);
     }
   }
-  return lines.join('\n');
+  // تقرير الذهب أولًا (المسار الحرج والاختناق وسببه ومكانه وثقته)، ثم المراحل الخام كاملة للمراجعة
+  return [goldReport({ tapMs: tap, trace, app }), '', '[التفاصيل الخام]', ...lines].join('\n');
 }
 
 export function createOverlayView(doc, send, { timers = globalThis } = {}) {

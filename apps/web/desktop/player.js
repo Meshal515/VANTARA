@@ -16,13 +16,16 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   // طبقة أدوات الـAPK فوق الفيديو (overlay.js): ما تعرضه يُحفظ هنا ويُرسل إليها
   let seekDone=0,link=null,overlayServers=false,overlayRoutes=null,overlayRoutesDone=false,subtitleTrackList=[],audioTrackList=[],speedValue=1,fitValue='fit',volumeValue=100,subDelay=0,subSize=40,subPos=100,subBg='shadow',netInfo=null,skipLabel=null,buffering=false,failed=false,titleText='VANTARA',subtitleCommandRevision=0,loadProgress=0,loadEpoch=0,lastVolume=100;
   // مراحل المحرك الفعلية ← نسبة امتلاء شعار شاشة التحميل (كما يقيس الـAPK البيانات التي وصلت لا وقتًا وهميًا)
-  const STAGE_PROGRESS={'engine-start':.06,'cache-selected':.1,'metadata':.16,'engine-ready':.22,'file-selected':.3,'downloading':.4,'player-start':.7,'first-frame':.95};
+  const STAGE_PROGRESS={'engine-start':.06,'cache-selected':.1,'metadata':.16,'engine-ready':.22,'file-selected':.3,'downloading':.4,'player-start':.7,'player-ipc-ready':.8};
   // قياس المشغل للوحة «الشبكة» كالـAPK (PlayerActivity.showNetwork): كل حقل يُحدّث من حدثه ويبقى آخر قيمة معروفة.
   // stages: زمن كل مرحلة منذ فتح الجلسة (تجهيز ← المحرك ← التحميل ← المشغل ← أول إطار).
   const NET_FIELDS={downloadSpeed:'torrentBps',peers:'peers',seeds:'seeds',aheadMs:'aheadMs',inputBps:'inputBps',videoBps:'videoBps',videoHeight:'videoHeight'};
-  function freshNet(prev){return {openAt:Date.now(),tapAt:engine.playRequestedAt?.({session})??null,stages:{},trace:[],server:prev?.server??null};}
+  // هوية البناء كما مرّرتها العملية الرئيسية إلى preload (channel.json): أول سطور التقرير
+  const appBuild={version:bridge?.version??null,channel:bridge?.channel??null,build:bridge?.build??null,sourceSha:bridge?.sourceSha??null};
+  function freshNet(prev){return {openAt:Date.now(),tapAt:engine.playRequestedAt?.({session})??null,stages:{},trace:[],server:prev?.server??null,app:appBuild};}
   // تشخيص البدء من عملية الخدمات (startup-trace.mjs): المرحلة وزمنها بساعتها، وأرقام آمنة فقط
-  function addTrace(prev,event){const next={...(prev??freshNet(null))};next.trace=[...(next.trace??[]),{stage:String(event.stage),ms:Number(event.elapsedMs)||0,...(event.mode?{mode:String(event.mode)}:{}),...(Number.isFinite(event.waitMs)?{waitMs:event.waitMs}:{})}].slice(-80);return next;}
+  // كل حقل رقمي نظّفه سجل البدء في الخدمات (startup-trace) يبقى مع حدثه: تفصيل Metadata وأسباب الانتظار (DeepTrace)
+  function addTrace(prev,event){const next={...(prev??freshNet(null))};const detail={};for(const [k,v] of Object.entries(event))if(!['type','stage','elapsedMs','session','mode','waitMs'].includes(k)&&Number.isFinite(v))detail[k]=v;next.trace=[...(next.trace??[]),{stage:String(event.stage),ms:Number(event.elapsedMs)||0,...(event.mode?{mode:String(event.mode)}:{}),...(Number.isFinite(event.waitMs)?{waitMs:event.waitMs}:{}),...(Object.keys(detail).length?{detail}:{})}].slice(-80);return next;}
   function mergeNet(prev,event){const next={...(prev??freshNet(null))};for(const [from,to] of Object.entries(NET_FIELDS))if(Number.isFinite(event[from])&&event[from]>=0)next[to]=event[from];return next;}
   function markStage(prev,stage){const next={...(prev??freshNet(null))};if(next.stages[stage]==null)next.stages={...next.stages,[stage]:Date.now()-next.openAt};return next;}
   const httpsArt=url=>typeof url==='string'&&/^https:\/\//i.test(url)?url:null;
