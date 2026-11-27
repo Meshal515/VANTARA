@@ -644,7 +644,7 @@ class PlayerActivity : Activity() {
             .setLoadControl(PlaybackBuffering.create(Runtime.getRuntime().maxMemory()))
             .setSeekBackIncrementMs(SEEK_MS)
             .setSeekForwardIncrementMs(SEEK_MS)
-            .build().let { SeekGuardPlayer(it, ::seekNeedsCues) }
+            .build().let { inner -> SeekGuardPlayer(inner) { to -> noteSeek(inner, to); seekNeedsCues(to) } }
         // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
@@ -667,6 +667,11 @@ class PlayerActivity : Activity() {
                 if (frameAt == 0L) { frameAt = SystemClock.elapsedRealtime(); android.util.Log.i("VantaraStartup", startupLine()) }
                 if (StartupReveal.hideOnFirstFrame(first, player.playbackState == Player.STATE_READY)) loading(false)
                 recordStartupOutput()
+                // P0 (المالك، 27 نوفمبر): بدأ بلا فهرس، فأول قفزة كانت تنتظر Cues من آخر الملف (11 ث، والمدة --:--). أول صورة
+                // ظهرت: الفهرس يُجلب الآن في الخلفية فتكون إعادة التجهيز عند القفزة من كتل مكتوبة
+                if (first && cuesDeferred) current?.url?.takeIf { it.startsWith("vantara-torrent:") }?.let { url ->
+                    runCatching { com.vantara.addons.torrent.TorrentEngine.get(this@PlayerActivity).fetchCues(android.net.Uri.parse(url)) }
+                }
             }
             override fun onAudioPositionAdvancing(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
                 if (!current(eventTime)) return
@@ -818,6 +823,7 @@ class PlayerActivity : Activity() {
         override fun onEvents(player: Player, events: Player.Events) {
             // A seek inside buffered media can stay READY without a state-change callback.
             if (player.playbackState == Player.STATE_READY) seekBudget.reset()
+            if (BuildConfig.DEBUG) diag.duration(player.duration)
         }
 
         override fun onPlaybackStateChanged(state: Int) {
@@ -862,7 +868,7 @@ class PlayerActivity : Activity() {
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
-            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
+            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seekApplied(player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 seekRecovery.seeked(SystemClock.elapsedRealtime())
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
@@ -965,6 +971,13 @@ class PlayerActivity : Activity() {
         sampleUsage()
         updateQualityLabel()
         watchStall()
+    }
+
+    /** تشخيص القفز (نسخة الاختبار): كل قفزة لحظة طلبها، بطريقتها والمدة قبلها (PlaybackDiagnostics.seekRequested). */
+    private fun noteSeek(inner: androidx.media3.exoplayer.ExoPlayer, to: Long) {
+        if (!BuildConfig.DEBUG) return
+        val method = if (cuesDeferred && !inner.isCurrentMediaItemSeekable) "إعادة تجهيز بالفهرس" else "عادية"
+        diag.seekRequested(inner.currentPosition, to, method, inner.duration.takeIf { it > 0 } ?: 0L, inner.isCurrentMediaItemSeekable)
     }
 
     /** المصدر الحالي بدأ بلا فهرس الحاوية (CandidateMediaSources.deferCues) ولم يُعد تجهيزه بعد. */
@@ -2466,7 +2479,8 @@ class PlayerActivity : Activity() {
         val facts = t?.let {
             val blocks = if (it.waitingPiece >= 0 && url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).pieceBlocks(android.net.Uri.parse(url), it.waitingPiece) }.getOrNull() else null
             PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps, it.firstPeerAt, it.firstPayloadAt,
-                turbo = it.turbo, earlyBytes = it.earlyBytes, earlyFailures = it.earlyFailures)
+                turbo = it.turbo, earlyBytes = it.earlyBytes, earlyFailures = it.earlyFailures,
+                hintsSent = it.hintsSent, hintsFailed = it.hintsFailed, waits = it.waits)
         }
         val f = player.videoFormat
         val groups = player.currentTracks.groups
@@ -2474,6 +2488,7 @@ class PlayerActivity : Activity() {
             player.playbackState, player.currentPosition, player.totalBufferedDuration, player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L,
             f?.containerMimeType, f?.let { listOfNotNull(it.sampleMimeType ?: it.codecs, if (it.width > 0) "${it.width}x${it.height}" else null).joinToString(" ") },
             videoDecoder, groups.count { it.type == C.TRACK_TYPE_TEXT }, groups.count { it.type == C.TRACK_TYPE_AUDIO },
+            playWhenReady = player.playWhenReady,
         )
         val report = diag.report(facts, p)
         body.addView(label("تشخيص (نسخة الاختبار)", 13.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(0, dp(14), 0, dp(4)) })

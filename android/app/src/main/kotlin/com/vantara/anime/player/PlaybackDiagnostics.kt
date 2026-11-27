@@ -21,8 +21,14 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     class Read(val n: Int, val at: Long, val position: Long) {
         var openedAt = 0L; var bytes = 0L; var firstByteAt = 0L; var endAt = 0L
     }
-    class Seek(val at: Long, val fromMs: Long, val toMs: Long) {
+    /**
+     * قفزة واحدة كما طُلبت من SeekGuardPlayer (نقطة كل قفزة: الأزرار والشريط والغرفة). [method]: عادية، أو «إعادة تجهيز
+     * بالفهرس» (مصدر بدأ بلا Cues: setMediaSource جديد فتُمسح الـTimeline والمدة حتى يقرأ الفهرس). [durationMs] المدة
+     * لحظة الطلب، و[unknownSince]/[unknownMs] متى غابت المدة بعدها وكم بقيت غائبة.
+     */
+    class Seek(val at: Long, val fromMs: Long, val toMs: Long, val method: String = "عادية", val durationMs: Long = 0L, val seekable: Boolean = true) {
         var readyAt = 0L; var frameAt = 0L
+        var unknownSince = 0L; var unknownMs = 0L
     }
     /** حقائق التورنت لحظة كتابة التقرير (من TorrentStats)، بالساعة نفسها elapsedRealtime. */
     class TorrentFacts(
@@ -38,11 +44,15 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
         /** الخيار B: مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
         val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
+        /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من ثانية. */
+        val hintsSent: Int = 0, val hintsFailed: Int = 0,
+        val waits: List<com.vantara.addons.torrent.ReadWait> = emptyList(),
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
         val state: Int, val positionMs: Long, val bufferedMs: Long, val durationMs: Long,
         val container: String?, val video: String?, val decoder: String?, val textTracks: Int, val audioTracks: Int,
+        val playWhenReady: Boolean = true,
     )
 
     private val reads = ArrayDeque<Read>()
@@ -104,6 +114,25 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         seeks.lastOrNull()?.takeIf { it.frameAt == 0L }?.frameAt = now()
     }
     /** [readyNow]: قفزة داخل ما هو محمّل أصلًا، فلا يمر المشغّل بالانتظار ولا يصل حدث READY جديد. */
+    /** القفزة لحظة طلبها (قبل أن يبدأ Media3 أو يُعاد التجهيز). [applied] يكمّلها حين يصل حدث القفزة نفسه. */
+    @Synchronized fun seekRequested(fromMs: Long, toMs: Long, method: String, durationMs: Long, seekable: Boolean) {
+        if (openAt == 0L) return
+        seeks.addLast(Seek(now(), fromMs, toMs, method, durationMs, seekable)); while (seeks.size > MAX_SEEKS) seeks.removeFirst()
+        event("قفزة ${clock(fromMs)} ← ${clock(toMs)} ($method)")
+    }
+    /** حدث القفزة من Media3: داخل المحمّل يبقى READY بلا انتقال حالة، فالجاهزية هنا. */
+    @Synchronized fun seekApplied(readyNow: Boolean) {
+        val s = seeks.lastOrNull() ?: return
+        if (readyNow && s.readyAt == 0L) s.readyAt = now()
+    }
+    /** المدة كما يعرفها المشغّل الآن (يُستدعى مع كل تغيّر حالة أو Timeline): يقيس غيابها بعد القفزة الأخيرة. */
+    @Synchronized fun duration(durationMs: Long) {
+        val s = seeks.lastOrNull() ?: return
+        val unknown = durationMs <= 0
+        if (unknown && s.unknownSince == 0L) s.unknownSince = now()
+        if (!unknown && s.unknownSince > 0L) { s.unknownMs += now() - s.unknownSince; s.unknownSince = 0L }
+    }
+
     @Synchronized fun seek(fromMs: Long, toMs: Long, readyNow: Boolean = false) {
         if (openAt == 0L) return
         seeks.addLast(Seek(now(), fromMs, toMs).apply { if (readyNow) readyAt = at }); while (seeks.size > MAX_SEEKS) seeks.removeFirst()
@@ -162,7 +191,12 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             if (t.swaps > 0) appendLine("تبديل مشاركين بطيئين عن قطعة عالقة: ${t.swaps}")
             appendLine("قبل التحقق: " + (if (t.turbo) "مسموح" else "موثق فقط") + " · قُرئ ${bytes(t.earlyBytes)}" +
                 if (t.earlyFailures > 0) " · فشل تحقق ${t.earlyFailures} قطعة وأُعيد التشغيل موثقًا" else "")
-            appendLine("المحرك: " + if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (VANTARA 0001+0002، نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12")
+            appendLine("المحرك: " + (if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12") +
+                " · تلميح القراءة: " + hints(t))
+            if (t.waits.isNotEmpty()) {
+                appendLine("انتظار القطع (أطول من ثانية، الأحدث آخرًا):")
+                for (w in t.waits) appendLine("  " + wait(w))
+            }
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }
@@ -182,14 +216,54 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             (if (r.endAt > 0) " · مدة ${secs(r.endAt - r.openedAt)} ث" else " · جارية"))
         if (seeks.isNotEmpty()) {
             appendLine("القفزات (${seeks.size}):")
-            seeks.forEachIndexed { i, s -> appendLine("  ${i + 1}) ${clock(s.fromMs)} ← ${clock(s.toMs)}: " +
+            seeks.forEachIndexed { i, s -> appendLine("  ${i + 1}) ${clock(s.fromMs)} ← ${clock(s.toMs)} (${s.method}): " +
                 (if (s.readyAt > 0) "جاهز بعد ${secs(s.readyAt - s.at)} ث" else "لم يجهز بعد (${secs(nowMs - s.at)} ث)") +
-                (if (s.frameAt > 0) " · صورة بعد ${secs(s.frameAt - s.at)} ث" else "")) }
+                (if (s.frameAt > 0) " · صورة بعد ${secs(s.frameAt - s.at)} ث" else "") +
+                " · المدة قبلها ${if (s.durationMs > 0) clock(s.durationMs) else "--:--"}" +
+                (s.unknownMs + if (s.unknownSince > 0) nowMs - s.unknownSince else 0L).let { if (it > 0) " · غابت المدة ${secs(it)} ث" else "" } +
+                reads.filter { it.at >= s.at && (seeks.getOrNull(i + 1)?.at ?: Long.MAX_VALUE) > it.at }.let { rs ->
+                    if (rs.isEmpty()) " · لا طلب قراءة" else " · قراءات: " + rs.joinToString("، ") { r -> "${where(r.position, t?.fileBytes)} ${bytes(r.bytes)}" + if (r.firstByteAt == 0L) " (لم يصل بايت)" else "" }
+                }) }
+            seeks.lastOrNull()?.takeIf { it.readyAt == 0L }?.let { appendLine("  لماذا لم يستأنف: " + stuck(it, t, p, nowMs)) }
         }
         appendLine("الأحداث:")
         for (e in events) appendLine("  $e")
         append("الحكم: ").append(verdict(t, p, nowMs))
     }
+
+    /** القفزة الأخيرة لم تعد READY: السبب من الحقائق وحدها، بترتيب ما يمنع الاستئناف أولًا. */
+    internal fun stuck(s: Seek, t: TorrentFacts?, p: PlayerFacts, nowMs: Long): String {
+        val after = reads.filter { it.at >= s.at }
+        val why = mutableListOf<String>()
+        if (!p.playWhenReady) why += "التشغيل موقوف (playWhenReady=false)"
+        if (p.durationMs <= 0) why += "المدة غير معروفة: المصدر " + (if (s.method != "عادية") "يُعاد تجهيزه ولم يقرأ الفهرس بعد" else "فقد الـTimeline")
+        when {
+            after.isEmpty() -> why += "لم يفتح المشغّل أي طلب قراءة منذ القفزة (${secs(nowMs - s.at)} ث)"
+            after.last().firstByteAt == 0L -> why += "آخر طلب ${where(after.last().position, t?.fileBytes)} لم يصل منه بايت منذ ${secs(nowMs - after.last().openedAt)} ث"
+        }
+        if (t != null && t.waitingPiece >= 0) why += "المحرك ينتظر القطعة ${t.waitingPiece} منذ ${secs(nowMs - t.waitingSince)} ث" +
+            (t.waitingBlocks?.let { (d, n) -> " ($d/$n كتلة)" } ?: " (لم يبدأ تحميلها)")
+        if (t != null && t.peers == 0) why += "لا مشاركين متصلين"
+        return why.ifEmpty { listOf("الحالة ${p.state} والموضع ${clock(p.positionMs)} وأمامه ${p.bufferedMs / 1000} ث") }.joinToString(" · ")
+    }
+
+    private fun hints(t: TorrentFacts) = when {
+        t.hintsSent > 0 -> "وصل ${t.hintsSent}" + if (t.hintsFailed > 0) " · فشل ${t.hintsFailed}" else ""
+        t.hintsFailed > 0 -> "لا يصل (فشل ${t.hintsFailed}، المكتبة بلا 0004)"
+        else -> "لم يُرسل بعد"
+    }
+
+    /** انتظار واحد: القطعة والموضع والمدة، وما يعرفه المحرك مكتوبًا مقابل libtorrent لحظة الثانية الأولى، وكيف انتهى. */
+    internal fun wait(w: com.vantara.addons.torrent.ReadWait): String =
+        "القطعة ${w.piece}" + (if (w.tail) " (آخر الملف)" else "") + " عند الكتلة ${w.block}: ${secs(w.ms)} ث" +
+            " · مكتوب عندنا ${w.known} وفي libtorrent ${w.engine} من ${w.blocks}" +
+            " · كتلة الموضع " + (if (w.atOffset) "معروفة" else "غير معروفة") +
+            " · انتهى " + (if (w.early) "بقراءة قبل التحقق" else "بالقطعة الموثقة") +
+            when {
+                w.untracked -> " · فجوة: كتل على القرص لا يعرفها المحرك"
+                !w.atOffset && w.engine < w.blocks -> " · كتلة الموضع لم تُنزَّل بعد"
+                else -> ""
+            }
 
     // ما حدث قبل فتح المشغّل (التسخين المسبق، بيانات محفوظة) يُكتب «قبل الفتح» لا «—»: البدء الدافئ يُعرف من البارد
     private fun rel(t: Long) = if (t > 0 && openAt > 0 && t >= openAt) String.format(Locale.US, "+%.1f", (t - openAt) / 1000.0) else if (t > 0 && openAt > 0) "قبل الفتح" else "—"

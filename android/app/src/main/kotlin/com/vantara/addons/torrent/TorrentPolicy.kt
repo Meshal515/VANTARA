@@ -89,7 +89,23 @@ data class TorrentStats(
     val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
     /** الخيار B ([TurboRead]): مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
     val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
+    /** تلميح القراءة (0004): كم مرة وصل libtorrent وكم مرة فشل (مكتبة بلا الدالتين). */
+    val hintsSent: Int = 0, val hintsFailed: Int = 0,
+    /** آخر انتظارات القراء الأطول من ثانية ([ReadWait]). */
+    val waits: List<ReadWait> = emptyList(),
 )
+/**
+ * انتظار قارئ لقطعة تجاوز ثانية: لحظة الثانية الأولى، كم كتلة يعرفها المحرك مكتوبة ([known]، من block_finished_alert)
+ * وكم يقول libtorrent إنها مكتوبة أو قيد الكتابة ([engine]، من download_queue) من [blocks]، وهل كتلة الموضع [block]
+ * معروفة. ثم المدة الكلية وكيف انتهى: قراءة قبل التحقق ([early]) أو القطعة الموثقة. [engine] أكبر من [known] بأكثر من
+ * كتلتين = كتل على القرص لا يعرفها المحرك فلا يقرؤها مبكرًا.
+ */
+data class ReadWait(
+    val piece: Int, val block: Int, val blocks: Int, val known: Int, val engine: Int, val atOffset: Boolean,
+    val ms: Long, val early: Boolean, val tail: Boolean,
+) {
+    val untracked: Boolean get() = engine > known + 2
+}
 /** ما قاسه المحرك لتورنت: حجم القطعة، والسرب (باذرون معروفون، -1 مجهول)، والمتصلون الآن. */
 data class TorrentFacts(val pieceLength: Int, val swarmSeeds: Int, val peers: Int)
 data class PieceRead(val piece: Int, val offset: Int, val length: Int)

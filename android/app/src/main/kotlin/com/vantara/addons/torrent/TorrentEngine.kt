@@ -329,6 +329,16 @@ class TorrentEngine internal constructor(
         tickets[token] = Ticket(request)
         return Uri.Builder().scheme(SCHEME).authority(token).path("/file").build()
     }
+    /**
+     * أول صورة ظهرت لمصدر بدأ بلا فهرس ([deferTail]): Cues يُجلب الآن في الخلفية، فأول قفزة (إعادة تجهيز بالفهرس في
+     * PlayerActivity) تقرؤه من كتل مكتوبة بدل انتظاره (11 ث بقطع 16MB، المالك 27 نوفمبر). موضعه من SeekHead ([MkvHead.cuesAt])،
+     * وتلميح القراءة عنده فتُطلب كتله أولًا (0004)؛ بلا موضع معروف: قطعتا الذيل كما كان قبل التأجيل.
+     */
+    fun fetchCues(uri: Uri): Boolean {
+        val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return false
+        tailDeferred.remove(hash)
+        return states[hash]?.fetchCues() ?: false
+    }
     /** المشغّل يبدأ هذا المصدر بلا فهرس (أول صورة من الرأس) [on]، أو يحتاج الفهرس الآن (قفزة، استئناف). */
     fun deferTail(uri: Uri, on: Boolean) {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return
@@ -458,7 +468,10 @@ class TorrentEngine internal constructor(
      */
     fun facts(uri: Uri): TorrentFacts? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
-        if (!managerHolder.isInitialized()) return null
+        // حقائق ما في المحرك فقط (مُسخَّن أو يُشغَّل، وله State). ورقة السيرفرات تسأل عن كل سيرفر (171 في لقطة المالك) كل
+        // 1.5 ث على خيط جسر Capacitor الواحد، وmanager.find مكالمة متزامنة تنتظر خيط شبكة libtorrent المشغول بالتسخين:
+        // كان «يبدأ…» ينتظر خلفها (pick على الخيط نفسه)
+        if (!managerHolder.isInitialized() || !states.containsKey(hash)) return null
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
         val info = runCatching { handle.torrentFile() }.getOrNull()?.takeIf { it.isValid } ?: return null
         val status = runCatching { handle.status() }.getOrNull() ?: return null
@@ -478,7 +491,8 @@ class TorrentEngine internal constructor(
             mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
             warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0,
             firstPeerAt = state?.firstPeerAt ?: 0L, firstPayloadAt = state?.firstPayloadAt ?: 0L,
-            turbo = turboAllowed(hash), earlyBytes = state?.earlyBytes ?: 0L, earlyFailures = state?.earlyFailures ?: 0)
+            turbo = turboAllowed(hash), earlyBytes = state?.earlyBytes ?: 0L, earlyFailures = state?.earlyFailures ?: 0,
+            hintsSent = state?.hintsSent ?: 0, hintsFailed = state?.hintsFailed ?: 0, waits = state?.waits() ?: emptyList())
     }
     /** للتشخيص فقط: كتل [piece] المكتملة أو قيد الكتابة من مجموعها؛ null إن لم تبدأ بعد. */
     fun pieceBlocks(uri: Uri, piece: Int): kotlin.Pair<Int, Int>? {
@@ -756,9 +770,33 @@ class TorrentEngine internal constructor(
         }
         fun earlyRead(bytes: Int) = synchronized(monitor) { earlyBytes += bytes; Unit }
         /** تلميح القراءة إلى libtorrent (async_call؛ لا ينتظر خيط الشبكة). */
-        fun readHint(reader: Int, piece: Int, offset: Int) = synchronized(monitor) {
-            torrent?.takeIf { it.isValid }?.let { NativeReadHint.set(it, reader, piece, offset) }; Unit
+        /** قطع Cues المطلوبة في الخلفية ([fetchCues])؛ تبقى بمواعيدها في كل prioritize حتى تُنزَّل. */
+        private var cuesPieces: List<Int> = emptyList()
+        fun fetchCues(): Boolean = synchronized(monitor) {
+            val f = file ?: return@synchronized false
+            val handle = torrent?.takeIf { it.isValid } ?: return@synchronized false
+            if (pieceLength <= 0) return@synchronized false
+            val at = head?.cuesAt?.takeIf { it in 0 until f.size }
+            val last = ((f.offset + f.size - 1) / pieceLength).toInt()
+            val start = at?.let { ((f.offset + it) / pieceLength).toInt() } ?: TorrentPolicy.edges(f, pieceLength).drop(1).minOrNull() ?: return@synchronized false
+            val end = at?.let { minOf(last, ((f.offset + it + CUES_FETCH_BYTES - 1) / pieceLength).toInt()) } ?: last
+            cuesPieces = (start..end).toList()
+            for ((i, piece) in cuesPieces.withIndex()) if (!handle.havePiece(piece)) {
+                handle.piecePriority(piece, Priority.SIX)
+                handle.setPieceDeadline(piece, CUES_DEADLINE_MS + i * 250)
+                deadlined += piece
+            }
+            if (at != null) NativeReadHint.set(handle, CUES_READER, start, ((f.offset + at) % pieceLength).toInt())
+            true
         }
+        fun readHint(reader: Int, piece: Int, offset: Int) = synchronized(monitor) {
+            torrent?.takeIf { it.isValid }?.let { if (NativeReadHint.set(it, reader, piece, offset)) hintsSent++ else hintsFailed++ }; Unit
+        }
+        /** للتشخيص: هل يصل تلميح القراءة إلى libtorrent على هذا الجهاز ([readHint]). */
+        @Volatile var hintsSent = 0; private set
+        @Volatile var hintsFailed = 0; private set
+        private val waits = ArrayDeque<ReadWait>()
+        fun waits(): List<ReadWait> = synchronized(monitor) { waits.toList() }
         fun clearHint(reader: Int) = synchronized(monitor) {
             torrent?.takeIf { it.isValid }?.let { NativeReadHint.clear(it, reader) }; Unit
         }
@@ -816,6 +854,8 @@ class TorrentEngine internal constructor(
             if (refs != 0 || idleAt != since) return@synchronized
             torrent?.takeIf { it.isValid }?.let { handle ->
                 NativeReadHint.clear(handle, WARM_READER)
+                NativeReadHint.clear(handle, CUES_READER)
+                cuesPieces = emptyList()
                 handle.pause(); handle.clearPieceDeadlines(); deadlined.clear()
                 window.forEach { handle.piecePriority(it, Priority.IGNORE) }
                 aheadRange.forEach { handle.piecePriority(it, Priority.IGNORE) }
@@ -897,7 +937,7 @@ class TorrentEngine internal constructor(
             if (selected != null && selected != file.index && refs > 1) throw IOException("Another file from this torrent is already playing")
             if (!initialized || selected != file.index) {
                 handle.prioritizePieces(Priority.array(Priority.IGNORE, info.numPieces()))
-                selected = file.index; initialized = true; window = emptyList(); focused = false; aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L
+                selected = file.index; initialized = true; window = emptyList(); focused = false; aheadRange = IntRange.EMPTY; edgesWanted = false; firstPieceAt = 0L; cuesPieces = emptyList()
                 head = if (file.path.endsWith(".mkv", ignoreCase = true)) MkvHead() else null
                 this.file = file; pieceLength = info.pieceLength()
                 lastPiece = info.numPieces() - 1; lastPieceBytes = if (lastPiece >= 0) info.pieceSize(lastPiece) else 0
@@ -934,7 +974,7 @@ class TorrentEngine internal constructor(
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val tailWaits = hash in tailDeferred
-            val pending = if (tailWaits) emptyList() else TorrentPolicy.edges(file, pieceLength).filter { it !in next && !handle.havePiece(it) }
+            val pending = if (tailWaits) emptyList() else (TorrentPolicy.edges(file, pieceLength) + cuesPieces).distinct().filter { it !in next && !handle.havePiece(it) }
             // مع libtorrent المخصص: قطعتان فقط بموعد (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7 فيقسم السرعة عليها)،
             // وبقية النافذة أولوية 6 بلا موعد. المكتبة الأصلية: النافذة كلها كما كانت (القياس: الضيقة وحدها لا تفيدها).
             val critical = if (PATCHED) next.take(CRITICAL_PIECES) else next
@@ -1050,14 +1090,22 @@ class TorrentEngine internal constructor(
             var checkedAt = 0L
             var swappedAt = 0L
             var done = -1L
+            // للتشخيص: لقطة الثانية الأولى من انتظار طويل ([ReadWait])، تُسجَّل حين ينتهي
+            var probe: IntArray? = null
+            fun waited(earlyRead: Boolean) {
+                val p = probe ?: return
+                waits.addLast(ReadWait(piece, (early?.offset ?: 0) / TurboRead.BLOCK_BYTES, p[2], p[0], p[1], p[3] == 1,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start), earlyRead, piece >= lastPiece - 1))
+                while (waits.size > MAX_WAITS) waits.removeFirst()
+            }
             try { synchronized(monitor) {
                 while (true) {
                     checkCancelled(cancelled)
-                    pieces[piece]?.let { return it }
+                    pieces[piece]?.let { waited(false); return it }
                     if (early != null && hash !in verifiedOnly) {
                         val span = TurboRead.writtenSpan(written[piece], early.offset, early.length, pieceSizeOf(piece))
                         // تُسجَّل قبل أن تُقرأ: فشل تحقق يصل بين هذا السطر والقراءة من القرص يُكشف ولا يمر
-                        if (span > 0) { early.span = span; earlyPieces.add(piece); return null }
+                        if (span > 0) { early.span = span; earlyPieces.add(piece); waited(true); return null }
                     }
                     if (waitingPiece != piece) { waitingPiece = piece; waitingSince = android.os.SystemClock.elapsedRealtime() }
                     if (refs == 0) throw InterruptedIOException("Torrent has no active reader")
@@ -1072,6 +1120,14 @@ class TorrentEngine internal constructor(
                     // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
                     // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).
                     val now = System.nanoTime()
+                    if (probe == null && now - start >= ONE_SECOND_NS) {
+                        val bits = written[piece]
+                        val queued = runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece } }.getOrNull()
+                        val blocks = queued?.blocksInPiece() ?: ((pieceSizeOf(piece) + TurboRead.BLOCK_BYTES - 1) / TurboRead.BLOCK_BYTES)
+                        val engine = queued?.let { it.finished() + it.writing() } ?: if (handle.havePiece(piece)) blocks else 0
+                        val atOffset = early != null && bits?.get(early.offset / TurboRead.BLOCK_BYTES) == true
+                        probe = intArrayOf(bits?.cardinality() ?: 0, engine, blocks, if (atOffset) 1 else 0)
+                    }
                     if (now - checkedAt >= ONE_SECOND_NS) {
                         checkedAt = now
                         val total = runCatching { handle.status().totalPayloadDownload() }.getOrDefault(done)
@@ -1156,8 +1212,15 @@ class TorrentEngine internal constructor(
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         /** قطع ناقصة بلا موعد تُتتبع كتلها للخيار B في وقت واحد (ذوات الموعد تُتتبع دائمًا). */
         private const val MAX_TRACKED_PIECES = 64
+        private const val MAX_WAITS = 8
         /** تلميح القراءة (0004): قارئ التسخين، ويُحدَّث تلميح الفتح كل 4 كتل (64KB) يتقدمها. */
         private const val WARM_READER = 0
+        /** قارئ Cues في الخلفية ([fetchCues]): لا يصطدم بقراء المشغّل (من 1) ولا بالتسخين (0). */
+        private const val CUES_READER = -1
+        /** Cues نادرًا ما يتجاوز 1MB (168KB في لقطة المالك لملف 1.9GB). */
+        private const val CUES_FETCH_BYTES = 2L * 1024 * 1024
+        /** بعد قطع التشغيل الحرجة (موعدها 0): لا يزاحم ما يُعرض الآن. */
+        private const val CUES_DEADLINE_MS = 1000
         private const val HINT_STRIDE_BLOCKS = 4
         private const val MAX_MEMORY_BYTES = 32 * 1024 * 1024
         private const val MAX_ACTIVE_BYTES = 8L * 1024 * 1024 * 1024

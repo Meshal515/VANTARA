@@ -53,13 +53,14 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   const group = sheet.querySelector('.ss-group--torrent');
   const visible = [...group.querySelectorAll(':scope > .an-srv-grid .an-srv')];
   const folded = [...group.querySelectorAll('details .an-srv')];
-  // جدول المعايير (lib/route-validity.js): العربية بوزن كبير، ثم السرعة والجودة والترميز والحجم
+  // المقترحة (المالك، 27 نوفمبر): أعلى 5 أسراب من كل جودة من أعلى جودتين، بالجودة ثم الزارعين. «المقترح» (درجة
+  // lib/route-validity.js: العربية بوزن كبير) يبقى «مقترح» في مكانه من الجودة
   expect(visible.map((b) => b.title)).toEqual([
-    'Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed',
     'Fight.Club.1999.2160p.UHD.BluRay.REMUX.HEVC.DV.HDR10Plus.TrueHD.Atmos.7.1-FGT',
-    'Fight.Club.1999.1080p.BluRay.x264.AAC-YTS',
     'Fight.Club.1999.2160p.BluRay.x265.10bit.HDR.DTS-HD.MA.5.1',
     'Fight.Club.1999.2160p.WEB-DL.x265.HDR.DDP5.1-NOGRP',
+    'Fight.Club.1999.1080p.BluRay.x264.AAC-YTS',
+    'Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed',
   ]);
   // بلا مشاركين = غير متاح: في قسم «غير متاح» لا بين التورنت، ولا يُقترح أبدًا
   expect(folded).toEqual([]);
@@ -67,7 +68,7 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(gone.map((b) => b.title).sort()).toEqual(['Fight.Club.1999.1080p.BluRay.x265', 'Fight.Club.1999.2160p.HDCAM']);
   // تحت «غير متاح الآن»: كل سطر يحمل علامة عدم التوفر وسببه (لا «غير متاح» مكررة بلا سبب)
   expect(gone.every((b) => b.querySelector('.ss-bad')?.textContent.trim())).toBe(true);
-  const best = visible[1];
+  const best = visible[0];
   // صف يُختار منه: الجودة، الإضافة، اللغة والحجم، والمشاركون. اسم الإصدار وDV وREMUX تحت السهم
   expect(best.querySelector('.ss-q').textContent).toBe('4K');
   expect(best.querySelector('.ss-name').textContent).toBe('Torrentio');
@@ -82,12 +83,12 @@ it('torrent releases show what they state, strongest first; dead swarms and CAM 
   expect(best.querySelector('.ss-seeds').title).toBe('عدد الزارعين (Seeders) كما أعلنه المصدر');
   expect(best.querySelector('.ss-meter')).toBeNull();
   expect(best.className).toContain('an-srv--swarm-strong');
-  expect(visible[4].querySelector('.ss-seeds--weak')).not.toBeNull();
+  expect(visible[2].querySelector('.ss-seeds--weak')).not.toBeNull();
   expect(gone[0].className).toContain('an-srv--swarm-dead');
-  // المقترح: أكثر مشاركين بحجم يُبثّ وترميز سهل (لا ريمكس 61 GB) — أول صف، وسببه تحت «شغّل الأفضل»
+  // المقترح: أكثر مشاركين بحجم يُبثّ وترميز سهل (لا ريمكس 61 GB) — في مكانه من 1080p، وسببه تحت «شغّل الأفضل»
   const top = sheet.querySelectorAll('.ss-row--top');
   expect(top).toHaveLength(1);
-  expect(top[0]).toBe(visible[0]);
+  expect(top[0]).toBe(visible[4]);
   expect(top[0].title).toBe('Fight.Club.1999.1080p.WEB-DL.x264.Arabic.Subbed');
   expect(top[0].querySelector('.ss-tag').hidden).toBe(false);
   expect(best.querySelector('.ss-tag').hidden).toBe(true);
