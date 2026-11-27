@@ -111,6 +111,7 @@ static constexpr int MAX_ANNOUNCE = 48;
 static constexpr int BLOCK = 16 * 1024;  // كتلة libtorrent
 // الخيار B: سقف ما يُسلَّم قبل التحقق لكل طلب (كما TurboRead.MAX_BYTES_PER_OPEN في أندرويد). VANTARA_LT_EARLY_MB=0 يعطّله
 static int64_t EARLY_BYTES = 32LL * 1024 * 1024;
+static int RECONNECT_S = 2;  // min_reconnect_time الفعلي (يُكتب حين تُضبط الجلسة)
 // قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
 static int WINDOW = 12;                    // TorrentPolicy.window count
 // libtorrent مخصص (tools/libtorrent-patches عبر منفذ vcpkg): قطعتان فقط بموعد، فـlibtorrent يرفع كل قطعة بموعد إلى
@@ -300,6 +301,30 @@ static std::string waitReason(lt::torrent_handle const& h, int piece, int block)
     } catch (...) { return "unknown"; }
 }
 
+/**
+ * DeepTrace: ما بُني معه هذا الملف التنفيذي فعلًا (لا ما في المستودع): رقع libtorrent (ثابتة الربط، فالمترجَم هو المحمَّل)
+ * وقيمها الفعلية الآن (متغيرات البيئة التي تقرؤها الرقع)، والقراءة المبكرة، وإعادة الاتصال، والقطع الحرجة.
+ */
+static std::string buildJson() {
+#ifdef VANTARA_PATCHED_LIBTORRENT
+    bool const patched = true;
+#else
+    bool const patched = false;
+#endif
+#ifdef VANTARA_LT_READ_HINTS
+    bool const hints = true;
+#else
+    bool const hints = false;
+#endif
+    auto env = [](char const* n) { char const* v = std::getenv(n); return v ? std::max(0, std::atoi(v)) : 0; };
+    std::ostringstream o;
+    o << "{\"patched\":" << (patched ? "true" : "false") << ",\"read_hints\":" << (hints ? "true" : "false")
+      << ",\"stall_cap_ms\":" << (patched ? env("VANTARA_LT_STALL_CAP_MS") : 0) << ",\"hedge_ms\":" << (patched ? env("VANTARA_LT_HEDGE_MS") : 0)
+      << ",\"early_read_mb\":" << (policy::EARLY_BYTES >> 20) << ",\"reconnect_s\":" << policy::RECONNECT_S << ",\"critical_pieces\":" << policy::CRITICAL
+      << ",\"idle\":true}";
+    return o.str();
+}
+
 static void applyOverrides(lt::settings_pack& s, std::string const& raw) {
     std::stringstream in(raw);
     std::string item;
@@ -352,7 +377,8 @@ public:
         // 2 ث (الافتراضي 60): إيقاف ثم استئناف (الدفء بعد الإغلاق، أو نافذة القرص) لا يعيد الاتصال بالمشاركين أنفسهم قبلها،
         // والمتتبع يعيد المشاركين أنفسهم. قياس: متابعة بعد إيقاف 8 ث 53–56 ث بـ60، و1.0–1.1 ث بـ2. المشارك الذي فشل يتضاعف
         // انتظاره مع عدّاد فشله ثم يُسقط (max_failcount)، فلا إغراق بالمحاولات
-        s.set_int(lt::settings_pack::min_reconnect_time, std::getenv("VANTARA_LT_RECONNECT_S") ? std::max(1, std::atoi(std::getenv("VANTARA_LT_RECONNECT_S"))) : 2);
+        policy::RECONNECT_S = std::getenv("VANTARA_LT_RECONNECT_S") ? std::max(1, std::atoi(std::getenv("VANTARA_LT_RECONNECT_S"))) : 2;
+        s.set_int(lt::settings_pack::min_reconnect_time, policy::RECONNECT_S);
         s.set_int(lt::settings_pack::piece_timeout, 8);
         s.set_int(lt::settings_pack::max_out_request_queue, 250);
         s.set_int(lt::settings_pack::request_queue_time, 1);
@@ -1417,7 +1443,7 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
     int timeoutMs = 15000;
     if (req.headers.count("x-req-timeout-ms")) { try { timeoutMs = std::clamp(std::stoi(req.headers["x-req-timeout-ms"]), 1000, 600000); } catch (...) {} }
     auto parts = split(req.path, '/');  // "", "torrents", id, action, file
-    if (req.path == "/") return respond(sock, {200, std::string("{\"server\":\"vantara-torrent\",\"engine\":\"libtorrent\",\"version\":\"") + VERSION + "\",\"libtorrent\":\"" + lt::version() + "\"}"});
+    if (req.path == "/") return respond(sock, {200, std::string("{\"server\":\"vantara-torrent\",\"engine\":\"libtorrent\",\"version\":\"") + VERSION + "\",\"libtorrent\":\"" + lt::version() + "\",\"build\":" + buildJson() + "}"});
     if (req.method == "POST" && req.path == "/torrents") {
         std::string magnet = req.body;
         while (!magnet.empty() && (magnet.back() == '\n' || magnet.back() == '\r' || magnet.back() == ' ')) magnet.pop_back();

@@ -375,6 +375,12 @@ test('libtorrent host DeepTrace: the add reply carries the Metadata timeline, an
   const proxy = await throttleProxy(Number(seedPeer[1]), 128 * 1024, 60);
   t.after(() => proxy.close());
   const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  // بصمة ما بُني معه المحرك فعلًا (لا ما في المستودع)
+  const build = (await request(base, '/')).body.build;
+  t.diagnostic(`build: ${JSON.stringify(build)}`);
+  assert.equal(typeof build.patched, 'boolean'); assert.equal(typeof build.read_hints, 'boolean');
+  assert.equal(build.reconnect_s, 2); assert.equal(build.early_read_mb, 32); assert.equal(build.idle, true);
+  if (build.patched) { assert.equal(build.stall_cap_ms, 1000); assert.equal(build.hedge_ms, 750); }
   const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
   assert.equal(added.status, 200);
   const tl = added.body.vantara?.timeline;

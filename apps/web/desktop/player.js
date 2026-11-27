@@ -20,7 +20,9 @@ export function installDesktopPlayer({g=globalThis,bridge=g.VantaraDesktop,engin
   // قياس المشغل للوحة «الشبكة» كالـAPK (PlayerActivity.showNetwork): كل حقل يُحدّث من حدثه ويبقى آخر قيمة معروفة.
   // stages: زمن كل مرحلة منذ فتح الجلسة (تجهيز ← المحرك ← التحميل ← المشغل ← أول إطار).
   const NET_FIELDS={downloadSpeed:'torrentBps',peers:'peers',seeds:'seeds',aheadMs:'aheadMs',inputBps:'inputBps',videoBps:'videoBps',videoHeight:'videoHeight'};
-  function freshNet(prev){return {openAt:Date.now(),tapAt:engine.playRequestedAt?.({session})??null,stages:{},trace:[],server:prev?.server??null};}
+  // هوية البناء كما مرّرتها العملية الرئيسية إلى preload (channel.json): أول سطور التقرير
+  const appBuild={version:bridge?.version??null,channel:bridge?.channel??null,build:bridge?.build??null,sourceSha:bridge?.sourceSha??null};
+  function freshNet(prev){return {openAt:Date.now(),tapAt:engine.playRequestedAt?.({session})??null,stages:{},trace:[],server:prev?.server??null,app:appBuild};}
   // تشخيص البدء من عملية الخدمات (startup-trace.mjs): المرحلة وزمنها بساعتها، وأرقام آمنة فقط
   // كل حقل رقمي نظّفه سجل البدء في الخدمات (startup-trace) يبقى مع حدثه: تفصيل Metadata وأسباب الانتظار (DeepTrace)
   function addTrace(prev,event){const next={...(prev??freshNet(null))};const detail={};for(const [k,v] of Object.entries(event))if(!['type','stage','elapsedMs','session','mode','waitMs'].includes(k)&&Number.isFinite(v))detail[k]=v;next.trace=[...(next.trace??[]),{stage:String(event.stage),ms:Number(event.elapsedMs)||0,...(event.mode?{mode:String(event.mode)}:{}),...(Number.isFinite(event.waitMs)?{waitMs:event.waitMs}:{}),...(Object.keys(detail).length?{detail}:{})}].slice(-80);return next;}

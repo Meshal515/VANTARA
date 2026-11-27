@@ -347,6 +347,15 @@ it('DeepTrace في نص التشخيص: كيف وصلت Metadata، وعلى ما
   expect(text).toContain('طلب 1 القطعة 3: 12222ms = طُلبت ولم تصل 11000ms + كتابة القرص 713ms + لم تُطلب الكتلة 509ms');
 });
 
+it('بصمة البناء أول التقرير: إصدار التطبيق وقناته وبناؤه والـcommit، وما بُني معه المحرك المحمَّل فعلًا', () => {
+  const text = diagnosticText({ app: { version: '0.4.91', channel: 'debug', build: 91, sourceSha: 'b54b5495aabbccdd' }, trace: [
+    { stage: 'engine-build', ms: 10, detail: { patched: 1, readHints: 1, stallCapMs: 1000, hedgeMs: 750, earlyReadMb: 32, reconnectS: 2, criticalPieces: 2 } },
+  ] });
+  expect(text).toContain('البناء: 0.4.91 · debug · 91 · b54b5495aabb');
+  expect(text).toContain('المحرك المحمَّل: رقع libtorrent نعم (سقف التعليق 1000ms، التحوّط 750ms) · تلميح القراءة نعم · قراءة مبكرة 32MB · إعادة اتصال 2 ث · قطع حرجة 2');
+  expect(diagnosticText({})).toContain('المحرك المحمَّل: غير معروف');
+});
+
 it('الشريط بثلاث طبقات: الجاهز على القرص تحت تخزين المشغّل، وسطر «جاهز على القرص» في الشبكة', () => {
   const { view } = fixture();
   view.update({ ready: true, paused: true, position: 60000, duration: 1440000, bufferedMs: 120000, diskMs: 780000, net: { openAt: 0, stages: { 'engine-start': 10 }, peers: 20, diskAheadMs: 720000 } });

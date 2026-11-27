@@ -87,8 +87,13 @@ export function diagnosticText(net = {}) {
   const fromTap = (k) => (st[k] != null ? s((tap ?? 0) + st[k]) : '—');
   const anchor = trace.find((e) => e.stage === 'source-selected');
   const mode = anchor?.mode === 'prewarmed' ? 'مُسخَّن (بدأ قبل الضغط)' : anchor ? 'بارد (بلا تسخين)' : 'غير معروف';
+  const app = net.app ?? {};
+  const build = trace.find((e) => e.stage === 'engine-build')?.detail;
   const lines = [
     'VANTARA ويندوز · تشخيص البدء',
+    // بصمة البناء: لا يُفترض أن آخر كود في الفرع هو المثبّت على الجهاز
+    `البناء: ${app.version ?? '—'} · ${app.channel ?? '—'} · ${app.build ?? '—'} · ${app.sourceSha ? app.sourceSha.slice(0, 12) : '—'}`,
+    build ? `المحرك المحمَّل: رقع libtorrent ${build.patched ? 'نعم' : 'لا'} (سقف التعليق ${build.stallCapMs}ms، التحوّط ${build.hedgeMs}ms) · تلميح القراءة ${build.readHints ? 'نعم' : 'لا'} · قراءة مبكرة ${build.earlyReadMb}MB · إعادة اتصال ${build.reconnectS} ث · قطع حرجة ${build.criticalPieces}` : 'المحرك المحمَّل: غير معروف (rqbit أو قبل التشغيل)',
     `البدء: ${mode}`,
     `من الضغط حتى بدء الخدمة: ${tap != null ? s(tap) : '—'}`,
     `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى جاهزية المشغّل (IPC): ${fromTap('player-ipc-ready')}`,

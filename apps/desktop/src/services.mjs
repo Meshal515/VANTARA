@@ -745,6 +745,12 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(!warm&&h.fallbackFrom){state.trace.record('engine-fallback');emit(state,{type:'playback/stage',stage:'engine-fallback',from:h.fallbackFrom,to:h.kind});}
     // المحرك الدائم كان جاهزًا (لا تشغيل عملية ولا تحميل DHT): يظهر في التشخيص «cache» لا «cold»
     state.trace.record('engine-ready',{mode:warm?'cache':'cold'});
+    // DeepTrace: ما بُني معه المحرك المحمَّل فعلًا (لا ما في المستودع)، مرة لكل محرك. rqbit بلا build: لا شيء
+    if(h.kind==='libtorrent'){
+      h.buildInfo??=localJSON(h.api,'/',{auth:h.auth,timeout:1500}).then(r=>r?.build??null,()=>null);
+      const b=await h.buildInfo;assertSession(state);
+      if(b)state.trace.record('engine-build',{patched:b.patched?1:0,readHints:b.read_hints?1:0,stallCapMs:b.stall_cap_ms,hedgeMs:b.hedge_ms,earlyReadMb:b.early_read_mb,reconnectS:b.reconnect_s,criticalPieces:b.critical_pieces});
+    }
     emit(state,{type:'playback/stage',stage:'engine-ready',engine:h.kind});
 
     emit(state,{type:'playback/stage',stage:'metadata'});
