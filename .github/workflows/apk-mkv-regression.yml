@@ -17,6 +17,7 @@ on:
         type: string
         default: 'patched'
       suite:
+        # android-emulator-runner ينفّذ كل سطر من script وحده: الاختيار بتعبير في سطر الأمر نفسه لا بكتلة if
         description: 'mkv (subtitled MKV reaches READY) | seek (P0: +10s/-10s/scrub from cold, warm and cached starts, TorrentSeekDeviceTest)'
         type: string
         default: 'mkv'
@@ -78,11 +79,7 @@ jobs:
             mkdir -p mkv-regression
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            if [ "${{ inputs.suite }}" = seek ]; then
-              adb shell am instrument -w -r -e seekRegression 1 -e class com.vantara.addons.torrent.TorrentSeekDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee mkv-regression/instrumentation.txt
-            else
-              adb shell am instrument -w -r -e mkvRegression 1 -e class com.vantara.addons.torrent.MkvSubtitleRegressionDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee mkv-regression/instrumentation.txt
-            fi
+            adb shell am instrument -w -r -e ${{ inputs.suite == 'seek' && 'seekRegression' || 'mkvRegression' }} 1 -e class com.vantara.addons.torrent.${{ inputs.suite == 'seek' && 'TorrentSeekDeviceTest' || 'MkvSubtitleRegressionDeviceTest' }} com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee mkv-regression/instrumentation.txt
             for f in $(adb shell run-as com.vantara.app.debug ls files/addon-proof | tr -d '\r'); do adb exec-out run-as com.vantara.app.debug cat "files/addon-proof/$f" > "mkv-regression/$f"; done
             adb logcat -d -s System.out | grep -E "READS|SEEK" || true
             ls -la mkv-regression
