@@ -268,6 +268,8 @@ dependencies {
     implementation "com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597"
 
     testImplementation "junit:junit:$junitVersion"
+    // org.json الحقيقي لاختبارات JVM (نسخة أندرويد في الاختبار بدائل فارغة): LatestRulesTest
+    testImplementation "org.json:json:20240303"
     testImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
     // شهادات TLS محلية لاختبار شبكة يحجبها فلتر SNI (CensoredNetworkTest)
     testImplementation "com.squareup.okhttp3:okhttp-tls:$okhttpVersion"

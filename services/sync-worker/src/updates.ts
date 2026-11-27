@@ -16,6 +16,8 @@ import type { D1Database } from './types.ts';
 import { decodeEntities, normalizeTitle } from '../../../apps/web/lib/catalog.js';
 import { adultSource, adultTitle } from '../../../apps/web/lib/adult-filter.js';
 import { ARABIC, tierFromId } from '../../../apps/web/lib/source-policy.js';
+import { decide as sharedDecide, eventId, isAbove as sharedIsAbove } from '../../../apps/web/lib/update-decision.js';
+export { eventId };
 
 /**
  * سياسة المصادر في «آخر التحديثات» (قرار المالك، 22 نوفمبر): المانجا يبنيها المصدر العربي الآمن وحده. الخادم لا
@@ -52,13 +54,6 @@ const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body)
 const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-/** هوية الحدث: العمل + الوحدة. 12.50 و12.5 نفس الفصل. */
-export function eventId(work: string, kind: Kind, season: number | null, number: number | null): string {
-  const n = number == null ? '' : String(Math.round(number * 1000) / 1000);
-  if (kind === 'chapter') return `${work}|c:${n}`;
-  if (kind === 'movie') return `${work}|movie`;
-  return season == null ? `${work}|e:${n}` : `${work}|s${season}e:${n}`;
-}
 
 interface Unit {
   season: number | null;
@@ -84,8 +79,6 @@ interface Mark {
 }
 
 /** حدث جديد على خط أساس قديم: وقت نشر حديث موثوق لأول مشاهدة. */
-/** أكبر قفزة تُقبل فوق خط الأساس؛ ما بعدها ترقيم مصدر خاطئ لا فصول جديدة. */
-const JUMP = { chapter: 30, episode: 12 } as const;
 /** أكبر دفعة بلا تواريخ تُعدّ إصدارًا حقيقيًا؛ ما فوقها لحاق مصدر أكمل. */
 const BURST = 3;
 /** شهادة قائمة Latest تُقبل لنافذة قريبة فقط: «تحدّث منذ أمس» لا يُكتب «الآن». */
@@ -95,7 +88,7 @@ const reliable = (p: unknown, now: number) => {
   const n = num(p);
   return n != null && n >= EARLIEST_PUBLICATION && n <= now ? n : null;
 };
-const isAbove = (u: Mark, m: Mark) => (u.season ?? 0) > (m.season ?? 0) || ((u.season ?? 0) === (m.season ?? 0) && u.number > m.number);
+const isAbove = (u: Mark, m: Mark): boolean => sharedIsAbove(u, m);
 
 /** يتحقق من تقرير مجسّ (عمل + ما يراه من وحداته) ويعيده بشكله المعتمد، أو null. */
 export function parseReport(raw: unknown, now: number): Report | null {
@@ -170,39 +163,9 @@ function sourceMergeSql(existing: string, incoming: string): string {
   ))`;
 }
 
-/**
- * Every dated unit is history, including delayed catch-up below the watermark.
- * Undated first sightings stay a baseline; small later advances may use firstSeenAt.
- * The UI accepts live insertions only with a trustworthy, genuinely recent publishedAt.
- * An undated movie visit never manufactures a release event.
- */
-export function decide(report: Report, mark: Mark | null, _now: number): { fresh: Unit[]; mark: Mark | null } {
-  if (report.kind === 'movie') return { fresh: report.units.filter((u) => u.publishedAt != null).slice(0, 1), mark: mark ?? { season: null, number: 0 } };
-  const sorted = [...report.units].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || a.number - b.number);
-  const top = sorted[sorted.length - 1]!;
-  const limit = JUMP[report.kind];
-  if (!mark) {
-    // UP1: خط الأساس الأول بفحص القفزة أيضًا. رقم شاذ كبير (قراءة خاطئة، RD7) كان يصير الخط من أول مشاهدة، فيرفض isAbove
-    // كل الفصول الحقيقية بعده ويختفي العمل من «آخر التحديثات». الخط = أعلى رقم في الموسم الأعلى يتصل بما تحته (فجوته عن
-    // الفصل الذي قبله ضمن حد القفزة)، والشاذ فوقه لا يصير خطًا ولا حدثًا. وحدة واحدة بلا ما يقارن بها تُقبل كما هي.
-    const season = sorted.filter((u) => (u.season ?? 0) === (top.season ?? 0));
-    let base = season[season.length - 1]!;
-    for (let i = season.length - 1; i > 0; i--) {
-      if (season[i]!.number - season[i - 1]!.number <= limit) { base = season[i]!; break; }
-      base = season[i - 1]!;
-    }
-    const outlier = (u: Unit) => (u.season ?? 0) === (base.season ?? 0) && u.number > base.number;
-    return { fresh: sorted.filter((u) => u.publishedAt != null && !outlier(u)), mark: { season: base.season, number: base.number } };
-  }
-  const above = sorted.filter((u) => {
-    if (!isAbove(u, mark)) return false;
-    // موسم جديد يبدأ من أوله؛ وفي نفس الموسم قفزة معقولة فقط
-    if ((u.season ?? 0) > (mark.season ?? 0)) return (u.season ?? 0) === (mark.season ?? 0) + 1 && u.number <= limit;
-    return u.number - mark.number <= limit;
-  });
-  const fresh = [...sorted.filter((u) => u.publishedAt != null), ...above.filter((u) => u.publishedAt == null)];
-  const last = above[above.length - 1];
-  return { fresh, mark: last ? { season: last.season, number: last.number } : mark };
+/** القرار المشترك (apps/web/lib/update-decision.js): نفس العقل للخادم وللنظام المحلي. */
+export function decide(report: Report, mark: Mark | null, now: number): { fresh: Unit[]; mark: Mark | null } {
+  return sharedDecide(report, mark, now) as { fresh: Unit[]; mark: Mark | null };
 }
 
 /** وحدة جديدة فعلًا (لا خط أساس ولا مصدر إضافي لحدث قديم): ما يستحق إشعار من العمل في مفضلته. */
