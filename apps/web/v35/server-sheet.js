@@ -470,13 +470,19 @@ export function createServerSheet(body, o) {
 
   // Debug actions live below source content; header geometry belongs to navigation/friends.
   const diagnostics = el('div', 'ss-diagnostics');
+  // مسجّل القفزات (يظهر مع التشخيص فقط): سطر يُنسخ، يُملأ أدناه
+  const jumpLine = el('button', 'ss-jumps');
+  jumpLine.type = 'button';
+  jumpLine.hidden = true;
   const paintDiagnostics = () => {
+    const shown = o.jumpProbe ?? diagnosticsUi.visible();
     diagnostics.replaceChildren();
-    diagnostics.hidden = !diagnosticsUi.visible();
-    if (diagnosticsUi.visible()) {
+    diagnostics.hidden = !shown;
+    if (shown) {
       const action = o.diagnosticAction?.();
       if (action) diagnostics.append(action);
-      else diagnostics.hidden = true;
+      diagnostics.append(jumpLine);
+      diagnostics.hidden = !action && jumpLine.hidden;
     }
   };
   scroll.append(diagnostics);
@@ -794,9 +800,11 @@ export function createServerSheet(body, o) {
     const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
     // CLAUDE.md: الإضاءة بإشارة المحرك أن بيانات أول إطار على القرص (ready)، لا بمؤقت ولا بالمشاركين ولا بالبيانات
     const warm = Boolean(d.torrent && measured[r.id]?.ready === true);
+    // يسخن الآن: في المحرك (له حقائق) ولم تصل إشارة الجاهزية بعد. البنفسجي له وحده (المالك، 27 نوفمبر)
+    const warming = Boolean(d.torrent && measured[r.id] && !warm);
     // الصف لا يُعاد بناؤه إن لم يتغير ما يُرسم منه (كان كل update يعيد DOM كل صف، ومنها مئات المطوية في «نسخ إضافية»:
     // خُمس كلفة التحديث). البصمة: وصف السيرفر (مفتاح view نفسه) وحالته وما يغيّر سطره وطرفه. اللمس يُربط دائمًا بالحالة الحالية
-    const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}|${warm}`;
+    const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}|${warm}|${warming}`;
     b.onclick = () => {
       if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
       return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
@@ -805,7 +813,7 @@ export function createServerSheet(body, o) {
     b.dataset.sig = sig;
     const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
     const open = b.classList.contains('ss-row--open');
-    b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}${warm ? ' ss-row--warm' : ''}`;
+    b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}${warm ? ' ss-row--warm' : ''}${warming ? ' ss-row--warming' : ''}`;
     b.disabled = pending && !isTryable(r);
     const qb = b.querySelector('.ss-q');
     // جودة غير معروفة (HLS متكيّف أو مصدر لم يعلنها) لا تُكتب «HD»: هذا ادعاء لم يتحقق، والوصف المقروء «تلقائي»
@@ -815,7 +823,7 @@ export function createServerSheet(body, o) {
     const wasWarm = b.dataset.warm === '1';
     b.dataset.warm = warm ? '1' : '';
     qb.lastElementChild.textContent = '';
-    qb.lastElementChild.innerHTML = warm ? BOLT : glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
+    qb.lastElementChild.innerHTML = warm || warming ? BOLT : glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
     qb.lastElementChild.setAttribute('aria-hidden', 'true');
     // البرق يدخل بحركة GSAP مرة حين يسخن الصف (motion.js: لا حركة مع تقليل الحركة)
     if (warm && !wasWarm) boltIn(qb.lastElementChild);
@@ -1082,8 +1090,69 @@ export function createServerSheet(body, o) {
     const hidden = new Set(groups.flatMap((g) => g.members.filter((m) => m !== g.best)));
     return routes.filter((r) => !hidden.has(r));
   };
+  // ── مسجّل القفزات (التشخيص ظاهر فقط؛ لا كلفة بدونه) ──
+  // المالك (27 نوفمبر): «يوم انزل تطلعني لفوق» على الجهاز، ولا تتكرر في Playwright بلمس حقيقي ووكيل WebView وحقائق كل ثانية.
+  // يُسجَّل كل تحرك لما على الشاشة بلا إصبع: بعد تحديث (صف ظاهر تغيّر موضعه، وأي قسم تغيّر ارتفاعه) أو في التمرير (نزل موضعه
+  // والإصبع يسحب للأسفل أو انزلاقه). السطر في أسفل الورقة يُنسخ كما هو للمحادثة
+  const jumps = [];
+  let fingerY = null, fingerDir = '', fingerAt = 0, lastY = 0;
+  const probing = () => o.jumpProbe ?? diagnosticsUi.visible();
+  const nameOf = (n) => n.querySelector?.('summary, .ss-group-title, h3')?.textContent?.trim().slice(0, 32) || String(n.className || n.tagName).split(' ')[0];
+  // كل الصفوف الظاهرة بمواضعها: بعد التحديث يُقارن أول صف بقي منها (الصف الأول قد يكون هو ما أُزيل)
+  const visibleRows = () => {
+    const view = scroll.getBoundingClientRect?.();
+    if (!view) return [];
+    return [...scroll.querySelectorAll('.ss-row')].map((b) => [b, b.getBoundingClientRect()])
+      .filter(([, r]) => r.height && r.bottom > view.top && r.top < view.bottom)
+      .map(([b, r]) => ({ b, top: r.top - view.top, key: (b.title || b.getAttribute('aria-label') || '').slice(0, 60) }));
+  };
+  const noteJump = (j) => {
+    jumps.push({ ...j, at: Math.round(globalThis.performance?.now?.() ?? Date.now()) });
+    if (jumps.length > 12) jumps.shift();
+    const lastJ = jumps.at(-1);
+    jumpLine.hidden = false;
+    jumpLine.textContent = `قفزات الورقة: ${jumps.length} · آخرها ${lastJ.dy}px (${lastJ.kind === 'update' ? 'بعد تحديث' : 'في التمرير'}) · اضغط للنسخ`;
+    paintDiagnostics();
+  };
+  jumpLine.onclick = (e) => {
+    e.stopPropagation();
+    const text = 'قفزات ورقة السيرفرات (VANTARA)\n' + jumps.map((j) => JSON.stringify(j)).join('\n');
+    globalThis.navigator?.clipboard?.writeText?.(text).then(() => { jumpLine.textContent = 'نُسخت القفزات'; }, () => {});
+  };
+  listen(scroll, 'touchstart', (e) => { fingerY = e?.touches?.[0]?.clientY ?? null; }, { passive: true });
+  listen(scroll, 'touchmove', (e) => {
+    const y = e?.touches?.[0]?.clientY;
+    if (y == null) return;
+    // الإصبع يصعد = المحتوى ينزل (تمرير للأسفل)
+    if (fingerY != null && Math.abs(y - fingerY) > 1) { fingerDir = y < fingerY ? 'down' : 'up'; fingerAt = Date.now(); }
+    fingerY = y;
+  }, { passive: true });
+  listen(scroll, 'scroll', () => {
+    const y = scroll.scrollTop || 0;
+    if (probing() && y < lastY - 24 && fingerDir === 'down' && Date.now() - fingerAt < 1200) {
+      noteJump({ kind: 'scroll', dy: Math.round(y - lastY), scrollTop: [Math.round(lastY), Math.round(y)], max: Math.round((scroll.scrollHeight || 0) - (scroll.clientHeight || 0)), handed });
+    }
+    lastY = y;
+  }, { passive: true });
+
   function update(model) {
     if (destroyed) return;
+    if (!probing()) return render(model);
+    const seen = visibleRows();
+    const heights = new Map([...list.children].map((n) => [n, n.offsetHeight]));
+    const y0 = scroll.scrollTop || 0, max0 = (scroll.scrollHeight || 0) - (scroll.clientHeight || 0);
+    render(model);
+    const a = seen.find((x) => x.b.isConnected);
+    if (!a) return;
+    const view = scroll.getBoundingClientRect();
+    const dy = Math.round(a.b.getBoundingClientRect().top - view.top - a.top);
+    if (Math.abs(dy) < 8) return;
+    const nodes = [...new Set([...heights.keys(), ...list.children])];
+    const changed = nodes.map((n) => [nameOf(n), heights.get(n) ?? 0, n.isConnected ? n.offsetHeight : 0]).filter(([, x, z]) => x !== z);
+    noteJump({ kind: 'update', dy, row: a.key, gone: seen.indexOf(a), scrollTop: [Math.round(y0), Math.round(scroll.scrollTop || 0)], max: [Math.round(max0), Math.round((scroll.scrollHeight || 0) - (scroll.clientHeight || 0))], changed, routes: model.routes?.length ?? 0 });
+  }
+
+  function render(model) {
     last = model;
     measured = model.facts ?? {};
     const routes = oneTorrent(model.routes ?? []);

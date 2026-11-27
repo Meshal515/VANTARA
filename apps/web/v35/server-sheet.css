@@ -34,6 +34,10 @@
 }
 
 .v35 .an-pick {
+  /* قوة السرب (الزارعون): ألوان حالات الثيم نفسها */
+  --ss-seed-strong: var(--success);
+  --ss-seed-fair: var(--warning);
+  --ss-seed-weak: var(--danger);
   --ss-y: 0px;
   --ss-p: 0;
   --ss-bar: 0;
@@ -684,13 +688,16 @@
   font-variant-numeric: tabular-nums;
   text-align: end;
 }
-/* الزارعون: أيقونة أشخاص والرقم بلون الثيم (المالك، 27 نوفمبر؛ لا أعمدة تُقرأ إشارة شبكة أو Ping)، والميت وحده خافت */
+/* الزارعون: أيقونة أشخاص والرقم بلون قوة السرب (المالك، 27 نوفمبر): قوي أخضر، قليل برتقالي، قليل جدًا أحمر، والميت خافت.
+   البنفسجي (لون القسم) للتسخين وحده، فلا يُستعمل هنا. الحدود من swarmTier: قوي ≥20، متوسط 5–19، ضعيف 1–4 */
 .v35 .ss-seeds {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--accent-text);
+  color: var(--ss-seed-strong);
 }
+.v35 .ss-seeds--fair { color: var(--ss-seed-fair); }
+.v35 .ss-seeds--weak { color: var(--ss-seed-weak); }
 .v35 .ss-seeds .icon {
   flex: none;
 }
@@ -746,9 +753,21 @@
   background: var(--surface-1) center / cover no-repeat;
 }
 .v35 .ss-group-ico[hidden] { display: none; }
-/* التسخين: برق بلون الثيم تحت الجودة حين يقول المحرك إن أول إطار على القرص؛ الخانة محجوزة المقاس فلا يتحرك الصف */
-.v35 .ss-row--warm .ss-q small {
+/* التسخين بلون القسم وحده (المالك، 27 نوفمبر). يسخن: برق ينبض (الخانة محجوزة المقاس فلا يتحرك الصف)؛ جاهز (المحرك يقول إن
+   بيانات أول إطار على القرص): برق ثابت يدخل بحركة GSAP مرة (boltIn في motion.js) */
+.v35 .ss-row--warm .ss-q small,
+.v35 .ss-row--warming .ss-q small {
   color: var(--accent);
+}
+.v35 .ss-row--warming .ss-bolt {
+  animation: ss-warming 1.1s ease-in-out infinite;
+}
+@keyframes ss-warming {
+  0%, 100% { opacity: 0.3; transform: scale(0.86); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v35 .ss-row--warming .ss-bolt { animation: none; opacity: 0.7; }
 }
 .v35 .ss-bolt {
   width: 15px;
@@ -1578,3 +1597,19 @@ html.room-servers .v35 .ss-info { display: none; }
   font-size: 12.5px;
   letter-spacing: 0;
 }
+
+/* مسجّل القفزات (يظهر مع التشخيص فقط): سطر صغير يُنسخ للمحادثة */
+.v35 .ss-jumps {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-caption);
+  text-align: start;
+}
+.v35 .ss-jumps[hidden] { display: none; }

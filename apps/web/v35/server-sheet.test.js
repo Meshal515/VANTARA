@@ -592,6 +592,35 @@ it('حقائق المحرك (حجم القطعة والسرب المقاس) تن
   expect(topName()).toContain('BBB');
 });
 
+it('التسخين (المالك، 27 نوفمبر): يسخن = برق ينبض بلون القسم، جاهز بإشارة المحرك = برق ثابت، والزارعون بلون قوة السرب', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const t = (id, seeds) => tor(`Show.S01E01.1080p.WEB.x264-${id}\n👤 ${seeds} 💾 1.4 GB ⚙️ Nyaa`, { id, quality: 1080, infoHash: id.padEnd(40, '0') });
+  const routes = [t('aaa', 900), t('bbb', 12), t('ccc', 3)];
+  const row = (id) => [...body.querySelectorAll('.ss-group--torrent .ss-row')].find((b) => b.textContent.toLowerCase().includes(id));
+  ui.update({ routes, settled: true, status: { text: '' } });
+  // لا شيء في المحرك: مغناطيس، ولا بنفسجي
+  for (const id of ['aaa', 'bbb', 'ccc']) {
+    expect(row(id).classList.contains('ss-row--warming')).toBe(false);
+    expect(row(id).querySelector('.ss-bolt')).toBeNull();
+  }
+  // الزارعون: قوي ≥20 أخضر، 5–19 برتقالي، 1–4 أحمر (صنف الطبقة؛ اللون في CSS)
+  expect(row('aaa').querySelector('.ss-seeds--strong')).not.toBeNull();
+  expect(row('bbb').querySelector('.ss-seeds--fair')).not.toBeNull();
+  expect(row('ccc').querySelector('.ss-seeds--weak')).not.toBeNull();
+  // aaa في المحرك ولم يجهز: يسخن
+  ui.update({ routes, facts: { aaa: { pieceLength: 2 << 20, seeds: 800, peers: 9, ready: false } }, settled: true, status: { text: '' } });
+  expect(row('aaa').classList.contains('ss-row--warming')).toBe(true);
+  expect(row('aaa').classList.contains('ss-row--warm')).toBe(false);
+  expect(row('aaa').querySelector('.ss-bolt')).not.toBeNull();
+  expect(row('bbb').classList.contains('ss-row--warming')).toBe(false);
+  // إشارة المحرك: جاهز
+  ui.update({ routes, facts: { aaa: { pieceLength: 2 << 20, seeds: 800, peers: 9, ready: true } }, settled: true, status: { text: '' } });
+  expect(row('aaa').classList.contains('ss-row--warm')).toBe(true);
+  expect(row('aaa').classList.contains('ss-row--warming')).toBe(false);
+  expect(row('aaa').querySelector('.ss-bolt')).not.toBeNull();
+});
+
 it('ترتيب التسخين الخلفي: السرب 16 ثم حجم القطعة 12 ثم العربي 2، وما سربه 20 فأقل يُترك إن وُجد أقوى', () => {
   const row = (id, seeders, { arabic = false, piece } = {}) => ({ r: { id }, d: { torrent: true, info: { seeders, arabic }, langs: [] }, m: piece ? { pieceLength: piece, seeds: seeders, peers: 3 } : undefined });
   // السرب الأقوى وزنًا: 900 بقطعة 2MB فوق 40 بقطعة 512KB
