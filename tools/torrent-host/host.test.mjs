@@ -168,16 +168,19 @@ test('libtorrent host: /diag reports engine rate, peers and the piece the reader
  * يتصادم قارئان ولا يُختبر شيء. دلو رموز بدقة 10ms لكل اتجاه، وتأخير [delayMs] في اتجاه واحد.
  */
 function throttleProxy(target, bps, delayMs) {
+  // عدّادات للتشخيص: كم اتصالًا وصل، وكم بايتًا عبر في كل اتجاه (يميّز عطل الوسيط من عطل المحرك)
+  const stats = { connections: 0, upstreamErrors: 0, toSeeder: 0, toEngine: 0 };
   const server = net.createServer(client => {
+    stats.connections++;
     const upstream = net.connect(target, '127.0.0.1');
-    const pipe = (from, to) => {
+    const pipe = (from, to, key) => {
       const queue = []; let budget = 0, ended = false;
       const timer = setInterval(() => {
         budget = Math.min(budget + bps / 100, bps / 10);
         const now = Date.now();
         while (queue.length && queue[0].at <= now && budget >= 1) {
           const n = Math.min(queue[0].buf.length, Math.floor(budget));
-          to.write(queue[0].buf.subarray(0, n)); budget -= n;
+          to.write(queue[0].buf.subarray(0, n)); budget -= n; stats[key] += n;
           if (n === queue[0].buf.length) queue.shift(); else queue[0].buf = queue[0].buf.subarray(n);
         }
         if (ended && !queue.length) { clearInterval(timer); to.end(); }
@@ -187,18 +190,15 @@ function throttleProxy(target, bps, delayMs) {
       from.on('close', () => { ended = true; });
       from.on('error', () => { clearInterval(timer); to.destroy(); });
     };
-    upstream.on('connect', () => { pipe(client, upstream); pipe(upstream, client); });
-    upstream.on('error', () => client.destroy());
+    upstream.on('connect', () => { pipe(client, upstream, 'toSeeder'); pipe(upstream, client, 'toEngine'); });
+    upstream.on('error', () => { stats.upstreamErrors++; client.destroy(); });
     client.on('error', () => upstream.destroy());
   });
+  server.stats = stats;
   return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
-// لينكس فقط: وسيط حد السرعة (throttleProxy، Node) علّق على مشغّل ويندوز في البناءين 82 و83 (لا طلب اكتمل في 120 ث)، والاختبارات
-// الأربعة الأخرى نجحت هناك. كود المحرك نفسه مختبر هنا على لينكس (أحمر قبل #398 وأخضر بعده)، وCI ويندوز يشغّله في «Tests for
-// what changed (Linux)». سبب تعليق الوسيط على ويندوز لم يُعرف.
-const linuxOnly = skip || (process.platform === 'win32' ? 'وسيط حد السرعة لم يعمل على مشغّل ويندوز (البناءان 82 و83)' : false);
-test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges) both finish without starving each other', { skip: linuxOnly, timeout: 180000 }, async t => {
+test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges) both finish without starving each other', { skip, timeout: 180000 }, async t => {
   // التسخين في ويندوز يقرأ أول الملف وآخره معًا. كان كل قارئ يضع النافذة على موضعه وحده: قطعة الآخر تصير «لا تُنزَّل»
   // (وضع التركيز) أو أدنى أولوية بلا موعد، وwaitPiece لا يعيد الأولويات، فيعلق.
   // الحكم ببصمة التجويع لا بالزمن: قطعة ينتظرها قارئ ولم تُطلب من الشبكة أصلًا (blocks = -1) أكثر من 4 ث. الزمن الكلي
@@ -216,24 +216,77 @@ test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges)
   const started = performance.now();
   const starved = [];
   let reading = true, maxRead = 0;
+  const snapshots = [];
   const sampler = (async () => {
     while (reading) {
       await sleep(250);
       const d = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
       if (!d?.waiting) continue;
       maxRead = Math.max(maxRead, d.reads?.max_ms ?? 0);
+      snapshots.push(`${Math.round(performance.now() - started)}ms rate=${d.rate_bps} peers=${d.peers} pieces=${d.pieces} state=${d.state} paused=${d.paused} finished=${d.finished} peer_states=${JSON.stringify(d.peer_states)} waiting=${JSON.stringify(d.waiting)} readers=${JSON.stringify(d.readers)}`);
       if (d.waiting.piece >= 0 && d.waiting.ms > 4000 && d.waiting.blocks === -1) starved.push(`piece ${d.waiting.piece} waited ${d.waiting.ms}ms unrequested`);
     }
   })();
   const timed = range => request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: range }, raw: true, timeout: 120000 })
-    .then(r => ({ r, ms: Math.round(performance.now() - started) }));
+    .then(r => ({ r, ms: Math.round(performance.now() - started) }), error => ({ error: error.message, ms: Math.round(performance.now() - started) }));
   const [first, last] = await Promise.all([timed(`bytes=0-${head - 1}`), timed(`bytes=${data.length - tail}-${data.length - 1}`)])
     .finally(() => { reading = false; });
   await sampler;
-  t.diagnostic(`head ${first.ms}ms, tail ${last.ms}ms (network ideal ≈ ${Math.round((head + tail) / (2 * 1024 * 1024) * 1000)}ms), slowest piece read from disk ${maxRead}ms`);
+  // الدليل قبل الحكم: حالة الطلبين، والوسيط، وآخر لقطات المحرك (كل قارئ: قطعته، نُزّلت؟، قراءتها جارية؟، أولويتها)
+  t.diagnostic(`head ${first.error ?? 'ok'} ${first.ms}ms (${first.r?.body.length ?? 0}B), tail ${last.error ?? 'ok'} ${last.ms}ms (${last.r?.body.length ?? 0}B), network ideal ≈ ${Math.round((head + tail) / (2 * 1024 * 1024) * 1000)}ms, slowest piece read from disk ${maxRead}ms`);
+  t.diagnostic(`proxy ${JSON.stringify(proxy.stats)}`);
+  for (const line of snapshots.slice(-6)) t.diagnostic(line);
+  assert.equal(first.error, undefined, 'head read finished');
+  assert.equal(last.error, undefined, 'tail read finished');
   assert.ok(first.r.body.equals(data.subarray(0, head)), 'head bytes exact');
   assert.ok(last.r.body.equals(data.subarray(data.length - tail)), 'tail bytes exact');
   assert.deepEqual(starved, [], 'a reader waited on a piece nobody requested');
+});
+
+test('libtorrent host: a reader paused between pieces keeps its next piece wanted while another reader finishes (no false «finished»)', { skip, timeout: 150000 }, async t => {
+  // جذر البناءين 85 و86: قارئ الرأس كان يرسل قطعة نزّلها (send يحجبه المستقبِل)، وموضعه المسجّل هو تلك القطعة المنزّلة،
+  // فقارئ الذيل في وضع التركيز يجعل قطعته التالية «لا تُنزَّل». اكتمل الذيل فصار كل المطلوب منزّلًا: libtorrent أعلن
+  // الانتهاء (state=4) وقطع الباذر (كلاهما يرفع فقط)، ثم انتظر الرأس القطعة 4 بلا مشارك 120 ث. هنا المستقبِل يتوقف عمدًا
+  // عن القراءة حتى يكتمل الذيل (ويندوز يتأخر في send فتتسع هذه الفجوة؛ لينكس يضيّقها فينجح الاختبار الأول مصادفة).
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 2 * 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  // الرأس حتى بداية الذيل: بقية مداه لم تُنزَّل حين يُحجب (كالقطعة 4 في ويندوز)، فإعلان الانتهاء خطأ لا اكتمال
+  const id = added.body.id, tail = 2 * 1024 * 1024, head = data.length - tail;
+  let resume;
+  const released = new Promise(r => { resume = r; });
+  const headDone = new Promise((resolve, reject) => {
+    const req = http.request(new URL(`/torrents/${id}/stream/0`, base), { headers: { Authorization: `Basic ${Buffer.from(auth).toString('base64')}`, Range: `bytes=0-${head - 1}`, 'x-req-timeout-ms': '120000' } }, res => {
+      const chunks = [];
+      res.once('data', c => { chunks.push(c); res.pause(); released.then(() => res.resume()); res.on('data', d => chunks.push(d)); });
+      res.on('end', () => resolve(Buffer.concat(chunks))); res.on('error', reject);
+    });
+    req.setTimeout(120000, () => req.destroy(new Error('timeout')));
+    req.on('error', reject); req.end();
+  });
+  // الرأس محجوب في send: موضعه المسجّل قطعة منزّلة ولم يمر عليه شيء ثانية (ذاكرة المقبس امتلأت)، كما في ويندوز
+  let blocked = null;
+  for (const until = Date.now() + 30000; Date.now() < until && !blocked; await sleep(200)) {
+    const r = (await request(base, `/torrents/${id}/diag`, { timeout: 5000 }).catch(() => null))?.body?.readers?.[0];
+    if (r?.have === 1 && r.reading === 0 && r.ms > 1000) blocked = r;
+  }
+  assert.ok(blocked, 'the head reader blocks in send on a downloaded piece');
+  t.diagnostic(`head reader blocked on piece ${blocked.piece}`);
+  const last = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=${data.length - tail}-${data.length - 1}` }, raw: true, timeout: 60000 });
+  assert.ok(last.body.equals(data.subarray(data.length - tail)), 'tail bytes exact');
+  await sleep(2000); // تُغلق قراءة الذيل ويستقر المحرك والرأس ما زال متوقفًا
+  const during = (await request(base, `/torrents/${id}/diag`, { timeout: 5000 })).body;
+  t.diagnostic(`while the head reader is paused: state=${during.state} finished=${during.finished} peers=${during.peers} pieces=${during.pieces} readers=${JSON.stringify(during.readers)} proxy=${JSON.stringify(proxy.stats)}`);
+  resume();
+  const started = performance.now();
+  const body = await Promise.race([headDone, sleep(45000).then(() => null)]);
+  t.diagnostic(`head after release: ${body ? `${Math.round(performance.now() - started)}ms` : 'stuck 45s'}`);
+  assert.equal(during.finished, 0, 'the torrent is not «finished» while an open reader still needs pieces');
+  assert.ok(body && body.equals(data.subarray(0, head)), 'head read finishes with exact bytes after the pause');
 });
 
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {

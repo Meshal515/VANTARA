@@ -475,6 +475,8 @@ for (const path of ["android/app/src/main/kotlin/com/vantara/addons/torrent/Torr
 for (const path of ["android/app/src/main/kotlin/com/vantara/anime/player/SeekGuardPlayer.kt"]) seams.add(path);
 // الخيار B (قرار المالك 26 نوفمبر): أداة إثبات أن كتلة block_finished_alert مقروءة من القرص ومطابقة لحظة إعلانها
 seams.add("tools/libtorrent-patches/block-probe.cpp");
+// جدولة الكتل بموضع القارئ (0004، بإذن المالك 27 نوفمبر): التعديل، ودالتا JNI داخل libjlibtorrent، وأداة القياس، والربط في أندرويد
+for (const path of ["tools/libtorrent-patches/0004-vantara-read-hints.patch", "tools/libtorrent-patches/vantara-jni.cpp", "tools/libtorrent-patches/hint-bench.cpp", "tools/libtorrent-patches/hint-bench.mjs", "android/app/src/main/kotlin/com/vantara/addons/torrent/NativeReadHint.kt"]) seams.add(path);
 // موضع بدء التورنت تحت 5 ث بدءٌ من الأول (تشخيص المالك على Debug 3410، 27 نوفمبر)
 seams.add("android/app/src/test/java/com/vantara/anime/player/PlaybackSeekBudgetTest.kt");
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];

@@ -9,6 +9,8 @@ on:
     paths:
       - 'tools/libtorrent-patches/0001-vantara-stall-cap.patch'
       - 'tools/libtorrent-patches/0002-vantara-urgent-hedge.patch'
+      - 'tools/libtorrent-patches/0004-vantara-read-hints.patch'
+      - 'tools/libtorrent-patches/vantara-jni.cpp'
       - '.github/workflows/android-libtorrent.yml'
   workflow_dispatch:
 permissions:
@@ -32,11 +34,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # opt=off: أعلام jlibtorrent 2.0.12.9 حرفيًا (Jamfile: <optimization>off، أي libtorrent بلا تحسين مترجم).
-        # opt=speed: الشيء نفسه بتحسين المترجم، لقياس أثره منفصلًا (متغير واحد).
+        # opt=speed وحده: النسخة التي تُنشر (opt=off كان لقياس أثر التحسين في p1 وانتهى)
         include:
-          - { abi: arm64, jni: arm64-v8a, openssl: android-arm64, clang: aarch64-linux-android, opt: 'off' }
-          - { abi: x86_64, jni: x86_64, openssl: android-x86_64, clang: x86_64-linux-android, opt: 'off' }
           - { abi: arm64, jni: arm64-v8a, openssl: android-arm64, clang: aarch64-linux-android, opt: speed }
           - { abi: x86_64, jni: x86_64, openssl: android-x86_64, clang: x86_64-linux-android, opt: speed }
     steps:
@@ -59,14 +58,18 @@ jobs:
           git fetch -q origin RC_2_0
           git reset -q --hard "$LIBTORRENT_REVISION"
           git submodule update --init -q
-          for p in 0001-vantara-stall-cap 0002-vantara-urgent-hedge; do
+          for p in 0001-vantara-stall-cap 0002-vantara-urgent-hedge 0004-vantara-read-hints; do
             patch -p1 --no-backup-if-mismatch < "$GITHUB_WORKSPACE/tools/libtorrent-patches/$p.patch"
           done
           # التعديلان وصلا فعلًا (لا بناء صامت للنسخة الأصلية)
           test "$(grep -c 'VANTARA_LT_STALL_CAP_MS\|VANTARA_LT_HEDGE_MS' src/torrent.cpp)" -ge 2
+          grep -q 'vantara_set_read_hint' src/torrent.cpp
+          grep -q 'define VANTARA_LT_READ_HINTS' include/libtorrent/torrent_handle.hpp
           cd /src
           git clone -q --depth 1 --branch "$JLIBTORRENT_REF" https://github.com/frostwire/frostwire-jlibtorrent
           test -s frostwire-jlibtorrent/swig/libtorrent_jni.cpp
+          # دالتا JNI لتلميح القراءة (NativeReadHint في التطبيق) تُترجمان داخل المكتبة نفسها مع رؤوس libtorrent نفسها
+          cat "$GITHUB_WORKSPACE/tools/libtorrent-patches/vantara-jni.cpp" >> frostwire-jlibtorrent/swig/libtorrent_jni.cpp
       - name: OpenSSL (${{ matrix.openssl }})
         run: |
           set -euo pipefail
@@ -100,6 +103,10 @@ jobs:
           # التعديلات داخل المكتبة المبنية فعلًا
           strings "$lib" | grep -q VANTARA_LT_STALL_CAP_MS
           strings "$lib" | grep -q VANTARA_LT_HEDGE_MS
+          # المخرجات كاملة أولًا: grep -q يغلق الأنبوب عند أول تطابق فيخرج llvm-nm بـ74 (EX_IOERR) ويُفشل pipefail الخطوة
+          symbols="$(/src/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm -D "$lib")"
+          grep -q Java_com_vantara_addons_torrent_NativeReadHint_set0 <<<"$symbols"
+          grep -q Java_com_vantara_addons_torrent_NativeReadHint_clear0 <<<"$symbols"
           (cd "$GITHUB_WORKSPACE/out" && sha256sum "${{ matrix.jni }}/libjlibtorrent.so" | tee "${{ matrix.jni }}.sha256")
       - uses: actions/upload-artifact@v4
         with:
@@ -111,12 +118,12 @@ jobs:
     # التعديلات يعني رفع رقم p في الوسم. Debug يثبّت البصمات في android/app/libtorrent-natives.lock.
     name: Publish natives (prerelease, immutable)
     needs: native
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
-      TAG: libtorrent-vantara-2.0.12-p1
+      TAG: libtorrent-vantara-2.0.12-p2
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v4
@@ -130,6 +137,6 @@ jobs:
           cp dl/libjlibtorrent-vantara-x86_64-opt-speed/x86_64/libjlibtorrent.so assets/x86_64-libjlibtorrent.so
           (cd assets && sha256sum *.so | tee SHA256SUMS)
           gh release create "$TAG" -R "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
-            --title "libtorrent 2.0.12 لـVANTARA (أندرويد) p1" \
-            --notes "مكتبة libjlibtorrent.so مبنية من وصفة jlibtorrent 2.0.12.9 مع تعديلي tools/libtorrent-patches 0001 و0002، بتحسين المترجم. للبناء Debug فقط. commit: $GITHUB_SHA" \
+            --title "libtorrent 2.0.12 لـVANTARA (أندرويد) p2" \
+            --notes "مكتبة libjlibtorrent.so مبنية من وصفة jlibtorrent 2.0.12.9 مع تعديلات tools/libtorrent-patches 0001 و0002 و0004 (جدولة الكتل بموضع القارئ) ودالتي JNI لتلميح القراءة، بتحسين المترجم. للبناء Debug فقط. commit: $GITHUB_SHA" \
             assets/*.so assets/SHA256SUMS
