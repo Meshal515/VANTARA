@@ -144,6 +144,14 @@ object TorrentPolicy {
      * طرفي الملف (فهرس MP4/MKV الذي يقفز إليه المستخرج قبل أول إطار)، ثم القطع التالية بتدرّج
      * يتسع — 12 قطعة بمواعيد متقاربة كانت تقسم السرعة عليها كلها فتتأخر القطعة الأولى.
      */
+    /**
+     * ما يأخذ موعدًا خارج النافذة: الطرفان في أول ترتيب فقط ([firstOpen]: المستخرج يقرأ الرأس ثم الفهرس قبل أول إطار)،
+     * وقطع الفهرس المطلوبة صراحة ([cues]) دائمًا. بموعد دائم كان الطرفان يملآن طابور كل مشارك قبل موضع المتابعة (قطع
+     * 16MB: حتى 48MB)، وlibtorrent لا يطلب للحرجة من مشارك طابوره فوق 2 ث: المتابعة 5–14 ث. القياس على محرك ويندوز
+     * (المكتبة نفسها): متابعة 16MB 6.9 ← 4.7 ث، والبدء كما هو.
+     */
+    fun pendingEdges(firstOpen: Boolean, edges: List<Int>, cues: List<Int>, next: List<Int>, have: (Int) -> Boolean): List<Int> =
+        ((if (firstOpen) edges else emptyList()) + cues).distinct().filter { it !in next && !have(it) }
     fun deadlines(window: List<Int>, pendingEdges: List<Int> = emptyList()): List<Pair<Int, Int>> {
         val out = ArrayList<Pair<Int, Int>>(window.size + pendingEdges.size)
         val seen = HashSet<Int>()

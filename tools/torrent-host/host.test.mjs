@@ -333,6 +333,40 @@ test('libtorrent host: a jump keeps deadlines only on pieces a reader waits for 
   mid.destroy();
 });
 
+test('libtorrent host: after pause then start, the same peers reconnect in seconds (min_reconnect_time), and idle keeps them connected', { skip, timeout: 120000 }, async t => {
+  // جذر التسخين والدفء: pause يقطع المشاركين، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time (60 ث
+  // افتراضيًا)، والمتتبع يعيدهم أنفسهم. المتابعة بعد تسخين موقوف 8 ث انتظرت 53–56 ث في المحاكي
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 512 * 1024, 30);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  const id = added.body.id;
+  const head = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: 'bytes=0-65535' }, raw: true, timeout: 30000 });
+  assert.ok(head.body.equals(data.subarray(0, 65536)));
+  const peers = async () => (await request(base, `/torrents/${id}/diag`, { timeout: 5000 })).body.peers;
+  const readAt = async (fraction) => {
+    const at = Math.floor(data.length * fraction), t0 = performance.now();
+    const r = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=${at}-${at + 65535}` }, raw: true, timeout: 60000 });
+    assert.ok(r.body.equals(data.subarray(at, at + 65536)), 'exact bytes');
+    return performance.now() - t0;
+  };
+  await request(base, `/torrents/${id}/pause`, { method: 'POST', body: '' });
+  await sleep(1500);
+  await request(base, `/torrents/${id}/start`, { method: 'POST', body: '' });
+  const afterPause = await readAt(0.75);
+  t.diagnostic(`first bytes after pause/start: ${Math.round(afterPause)}ms`);
+  assert.ok(afterPause < 15000, `the same peer reconnects in seconds, not after min_reconnect_time: ${Math.round(afterPause)}ms`);
+  // خامل متصل (التسخين انتهى، أو الدفء بعد الإغلاق): المشارك باقٍ، والقراءة التالية تبدأ بلا إعادة اتصال
+  assert.equal((await request(base, `/torrents/${id}/idle`, { method: 'POST', body: '' })).status, 200);
+  await sleep(1500);
+  assert.ok(await peers() > 0, 'idle keeps the peers connected');
+  const afterIdle = await readAt(0.5);
+  t.diagnostic(`first bytes after idle: ${Math.round(afterIdle)}ms`);
+  assert.ok(afterIdle < 15000, `idle resumes in seconds: ${Math.round(afterIdle)}ms`);
+});
+
 test('libtorrent host: written blocks are tracked from libtorrent before a piece verifies, and settle when it does (option B, step 1)', { skip, timeout: 120000 }, async t => {
   // ويندوز: الخادم يسلّم القطع الموثقة كاملة فقط، فـ6.5KB من فهرس MKV تنتظر قطعة 16MB (bench: 7.2 ث من 10.3 حتى أول صورة).
   // الخطوة 1 من الخيار B كما في أندرويد: كتل كل قطعة غير موثقة كما أعلنها libtorrent بعد كتابتها (block_finished_alert)،

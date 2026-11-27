@@ -307,7 +307,10 @@ public:
         s.set_int(lt::settings_pack::tracker_receive_timeout, 6);
         s.set_int(lt::settings_pack::tracker_completion_timeout, 15);
         s.set_int(lt::settings_pack::request_timeout, 4);
-        if (const char* r = std::getenv("VANTARA_LT_RECONNECT_S")) s.set_int(lt::settings_pack::min_reconnect_time, std::max(1, std::atoi(r)));
+        // 2 ث (الافتراضي 60): إيقاف ثم استئناف (الدفء بعد الإغلاق، أو نافذة القرص) لا يعيد الاتصال بالمشاركين أنفسهم قبلها،
+        // والمتتبع يعيد المشاركين أنفسهم. قياس: متابعة بعد إيقاف 8 ث 53–56 ث بـ60، و1.0–1.1 ث بـ2. المشارك الذي فشل يتضاعف
+        // انتظاره مع عدّاد فشله ثم يُسقط (max_failcount)، فلا إغراق بالمحاولات
+        s.set_int(lt::settings_pack::min_reconnect_time, std::getenv("VANTARA_LT_RECONNECT_S") ? std::max(1, std::atoi(std::getenv("VANTARA_LT_RECONNECT_S"))) : 2);
         s.set_int(lt::settings_pack::piece_timeout, 8);
         s.set_int(lt::settings_pack::max_out_request_queue, 250);
         s.set_int(lt::settings_pack::request_queue_time, 1);

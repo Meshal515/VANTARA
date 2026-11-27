@@ -493,6 +493,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     })();
     return h.stoppedTask;
   }
+  /**
+   * تورنت لا يُشاهَد الآن (تسخين انتهى، أو دفء بعد الإغلاق): «خامل متصل» في libtorrent، لا يُطلب شيء والمشاركون يبقون.
+   * pause كان يقطعهم، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time: متابعة بعد التسخين 53 ث في
+   * المحاكي مقابل 0.7–0.9 ث. rqbit (الرجوع) بلا idle: يبقى pause. يرجع true إن صار موقوفًا فعلًا.
+   */
+  async function idleTorrent(api,id,options){
+    try{await localJSON(api,`/torrents/${id}/idle`,options);return false;}
+    catch(error){if(options.signal?.aborted)throw error;await localJSON(api,`/torrents/${id}/pause`,options);return true;}
+  }
   /** جلسة تستعمل تورنت المحرك: إن كان متوقفًا بانتظار الحذف يعود فورًا (التورنت الدافئ). */
   function hubRetain(state,id) {
     const h=state.hub;if(!h||!Number.isSafeInteger(id))return;
@@ -511,7 +520,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const options={auth:h.auth,signal:h.controller.signal,body:'',timeout:5000};
     const drop=()=>{if(h.refs.get(id)!==ref||ref.n>0)return;h.refs.delete(id);void localJSON(h.api,`/torrents/${id}/delete`,{...options,timeout:15000}).catch(()=>{});};
     if(!(warmTorrentMs>0))return drop();
-    ref.cooled=true;void localJSON(h.api,`/torrents/${id}/pause`,options).catch(()=>{});
+    ref.cooled=true;void idleTorrent(h.api,id,options).catch(()=>{});
     ref.timer=setTimeout(drop,warmTorrentMs);ref.timer.unref?.();
   }
   const startup=Promise.all(['torrent-cache','subtitle-cache'].map(name=>rm(join(userData,name),{recursive:true,force:true})))
@@ -1175,7 +1184,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.trace.record('prewarm-edges',{bytes:head+tail,complete:results.every(Boolean)});
     if(!state.prewarming||state.stopped||!w)return;
     // التشغيل ينتظر هذا الوعد قبل أن يقرر الاستئناف، فلا يبقى التورنت موقوفًا بعد تبنّيه
-    state.prewarmPause=localJSON(state.api,`/torrents/${state.torrentId}/pause`,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(()=>{w.paused=true;},()=>{});
+    state.prewarmPause=idleTorrent(state.api,state.torrentId,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(paused=>{w.paused=paused;},()=>{});
   }
   function takePrewarm(candidate) {
     const key=`${candidate.infoHash}|${candidate.fileIdx??''}`,p=prewarms.get(key);
