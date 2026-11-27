@@ -213,7 +213,7 @@ static lt::ip_filter publicNetworkFilter() {
 
 // ───────────────────────────── حالة التورنت ─────────────────────────────
 // last: آخر قطعة في مدى الطلب (Range)؛ ما ينتظره القارئ لاحقًا لا يتعداها
-struct Reader { int64_t piece = -1; clk::time_point at; int64_t last = -1; };
+struct Reader { int64_t piece = -1; clk::time_point at; int64_t last = -1; int file = -1; clk::time_point opened; };
 
 struct Torrent {
     int id = -1;
@@ -469,9 +469,9 @@ public:
         t->h.get_peer_info(peers);
         int unchokedUs = 0, sending = 0, onWaiting = 0;
         std::vector<int> waitSpeeds;
-        int waiting, windowStart; int64_t waitedMs = -1;
+        int waiting, windowStart; int64_t waitedMs = -1; std::set<int> deadlined;
         size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount, directHits, directMisses, directAhead;
-        { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart;
+        { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart; deadlined = t->deadlined;
           readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount; directHits = t->directHits; directMisses = t->directMisses; directAhead = t->directAhead;
           if (waiting >= 0) waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t->waitingSince).count(); }
         for (auto const& p : peers) {
@@ -487,6 +487,7 @@ public:
         o << "{\"rate_bps\":" << st.download_payload_rate << ",\"total_rate_bps\":" << st.download_rate << ",\"peers\":" << st.num_peers
           << ",\"seeds\":" << st.num_seeds << ",\"unchoked_us\":" << unchokedUs << ",\"sending\":" << sending << ",\"list_peers\":" << st.list_peers
           << ",\"pieces\":" << st.num_pieces << ",\"partial\":" << queue.size() << ",\"window_start\":" << windowStart << ",\"window\":" << policy::WINDOW
+          << ",\"deadlines\":[" << [&] { std::string d; for (int p : deadlined) d += (d.empty() ? "" : ",") + std::to_string(p); return d; }() << "]"
           << ",\"waiting\":{\"piece\":" << waiting << ",\"ms\":" << waitedMs << ",\"blocks\":" << wBlocks << ",\"finished\":" << wFinished
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
@@ -653,11 +654,20 @@ public:
     }
 
     void dropReader(std::shared_ptr<Torrent> const& t, uint64_t readerId) {
-        std::lock_guard<std::mutex> lock(m_);
-        t->readers.erase(readerId);
+        uint64_t primary = 0; Reader next;
+        {
+            std::lock_guard<std::mutex> lock(m_);
+            t->readers.erase(readerId);
 #ifdef VANTARA_LT_READ_HINTS
-        try { t->h.vantara_clear_read_hint(int(readerId & 0x7fffffff)); } catch (...) {}
+            try { t->h.vantara_clear_read_hint(int(readerId & 0x7fffffff)); } catch (...) {}
 #endif
+            clk::time_point latest{};
+            for (auto const& [id, r] : t->readers) if (r.opened >= latest) { latest = r.opened; primary = id; next = r; }
+        }
+        // ما كان القارئ المغلق ينتظره لا يبقى بموعد: القارئ الباقي لا يعيد الترتيب وهو في حلقة الانتظار (قارئ رأس mpv
+        // المغلق أبقى قطعته الأولى 16MB بموعد خلف موضع المتابعة)
+        if (!primary || next.file < 0) return;
+        if (auto ti = t->h.torrent_file()) reposition(t, *ti, next.file, int(next.piece), primary, false, int(next.last), true);
     }
 
     uint64_t newReader() { return ++readerSeq_; }
@@ -790,16 +800,20 @@ private:
     // الموعد والطرفان فقط. فتح النافذة وما بعدها دفعة واحدة يملأ طابور كل مشارك بكتل لا ينتظرها المشغّل، فكتل القطعة
     // المنتظرة العالقة عند مشارك بطيء لا تُنقذ إلا خلفها. محاكي السرب (40 مشاركًا، 1MB): أول قطعة 3.9 ← 1.8 ث بعد
     // تسخين قصير. [widen]: القطعة المنتظرة وصلت، فتُفتح النافذة كاملة.
-    void reposition(std::shared_ptr<Torrent> const& t, lt::torrent_info const& ti, int fileIndex, int piece, uint64_t readerId, bool widen = false, int rangeLast = -1) {
+    void reposition(std::shared_ptr<Torrent> const& t, lt::torrent_info const& ti, int fileIndex, int piece, uint64_t readerId, bool widen = false, int rangeLast = -1, bool force = false) {
         std::lock_guard<std::mutex> lock(m_);
-        t->readers[readerId] = Reader{piece, clk::now(), rangeLast};
-        // القارئ الأحدث يقود النافذة (mpv يفتح قارئًا جديدًا عند القفز)
+        // وقت الفتح لا آخر نشاط: mpv/ffmpeg يفتح قارئًا جديدًا عند كل قفز، وقارئ الرأس القديم يبقى يقرأ مسبقًا لذاكرة المقبس
+        // فكان آخر نشاط يجعله «الأحدث» ويسرق النافذة من قارئ المتابعة المنتظر (diag: الرأس 7 والموضع 6)
+        auto const known = t->readers.find(readerId);
+        t->readers[readerId] = Reader{piece, clk::now(), rangeLast, fileIndex, known != t->readers.end() ? known->second.opened : clk::now()};
+        // القارئ الأحدث فتحًا يقود النافذة
         uint64_t primary = readerId;
         clk::time_point latest{};
-        for (auto const& [id, r] : t->readers) if (r.at >= latest) { latest = r.at; primary = id; }
+        for (auto const& [id, r] : t->readers) if (r.opened >= latest) { latest = r.opened; primary = id; }
         if (primary != readerId) return;
-        if (widen ? (!t->focused || piece != t->windowStart) : piece == t->windowStart) return;
+        if (!force && (widen ? (!t->focused || piece != t->windowStart) : piece == t->windowStart)) return;
         int const prevStart = t->windowStart;
+        bool const firstOpen = prevStart < 0;
         bool const jump = prevStart < 0 || piece < prevStart || piece >= prevStart + std::max(policy::CRITICAL, 1);
         bool const focus = policy::CRITICAL > 0 && !t->h.have_piece(lt::piece_index_t(piece)) && (jump || (t->focused && piece == prevStart));
         t->windowStart = piece;
@@ -834,22 +848,34 @@ private:
             others.emplace_back(next, end);
             if (!wantedAlready(next)) pending.push_back(next);
         }
-        for (int p : edgePieces(ti, fileIndex)) if (!wantedAlready(p) && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
+        // الطرفان بموعد في أول فتح فقط: المشغّل يقرأ الرأس ثم الفهرس في الذيل قبل أول إطار. بعده لا ينتظرهما إلا قارئ مفتوح
+        // عليهما (others أعلاه). بموعد دائم كانا يملآن طابور كل مشارك (قطع 16MB: حتى 48MB)، وlibtorrent لا يلغي طلبات
+        // قطعة ذات موعد ولا يطلب للحرجة من مشارك طابوره فوق 2 ث: متابعة 16MB انتظرت موضعها 4.7 ث بعد أول بايت
+        if (firstOpen) for (int p : edgePieces(ti, fileIndex)) if (!wantedAlready(p) && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
         std::vector<int> const critical = policy::CRITICAL > 0 && int(window.size()) > policy::CRITICAL
             ? std::vector<int>(window.begin(), window.begin() + policy::CRITICAL) : window;
         auto const wanted = policy::deadlines(critical, pending);
         std::set<int> keep;
         for (auto const& w : wanted) keep.insert(w.first);
-        // الفرق فقط: مسح كل المواعيد يلغي طلبات جارية عند المشاركين
+        // الفرق فقط: مسح كل المواعيد يشغّل cancel_non_critical في libtorrent، وما طُلب صار في الأنبوب (ذاكرة TCP) فلا يعود
+        // بالإلغاء، بل تُحرَّر كتله في المنتقي فتُطلب مرتين (قياس: ذيل 16MB 0.6–0.8 ← 1.1–1.5 ث بالإلغاء). العلاج ألا تُطلب
+        // كتل لا ينتظرها أحد من الأساس (الطرفان والقارئ المغلق أعلاه)، لا إلغاؤها بعد الطلب
         for (int p : t->deadlined) if (!keep.count(p)) t->h.reset_piece_deadline(lt::piece_index_t(p));
         std::vector<lt::download_priority_t> prio(size_t(ti.num_pieces()), lt::dont_download);
         int const aheadEnd = std::min(last, piece + std::max(policy::AHEAD_PIECES, policy::WINDOW));
         if (!focus) for (int p = piece; p <= last; ++p) prio[size_t(p)] = p <= aheadEnd ? lt::download_priority_t(4) : lt::low_priority;
         for (auto const& [from, to] : others) for (int p = from; p <= to; ++p) prio[size_t(p)] = std::max(prio[size_t(p)], lt::low_priority);
-        for (int p : edgePieces(ti, fileIndex)) if (p >= first) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
+        // بعد أول فتح: الطرفان للفتح القادم (إعادة تحميل mpv) بأولوية عادية أثناء التشغيل، ولا يزاحمان قطعة منتظرة
+        for (int p : edgePieces(ti, fileIndex)) if (p >= first)
+            prio[size_t(p)] = std::max(prio[size_t(p)], firstOpen ? lt::download_priority_t(6) : focus ? lt::dont_download : lt::download_priority_t(4));
         for (int p : window) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
+        // الخيار B: قطعة سُلّم منها قبل التحقق ثم تجاوزها القارئ تكتمل ليُتحقق منها (خلف الموضع كانت «لا تُنزَّل»، فما سُلّم
+        // منها قد لا يُتحقق أبدًا). في التركيز تنتظر حتى تصل القطعة المنتظرة، فلا تزاحمها
+        if (!focus) for (int p : t->early) if (p >= first && p <= last) prio[size_t(p)] = std::max(prio[size_t(p)], lt::low_priority);
         for (auto const& [p, deadline] : wanted) prio[size_t(p)] = deadline == 0 ? lt::top_priority : lt::download_priority_t(6);
         t->h.prioritize_pieces(prio);
+        // لا يُعاد موعد قطعة أبقاها الفرق: set_piece_deadline يرفع أولويتها إلى 7 دائمًا، فرأس قارئ قديم يصير بأولوية موضع
+        // القفز في المنتقي العادي أيضًا (قياس 16MB: إعادتها عند القفز 0.78 ← 1.35 ث من البداية، و4.0 ← 6.1 ث متابعة)
         for (auto const& [p, deadline] : wanted) if (deadline == 0 || !t->deadlined.count(p)) t->h.set_piece_deadline(lt::piece_index_t(p), deadline);
         t->deadlined = keep;
     }

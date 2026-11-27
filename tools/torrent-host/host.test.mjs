@@ -289,6 +289,50 @@ test('libtorrent host: a reader paused between pieces keeps its next piece wante
   assert.ok(body && body.equals(data.subarray(0, head)), 'head read finishes with exact bytes after the pause');
 });
 
+test('libtorrent host: a jump keeps deadlines only on pieces a reader waits for (not the edges, not a closed reader), so their queued blocks cannot hold the new position', { skip, timeout: 120000 }, async t => {
+  // جذر متابعة 16MB في ويندوز (23.6 ث ثم 6.2 ث بالخيار B): الطرفان بموعد في كل إعادة ترتيب، وقارئ الرأس المغلق يبقى
+  // موعده؛ libtorrent لا يلغي طلبات قطعة ذات موعد (cancel_non_critical) ولا يطلب للحرجة من مشارك طابوره فوق 2 ث، فكتل
+  // موضع المتابعة انتظرت خلف 6–12MB من الرأس والذيل عند كل مشارك (/diag: 2–8 طلبات للقطعة المنتظرة لثانيتين)
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 64 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  const id = added.body.id, piece = 262144, pieces = data.length / piece, edges = [pieces - 2, pieces - 1];
+  const open = (from) => {
+    const req = http.request(new URL(`/torrents/${id}/stream/0`, base), { headers: { Authorization: `Basic ${Buffer.from(auth).toString('base64')}`, Range: `bytes=${from}-` } }, res => { res.on('data', () => {}); res.on('error', () => {}); });
+    req.on('error', () => {}); req.end();
+    return req;
+  };
+  const diag = async () => (await request(base, `/torrents/${id}/diag`, { timeout: 5000 })).body;
+  const until = async (ok, what) => { for (const end = Date.now() + 15000; Date.now() < end; await sleep(100)) { const d = await diag(); if (ok(d)) return d; } throw new Error(what + ': ' + JSON.stringify(await diag())); };
+  const head = open(0);
+  const first = await until(d => d.readers.length === 1 && d.deadlines.length > 0, 'head reader registered');
+  // أول فتح: الذيل يُجلب مع الرأس (المشغّل يقرأ الفهرس قبل أول إطار)
+  assert.ok(edges.every(p => first.deadlines.includes(p)), `first open keeps the edges: ${first.deadlines}`);
+  const midPiece = Math.floor(pieces / 2);
+  const mid = open(midPiece * piece + 1000);
+  const jumped = await until(d => d.readers.length === 2 && d.window_start === midPiece, 'jump reader is primary');
+  t.diagnostic(`after the jump: deadlines=${jumped.deadlines} readers=${JSON.stringify(jumped.readers)}`);
+  assert.ok(jumped.deadlines.includes(midPiece), 'the jump position has a deadline');
+  assert.ok(!edges.some(p => jumped.deadlines.includes(p)), `edges nobody waits for lose their deadline at a jump: ${jumped.deadlines}`);
+  // القارئ الأحدث فتحًا يقود ولو واصل الرأس القراءة (آخر نشاط كان يعيد النافذة إلى الرأس)
+  const leads = [];
+  for (let i = 0; i < 15; i++, await sleep(100)) leads.push((await diag()).window_start);
+  assert.ok(leads.every(w => w === midPiece), `the newest reader keeps the window while the head reader streams: ${leads}`);
+  const headPiece = jumped.readers.find(r => r.piece < midPiece)?.piece;
+  assert.ok(jumped.deadlines.some(p => p < midPiece), 'the open head reader still has its next piece');
+  head.destroy();
+  const closed = await until(d => d.readers.length === 1, 'head reader dropped');
+  await sleep(300);
+  const after = await diag();
+  t.diagnostic(`after the head reader closed (it was at ${headPiece}): deadlines=${after.deadlines}`);
+  assert.ok(after.deadlines.every(p => p >= midPiece), `a closed reader keeps no deadline: ${after.deadlines} (closed at ${JSON.stringify(closed.readers)})`);
+  mid.destroy();
+});
+
 test('libtorrent host: written blocks are tracked from libtorrent before a piece verifies, and settle when it does (option B, step 1)', { skip, timeout: 120000 }, async t => {
   // ويندوز: الخادم يسلّم القطع الموثقة كاملة فقط، فـ6.5KB من فهرس MKV تنتظر قطعة 16MB (bench: 7.2 ث من 10.3 حتى أول صورة).
   // الخطوة 1 من الخيار B كما في أندرويد: كتل كل قطعة غير موثقة كما أعلنها libtorrent بعد كتابتها (block_finished_alert)،
