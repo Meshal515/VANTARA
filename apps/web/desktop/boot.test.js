@@ -76,7 +76,8 @@ it('ويندوز بمحرك Suwayomi: وظائف المستودعات تُعلن
   expect(await ExtensionEngine.cover({ sourceId: 'x', url: 'vantara-engine://suwayomi/manga/1/thumbnail' })).toEqual({ path: 'vantara-engine://suwayomi/manga/1/thumbnail' });
   // مصادر الويب تفشل في بيئة الاختبار (لا runtime): مصادر المحرك تبقى ظاهرة
   const listed = await ExtensionEngine.sources();
-  expect(listed.sources.map((s) => s.id)).toContain('eu.kanade.tachiyomi.extension.ar.teamx#7154');
+  // صفر مصادر مدمجة: Team X المثبّتة إضافةً تظهر بمعرّفها القديم (المكتبة لا تنقطع) ومعرّفها الحقيقي في nativeId
+  expect(listed.sources).toContainEqual(expect.objectContaining({ id: 'eu.kanade.tachiyomi.extension.ar.teamx', nativeId: 'eu.kanade.tachiyomi.extension.ar.teamx#7154' }));
 });
 
 it('التحقق في ويندوز بشكل إضافة الـAPK: المضيف المحجوب يُعلن، وbegin يفتح الصفحة الظاهرة ثم يزيله', async () => {

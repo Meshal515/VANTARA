@@ -7,7 +7,7 @@ const EXISTING = Date.UTC(2026, 0, 1);
 const NEW = Date.UTC(2027, 0, 1);
 
 let plugin, e, engine;
-async function load({ createdAt = null, standalone = false, settings = {}, installed = [] } = {}) {
+async function load({ createdAt = null, standalone = false, settings = {}, installed = [], used = [AZORA, DILAR] } = {}) {
   vi.resetModules();
   plugin = {
     sources: vi.fn(async () => ({ sources: [
@@ -22,11 +22,17 @@ async function load({ createdAt = null, standalone = false, settings = {}, insta
   vi.stubGlobal('Capacitor', { Plugins: { ExtensionEngine: plugin } });
   e = await import('./source-entitlement.js');
   engine = await import('./extension-engine.js');
-  e.setEntitlement(e.decide({ standalone, account: createdAt == null ? null : { user_id: 'u', created_at: createdAt }, settings }));
+  e.setEntitlement(e.decide({ standalone, account: createdAt == null ? null : { user_id: 'u', created_at: createdAt }, settings, used }));
 }
 afterEach(() => vi.unstubAllGlobals());
 
-it('old account: everything it sees becomes installed, and its repository is kept as its own data', async () => {
+it('old account: only what it uses becomes installed (owner, 27 Nov: no 19 ready-made)', async () => {
+  await load({ createdAt: EXISTING, used: [DILAR] });
+  await vi.waitFor(() => expect(plugin.migrateBuiltins).toHaveBeenCalled());
+  expect(plugin.migrateBuiltins).toHaveBeenLastCalledWith({ pkgs: [DILAR], keepRepository: true });
+});
+
+it('old account: everything it uses becomes installed, and its repository is kept as its own data', async () => {
   await load({ createdAt: EXISTING });
   await vi.waitFor(() => expect(plugin.migrateBuiltins).toHaveBeenCalled());
   expect(plugin.migrateBuiltins).toHaveBeenLastCalledWith({ pkgs: [AZORA, DILAR].sort(), keepRepository: true });

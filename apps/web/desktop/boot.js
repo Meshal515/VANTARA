@@ -6,6 +6,7 @@ import { installFirstPartyTransport } from './first-party.js';
 import { startDesktopUpdateWatch } from './update-check.js';
 import { installDesktopPlayer } from './player.js';
 import { desktopChallenges } from './source-fetcher.js';
+import { FORMER_BUILTIN_SOURCES } from '../lib/source-entitlement.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
 function element(document, tag, text, cls) {
@@ -71,7 +72,8 @@ export function createDesktopVerification(bridge, challenges = desktopChallenges
  * والتنزيلات تبقى بلا إعادة كتابة. `map`: المعرّف القديم ← الحقيقي.
  */
 export function bridgeLegacySources(web = [], mine = []) {
-  const webById = new Map(web.map((s) => [String(s?.id ?? ''), s]));
+  // المعرّف القديم ولغته من الجدول (التعريفات أُزيلت من الحزمة)، ومن تعريف ويب باقٍ على جهاز قديم إن وُجد
+  const webById = new Map([...FORMER_BUILTIN_SOURCES.map((s) => [s.id, s]), ...web.map((s) => [String(s?.id ?? ''), s])]);
   const byPkg = new Map();
   for (const s of mine) { const pkg = String(s?.pkg ?? String(s?.id ?? '').split('#')[0]); if (!byPkg.has(pkg)) byPkg.set(pkg, []); byPkg.get(pkg).push(s); }
   const map = new Map();

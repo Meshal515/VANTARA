@@ -13,7 +13,7 @@
  */
 
 import { webPlugin, desktopPlugin } from '../pwa/platform.js';
-import { assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
+import { FORMER_BUILTIN_SOURCES, assertChoiceContext, assertVisible, choiceContext, choosePackage, entitlement, isBundled, onEntitlementChange, packageOf, visible, visiblePackages } from './source-entitlement.js';
 
 /**
  * تغيّر المصادر (تثبيت، حذف، تحديث، رجوع، ترحيل، موقع ويب): من يحفظ قائمتها يمسحها فورًا (works.js). كانت قائمة
@@ -63,7 +63,8 @@ onEntitlementChange(async (decision) => {
 		try {
 			const { sources: list } = await desktop.sources();
 			if (entitlement() !== decision) return;
-			await migrateDesktopBuiltins(desktop, decision, visiblePackages(list ?? [], decision), list ?? []);
+			// الحزم من جدول المعرّفات القديمة (لا من تعريفات ويب لم تعد في الحزمة)، بقرار الظهور نفسه
+			await migrateDesktopBuiltins(desktop, decision, FORMER_BUILTIN_SOURCES.filter((s) => visible(s, decision)).map((s) => s.id), list ?? []);
 		} catch { /* يُعاد عند التغيير التالي */ }
 		return;
 	}
@@ -88,9 +89,18 @@ onEntitlementChange(async (decision) => {
 export async function migrateBuiltins(plugin, decision, pkgs) {
 	if (typeof plugin?.migrateBuiltins !== 'function' || !pkgs.length) return null;
 	if (decision.state === 'unknown' && !decision.standalone) return null;
+	// الحساب القديم قبل معرفة استعماله (المزامنة لم تكتمل): لا ترحيل، وإلا ثُبّت كل المدمج («لا 19 جاهزة»)
+	if (decision.state === 'legacy' && !decision.used) return null;
 	const out = await plugin.migrateBuiltins({ pkgs, keepRepository: decision.state === 'legacy' || decision.standalone === true });
 	for (const pkg of out?.migrated ?? []) installedPackages.add(String(pkg));
 	if (out?.migrated?.length) sourcesChanged();
+	// آلية الترحيل الآمنة (قرار المالك 27 نوفمبر): حزمة تعذّر ترحيلها بنسختها المثبّتة (Keiyoushi يحذف الإصدارات القديمة)
+	// تُثبَّت بأحدث إصدار موقّع من المستودع نفسه، ويُعاد كل 10 دقائق حتى تنجح. لا يُحذف شيء، والمعرّف القديم يبقى.
+	const failed = (out?.failed ?? []).map(String).filter((pkg) => !installedPackages.has(pkg));
+	if (failed.length && typeof plugin.installExtension === 'function' && typeof plugin.addRepo === 'function') {
+		const rescue = await migrateDesktopBuiltins(plugin, decision, failed, [], Date.now()).catch(() => null);
+		return { ...out, rescued: rescue?.migrated ?? [], failed: rescue?.failed ?? failed };
+	}
 	return out;
 }
 
@@ -105,6 +115,7 @@ const desktopRetryAt = new Map();
 export async function migrateDesktopBuiltins(plugin, decision, pkgs, list = [], now = Date.now()) {
 	if (typeof plugin?.installExtension !== 'function' || typeof plugin?.addRepo !== 'function' || !pkgs.length) return null;
 	if (decision.state === 'unknown' && !decision.standalone) return null;
+	if (decision.state === 'legacy' && !decision.used) return null;
 	const installed = new Set((list ?? []).filter((s) => s?.user).map((s) => packageOf(s.id)));
 	const todo = pkgs.filter((pkg) => !installed.has(pkg) && (desktopRetryAt.get(pkg) ?? 0) <= now);
 	if (!todo.length) return null;

@@ -49,6 +49,34 @@ export function isBundled(def) {
   return PKG_RULE.test(packageOf(id));
 }
 
+/**
+ * جدول المعرّفات القديمة للمصادر التي كانت مدمجة (قرار المالك 27 نوفمبر: «صفر مصادر مدمجة»). ليس مصادر ولا كودًا:
+ * المعرّف ولغته فقط، ليصل المعرّف القديم المحفوظ في المكتبة والتقدّم إلى الإضافة المثبّتة من المستودع (نظير
+ * LegacySourceIds.kt في أندرويد)، وليعرف الترحيل ما يُثبَّت. التعريفات نفسها أُزيلت من حزمة الواجهة (defs.json).
+ */
+export const FORMER_BUILTIN_SOURCES = Object.freeze([
+	['eu.kanade.tachiyomi.extension.ar.manga3asq', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangastarz', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangaspark', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangalek', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.hizomanga', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.comicverse', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.lonertranslations', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangaailand', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.manhatok', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.orcamanga', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.xsanomanga', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.yokai', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.azora', 'ar'],
+	['eu.kanade.tachiyomi.extension.all.mangadex', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.lavascans', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangalink', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangalionz', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.teamx', 'ar'],
+	['eu.kanade.tachiyomi.extension.ar.mangaswat', 'ar'],
+].map(([id, lang]) => Object.freeze({ id, lang })));
+export const FORMER_BUILTIN_IDS = new Set(FORMER_BUILTIN_SOURCES.map((s) => s.id));
+
 /** فوج الحساب من صفّه المتزامن، أو null إن لم يصل الصف بعد. */
 export function cohortOf(account) {
   const at = Number(account?.created_at);
