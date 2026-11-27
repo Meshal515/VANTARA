@@ -398,7 +398,7 @@ it('each direct row shows its source picture beside the name, in a slot reserved
 });
 
 
-it('كل سيرفر مباشر صالح ظاهر مهما كثر، والتورنت ستة إصدارات ظاهرة (المالك، 15 نوفمبر)', () => {
+it('كل سيرفر مباشر صالح ظاهر مهما كثر (المالك، 15 نوفمبر)، والتورنت أعلى 5 أسراب من كل جودة من أعلى جودتين (27 نوفمبر)', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceId });
   const direct = Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, sourceId: 'witanime', server: `host${i}`, quality: 1080, state: 'READY', probed: true, probeMs: 500 + i }));
@@ -407,10 +407,33 @@ it('كل سيرفر مباشر صالح ظاهر مهما كثر، والتور�
   ui.update({ routes: [...direct, ...torrents, cam], settled: true, status: { text: '' } });
   expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(20);
   expect(body.querySelector('.ss-group--direct .ss-more-copies, .ss-group--direct details:not([hidden])')).toBeNull();
-  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')).toHaveLength(6);
+  // جودة واحدة: أعلى عشرة منها (ضعف الخمسة)، والضعيف (CAM) خارجها
+  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')).toHaveLength(10);
+  expect(body.querySelector('.ss-group--torrent > .an-srv-grid').textContent).not.toContain('CAM');
   // وما يصل بعدها صالحًا يظهر كذلك، تحت الموجود
   ui.update({ routes: [...direct, ...torrents, cam, { id: 'late', sourceId: 'witanime', server: 'late', quality: 720, state: 'READY', probed: true, probeMs: 900 }], settled: true, status: { text: '' } });
   expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(21);
+});
+
+it('المقترحة: أعلى 5 أسراب 4K ثم أعلى 5 أسراب 1080p بالترتيب، و720p والأضعف في «نسخ إضافية» (المالك، 27 نوفمبر)', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {} });
+  const mk = (q, i, seeds) => ({ id: `${q}-${i}`, sourceId: TORR, sourceName: 'Torrentio', quality: q, state: 'READY', runtimeReady: true, infoHash: `${q}${i}`.padEnd(40, '0'),
+    label: `Show.S01E01.${q}p.WEB-DL-G${q}x${i}.mkv\n👤 ${seeds} 💾 ${q === 2160 ? 6 : 2}.${i} GB ⚙️ TPB` });
+  // تصل مختلطة: السرب الأكبر ليس أولًا
+  const routes = [
+    ...[12, 86, 15, 7, 11, 10, 3].map((s, i) => mk(2160, i, s)),
+    ...[40, 9, 120, 33, 5, 60, 2].map((s, i) => mk(1080, i, s)),
+    ...[500, 400].map((s, i) => mk(720, i, s)),
+  ];
+  ui.update({ routes, settled: true, status: { text: '' } });
+  const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')].map((b) => `${b.querySelector('.ss-q b').textContent} ${b.querySelector('.an-srv-seeds')?.textContent}`);
+  expect(shown).toEqual(['4K 86', '4K 15', '4K 12', '4K 11', '4K 10', '1080p 120', '1080p 60', '1080p 40', '1080p 33', '1080p 9']);
+  expect(body.querySelector('.ss-group--torrent .an-srv-more summary').textContent).toBe('نسخ إضافية (6)');
+  // سرب أقوى يصل لاحقًا يأخذ مكانه في الخمسة
+  ui.update({ routes: [...routes, mk(2160, 9, 300)], settled: true, status: { text: '' } });
+  const again = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')].map((b) => b.querySelector('.an-srv-seeds')?.textContent);
+  expect(again.slice(0, 5)).toEqual(['300', '86', '15', '12', '11']);
 });
 
 it('جودة غير معلنة تظهر «تلقائي» لا «HD» (UX11)، والمعلنة كما هي', () => {
@@ -575,16 +598,18 @@ it('الورقة ترسل الصفوف الظاهرة غير «المقترح» 
     const { el, body } = dom();
     const onWarmRows = vi.fn();
     const ui = createServerSheet(body, { el, onPick: vi.fn(), onWarmRows });
-    const routes = Array.from({ length: 9 }, (_, i) => tor(`Show.S01E01.1080p.WEB.x264-G${i}\n👤 ${100 + i * 50} 💾 1.4 GB ⚙️ Nyaa`, { id: `t${i}`, quality: 1080, infoHash: String(i).repeat(40) }));
+    const routes = Array.from({ length: 12 }, (_, i) => tor(`Show.S01E01.1080p.WEB.x264-G${i}\n👤 ${100 + i * 50} 💾 1.4 GB ⚙️ Nyaa`, { id: `t${i}`, quality: 1080, infoHash: String(i % 10).repeat(39) + String(Math.floor(i / 10)) }));
     ui.update({ routes, settled: true, status: { text: '' } });
     vi.advanceTimersByTime(401);
     expect(onWarmRows).toHaveBeenCalledTimes(1);
     const ids = onWarmRows.mock.calls[0][0];
     const top = body.querySelector('.ss-row--top');
     const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')];
-    expect(shown.length).toBe(6);
-    // خمسة ظاهرة غير المقترح، ولا شيء من «نسخ إضافية»
-    expect(ids).toHaveLength(5);
+    // جودة واحدة: عشرة ظاهرة (أعلى عشرة أسراب)، وتسعة غير المقترح تُسخَّن خلفيًا، ولا شيء من «نسخ إضافية»
+    expect(shown.length).toBe(10);
+    expect(ids).toHaveLength(9);
+    expect(ids).not.toContain('t0');
+    expect(ids).not.toContain('t1');
     expect(ids).not.toContain(routes.find((r) => top.textContent.includes(r.label.split('\n')[0].split('-').pop())).id);
     // نفس القائمة في تحديث لاحق: لا إعادة
     ui.update({ routes, settled: true, status: { text: '' } });

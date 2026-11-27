@@ -458,7 +458,10 @@ class TorrentEngine internal constructor(
      */
     fun facts(uri: Uri): TorrentFacts? {
         val hash = uri.host?.let(tickets::get)?.request?.infoHash ?: return null
-        if (!managerHolder.isInitialized()) return null
+        // حقائق ما في المحرك فقط (مُسخَّن أو يُشغَّل، وله State). ورقة السيرفرات تسأل عن كل سيرفر (171 في لقطة المالك) كل
+        // 1.5 ث على خيط جسر Capacitor الواحد، وmanager.find مكالمة متزامنة تنتظر خيط شبكة libtorrent المشغول بالتسخين:
+        // كان «يبدأ…» ينتظر خلفها (pick على الخيط نفسه)
+        if (!managerHolder.isInitialized() || !states.containsKey(hash)) return null
         val handle = manager.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return null
         val info = runCatching { handle.torrentFile() }.getOrNull()?.takeIf { it.isValid } ?: return null
         val status = runCatching { handle.status() }.getOrNull() ?: return null

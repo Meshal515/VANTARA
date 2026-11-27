@@ -15,6 +15,7 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
 import { parseRelease, swarmTier } from '../addons/release-info.js';
 import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
+import { flingHoldRisk } from './collapse-hero.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, measuredSeeds, pieceScore, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
@@ -250,6 +251,7 @@ export function factDate(v) {
  */
 /** لمسة على صف بعد تحرّك القائمة بأقل من هذا تُهمل (لا تشغيل بالخطأ). */
 const TAP_GUARD_MS = 450;
+const TOP_PER_QUALITY = 5;
 
 export function createServerSheet(body, o) {
   let destroyed = false;
@@ -506,30 +508,52 @@ export function createServerSheet(body, o) {
   // الصورة والشعار يتحركان بخط CSS مربوط بتمرير الورقة نفسها (كانت الكتابة بعد حدث scroll
   // متأخرة إطارًا فتهتز). WebView 153–156 يحبس الانزلاق بعد رفع الإصبع ما دامت حركة مربوطة
   // بالتمرير، فأثناء الانزلاق تُوقف حركة CSS وتعمل المتغيرات التي يكتبها collapse بنفس القيم.
+  // نفس قواعد collapse-hero.js (CLAUDE.md): في WebView وحده (flingHoldRisk)، والحكم بحركة الإصبع نفسها، والتسلّم عند حد
+  // الإطار التالي لا في حدث الرفع. كانت هذه النسخة تتسلّم في touchend وموضع التمرير فيه متأخر عن الشاشة بآخر حركة للإصبع،
+  // فتُكتب قيمة أقدم مما يرسمه CSS وترتد الصورة بقدرها مع كل رفعة؛ وتحكم بالحركة من حدث scroll وحده، والزحلقة السريعة
+  // يصل تمريرها بعد الرفع فتفوت التسليم فيُحبس الانزلاق ثم يُلقى دفعة واحدة (crbug 572898003).
   let handed = false;
   let moved = false;
+  let touching = false;
+  let startY = 0;
   let settleTimer = null;
+  let takeover = null;
+  const holdRisk = flingHoldRisk();
   const handBack = () => {
     clearTimeout(settleTimer);
     if (!handed) return;
     handed = false;
     body.classList.remove('ss-handed');
   };
-  listen(scroll, 'touchstart', () => { moved = false; handBack(); }, { passive: true });
+  listen(scroll, 'touchstart', (e) => {
+    if (takeover != null) globalThis.cancelAnimationFrame?.(takeover);
+    takeover = null;
+    touching = true;
+    moved = false;
+    startY = e?.touches?.[0]?.clientY ?? 0;
+    handBack();
+  }, { passive: true });
   listen(scroll, 'scroll', () => {
-    moved = true;
+    if (touching) moved = true;
     if (handed) {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(handBack, 180);
     }
   }, { passive: true });
-  const fling = () => {
-    if (!moved) return;
-    handed = true;
-    collapse();
-    body.classList.add('ss-handed');
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(handBack, 180);
+  const fling = (e) => {
+    touching = false;
+    const endY = e?.changedTouches?.[0]?.clientY;
+    if (endY != null && Math.abs(endY - startY) > 6) moved = true;
+    if (!holdRisk || !moved || typeof requestAnimationFrame !== 'function') return;
+    takeover = requestAnimationFrame(() => {
+      takeover = null;
+      if (destroyed || touching) return;
+      handed = true;
+      collapse();
+      body.classList.add('ss-handed');
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(handBack, 180);
+    });
   };
   listen(scroll, 'touchend', fling, { passive: true });
   listen(scroll, 'touchcancel', fling, { passive: true });
@@ -613,6 +637,22 @@ export function createServerSheet(body, o) {
 
   // لحظة تحرّك فيها صف موجود: لمسة بعدها مباشرة كانت تشغّل سيرفرًا غير الذي قصده الإصبع
   let shiftedAt = 0;
+  // المالك (27 نوفمبر): في آخر الورقة «يرفعني فوق»، ويهدأ حين تصل سيرفرات CloudStream. أقسام الأسفل («قيد الفحص»،
+  // «غير متاح الآن»، «نسخ إضافية») تظهر وتختفي مع تدفق السيرفرات، فيقصر المحتوى والإصبع عند آخره، والمتصفح يقص موضع
+  // التمرير إلى الحد الجديد: قفزة للأعلى مع كل تحديث (اهتزاز). الارتفاع الذي بلغته القائمة يبقى محجوزًا ما دام أسفلها
+  // ظاهرًا، ويُترك حين يكون أسفلها خارج الشاشة (تقصيره هناك لا يحرّك ما تراه). تغيير المرشّح بيد المستخدم يبدأ من جديد.
+  let heldPx = 0, heldKey = '';
+  const holdHeight = (key) => {
+    if (key !== heldKey) { heldKey = key; heldPx = 0; list.style.minHeight = ''; return; }
+    // الارتفاع الطبيعي من موضع آخر عنصر (لا بإلغاء الحجز ثم القياس: ذلك تخطيط بالمحتوى المقصوص فيُقص التمرير فورًا)
+    const top = list.getBoundingClientRect?.().top ?? 0;
+    const end = list.lastElementChild?.getBoundingClientRect?.().bottom ?? top;
+    const natural = Math.max(0, end - top);
+    // التقصير بمقدار Δ ينقص أقصى تمرير بمقدار Δ: لا قص ما دام المتبقي تحت الشاشة (D) أكبر منه. يُترك من الحجز ما يسعه D فقط
+    const below = Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0) - (scroll.scrollTop || 0));
+    heldPx = natural >= heldPx ? natural : natural + Math.max(0, heldPx - natural - below);
+    list.style.minHeight = heldPx > natural ? `${Math.round(heldPx)}px` : '';
+  };
   const reconcile = (parent, nodes) => {
     const before = new Map([...parent.children].map((node, i) => [node, i]));
     nodes.forEach((node, i) => {
@@ -707,8 +747,19 @@ export function createServerSheet(body, o) {
       b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') hoverRow(id); });
       b.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') leaveRows(); });
     }
-    const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
     const top = r.id === topId;
+    const starting = Boolean(last.busy && picked === r.id);
+    const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
+    // الصف لا يُعاد بناؤه إن لم يتغير ما يُرسم منه (كان كل update يعيد DOM كل صف، ومنها مئات المطوية في «نسخ إضافية»:
+    // خُمس كلفة التحديث). البصمة: وصف السيرفر (مفتاح view نفسه) وحالته وما يغيّر سطره وطرفه. اللمس يُربط دائمًا بالحالة الحالية
+    const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}`;
+    b.onclick = () => {
+      if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
+      return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
+    };
+    if (b.dataset.sig === sig) return b;
+    b.dataset.sig = sig;
+    const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
     const open = b.classList.contains('ss-row--open');
     b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
     b.disabled = pending && !isTryable(r);
@@ -722,7 +773,6 @@ export function createServerSheet(body, o) {
     qb.lastElementChild.setAttribute('aria-hidden', 'true');
     b.querySelector('.ss-name').textContent = d.name;
     // صورة المصدر (إضافته: CloudStream أو Aniyomi) بجانب اسمه، في خانة محجوزة من البداية فلا يتحرك الاسم حين تصل
-    const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
     const ico = b.querySelector('.ss-ico');
     if (ico.dataset.src !== (icon ?? '')) {
       ico.dataset.src = icon ?? '';
@@ -736,7 +786,6 @@ export function createServerSheet(body, o) {
     b.querySelector('.ss-tag').hidden = !top;
     b.querySelector('.ss-meta').replaceChildren(...metaChips(r, d, pending).map(chipNode));
     const end = b.querySelector('.ss-end');
-    const starting = Boolean(last.busy && picked === r.id);
     b.classList.toggle('ss-row--busy', starting);
     if (starting) end.innerHTML = '<i class="ss-spin"></i><small>يبدأ…</small>';
     else if (pending) end.innerHTML = `<i class="ss-spin"></i><small>${VALIDITY_AR.CHECKING}</small>`;
@@ -788,10 +837,6 @@ export function createServerSheet(body, o) {
     const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
-    b.onclick = () => {
-      if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
-      return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
-    };
     return b;
   }
 
@@ -945,10 +990,15 @@ export function createServerSheet(body, o) {
   // ما لم يمت وتصل نسخة صالحة منه.
   // UX14: البصمة (infoHash) هي هوية التورنت الدقيقة: نفس البصمة صف واحد ولو اختلف اسم الملف، وبصمتان معروفتان
   // مختلفتان صفّان ولو تطابق الاسم والحجم. إن غابت البصمة عند أحدهما يبقى الاسم والحجم (Aniyomi قد لا يعطيها).
+  // مشتق من الوصف وحده (اسم الملف والحجم)، فيُحفظ معه: يتغير بتغيّره فقط
   const torrentKey = (r) => {
     const d = view(r);
+    const hit = views.get(r.id);
+    if (hit && hit.d === d && 'tk' in hit) return hit.tk;
     const file = d.torrent ? d.info?.filename : null;
-    return file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
+    const tk = file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
+    if (hit && hit.d === d) hit.tk = tk;
+    return tk;
   };
   const hashOf = (r) => {
     if (!view(r).torrent) return null;
@@ -957,22 +1007,39 @@ export function createServerSheet(body, o) {
     const hash = (direct ?? magnet)?.toLowerCase();
     return hash ? `${hash}|${r.fileIdx ?? ''}` : null;
   };
-  const sameTorrent = (a, b) => {
-    const ha = hashOf(a), hb = hashOf(b);
-    if (ha && hb) return ha === hb;
-    const ka = torrentKey(a);
-    return ka != null && ka === torrentKey(b);
-  };
   const seedersOf = (r) => Number(view(r).info?.seeders) || 0;
+  /**
+   * المقترحة من التورنت (طلب المالك، 27 نوفمبر): أعلى [TOP_PER_QUALITY] أسراب من كل جودة من أعلى جودتين موجودتين
+   * (4K ثم 1080p عادةً)، بالجودة ثم الزارعين، والضعيف (بلا زارعين أو CAM) خارجها. «المقترح» يبقى ظاهرًا ولو خارجها.
+   * مرشّح جودة واحدة: أعلى ضعفها منها. الصف الذي يتحرك تحت الإصبع محميّ بـTAP_GUARD_MS (shiftedAt في reconcile).
+   */
+  const topSwarms = (items, weak) => {
+    const strong = items.filter((r) => isSelectable(r) && !weak(r) && view(r).q != null);
+    const qs = [...new Set(strong.map((r) => view(r).q))].sort((a, b) => b - a).slice(0, 2);
+    const per = qs.length === 1 ? TOP_PER_QUALITY * 2 : TOP_PER_QUALITY;
+    const out = [];
+    for (const q of qs) out.push(...strong.filter((r) => view(r).q === q).sort((a, b) => seedersOf(b) - seedersOf(a) || placed.get(a.id) - placed.get(b.id)).slice(0, per));
+    const top = items.find((r) => r.id === topId);
+    if (top && !out.includes(top)) out.push(top);
+    return out;
+  };
+  // كلفة التحديث (قياس 27 نوفمبر، معالج بسرعة الجوال): 161ms لكل update بـ171 سيرفرًا، نصفها هنا: كل سيرفر يقارَن بكل
+  // عضو في كل مجموعة سابقة (sameTorrent تعيد التعبيرات النمطية في كل مقارنة). المجموعة تحفظ بصماتها ومفاتيحها، فالشرط
+  // نفسه بالضبط (sameTorrent وقيد البصمتين) يصير بحثًا في مجموعة، والبصمة والمفتاح يُحسبان مرة لكل سيرفر
   const oneTorrent = (routes) => {
     const groups = [];
     for (const r of routes) {
-      if (!view(r).torrent || (!hashOf(r) && !torrentKey(r))) continue;
-      const h = hashOf(r);
-      // لا تجمع المجموعة بصمتين معروفتين مختلفتين، ولو ربط بينهما مسار بلا بصمة
-      const g = groups.find((x) => x.members.some((m) => sameTorrent(m, r)) && x.members.every((m) => !h || !hashOf(m) || hashOf(m) === h));
-      if (!g) { groups.push({ best: r, members: [r] }); continue; }
+      if (!view(r).torrent) continue;
+      const h = hashOf(r), k = torrentKey(r);
+      if (!h && !k) continue;
+      // sameTorrent(m, r): بصمتان معروفتان تتطابقان، وإلا المفتاح (اسم الملف والحجم). ولا تجمع المجموعة بصمتين معروفتين
+      // مختلفتين، ولو ربط بينهما مسار بلا بصمة
+      const g = groups.find((x) => (h ? x.hashes.has(h) || (k != null && x.bareKeys.has(k)) : k != null && x.keys.has(k))
+        && (!h || x.hashes.size === 0 || (x.hashes.size === 1 && x.hashes.has(h))));
+      const join = (x) => { if (h) x.hashes.add(h); else if (k != null) x.bareKeys.add(k); if (k != null) x.keys.add(k); };
+      if (!g) { const x = { best: r, members: [r], hashes: new Set(), bareKeys: new Set(), keys: new Set() }; join(x); groups.push(x); continue; }
       g.members.push(r);
+      join(g);
       const cur = g.best;
       const take = placed.has(cur.id) ? isDead(cur) && isSelectable(r)
         : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
@@ -1026,9 +1093,22 @@ export function createServerSheet(body, o) {
     const directLive = live.filter((r) => !view(r).torrent).sort(bySeq);
     const torrentLive = live.filter((r) => view(r).torrent).sort(bySeq);
 
-    const fill = (g, items, cap, weak) => {
+    const fill = (g, items, cap, weak, pinned = null) => {
       const main = [];
       const extra = [];
+      // التورنت (المالك، 27 نوفمبر): الظاهر أعلى 5 أسراب من كل جودة من أعلى جودتين موجودتين، بالجودة ثم السرب
+      if (pinned) {
+        for (const r of pinned) { folded.set(r.id, true); main.push(row(r)); }
+        const shown = new Set(pinned);
+        for (const r of items) if (!shown.has(r)) { folded.set(r.id, false); extra.push(row(r)); }
+        reconcile(g.grid, main);
+        reconcile(g.moreGrid, extra);
+        g.more.hidden = !extra.length;
+        g.summary.textContent = `نسخ إضافية (${extra.length})`;
+        g.count.textContent = String(items.length);
+        g.s.hidden = !items.length;
+        return;
+      }
       // مكان الصف (ظاهر أو «نسخ إضافية») يُقرَّر مرة حين يظهر، فلا ينتقل بين الاثنين بعدها.
       // كل سيرفر مباشر صالح يظهر (طلب المالك 15 نوفمبر): كان الظاهر 12 فقط، فيصل سيرفر CloudStream الصالح بعدها مطويًّا
       // في «نسخ إضافية» ولا يراه أحد. التورنت وحده يبقى بستة إصدارات ظاهرة (عشرات الإصدارات للحلقة نفسها) والضعيف مطويّ.
@@ -1048,10 +1128,11 @@ export function createServerSheet(body, o) {
       g.s.hidden = !items.length;
     };
     fill(direct, directLive, Infinity);
-    fill(torrent, torrentLive, 6, (r) => {
+    const weakTorrent = (r) => {
       const d = view(r);
       return d.tier === 'dead' || d.info?.source === 'CAM';
-    });
+    };
+    fill(torrent, torrentLive, 6, weakTorrent, topSwarms(torrentLive, weakTorrent));
     announceRows(warmRows(torrentLive
       .filter((r) => r.id !== topId && folded.get(r.id) === true && isSelectable(r))
       .map((r) => ({ r, d: view(r), m: measured[r.id] }))));
@@ -1077,6 +1158,7 @@ export function createServerSheet(body, o) {
     ].filter(Boolean);
     reconcile(list, order);
     if (!order.length && routes.length) list.replaceChildren(el('p', 'ss-none', 'لا سيرفر بهذا الاختيار — جرّب جودة أو لغة أو مصدرًا آخر'));
+    holdHeight(filterKey);
 
     // زرّ واحد هادئ: يشغّل المقترح نفسه، أو ينتظر أول جاهز
     best.classList.remove('waiting');
