@@ -3,8 +3,9 @@
  *
  * 1. **نسخة الحساب:** ما كشفه هذا الجهاز بنفسه (لا يوجد عند الخادم) يُرفع ملخصًا صغيرًا بلا روابط بعد كل دورة،
  *    ويُستعاد مرة في تثبيت جديد. ما سبق الهجرة محفوظ في الخادم أصلًا وتعيده الهجرة نفسها.
- * 2. **إشارات الأصحاب:** ما يكشفه جهاز يصل لبقية الحسابات. الإشارة تُقبل **لمصدر مثبت هنا فقط** وبعد سياسة هذا
- *    الجهاز، وتُكتب حدثًا وترفع خطوط الأساس، ويتخطى الكاشف فحص هذا العمل من هذا المصدر لفترة، فلا يُطرق الموقع مرتين.
+ * 2. **إشارات الأصحاب:** ما يكشفه جهاز يصل لبقية الحسابات **ولو لم يُثبَّت مصدره هنا** (قرار المالك، 27 نوفمبر): الإشارة
+ *    خبر لا مصدر، فالتطبيق يبقى فارغًا من المصادر. تمر على سياسة هذا الجهاز، وتُكتب حدثًا وترفع خطوط الأساس، وإن كان
+ *    المصدر مثبتًا هنا يتخطى الكاشف فحص هذا العمل منه لفترة، فلا يُطرق الموقع مرتين.
  */
 import { raiseMarks } from './latest-migrate.js';
 
@@ -60,16 +61,16 @@ export async function restoreBackup(store, send) {
 }
 
 /**
- * يسحب إشارات الأصحاب الجديدة. `installed` مجموعة معرّفات المصادر المثبتة هنا، و`allow(section, sourceId, title)`
- * سياسة هذا الجهاز. ما يُقبل يصير حدثًا ويُعلَّم «طازجًا» فيتخطاه الكاشف.
+ * يسحب إشارات الأصحاب الجديدة. تُقبل كلها ما دامت تمر على `allow(section, sourceId, title)` (سياسة هذا الجهاز)، مثبتًا
+ * كان مصدرها أو لا. ما يُقبل يصير حدثًا ويُعلَّم «طازجًا» فيتخطاه الكاشف إن كان المصدر مثبتًا هنا.
  */
-export async function pullSignals(store, send, { installed, allow = () => true, now = Date.now() } = {}) {
+export async function pullSignals(store, send, { allow = () => true, now = Date.now() } = {}) {
   let after = (await store.getMeta('signals.after')) ?? 0, accepted = 0, rejected = 0;
   for (let round = 0; round < 10; round++) {
     const res = await send(`/v1/latest/signals?after=${after}`);
     if (res?.status !== 200 || !Array.isArray(res.body?.signals)) break;
     const list = res.body.signals;
-    const ok = list.filter((s) => installed.has(s.sourceId) && allow(s.section, s.sourceId, s.title));
+    const ok = list.filter((s) => allow(s.section, s.sourceId, s.title));
     rejected += list.length - ok.length;
     if (ok.length) {
       const events = ok.map((s) => ({ id: s.eventId, work: s.work, section: s.section, kind: s.kind, season: s.season, number: s.number, title: s.title, at: Math.min(s.at, now), firstSeenAt: Math.min(s.at, now), sources: [{ s: s.sourceId }] }));

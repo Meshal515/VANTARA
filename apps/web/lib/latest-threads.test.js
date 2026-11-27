@@ -35,13 +35,13 @@ describe('الخيط الثاني: إشارات الأصحاب', () => {
   const server = (signals) => vi.fn(async (path) => (path.startsWith('/v1/latest/signals') ? { status: 200, body: { signals: path.endsWith('after=0') ? signals : [], next: signals.length } } : { status: 404, body: {} }));
   const sig = (n, sourceId = 'pkg.ar') => ({ eventId: `ext:w|c:${n}`, work: 'ext:w', section: 'manga', kind: 'chapter', season: null, number: n, title: 'عمل', sourceId, at: 2000 + n });
 
-  it('تُقبل لمصدر مثبت هنا وبسياسة هذا الجهاز فقط، وتُكتب حدثًا وترفع الخط', async () => {
+  it('تظهر ولو لم يُثبَّت مصدرها هنا (قرار المالك)، والسياسة وحدها تمنع، وتُكتب حدثًا وترفع الخط', async () => {
     const store = fresh();
     const send = server([sig(10), sig(11, 'not.installed'), sig(12, 'pkg.blocked')]);
-    const r = await pullSignals(store, send, { installed: new Set(['pkg.ar', 'pkg.blocked']), allow: (section, key) => key !== 'pkg.blocked', now: 5000 });
-    expect(r).toEqual({ accepted: 1, rejected: 2 });
-    expect((await store.timeline('manga')).events.map((e) => e.id)).toEqual(['ext:w|c:10']);
-    expect((await store.getMarks(['ext:w']))[0].number).toBe(10);
+    const r = await pullSignals(store, send, { allow: (section, key) => key !== 'pkg.blocked', now: 5000 });
+    expect(r).toEqual({ accepted: 2, rejected: 1 });
+    expect((await store.timeline('manga')).events.map((e) => e.id)).toEqual(['ext:w|c:11', 'ext:w|c:10']);
+    expect((await store.getMarks(['ext:w']))[0].number).toBe(11);
     expect(await store.getMeta('signals.after')).toBe(3);
     expect(await friendFresh(store, 'pkg.ar', 'ext:w', 5000)).toBe(true);
     expect(await friendFresh(store, 'pkg.ar', 'ext:w', 5000 + 3 * 3_600_000)).toBe(false);
@@ -52,7 +52,7 @@ describe('الخيط الثاني: إشارات الأصحاب', () => {
     const p = { key: 'pkg.ar', host: 'h', section: 'manga', latest: async () => ({ items: [{ ref: { title: 'عمل' }, title: 'عمل', url: '/w' }] }), units: async () => { units++; return [{ number: 10, season: null }]; } };
     const engine = createLatestEngine({ store, providers: async () => [p], identify: async () => 'ext:w', now: () => 5000, skipWork: (q, work) => friendFresh(store, q.key, work, 5000) });
     await engine.runCycle();
-    await pullSignals(store, server([sig(10)]), { installed: new Set(['pkg.ar']), now: 5000 });
+    await pullSignals(store, server([sig(10)]), { now: 5000 });
     const st = await engine.runCycle();
     expect(st.friendSkip).toBe(1);
     expect(units).toBe(0);

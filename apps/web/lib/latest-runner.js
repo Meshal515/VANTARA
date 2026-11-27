@@ -48,8 +48,8 @@ export function startLatestRunner({ store, ready, send = null, doc = globalThis.
     if (!send) return;
     try { await restoreBackup(store, send); } catch { /* المحاولة في الدورة التالية */ }
     try {
-      const installed = new Set(current.map((p) => p.key));
-      await pullSignals(store, send, { installed, allow: (section, key, title) => latestAllowed({ section, key }, { title, ref: { title } }) });
+      // ولو لم يُثبَّت المصدر هنا (قرار المالك): الإشارة خبر، والسياسة نفسها تحكمها
+      await pullSignals(store, send, { allow: (section, key, title) => latestAllowed({ section, key }, { title, ref: { title } }) });
     } catch { /* المحاولة في الدورة التالية */ }
   }
   let timer = null, stopped = false;
