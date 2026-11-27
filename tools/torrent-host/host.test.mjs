@@ -322,6 +322,40 @@ test('libtorrent host: written blocks are tracked from libtorrent before a piece
   assert.equal(last.failures, 0);
 });
 
+test('libtorrent host: early bytes arrive before their piece verifies, exact; a hash failure stops early reads and is reported for recovery', { skip, timeout: 120000 }, async t => {
+  // الخطوة 2 من الخيار B: أول قطع الطلب من كتلها المكتوبة (لا انتظار القطعة الموثقة كاملة)، وفشل تحقق قطعة سُلّم منها مبكرًا
+  // يجعل التورنت موثقًا فقط ويُعلَن في /stats/v1 فيعيد التطبيق تحميل mpv من الموضع. ما بعده موثق فقط وصحيح
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  const id = added.body.id;
+  // الفشل أثناء القراءة نفسها، لحظة وجود قطعة سُلّم منها ولم تتحقق بعد (لا بعد أن يتحقق كل شيء)
+  const reading = request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=0-${8 * 1048576 - 1}` }, raw: true, timeout: 60000 });
+  let failed = null;
+  for (const until = Date.now() + 20000; Date.now() < until && !failed; await sleep(20)) {
+    const d = (await request(base, `/torrents/${id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
+    if (d?.early?.pending > 0) {
+      const r = await request(base, `/torrents/${id}/test-hash-fail`, { method: 'POST' });
+      if (r.status === 200) failed = r.body;
+    }
+  }
+  assert.ok(failed, 'a piece served before verification was still pending when the failure arrived');
+  const after = (await request(base, `/torrents/${id}/stats/v1`)).body.vantara;
+  t.diagnostic(`hash failure on piece ${failed.piece} while reading: ${JSON.stringify(after)}`);
+  assert.equal(after.early_failures, 1, 'reported for the app to reload mpv at the position');
+  assert.equal(after.verified_only, true);
+  const body = (await reading).body;
+  assert.ok(body.equals(data.subarray(0, 8 * 1048576)), 'the read finishes with exact bytes (verified after the failure)');
+  const last = (await request(base, `/torrents/${id}/stats/v1`)).body.vantara;
+  assert.ok(last.early_bytes - after.early_bytes <= 1048576, `at most the span already in flight is early after the failure (${last.early_bytes - after.early_bytes})`);
+  const more = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=${16 * 1048576}-${17 * 1048576 - 1}` }, raw: true, timeout: 60000 });
+  assert.ok(more.body.equals(data.subarray(16 * 1048576, 17 * 1048576)));
+  assert.equal((await request(base, `/torrents/${id}/stats/v1`)).body.vantara.early_bytes, last.early_bytes, 'a new reader after the failure gets verified bytes only');
+});
+
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vantara-torrent-parent-'));
   const apiPort = await port(), listenPort = await port();

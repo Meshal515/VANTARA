@@ -789,11 +789,26 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         const snapshot=stats.live?.snapshot,range=state.latestDemand;
         state.trace.record('torrent-sample',{knownPeers:snapshot?.peer_stats?.seen,connectedPeers:peers,speedBytes:Number.isFinite(speed)?speed*1024*1024:undefined,checkedBytes:snapshot?.downloaded_and_checked_bytes,checkedPieces:snapshot?.downloaded_and_checked_pieces,requestedPiece:range?Math.floor((state.win.fileOffset+range.cursor)/(state.win.pieceLength||1)):undefined,cursor:range?.cursor,cacheBytesRead:state.cacheBytesRead??0});
         if(peers>0)state.trace.once('peer-connected');
+        // الخيار B: تحقق قطعة سُلّم منها قبل التحقق فشل. المحرك صار موثقًا فقط لهذا التورنت، وما سُلّم قبل الفشل لا
+        // يُسترجع: يعاد تحميل mpv من الموضع نفسه ببيانات موثقة (كما PlayerActivity.recoverVerified في أندرويد)
+        const earlyFailures=Number(stats.vantara?.early_failures);
+        if(Number.isFinite(earlyFailures)&&earlyFailures>(state.earlyFailures??0)){state.earlyFailures=earlyFailures;void reloadVerified(state);}
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{}),...(Number.isFinite(seeds)?{seeds}:{})});
       }catch{}finally{state.statsPending=false;}
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
     return state.streamUrl;
+  }
+  /** إعادة تحميل mpv عند الموضع الحالي وحالته (موقوف/يعمل) بعد فشل تحقق قطعة قُرئت مبكرًا. */
+  async function reloadVerified(state){
+    if(state.stopped||current!==state||!state.streamUrl)return;
+    let seconds=null;
+    try{seconds=await ipcCommand(state,['get_property','time-pos']);}catch{}
+    if(state.stopped||current!==state)return;
+    const at=Number.isFinite(seconds)&&seconds>=0?seconds:0;
+    state.trace.record('early-failure-reload',{position:Math.round(at*1000)});
+    emit(state,{type:'playback/retrying',message:'قطعة لم يكتمل تحققها: نعيد التشغيل من بيانات موثقة'});
+    void ipcCommand(state,['loadfile',state.streamUrl,'replace',-1,`start=${at},pause=${state.mediaPaused?'yes':'no'}`]).catch(()=>{});
   }
   /**
    * يشغّل محرك التورنت وينتظر واجهته: libtorrent أولًا ثم rqbit احتياطًا (engineOrder). لكل محرك

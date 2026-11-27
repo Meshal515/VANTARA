@@ -108,6 +108,8 @@ static const std::vector<std::string> PUBLIC_TRACKERS = {
 };
 static constexpr int MAX_ANNOUNCE = 48;
 static constexpr int BLOCK = 16 * 1024;  // كتلة libtorrent
+// الخيار B: سقف ما يُسلَّم قبل التحقق لكل طلب (كما TurboRead.MAX_BYTES_PER_OPEN في أندرويد). VANTARA_LT_EARLY_MB=0 يعطّله
+static int64_t EARLY_BYTES = 32LL * 1024 * 1024;
 // قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
 static int WINDOW = 12;                    // TorrentPolicy.window count
 // libtorrent مخصص (tools/libtorrent-patches عبر منفذ vcpkg): قطعتان فقط بموعد، فـlibtorrent يرفع كل قطعة بموعد إلى
@@ -447,7 +449,13 @@ public:
           << ",\"live\":{\"download_speed\":{\"mbps\":" << (st.download_payload_rate / 1048576.0) << "},\"upload_speed\":{\"mbps\":" << (st.upload_payload_rate / 1048576.0)
           << "},\"snapshot\":{\"downloaded_and_checked_bytes\":" << st.total_done << ",\"downloaded_and_checked_pieces\":" << st.num_pieces
           << ",\"peer_stats\":{\"live\":" << st.num_peers << ",\"seen\":" << (st.list_peers) << ",\"seeds\":" << st.num_seeds << "}}}"
-          << ",\"waiting_piece\":" << t->waitingPiece << "}";
+          << ",\"waiting_piece\":" << t->waitingPiece;
+        {
+            // الخيار B: فشل تحقق قطعة سُلّم منها مبكرًا ⇒ التطبيق يعيد تحميل mpv من الموضع (services.mjs)
+            std::lock_guard<std::mutex> lock(m_);
+            o << ",\"vantara\":{\"early_failures\":" << t->earlyFailures << ",\"early_bytes\":" << t->earlyBytes << ",\"verified_only\":" << (t->verifiedOnly ? "true" : "false") << "}";
+        }
+        o << "}";
         return {200, o.str()};
     }
 
@@ -550,6 +558,16 @@ public:
         auto t = find(id);
         if (!t) return {404, R"({"error":"not found"})"};
         if (what == "pause") { t->h.pause(); t->paused = true; }
+        else if (what == "test-hash-fail") {
+            // للاختبار فقط (--allow-private-peers): فشل تحقق كما يصل من libtorrent لأول قطعة سُلّم منها مبكرًا
+            if (!allowPrivate_) return {404, R"({"error":"not found"})"};
+            int piece = -1;
+            { std::lock_guard<std::mutex> lock(m_); if (!t->early.empty()) piece = *t->early.begin(); }
+            if (piece < 0) return {409, R"({"error":"no early piece"})"};
+            pieceSettled(t->h, piece, true);
+            cv_.notify_all();
+            return {200, "{\"piece\":" + std::to_string(piece) + "}"};
+        }
         else if (what == "start") {
             // الإيقاف يقطع كل المشاركين؛ الاستئناف وحده يبدأ بالقلة المعروفة ولا يسأل المتتبعات وDHT حتى موعدها
             // (عيّنة المالك: زارعون قليلون ثم كثروا فجأة، وأول صورة +20 ث مع تورنت دافئ). إعلان فوري كالإضافة الأولى
@@ -584,6 +602,13 @@ public:
         int64_t const offset = files.file_offset(lt::file_index_t(fileIndex));
         int const pieceLength = ti->piece_length();
         int64_t pos = from;
+        // الخيار B (كما TurboRead في أندرويد): أول القطع المختلفة لهذا الطلب حتى policy::EARLY_BYTES تُسلَّم من كتلها
+        // المكتوبة قبل تحقق القطعة (فهرس MKV 6.5KB كان ينتظر قطعة 16MB: 7.2 ث). التحقق يستمر؛ فشله يجعل التورنت موثقًا
+        // فقط ويزيد trust، فيعيد التطبيق تحميل mpv من الموضع ببيانات موثقة. ما بعدها موثق دائمًا.
+        int64_t earlyLeft = policy::EARLY_BYTES;
+        int const firstLimit = int(std::clamp<int64_t>((policy::EARLY_BYTES + pieceLength - 1) / pieceLength, 2, 64));
+        std::set<int> firstPieces;
+        int hintPiece = -1, hintBlock = -1;
         while (pos <= to) {
             if (stopping_) return false;
             int64_t const absolute = offset + pos;
@@ -591,6 +616,31 @@ public:
             int const inPiece = int(absolute % pieceLength);
             int const rangeLast = int((offset + to) / pieceLength);
             reposition(t, *ti, fileIndex, piece, readerId, false, rangeLast);
+#ifdef VANTARA_LT_READ_HINTS
+            // 0004: كتل القطعة من موضع القراءة لا من أولها (فهرس MKV في آخر القطعة الأخيرة)، كل 4 كتل أو قطعة جديدة
+            if (piece != hintPiece || inPiece / policy::BLOCK < hintBlock || inPiece / policy::BLOCK - hintBlock >= 4) {
+                hintPiece = piece; hintBlock = inPiece / policy::BLOCK;
+                try { t->h.vantara_set_read_hint(int(readerId & 0x7fffffff), lt::piece_index_t(piece), inPiece); } catch (...) {}
+            }
+#else
+            (void)hintPiece; (void)hintBlock;
+#endif
+            if (earlyLeft > 0 && (firstPieces.count(piece) || int(firstPieces.size()) < firstLimit)) {
+                firstPieces.insert(piece);
+                int64_t const pieceSize = ti->piece_size(lt::piece_index_t(piece));
+                int64_t const want = std::min<int64_t>({to - pos + 1, pieceSize - inPiece, earlyLeft, 1 << 20});
+                int64_t const span = waitEarly(t, piece, inPiece, want);
+                if (span > 0) {
+                    std::vector<char> buf(static_cast<std::size_t>(span));
+                    if (readSpan(t->h, piece, inPiece, buf)) {
+                        { std::lock_guard<std::mutex> lock(m_); t->earlyBytes += span; }
+                        if (!send(buf.data(), buf.size())) return false;
+                        pos += span; earlyLeft -= span;
+                        continue;
+                    }
+                    earlyLeft = 0;  // القرص لم يعطِ ما أعلن libtorrent كتابته: هذا الطلب موثق فقط من الآن
+                } else if (span < 0) return false;
+            }
             std::shared_ptr<std::vector<char>> data = waitPiece(t, piece);
             if (!data) return false;
             reposition(t, *ti, fileIndex, piece, readerId, true, rangeLast);
@@ -605,6 +655,9 @@ public:
     void dropReader(std::shared_ptr<Torrent> const& t, uint64_t readerId) {
         std::lock_guard<std::mutex> lock(m_);
         t->readers.erase(readerId);
+#ifdef VANTARA_LT_READ_HINTS
+        try { t->h.vantara_clear_read_hint(int(readerId & 0x7fffffff)); } catch (...) {}
+#endif
     }
 
     uint64_t newReader() { return ++readerSeq_; }
@@ -801,6 +854,55 @@ private:
         t->deadlined = keep;
     }
 
+    /**
+     * الخيار B: كم بايتًا متصلًا من [inPiece] (حتى [want]) كُتبت كتله ولم تتحقق القطعة بعد. 0 = اقرأ الموثق (تحققت القطعة،
+     * أو التورنت موثق فقط)، -1 = أُزيل التورنت أو توقف الخادم. يسجّل القطعة «مبكرة» قبل القراءة من القرص (فشل يصل بين
+     * التسجيل والقراءة يُكشف ولا يمر).
+     */
+    int64_t waitEarly(std::shared_ptr<Torrent> const& t, int piece, int inPiece, int64_t want) {
+        std::unique_lock<std::mutex> lock(m_);
+        for (;;) {
+            if (stopping_ || !byId_.count(t->id)) return -1;
+            if (t->verifiedOnly || t->pieceCache.count(piece) || t->h.have_piece(lt::piece_index_t(piece))) return 0;
+            if (auto it = t->written.find(piece); it != t->written.end()) {
+                auto const& bits = it->second;
+                int64_t const size = int64_t(bits.size()) * policy::BLOCK;
+                int64_t end = inPiece;
+                while (end < inPiece + want && size_t(end / policy::BLOCK) < bits.size() && bits[size_t(end / policy::BLOCK)])
+                    end = std::min<int64_t>((end / policy::BLOCK + 1) * policy::BLOCK, size);
+                int64_t const span = std::min<int64_t>(end, inPiece + want) - inPiece;
+                if (span > 0) {
+                    t->early.insert(piece);
+                    if (t->waitingPiece == piece) t->waitingPiece = -1;
+                    return span;
+                }
+            }
+            if (t->waitingPiece != piece) { t->waitingPiece = piece; t->waitingSince = clk::now(); }
+            cv_.wait_for(lock, 100ms);
+        }
+    }
+
+    /** [out].size() بايت من [piece] عند [inPiece] كما كُتبت على القرص (قد تعبر ملفات الحزمة)؛ false إن لم يعطها القرص. */
+    bool readSpan(lt::torrent_handle const& h, int piece, int inPiece, std::vector<char>& out) {
+        try {
+            auto const ti = h.torrent_file();
+            if (!ti) return false;
+            auto const& layout = ltc::files(*ti);
+            int64_t off = 0;
+            for (auto const& sl : ti->map_block(lt::piece_index_t(piece), inPiece, int(out.size()))) {
+                if (!layout.pad_file_at(sl.file_index)) {
+                    std::ifstream in(fs::u8path(layout.file_path(sl.file_index, dir_)), std::ios::binary);
+                    if (!in) return false;
+                    in.seekg(std::streamoff(sl.offset));
+                    in.read(out.data() + off, std::streamsize(sl.size));
+                    if (in.gcount() != std::streamsize(sl.size)) return false;
+                }
+                off += sl.size;
+            }
+            return off == int64_t(out.size());
+        } catch (...) { return false; }
+    }
+
     std::shared_ptr<std::vector<char>> waitPiece(std::shared_ptr<Torrent> const& t, int piece) {
         std::unique_lock<std::mutex> lock(m_);
         bool waited = false;
@@ -938,6 +1040,8 @@ private:
             if (!info || piece < 0 || piece >= info->num_pieces() || block < 0) return false;
             int const blocks = (info->piece_size(lt::piece_index_t(piece)) + policy::BLOCK - 1) / policy::BLOCK;
             if (block >= blocks) return false;
+            // كتلة مكررة (إنقاذ الكتل البطيئة) تُكتب بعد تحقق قطعتها: لا تعيد فتح سجل قطعة متحققة (اختبار stale)
+            if (t->h.have_piece(lt::piece_index_t(piece))) return false;
             auto& bits = t->written[piece];
             if (bits.empty()) bits.assign(size_t(blocks), false);
             bits[size_t(block)] = true;
@@ -1267,6 +1371,7 @@ static int seedMode(std::string const& file, int port, int pieceSize) {
 int main(int argc, char** argv) {
     // تجارب القياس فقط: حجم نافذة القراءة وما بعدها؛ بلا المتغيرين تبقى قيم الـAPK (12 و64)
     if (const char* w = std::getenv("VANTARA_LT_WINDOW")) policy::WINDOW = std::max(1, std::atoi(w));
+    if (const char* e = std::getenv("VANTARA_LT_EARLY_MB")) policy::EARLY_BYTES = std::max(0LL, std::atoll(e)) * 1024 * 1024;
     if (const char* c = std::getenv("VANTARA_LT_CRITICAL")) policy::CRITICAL = std::max(0, std::atoi(c));
 #ifdef VANTARA_PATCHED_LIBTORRENT
     // ضبط التعديلين قبل أول جلسة (libtorrent يقرؤه مرة واحدة)؛ متغير بيئة موجود يغلب للمقارنة
