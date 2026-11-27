@@ -107,6 +107,7 @@ static const std::vector<std::string> PUBLIC_TRACKERS = {
     "http://tracker.opentrackr.org:1337/announce", "https://tracker.gbitt.info:443/announce",
 };
 static constexpr int MAX_ANNOUNCE = 48;
+static constexpr int BLOCK = 16 * 1024;  // كتلة libtorrent
 // قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
 static int WINDOW = 12;                    // TorrentPolicy.window count
 // libtorrent مخصص (tools/libtorrent-patches عبر منفذ vcpkg): قطعتان فقط بموعد، فـlibtorrent يرفع كل قطعة بموعد إلى
@@ -243,6 +244,16 @@ struct Torrent {
     std::set<int> directPending;  // قطع في طابور القراءة المسبقة المباشرة (خيط مستقل)
     int directHits = 0, directMisses = 0, directAhead = 0;
     int errorRecoveries = 0;
+    // الخيار B (كما TurboRead في أندرويد): كتل القطع غير المتحقق منها كما أعلن libtorrent كتابتها على القرص
+    // (block_finished_alert بعد نجاح الكتابة)، تُمحى عند تحقق القطعة أو فشله. [early]: قطع سُلّم منها قبل التحقق
+    // ولم يُحسم تحققها بعد؛ فشل تحقق إحداها يجعل التورنت موثقًا فقط ([verifiedOnly]) ويزيد [trust] فيعيد التطبيق
+    // تحميل mpv من الموضع نفسه ببيانات موثقة (ما سُلّم قبل الفشل لا يُسترجع: التعافي إعادة تحميل).
+    std::map<int, std::vector<bool>> written;
+    std::set<int> early;
+    bool verifiedOnly = false;
+    int trust = 0;
+    int earlyFailures = 0;
+    int64_t earlyBytes = 0;
 };
 
 static void applyOverrides(lt::settings_pack& s, std::string const& raw) {
@@ -314,7 +325,7 @@ public:
         if (allowPrivate_) { s.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true); s.set_bool(lt::settings_pack::enable_dht, false); s.set_bool(lt::settings_pack::enable_upnp, false); s.set_bool(lt::settings_pack::enable_natpmp, false); }
         s.set_str(lt::settings_pack::listen_interfaces, (allowPrivate_ ? "127.0.0.1:" : "0.0.0.0:") + std::to_string(listenPort) + (allowPrivate_ ? "" : ",[::]:" + std::to_string(listenPort)));
         s.set_str(lt::settings_pack::user_agent, std::string("VANTARA/") + VERSION + " libtorrent/" + lt::version());
-        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
+        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | lt::alert_category::block_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
         // تجارب القياس فقط: VANTARA_LT_SETTINGS="اسم=قيمة,..." بأسماء settings_pack نفسها، فوق إعدادات الـAPK.
         // بلا المتغير لا يتغير شيء. كل إعداد يُطبع على stderr حتى يُعرف ما قيس.
         if (const char* raw = std::getenv("VANTARA_LT_SETTINGS")) applyOverrides(s, raw);
@@ -486,7 +497,19 @@ public:
               << ",\"piece\":" << int(static_cast<std::int32_t>(pi.downloading_piece_index)) << "}";
         }
         o << "],\"state\":" << int(st.state) << ",\"paused\":" << (bool(st.flags & lt::torrent_flags::paused) ? 1 : 0)
-          << ",\"finished\":" << (st.is_finished ? 1 : 0) << ",\"readers\":[";
+          << ",\"finished\":" << (st.is_finished ? 1 : 0);
+        {
+            std::lock_guard<std::mutex> lock(m_);
+            size_t blocks = 0, stale = 0;
+            for (auto const& [p, bits] : t->written) {
+                for (bool b : bits) blocks += b ? 1 : 0;
+                // قطعة تحققت وبقيت في السجل = تتبع خاطئ (يجب أن تُمحى عند piece_finished)
+                if (t->h.have_piece(lt::piece_index_t(p))) ++stale;
+            }
+            o << ",\"early\":{\"written_pieces\":" << t->written.size() << ",\"written_blocks\":" << blocks << ",\"stale\":" << stale << ",\"pending\":" << t->early.size()
+              << ",\"bytes\":" << t->earlyBytes << ",\"failures\":" << t->earlyFailures << ",\"trust\":" << t->trust << ",\"verified_only\":" << (t->verifiedOnly ? 1 : 0) << "}";
+        }
+        o << ",\"readers\":[";
         // كل قارئ مفتوح: قطعته، ومنذ متى، وهل نُزّلت، وهل قراءتها من القرص جارية، وأولويتها وموعدها (أين يعلق إن علق)
         {
             std::vector<std::pair<uint64_t, Reader>> readers;
@@ -906,6 +929,34 @@ private:
         while (t.cacheOrder.size() > size_t(std::max(6, policy::READAHEAD + 2))) { t.pieceCache.erase(t.cacheOrder.front()); t.cacheOrder.pop_front(); }
     }
 
+    // الخيار B: كتلة كُتبت على القرص (true إن كانت لقطعة يتتبعها البث، فيستيقظ من ينتظر)
+    bool blockWritten(lt::torrent_handle const& handle, int piece, int block) {
+        std::lock_guard<std::mutex> lock(m_);
+        for (auto& [id, t] : byId_) {
+            if (t->h != handle) continue;
+            auto const info = t->h.torrent_file();
+            if (!info || piece < 0 || piece >= info->num_pieces() || block < 0) return false;
+            int const blocks = (info->piece_size(lt::piece_index_t(piece)) + policy::BLOCK - 1) / policy::BLOCK;
+            if (block >= blocks) return false;
+            auto& bits = t->written[piece];
+            if (bits.empty()) bits.assign(size_t(blocks), false);
+            bits[size_t(block)] = true;
+            return true;
+        }
+        return false;
+    }
+    // تحقق القطعة أو فشله يحسم كتلها؛ فشل قطعة سُلّم منها قبل التحقق = التورنت موثق فقط وجيل الثقة يزيد
+    void pieceSettled(lt::torrent_handle const& handle, int piece, bool failed) {
+        std::lock_guard<std::mutex> lock(m_);
+        for (auto& [id, t] : byId_) {
+            if (t->h != handle) continue;
+            t->written.erase(piece);
+            bool const wasEarly = t->early.erase(piece) > 0;
+            if (failed) { ++t->trust; if (wasEarly) { ++t->earlyFailures; t->verifiedOnly = true; } }
+            return;
+        }
+    }
+
     void storePiece(lt::read_piece_alert const* a) {
         std::lock_guard<std::mutex> lock(m_);
         for (auto& [id, t] : byId_) {
@@ -976,6 +1027,9 @@ private:
             bool notify = false;
             for (lt::alert* a : alerts) {
                 if (auto* r = lt::alert_cast<lt::read_piece_alert>(a)) { storePiece(r); notify = true; }
+                else if (auto* b = lt::alert_cast<lt::block_finished_alert>(a)) { if (blockWritten(b->handle, int(static_cast<std::int32_t>(b->piece_index)), b->block_index)) notify = true; continue; }
+                else if (auto* f = lt::alert_cast<lt::piece_finished_alert>(a)) { pieceSettled(f->handle, int(static_cast<std::int32_t>(f->piece_index)), false); notify = true; continue; }
+                else if (auto* h = lt::alert_cast<lt::hash_failed_alert>(a)) { pieceSettled(h->handle, int(static_cast<std::int32_t>(h->piece_index)), true); notify = true; continue; }
                 else if (lt::alert_cast<lt::piece_finished_alert>(a) || lt::alert_cast<lt::metadata_received_alert>(a) || lt::alert_cast<lt::torrent_removed_alert>(a) || lt::alert_cast<lt::hash_failed_alert>(a)) notify = true;
                 else if (auto* e = lt::alert_cast<lt::torrent_error_alert>(a)) { std::cerr << "torrent error: " << e->message() << '\n'; notify = true; }
                 if (debug_ && (lt::alert_cast<lt::peer_error_alert>(a) || lt::alert_cast<lt::peer_disconnected_alert>(a) || lt::alert_cast<lt::peer_connect_alert>(a) || lt::alert_cast<lt::listen_failed_alert>(a) || lt::alert_cast<lt::listen_succeeded_alert>(a)))

@@ -289,6 +289,39 @@ test('libtorrent host: a reader paused between pieces keeps its next piece wante
   assert.ok(body && body.equals(data.subarray(0, head)), 'head read finishes with exact bytes after the pause');
 });
 
+test('libtorrent host: written blocks are tracked from libtorrent before a piece verifies, and settle when it does (option B, step 1)', { skip, timeout: 120000 }, async t => {
+  // ويندوز: الخادم يسلّم القطع الموثقة كاملة فقط، فـ6.5KB من فهرس MKV تنتظر قطعة 16MB (bench: 7.2 ث من 10.3 حتى أول صورة).
+  // الخطوة 1 من الخيار B كما في أندرويد: كتل كل قطعة غير موثقة كما أعلنها libtorrent بعد كتابتها (block_finished_alert)،
+  // تُمحى عند تحققها. السرب مقيد السرعة فتُرى القطع جزئية
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  const read = request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: `bytes=0-${8 * 1024 * 1024 - 1}` }, raw: true, timeout: 60000 });
+  let sawPartial = null;
+  for (const until = Date.now() + 30000; Date.now() < until && !sawPartial; await sleep(100)) {
+    const d = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
+    if (d?.early?.written_blocks > 0) sawPartial = d.early;
+  }
+  t.diagnostic(`partial pieces while downloading: ${JSON.stringify(sawPartial)}`);
+  assert.ok(sawPartial, 'blocks written before their piece verified are seen');
+  assert.equal(sawPartial.verified_only, 0);
+  const body = (await read).body;
+  assert.ok(body.equals(data.subarray(0, 8 * 1024 * 1024)), 'exact bytes');
+  // طوال التنزيل وبعده: لا قطعة تحققت وبقيت في السجل (تُمحى عند piece_finished)، ولا فشل
+  let worst = 0, last = null;
+  for (const until = Date.now() + 4000; Date.now() < until; await sleep(150)) {
+    last = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 })).body.early;
+    worst = Math.max(worst, last.stale);
+  }
+  t.diagnostic(`after the read: ${JSON.stringify(last)}, worst stale ${worst}`);
+  assert.equal(worst, 0, 'a verified piece never stays in the written-blocks record');
+  assert.equal(last.failures, 0);
+});
+
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vantara-torrent-parent-'));
   const apiPort = await port(), listenPort = await port();
