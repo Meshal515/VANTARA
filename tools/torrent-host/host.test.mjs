@@ -243,6 +243,52 @@ test('libtorrent host: two concurrent readers (head and tail, like prewarmEdges)
   assert.deepEqual(starved, [], 'a reader waited on a piece nobody requested');
 });
 
+test('libtorrent host: a reader paused between pieces keeps its next piece wanted while another reader finishes (no false «finished»)', { skip, timeout: 150000 }, async t => {
+  // جذر البناءين 85 و86: قارئ الرأس كان يرسل قطعة نزّلها (send يحجبه المستقبِل)، وموضعه المسجّل هو تلك القطعة المنزّلة،
+  // فقارئ الذيل في وضع التركيز يجعل قطعته التالية «لا تُنزَّل». اكتمل الذيل فصار كل المطلوب منزّلًا: libtorrent أعلن
+  // الانتهاء (state=4) وقطع الباذر (كلاهما يرفع فقط)، ثم انتظر الرأس القطعة 4 بلا مشارك 120 ث. هنا المستقبِل يتوقف عمدًا
+  // عن القراءة حتى يكتمل الذيل (ويندوز يتأخر في send فتتسع هذه الفجوة؛ لينكس يضيّقها فينجح الاختبار الأول مصادفة).
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 2 * 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  // الرأس حتى بداية الذيل: بقية مداه لم تُنزَّل حين يُحجب (كالقطعة 4 في ويندوز)، فإعلان الانتهاء خطأ لا اكتمال
+  const id = added.body.id, tail = 2 * 1024 * 1024, head = data.length - tail;
+  let resume;
+  const released = new Promise(r => { resume = r; });
+  const headDone = new Promise((resolve, reject) => {
+    const req = http.request(new URL(`/torrents/${id}/stream/0`, base), { headers: { Authorization: `Basic ${Buffer.from(auth).toString('base64')}`, Range: `bytes=0-${head - 1}`, 'x-req-timeout-ms': '120000' } }, res => {
+      const chunks = [];
+      res.once('data', c => { chunks.push(c); res.pause(); released.then(() => res.resume()); res.on('data', d => chunks.push(d)); });
+      res.on('end', () => resolve(Buffer.concat(chunks))); res.on('error', reject);
+    });
+    req.setTimeout(120000, () => req.destroy(new Error('timeout')));
+    req.on('error', reject); req.end();
+  });
+  // الرأس محجوب في send: موضعه المسجّل قطعة منزّلة ولم يمر عليه شيء ثانية (ذاكرة المقبس امتلأت)، كما في ويندوز
+  let blocked = null;
+  for (const until = Date.now() + 30000; Date.now() < until && !blocked; await sleep(200)) {
+    const r = (await request(base, `/torrents/${id}/diag`, { timeout: 5000 }).catch(() => null))?.body?.readers?.[0];
+    if (r?.have === 1 && r.reading === 0 && r.ms > 1000) blocked = r;
+  }
+  assert.ok(blocked, 'the head reader blocks in send on a downloaded piece');
+  t.diagnostic(`head reader blocked on piece ${blocked.piece}`);
+  const last = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=${data.length - tail}-${data.length - 1}` }, raw: true, timeout: 60000 });
+  assert.ok(last.body.equals(data.subarray(data.length - tail)), 'tail bytes exact');
+  await sleep(2000); // تُغلق قراءة الذيل ويستقر المحرك والرأس ما زال متوقفًا
+  const during = (await request(base, `/torrents/${id}/diag`, { timeout: 5000 })).body;
+  t.diagnostic(`while the head reader is paused: state=${during.state} finished=${during.finished} peers=${during.peers} pieces=${during.pieces} readers=${JSON.stringify(during.readers)} proxy=${JSON.stringify(proxy.stats)}`);
+  resume();
+  const started = performance.now();
+  const body = await Promise.race([headDone, sleep(45000).then(() => null)]);
+  t.diagnostic(`head after release: ${body ? `${Math.round(performance.now() - started)}ms` : 'stuck 45s'}`);
+  assert.equal(during.finished, 0, 'the torrent is not «finished» while an open reader still needs pieces');
+  assert.ok(body && body.equals(data.subarray(0, head)), 'head read finishes with exact bytes after the pause');
+});
+
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vantara-torrent-parent-'));
   const apiPort = await port(), listenPort = await port();
