@@ -1132,7 +1132,8 @@ class TorrentEngine internal constructor(
             var checkedAt = 0L
             var swappedAt = 0L
             var done = -1L
-            // للتشخيص: لقطة الثانية الأولى من انتظار طويل ([ReadWait])، تُسجَّل حين ينتهي
+            // للتشخيص: لقطة أول 0.1 ث من انتظار ([ReadWait])، تُسجَّل حين ينتهي. كانت عند ثانية فاختفت انتظارات قراءة
+            // الفهرس الأقصر منها (عينة المالك 27 نوفمبر: 4.2 ث لـ1.6MB من ذيل الملف بلا انتظار مسجل واحد)
             var probe: IntArray? = null
             fun waited(earlyRead: Boolean) {
                 val p = probe ?: return
@@ -1162,7 +1163,7 @@ class TorrentEngine internal constructor(
                     // البايتات الواصلة لا القطع المكتملة: بسرعة 6 Mbps وقطع كبيرة لا تكتمل قطعة خلال 30 ث
                     // والتحميل مستمر، فكان يُحكم بالتوقف ويفشل التشغيل («try another source»).
                     val now = System.nanoTime()
-                    if (probe == null && now - start >= ONE_SECOND_NS) {
+                    if (probe == null && now - start >= WAIT_PROBE_NS) {
                         val bits = written[piece]
                         val queued = runCatching { handle.downloadQueue.firstOrNull { it.pieceIndex() == piece } }.getOrNull()
                         val blocks = queued?.blocksInPiece() ?: ((pieceSizeOf(piece) + TurboRead.BLOCK_BYTES - 1) / TurboRead.BLOCK_BYTES)
@@ -1254,7 +1255,8 @@ class TorrentEngine internal constructor(
         private const val MAX_PIECE_BYTES = 16 * 1024 * 1024
         /** قطع ناقصة بلا موعد تُتتبع كتلها للخيار B في وقت واحد (ذوات الموعد تُتتبع دائمًا). */
         private const val MAX_TRACKED_PIECES = 64
-        private const val MAX_WAITS = 32
+        private const val MAX_WAITS = 64
+        private val WAIT_PROBE_NS = TimeUnit.MILLISECONDS.toNanos(100)
         /** تلميح القراءة (0004): قارئ التسخين، ويُحدَّث تلميح الفتح كل 4 كتل (64KB) يتقدمها. */
         private const val WARM_READER = 0
         /** قارئ Cues في الخلفية ([fetchCues]): لا يصطدم بقراء المشغّل (من 1) ولا بالتسخين (0). */

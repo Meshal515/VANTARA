@@ -44,7 +44,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
         /** الخيار B: مسموح الآن، وما قُرئ قبل التحقق، وكم قطعة منه فشل تحققها. */
         val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
-        /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من ثانية. */
+        /** تلميح القراءة: وصل libtorrent كم مرة وفشل كم مرة، وآخر انتظارات القطع الأطول من 0.1 ث. */
         val hintsSent: Int = 0, val hintsFailed: Int = 0,
         val waits: List<com.vantara.addons.torrent.ReadWait> = emptyList(),
         /** تقرير الذهب: إضافة التورنت للجلسة، وMetadata من ملف محفوظ، وأول مشارك معروف. */
@@ -188,12 +188,12 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     /** مدخل تقرير الذهب من هذه الجلسة (ساعة واحدة: elapsedRealtime). */
     @Synchronized fun goldInput(t: TorrentFacts?, nowMs: Long = now(), build: String = "—", patched: Boolean = false, critical: Int = 0) = GoldReport.Input(
         tapAt = launchedAt, openAt = openAt, preparationMs = preparationMs,
-        reads = reads.map { GoldReport.Read(it.at, it.openedAt, it.firstByteAt, it.position, it.bytes) },
+        reads = reads.map { GoldReport.Read(it.at, it.openedAt, it.firstByteAt, it.position, it.bytes, it.endAt) },
         tracksAt = tracksAt, readyAt = readyAt, frameAt = frameAt, audioOnlyAt = audioOnlyAt,
         decoder = decoderName, decoderInitAt = decoderInitAt, decoderInitMs = decoderInitMs,
         torrent = t?.let { GoldReport.Torrent(it.addedAt, it.metadataCached, it.firstKnownAt, it.firstPeerAt, it.metadataAt, it.firstPayloadAt, it.firstPieceAt,
             it.warmedAt, it.warmedPieces, it.fileBytes, it.pieceBytes, it.waits, it.waitingPiece, it.waitingSince, it.waitingBlocks,
-            it.peers, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical) },
+            it.peers, it.downloadBps, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical) },
         build = build, now = nowMs, readsFull = count > MAX_READS,
     )
 
@@ -222,7 +222,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
             appendLine("المحرك: " + (if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12") +
                 " · تلميح القراءة: " + hints(t))
             if (t.waits.isNotEmpty()) {
-                appendLine("انتظار القطع (أطول من ثانية، الأحدث آخرًا):")
+                appendLine("انتظار القطع (أطول من 0.1 ث، الأحدث آخرًا):")
                 for (w in t.waits) appendLine("  " + wait(w))
             }
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
@@ -285,7 +285,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         else -> "لم يُرسل بعد"
     }
 
-    /** انتظار واحد: القطعة والموضع والمدة، وما يعرفه المحرك مكتوبًا مقابل libtorrent لحظة الثانية الأولى، وكيف انتهى. */
+    /** انتظار واحد: القطعة والموضع والمدة، وما يعرفه المحرك مكتوبًا مقابل libtorrent لحظة أول عيّنة، وكيف انتهى. */
     internal fun wait(w: com.vantara.addons.torrent.ReadWait): String =
         "القطعة ${w.piece}" + (if (w.tail) " (آخر الملف)" else "") + " عند الكتلة ${w.block}: ${secs(w.ms)} ث" +
             " · مكتوب عندنا ${w.known} وفي libtorrent ${w.engine} من ${w.blocks}" +

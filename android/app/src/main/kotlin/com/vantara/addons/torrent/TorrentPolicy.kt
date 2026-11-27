@@ -93,7 +93,7 @@ data class TorrentStats(
     val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
     /** تلميح القراءة (0004): كم مرة وصل libtorrent وكم مرة فشل (مكتبة بلا الدالتين). */
     val hintsSent: Int = 0, val hintsFailed: Int = 0,
-    /** آخر انتظارات القراء الأطول من ثانية ([ReadWait]). */
+    /** آخر انتظارات القراء الأطول من 0.1 ث ([ReadWait]). */
     val waits: List<ReadWait> = emptyList(),
     /** كل read وصل المحرك (بعد مخزن TorrentDataSource). */
     val engineReads: Long = 0L,
