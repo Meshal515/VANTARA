@@ -634,6 +634,11 @@ class TorrentEngine internal constructor(
                 done
             } catch (_: IOException) { 0 }
         }
+        /** كم بايتًا من [position] قبل مرفقات MKV التي تُعطى أصفارًا (مخزن TorrentDataSource لا يعبرها)؛ بلا حد إن لم تكن. */
+        fun unskipped(position: Long): Long {
+            val range = state.head?.skip ?: return Long.MAX_VALUE
+            return if (position < range.first) range.first - position else Long.MAX_VALUE
+        }
         fun read(position: Long, target: ByteArray, offset: Int, count: Int): Int {
             if (closed.get()) throw InterruptedIOException("Torrent reader closed")
             val head = state.head
