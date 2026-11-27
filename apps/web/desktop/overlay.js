@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { goldReport } from '../lib/deeptrace.js';
 import { syncGlass } from '../v35/glass.js';
 
 // Glass (خيار المظهر): نافذة الأدوات صفحة مستقلة، فتقرأ الاختيار نفسه وتتبعه إن تغيّر من النافذة الرئيسية.
@@ -110,7 +111,8 @@ export function diagnosticText(net = {}) {
       lines.push(`  ${e.stage}  ${rel < 0 ? `قبل الضغط ${s(-rel)}` : `+${s(rel)}`}${extra ? `  (${extra})` : ''}`);
     }
   }
-  return lines.join('\n');
+  // تقرير الذهب أولًا (المسار الحرج والاختناق وسببه ومكانه وثقته)، ثم المراحل الخام كاملة للمراجعة
+  return [goldReport({ tapMs: tap, trace, app }), '', '[التفاصيل الخام]', ...lines].join('\n');
 }
 
 export function createOverlayView(doc, send, { timers = globalThis } = {}) {

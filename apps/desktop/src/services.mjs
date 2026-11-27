@@ -1121,6 +1121,9 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
             if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
           if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);
+            // DeepTrace: قبل أول إطار، mpv متوقف ينتظر بيانات (لا الفك): بداية كل انتظار ونهايته بمدته
+            if(!state.ready){if(event.data&&state.cacheWaitAt==null){state.cacheWaitAt=performance.now();state.trace.record('player-cache-wait-start');}
+              else if(!event.data&&state.cacheWaitAt!=null){state.trace.record('player-cache-wait-end',{waitMs:performance.now()-state.cacheWaitAt});state.cacheWaitAt=null;}}
             // أول توقف للتخزين بعد بدء العرض: الشبكة أبطأ مما بدأنا به، فالاستئناف ينتظر ثلاث ثوانٍ (لا تقطيع متكرر)
             if(event.data&&state.ready&&!state.rebufferWait){state.rebufferWait=true;void ipcCommand(state,['set_property','cache-pause-wait',REBUFFER_CACHE_WAIT_SECONDS]).catch(()=>{});}}
 
