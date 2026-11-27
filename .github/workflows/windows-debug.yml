@@ -139,7 +139,7 @@ jobs:
             apps/desktop/native/VANTARA.exe
             apps/desktop/native/vantara-torrent.exe
             apps/desktop/native/vantara-torrent.version.txt
-          key: windows-native-electron-44.7.2-${{ hashFiles('tools/torrent-host/vantara-torrent.cpp', 'tools/torrent-host/CMakeLists.txt', 'tools/libtorrent-patches/vcpkg-overlay/**', 'tools/libtorrent-patches/0001-vantara-stall-cap.patch', 'tools/libtorrent-patches/0002-vantara-urgent-hedge.patch', 'apps/desktop/native-host/**', 'tools/build-video-host.ps1', 'tools/brand-windows-executable.ps1', 'tools/windows-icon-resources.mjs', 'apps/desktop/assets/vantara-debug.ico') }}
+          key: windows-native-electron-44.7.2-${{ hashFiles('tools/torrent-host/vantara-torrent.cpp', 'tools/torrent-host/CMakeLists.txt', 'tools/libtorrent-patches/vcpkg-overlay/**', 'tools/libtorrent-patches/0001-vantara-stall-cap.patch', 'tools/libtorrent-patches/0002-vantara-urgent-hedge.patch', 'tools/libtorrent-patches/0004-vantara-read-hints.patch', 'apps/desktop/native-host/**', 'tools/build-video-host.ps1', 'tools/brand-windows-executable.ps1', 'tools/windows-icon-resources.mjs', 'apps/desktop/assets/vantara-debug.ico') }}
       - name: Restore vcpkg binary cache
         if: steps.built.outputs.cache-hit != 'true'
         uses: actions/cache@v4
@@ -154,7 +154,7 @@ jobs:
           New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
           # libtorrent 2.0.12 لـVANTARA (نسخة أندرويد نفسها) مع تعديلي البث، من منفذ vcpkg المخصص؛ 2.1.x الرسمي
           # كان read_piece فيه 11–30 ث على ويندوز حقيقي مقابل 1.2–2.1 ث هنا (windows-libtorrent.yml)
-          Copy-Item tools/libtorrent-patches/0001-vantara-stall-cap.patch, tools/libtorrent-patches/0002-vantara-urgent-hedge.patch tools/libtorrent-patches/vcpkg-overlay/libtorrent
+          Copy-Item tools/libtorrent-patches/0001-vantara-stall-cap.patch, tools/libtorrent-patches/0002-vantara-urgent-hedge.patch, tools/libtorrent-patches/0004-vantara-read-hints.patch tools/libtorrent-patches/vcpkg-overlay/libtorrent
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install libtorrent:x64-windows-static --overlay-ports=tools/libtorrent-patches/vcpkg-overlay
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg libtorrent build failed' }
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" list libtorrent

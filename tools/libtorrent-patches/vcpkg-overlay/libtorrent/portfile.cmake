@@ -35,11 +35,13 @@ vcpkg_from_github(
         REF "v${VERSION}"
         SHA512 5d737dbc25f335f5dc207647155289177ded51051f6338629680efc766825a52ec952092a1b0297121bfc201d4508be3cb427e24b18a18649435377dcfeb086b
         HEAD_REF RC_2_0
-        # VANTARA: تعديلا البث (tools/libtorrent-patches). ينسخهما سير windows-debug إلى مجلد المنفذ قبل البناء
-        # فيدخلان بصمة كاش vcpkg. معطلان ما لم يضبط المحرك VANTARA_LT_STALL_CAP_MS / VANTARA_LT_HEDGE_MS.
+        # VANTARA: تعديلات البث (tools/libtorrent-patches) بترتيب أندرويد نفسه. ينسخها سير windows-debug إلى مجلد المنفذ قبل
+        # البناء فتدخل بصمة كاش vcpkg. 0001/0002 معطلان ما لم يضبط المحرك VANTARA_LT_STALL_CAP_MS / VANTARA_LT_HEDGE_MS،
+        # و0004 (تلميح موضع القارئ للخيار B) يعمل فقط حين يستدعي المحرك vantara_set_read_hint.
         PATCHES
             0001-vantara-stall-cap.patch
             0002-vantara-urgent-hedge.patch
+            0004-vantara-read-hints.patch
 )
 
 vcpkg_from_github(

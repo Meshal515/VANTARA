@@ -1006,7 +1006,7 @@ class TorrentEngine internal constructor(
             if (directory.usableSpace < MIN_FREE_BYTES || allocatedBytes(folder) > MAX_ACTIVE_BYTES) throw IOException("Insufficient torrent cache space")
             // طرفا الملف لم يكتملا بعد (المستخرج يقفز إلى الفهرس قبل أول إطار): يبقيان بموعد قريب
             val tailWaits = hash in tailDeferred
-            val pending = if (tailWaits) emptyList() else (TorrentPolicy.edges(file, pieceLength) + cuesPieces).distinct().filter { it !in next && !handle.havePiece(it) }
+            val pending = if (tailWaits) emptyList() else TorrentPolicy.pendingEdges(window.isEmpty(), TorrentPolicy.edges(file, pieceLength), cuesPieces, next) { handle.havePiece(it) }
             // مع libtorrent المخصص: قطعتان فقط بموعد (libtorrent يرفع كل قطعة بموعد إلى الأولوية 7 فيقسم السرعة عليها)،
             // وبقية النافذة أولوية 6 بلا موعد. المكتبة الأصلية: النافذة كلها كما كانت (القياس: الضيقة وحدها لا تفيدها).
             val critical = if (PATCHED) next.take(CRITICAL_PIECES) else next
@@ -1036,6 +1036,8 @@ class TorrentEngine internal constructor(
             else extendAhead(handle, file, pieceLength, next)
             // بلا فهرس: الذيل يبقى مطلوبًا بأولوية أقل لأول قفزة (إلغاء النافذة القديمة لا يمسّه)
             if (tailWaits) for (piece in TorrentPolicy.edges(file, pieceLength).drop(1)) if (piece !in next && !handle.havePiece(piece)) handle.piecePriority(piece, Priority.FOUR)
+            // الخيار B: قطعة سُلّم منها قبل التحقق ثم خرجت من النافذة (IGNORE) تكتمل ليُتحقق منها، بعد أن تصل القطعة المنتظرة
+            if (!focus) for (piece in earlyPieces) if (piece !in next && !handle.havePiece(piece)) handle.piecePriority(piece, Priority.NORMAL)
             window = next
             focused = focus
         }
@@ -1269,6 +1271,7 @@ class TorrentEngine internal constructor(
         /** مهلة قطعة معاينة الشريط: إطار لا يصل خلالها يُترك ويُعاد لاحقًا، والمشاهدة لا تنتظره. */
         private const val PREVIEW_WAIT_MS = 25_000L
         private const val IDLE_GRACE_MS = 20_000L
+        internal const val MIN_RECONNECT_S = 2
         private const val ONE_SECOND_NS = 1_000_000_000L
         private const val PREFETCH_HOLD_MS = 90_000L
         private const val PREFETCH_CONNECTIONS = 24
@@ -1298,6 +1301,10 @@ class TorrentEngine internal constructor(
             settings.setBoolean(settings_pack.bool_types.announce_to_all_trackers.swigValue(), true)
             settings.setBoolean(settings_pack.bool_types.announce_to_all_tiers.swigValue(), true)
             settings.setBoolean(settings_pack.bool_types.strict_end_game_mode.swigValue(), false)
+            // 2 ث (الافتراضي 60): المسخَّن بعد مهلته، والخلفي بعد تبريده، والخامل بعد 20 ث كلها pause يقطع المشاركين، وlibtorrent
+            // لا يعيد الاتصال بالمشارك نفسه قبل هذه المهلة (المتتبع يعيدهم أنفسهم): المتابعة كانت تنتظر حتى دقيقة. قياس المحرك
+            // نفسه (ويندوز، سرب محاكى): 53–56 ث بـ60 و1.0–1.1 ث بـ2
+            settings.setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), MIN_RECONNECT_S)
             // تورنت اكتملت قطعه المطلوبة (طرفا الملف مسبقًا، أو نافذة قدّام امتلأت) كان يقطع المشاركين
             // الكاملين؛ القطعة التالية تنتظر إعادة اتصال (~5 ث في اختبار سرب محلي حقيقي، 52ms بدونه).
             settings.setBoolean(settings_pack.bool_types.close_redundant_connections.swigValue(), false)

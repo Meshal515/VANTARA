@@ -63,20 +63,35 @@ class TorrentSeekDeviceTest {
         val failures = mutableListOf<String>()
         File(context.cacheDir, "torrent-streams").deleteRecursively()
         // بارد ← مُسخَّن (كاش البارد يُمسح أولًا) ← مخزّن (كاش المُسخَّن يبقى)
-        for ((mode, startMs) in listOf("cold" to 0L, "warm" to 0L, "cached" to 0L, "cold-resume" to 300_000L)) {
-            if (mode == "warm" || mode == "cold-resume") File(context.cacheDir, "torrent-streams").deleteRecursively()
+        // (الاسم، موضع البدء، امسح الكاش أولًا، سخّن قبل الفتح، المخزن مفعّل، فشل تحقق مصطنع بعد أول قفزة)
+        data class Case(val mode: String, val startMs: Long, val clear: Boolean, val warm: Boolean, val chunking: Boolean = true, val failure: Boolean = false)
+        val cases = listOf(
+            Case("cold", 0, clear = true, warm = false), Case("cold-resume", 300_000, clear = true, warm = false),
+            Case("warm", 0, clear = true, warm = true), Case("warm-resume", 300_000, clear = true, warm = true),
+            Case("cached", 0, clear = false, warm = false), Case("cached-resume", 300_000, clear = false, warm = false),
+            // قبل الإصلاح بالملف نفسه على القرص: كل read إلى المحرك (كم استدعاء وكم زمنًا)
+            Case("cached-resume-unbuffered", 300_000, clear = false, warm = false, chunking = false),
+            // التعافي: فشل تحقق قطعة قُرئت قبل التحقق، والمشغّل يُعاد تجهيزه من بيانات موثقة ويستمر
+            Case("recovery", 0, clear = true, warm = false, failure = true),
+        )
+        for (c in cases) {
+            if (c.clear) File(context.cacheDir, "torrent-streams").deleteRecursively()
+            TorrentDataSource.chunking = c.chunking
             val engine = TorrentEngine(context)
             val uri = engine.register(TorrentRequest(choice.hash, choice.fileIdx, choice.sources))
-            if (mode == "warm") { engine.prefetch(uri, fetchEdges = true, priority = true); Thread.sleep(20_000) }
-            val report = JSONObject().put("mode", mode).put("title", choice.title).put("startMs", startMs)
-            failures += runScenario(engine, uri, startMs, report)
-            File(context.filesDir, "addon-proof/seeks-$mode.json").apply { parentFile!!.mkdirs() }.writeText(report.toString(2))
+            if (c.warm) { engine.prefetch(uri, fetchEdges = true, priority = true); Thread.sleep(20_000) }
+            val report = JSONObject().put("mode", c.mode).put("title", choice.title).put("startMs", c.startMs).put("chunking", c.chunking)
+            try { failures += runScenario(engine, uri, c.startMs, report, c.failure) }
+            finally { TorrentDataSource.chunking = true }
+            File(context.filesDir, "addon-proof/seeks-${c.mode}.json").apply { parentFile!!.mkdirs() }.writeText(report.toString(2))
+            println("CASE ${c.mode} startMs=${report.optLong("startReadyMs")} cuesMs=${report.optLong("cuesMs", -1)} engineReads=${report.optLong("engineReads")} cpuMs=${report.optLong("cpuMs")} recovered=${report.optString("recovered")}")
             engine.release(uri); engine.close()
         }
         org.junit.Assert.assertTrue(failures.joinToString("\n"), failures.isEmpty())
     }
 
-    private fun runScenario(engine: TorrentEngine, uri: android.net.Uri, startMs: Long, report: JSONObject): List<String> {
+    private fun runScenario(engine: TorrentEngine, uri: android.net.Uri, startMs: Long, report: JSONObject, hashFailure: Boolean = false): List<String> {
+        val cpu0 = android.os.Process.getElapsedCpuTime()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val t0 = SystemClock.elapsedRealtime()
@@ -140,9 +155,36 @@ class TorrentSeekDeviceTest {
             }
             val started = waitFor(player!!, 90_000) { p -> p.playbackState == Player.STATE_READY && frames.get() > 0 }
             report.put("startReadyMs", if (started) SystemClock.elapsedRealtime() - t0 else -1).put("startError", failure.get())
+            // قراءة الفهرس: أول فتح عند آخر 1% من الملف، من فتحه حتى آخر بايت
+            synchronized(opens) { (0 until opens.length()).map { opens.getJSONObject(it) } }
+                .firstOrNull { it.optLong("pos") > (engine.stats(uri)?.fileBytes ?: Long.MAX_VALUE) * 99 / 100 && it.has("last") }
+                ?.let { report.put("cuesMs", it.getLong("last") - it.getLong("t")).put("cuesBytes", it.optLong("read")) }
             // PlayerActivity: أول صورة لمصدر بلا فهرس ← Cues في الخلفية (TorrentEngine.fetchCues)
             if (started && deferred) report.put("fetchCues", engine.fetchCues(uri))
             if (!started) return listOf("${report.getString("mode")}: لم يبدأ خلال 90 ث (${state(player!!, engine, uri)}) ${failure.get()}")
+            // التعافي لحظة أول صورة (القطع المقروءة قبل التحقق لم تُحسم بعد): فشل تحقق كما يصل من libtorrent، والمشغّل يُعاد
+            // تجهيزه من بيانات موثقة كما PlayerActivity.recoverVerified، ويستمر. ما سُلّم قبله لا يُسترجع: هذا هو مسار التعافي
+            if (hashFailure) {
+                val early = engine.earlyPiecesOf(uri)
+                if (early.isEmpty()) report.put("recovered", "no-early-pieces-at-first-frame")
+                else {
+                    val recovered = java.util.concurrent.CountDownLatch(1)
+                    val listener: (String) -> Unit = { recovered.countDown() }
+                    engine.addTurboListener(listener)
+                    engine.simulateHashFailure(uri, early.first())
+                    val notified = recovered.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                    engine.removeTurboListener(listener)
+                    var resumeAt = 0L
+                    instrumentation.runOnMainSync { resumeAt = player!!.currentPosition; frames.set(0); deferred = false; reprepare(player!!, resumeAt) }
+                    val back = waitFor(player!!, 60_000) { p -> p.playbackState == Player.STATE_READY && frames.get() > 0 && p.duration > 0 }
+                    var moving = false
+                    if (back) { var at0 = 0L; instrumentation.runOnMainSync { at0 = player!!.currentPosition }; Thread.sleep(1500); instrumentation.runOnMainSync { moving = player!!.currentPosition > at0 + 500 } }
+                    val turbo = engine.stats(uri)?.turbo
+                    report.put("recovered", "earlyPieces=${early.size} notified=$notified back=$back continues=$moving earlyAllowedAfter=$turbo")
+                    if (!notified || !back || !moving || turbo != false) failures += "${report.getString("mode")}: التعافي بعد فشل التحقق لم يكتمل (${report.getString("recovered")})"
+                }
+            }
+
             Thread.sleep(3000)
             val plan: List<Pair<String, (Long, Long) -> Long>> = listOf(
                 "+10" to { pos, _ -> pos + 10_000 }, "+10" to { pos, _ -> pos + 10_000 }, "-10" to { pos, _ -> pos - 10_000 },
@@ -189,12 +231,23 @@ class TorrentSeekDeviceTest {
                     failures += "${report.getString("mode")} ${label}: لم يستأنف خلال ${took / 1000} ث — $why"
                 }
                 seeks.put(entry)
-                println("SEEK ${report.getString("mode")} $label ok=$ok ms=$took durUnknownMs=$lostDurationMs ${entry.optString("whyStuck")}")
+                // التشغيل يستمر بعد القفزة (لا READY فقط): الموضع يتقدم والمدة معروفة
+                if (ok) {
+                    var before = 0L
+                    instrumentation.runOnMainSync { before = player!!.currentPosition }
+                    Thread.sleep(1500)
+                    var advanced = false; var duration = 0L
+                    instrumentation.runOnMainSync { advanced = player!!.currentPosition > before + 500; duration = player!!.duration }
+                    entry.put("continues", advanced).put("durationKnown", duration > 0)
+                    if (!advanced || duration <= 0) failures += "${report.getString("mode")} $label: لم يستمر التشغيل بعد القفزة (تقدّم=$advanced، المدة=$duration)"
+                }
+                println("SEEK ${report.getString("mode")} $label ok=$ok ms=$took durUnknownMs=$lostDurationMs continues=${entry.optBoolean("continues")} ${entry.optString("whyStuck")}")
                 if (!ok) break
                 Thread.sleep(2500)
             }
         } finally {
             report.put("seeks", seeks).put("opens", opens).put("error", failure.get())
+                .put("engineReads", engine.stats(uri)?.engineReads ?: -1).put("cpuMs", android.os.Process.getElapsedCpuTime() - cpu0)
             runCatching { instrumentation.runOnMainSync { player?.release() } }
             images.close(); consumer.quitSafely()
         }

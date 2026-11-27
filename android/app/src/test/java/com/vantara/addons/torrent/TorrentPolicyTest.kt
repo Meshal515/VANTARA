@@ -5,6 +5,15 @@ import org.junit.Test
 
 class TorrentPolicyTest {
     private val hash = "0123456789abcdef0123456789abcdef01234567"
+    @Test fun edgesGetADeadlineOnTheFirstOpenOnlyWhileRequestedCuesAlwaysDo() {
+        val edges = listOf(0, 13, 14)
+        // أول فتح: الرأس بموعد النافذة، والذيل بعده
+        assertEquals(listOf(13, 14), TorrentPolicy.pendingEdges(true, edges, emptyList(), listOf(0, 1)) { false })
+        // متابعة من المنتصف بعد الفتح الأول: الطرفان لا يزاحمان موضعها، وقطعة الفهرس التي طُلبت للقفز تبقى
+        assertEquals(emptyList<Int>(), TorrentPolicy.pendingEdges(false, edges, emptyList(), listOf(6, 7)) { false })
+        assertEquals(listOf(14), TorrentPolicy.pendingEdges(false, edges, listOf(14), listOf(6, 7)) { false })
+        assertEquals(emptyList<Int>(), TorrentPolicy.pendingEdges(true, edges, listOf(14), listOf(0)) { it != 0 })
+    }
     @Test fun hashIdentityCannotBeChangedByMagnet() {
         assertEquals(hash, TorrentRequest(hash.uppercase()).infoHash)
         assertThrows(IllegalArgumentException::class.java) { TorrentRequest(hash, magnet = "magnet:?xt=urn:btih:${"a".repeat(40)}") }

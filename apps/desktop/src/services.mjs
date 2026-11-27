@@ -493,6 +493,15 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     })();
     return h.stoppedTask;
   }
+  /**
+   * تورنت لا يُشاهَد الآن (تسخين انتهى، أو دفء بعد الإغلاق): «خامل متصل» في libtorrent، لا يُطلب شيء والمشاركون يبقون.
+   * pause كان يقطعهم، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time: متابعة بعد التسخين 53 ث في
+   * المحاكي مقابل 0.7–0.9 ث. rqbit (الرجوع) بلا idle: يبقى pause. يرجع true إن صار موقوفًا فعلًا.
+   */
+  async function idleTorrent(api,id,options){
+    try{await localJSON(api,`/torrents/${id}/idle`,options);return false;}
+    catch(error){if(options.signal?.aborted)throw error;await localJSON(api,`/torrents/${id}/pause`,options);return true;}
+  }
   /** جلسة تستعمل تورنت المحرك: إن كان متوقفًا بانتظار الحذف يعود فورًا (التورنت الدافئ). */
   function hubRetain(state,id) {
     const h=state.hub;if(!h||!Number.isSafeInteger(id))return;
@@ -511,7 +520,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const options={auth:h.auth,signal:h.controller.signal,body:'',timeout:5000};
     const drop=()=>{if(h.refs.get(id)!==ref||ref.n>0)return;h.refs.delete(id);void localJSON(h.api,`/torrents/${id}/delete`,{...options,timeout:15000}).catch(()=>{});};
     if(!(warmTorrentMs>0))return drop();
-    ref.cooled=true;void localJSON(h.api,`/torrents/${id}/pause`,options).catch(()=>{});
+    ref.cooled=true;void idleTorrent(h.api,id,options).catch(()=>{});
     ref.timer=setTimeout(drop,warmTorrentMs);ref.timer.unref?.();
   }
   const startup=Promise.all(['torrent-cache','subtitle-cache'].map(name=>rm(join(userData,name),{recursive:true,force:true})))
@@ -789,11 +798,26 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         const snapshot=stats.live?.snapshot,range=state.latestDemand;
         state.trace.record('torrent-sample',{knownPeers:snapshot?.peer_stats?.seen,connectedPeers:peers,speedBytes:Number.isFinite(speed)?speed*1024*1024:undefined,checkedBytes:snapshot?.downloaded_and_checked_bytes,checkedPieces:snapshot?.downloaded_and_checked_pieces,requestedPiece:range?Math.floor((state.win.fileOffset+range.cursor)/(state.win.pieceLength||1)):undefined,cursor:range?.cursor,cacheBytesRead:state.cacheBytesRead??0});
         if(peers>0)state.trace.once('peer-connected');
+        // الخيار B: تحقق قطعة سُلّم منها قبل التحقق فشل. المحرك صار موثقًا فقط لهذا التورنت، وما سُلّم قبل الفشل لا
+        // يُسترجع: يعاد تحميل mpv من الموضع نفسه ببيانات موثقة (كما PlayerActivity.recoverVerified في أندرويد)
+        const earlyFailures=Number(stats.vantara?.early_failures);
+        if(Number.isFinite(earlyFailures)&&earlyFailures>(state.earlyFailures??0)){state.earlyFailures=earlyFailures;void reloadVerified(state);}
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{}),...(Number.isFinite(seeds)?{seeds}:{})});
       }catch{}finally{state.statsPending=false;}
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
     return state.streamUrl;
+  }
+  /** إعادة تحميل mpv عند الموضع الحالي وحالته (موقوف/يعمل) بعد فشل تحقق قطعة قُرئت مبكرًا. */
+  async function reloadVerified(state){
+    if(state.stopped||current!==state||!state.streamUrl)return;
+    let seconds=null;
+    try{seconds=await ipcCommand(state,['get_property','time-pos']);}catch{}
+    if(state.stopped||current!==state)return;
+    const at=Number.isFinite(seconds)&&seconds>=0?seconds:0;
+    state.trace.record('early-failure-reload',{position:Math.round(at*1000)});
+    emit(state,{type:'playback/retrying',message:'قطعة لم يكتمل تحققها: نعيد التشغيل من بيانات موثقة'});
+    void ipcCommand(state,['loadfile',state.streamUrl,'replace',-1,`start=${at},pause=${state.mediaPaused?'yes':'no'}`]).catch(()=>{});
   }
   /**
    * يشغّل محرك التورنت وينتظر واجهته: libtorrent أولًا ثم rqbit احتياطًا (engineOrder). لكل محرك
@@ -1160,7 +1184,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.trace.record('prewarm-edges',{bytes:head+tail,complete:results.every(Boolean)});
     if(!state.prewarming||state.stopped||!w)return;
     // التشغيل ينتظر هذا الوعد قبل أن يقرر الاستئناف، فلا يبقى التورنت موقوفًا بعد تبنّيه
-    state.prewarmPause=localJSON(state.api,`/torrents/${state.torrentId}/pause`,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(()=>{w.paused=true;},()=>{});
+    state.prewarmPause=idleTorrent(state.api,state.torrentId,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(paused=>{w.paused=paused;},()=>{});
   }
   function takePrewarm(candidate) {
     const key=`${candidate.infoHash}|${candidate.fileIdx??''}`,p=prewarms.get(key);

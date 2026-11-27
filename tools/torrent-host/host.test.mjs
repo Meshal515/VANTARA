@@ -289,6 +289,151 @@ test('libtorrent host: a reader paused between pieces keeps its next piece wante
   assert.ok(body && body.equals(data.subarray(0, head)), 'head read finishes with exact bytes after the pause');
 });
 
+test('libtorrent host: a jump keeps deadlines only on pieces a reader waits for (not the edges, not a closed reader), so their queued blocks cannot hold the new position', { skip, timeout: 120000 }, async t => {
+  // جذر متابعة 16MB في ويندوز (23.6 ث ثم 6.2 ث بالخيار B): الطرفان بموعد في كل إعادة ترتيب، وقارئ الرأس المغلق يبقى
+  // موعده؛ libtorrent لا يلغي طلبات قطعة ذات موعد (cancel_non_critical) ولا يطلب للحرجة من مشارك طابوره فوق 2 ث، فكتل
+  // موضع المتابعة انتظرت خلف 6–12MB من الرأس والذيل عند كل مشارك (/diag: 2–8 طلبات للقطعة المنتظرة لثانيتين)
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 64 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  const id = added.body.id, piece = 262144, pieces = data.length / piece, edges = [pieces - 2, pieces - 1];
+  const open = (from) => {
+    const req = http.request(new URL(`/torrents/${id}/stream/0`, base), { headers: { Authorization: `Basic ${Buffer.from(auth).toString('base64')}`, Range: `bytes=${from}-` } }, res => { res.on('data', () => {}); res.on('error', () => {}); });
+    req.on('error', () => {}); req.end();
+    return req;
+  };
+  const diag = async () => (await request(base, `/torrents/${id}/diag`, { timeout: 5000 })).body;
+  const until = async (ok, what) => { for (const end = Date.now() + 15000; Date.now() < end; await sleep(100)) { const d = await diag(); if (ok(d)) return d; } throw new Error(what + ': ' + JSON.stringify(await diag())); };
+  const head = open(0);
+  const first = await until(d => d.readers.length === 1 && d.deadlines.length > 0, 'head reader registered');
+  // أول فتح: الذيل يُجلب مع الرأس (المشغّل يقرأ الفهرس قبل أول إطار)
+  assert.ok(edges.every(p => first.deadlines.includes(p)), `first open keeps the edges: ${first.deadlines}`);
+  const midPiece = Math.floor(pieces / 2);
+  const mid = open(midPiece * piece + 1000);
+  const jumped = await until(d => d.readers.length === 2 && d.window_start === midPiece, 'jump reader is primary');
+  t.diagnostic(`after the jump: deadlines=${jumped.deadlines} readers=${JSON.stringify(jumped.readers)}`);
+  assert.ok(jumped.deadlines.includes(midPiece), 'the jump position has a deadline');
+  assert.ok(!edges.some(p => jumped.deadlines.includes(p)), `edges nobody waits for lose their deadline at a jump: ${jumped.deadlines}`);
+  // القارئ الأحدث فتحًا يقود ولو واصل الرأس القراءة (آخر نشاط كان يعيد النافذة إلى الرأس)
+  const leads = [];
+  for (let i = 0; i < 15; i++, await sleep(100)) leads.push((await diag()).window_start);
+  assert.ok(leads.every(w => w === midPiece), `the newest reader keeps the window while the head reader streams: ${leads}`);
+  const headPiece = jumped.readers.find(r => r.piece < midPiece)?.piece;
+  assert.ok(jumped.deadlines.some(p => p < midPiece), 'the open head reader still has its next piece');
+  head.destroy();
+  const closed = await until(d => d.readers.length === 1, 'head reader dropped');
+  await sleep(300);
+  const after = await diag();
+  t.diagnostic(`after the head reader closed (it was at ${headPiece}): deadlines=${after.deadlines}`);
+  assert.ok(after.deadlines.every(p => p >= midPiece), `a closed reader keeps no deadline: ${after.deadlines} (closed at ${JSON.stringify(closed.readers)})`);
+  mid.destroy();
+});
+
+test('libtorrent host: after pause then start, the same peers reconnect in seconds (min_reconnect_time), and idle keeps them connected', { skip, timeout: 120000 }, async t => {
+  // جذر التسخين والدفء: pause يقطع المشاركين، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time (60 ث
+  // افتراضيًا)، والمتتبع يعيدهم أنفسهم. المتابعة بعد تسخين موقوف 8 ث انتظرت 53–56 ث في المحاكي
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 512 * 1024, 30);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  const id = added.body.id;
+  const head = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: 'bytes=0-65535' }, raw: true, timeout: 30000 });
+  assert.ok(head.body.equals(data.subarray(0, 65536)));
+  const peers = async () => (await request(base, `/torrents/${id}/diag`, { timeout: 5000 })).body.peers;
+  const readAt = async (fraction) => {
+    const at = Math.floor(data.length * fraction), t0 = performance.now();
+    const r = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=${at}-${at + 65535}` }, raw: true, timeout: 60000 });
+    assert.ok(r.body.equals(data.subarray(at, at + 65536)), 'exact bytes');
+    return performance.now() - t0;
+  };
+  await request(base, `/torrents/${id}/pause`, { method: 'POST', body: '' });
+  await sleep(1500);
+  await request(base, `/torrents/${id}/start`, { method: 'POST', body: '' });
+  const afterPause = await readAt(0.75);
+  t.diagnostic(`first bytes after pause/start: ${Math.round(afterPause)}ms`);
+  assert.ok(afterPause < 15000, `the same peer reconnects in seconds, not after min_reconnect_time: ${Math.round(afterPause)}ms`);
+  // خامل متصل (التسخين انتهى، أو الدفء بعد الإغلاق): المشارك باقٍ، والقراءة التالية تبدأ بلا إعادة اتصال
+  assert.equal((await request(base, `/torrents/${id}/idle`, { method: 'POST', body: '' })).status, 200);
+  await sleep(1500);
+  assert.ok(await peers() > 0, 'idle keeps the peers connected');
+  const afterIdle = await readAt(0.5);
+  t.diagnostic(`first bytes after idle: ${Math.round(afterIdle)}ms`);
+  assert.ok(afterIdle < 15000, `idle resumes in seconds: ${Math.round(afterIdle)}ms`);
+});
+
+test('libtorrent host: written blocks are tracked from libtorrent before a piece verifies, and settle when it does (option B, step 1)', { skip, timeout: 120000 }, async t => {
+  // ويندوز: الخادم يسلّم القطع الموثقة كاملة فقط، فـ6.5KB من فهرس MKV تنتظر قطعة 16MB (bench: 7.2 ث من 10.3 حتى أول صورة).
+  // الخطوة 1 من الخيار B كما في أندرويد: كتل كل قطعة غير موثقة كما أعلنها libtorrent بعد كتابتها (block_finished_alert)،
+  // تُمحى عند تحققها. السرب مقيد السرعة فتُرى القطع جزئية
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  const read = request(base, `/torrents/${added.body.id}/stream/0`, { headers: { Range: `bytes=0-${8 * 1024 * 1024 - 1}` }, raw: true, timeout: 60000 });
+  let sawPartial = null;
+  for (const until = Date.now() + 30000; Date.now() < until && !sawPartial; await sleep(100)) {
+    const d = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
+    if (d?.early?.written_blocks > 0) sawPartial = d.early;
+  }
+  t.diagnostic(`partial pieces while downloading: ${JSON.stringify(sawPartial)}`);
+  assert.ok(sawPartial, 'blocks written before their piece verified are seen');
+  assert.equal(sawPartial.verified_only, 0);
+  const body = (await read).body;
+  assert.ok(body.equals(data.subarray(0, 8 * 1024 * 1024)), 'exact bytes');
+  // طوال التنزيل وبعده: لا قطعة تحققت وبقيت في السجل (تُمحى عند piece_finished)، ولا فشل
+  let worst = 0, last = null;
+  for (const until = Date.now() + 4000; Date.now() < until; await sleep(150)) {
+    last = (await request(base, `/torrents/${added.body.id}/diag`, { timeout: 5000 })).body.early;
+    worst = Math.max(worst, last.stale);
+  }
+  t.diagnostic(`after the read: ${JSON.stringify(last)}, worst stale ${worst}`);
+  assert.equal(worst, 0, 'a verified piece never stays in the written-blocks record');
+  assert.equal(last.failures, 0);
+});
+
+test('libtorrent host: early bytes arrive before their piece verifies, exact; a hash failure stops early reads and is reported for recovery', { skip, timeout: 120000 }, async t => {
+  // الخطوة 2 من الخيار B: أول قطع الطلب من كتلها المكتوبة (لا انتظار القطعة الموثقة كاملة)، وفشل تحقق قطعة سُلّم منها مبكرًا
+  // يجعل التورنت موثقًا فقط ويُعلَن في /stats/v1 فيعيد التطبيق تحميل mpv من الموضع. ما بعده موثق فقط وصحيح
+  const { base, magnet, data } = await fixture(t);
+  const seedPeer = magnet.match(/x\.pe=127\.0\.0\.1(?:%3A|:)(\d+)/i);
+  const proxy = await throttleProxy(Number(seedPeer[1]), 1024 * 1024, 40);
+  t.after(() => proxy.close());
+  const viaProxy = magnet.replace(seedPeer[0], seedPeer[0].replace(seedPeer[1], String(proxy.address().port)));
+  const added = await request(base, '/torrents?only_files=0', { method: 'POST', body: viaProxy, timeout: 30000 });
+  const id = added.body.id;
+  // الفشل أثناء القراءة نفسها، لحظة وجود قطعة سُلّم منها ولم تتحقق بعد (لا بعد أن يتحقق كل شيء)
+  const reading = request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=0-${8 * 1048576 - 1}` }, raw: true, timeout: 60000 });
+  let failed = null;
+  for (const until = Date.now() + 20000; Date.now() < until && !failed; await sleep(20)) {
+    const d = (await request(base, `/torrents/${id}/diag`, { timeout: 5000 }).catch(() => null))?.body;
+    if (d?.early?.pending > 0) {
+      const r = await request(base, `/torrents/${id}/test-hash-fail`, { method: 'POST' });
+      if (r.status === 200) failed = r.body;
+    }
+  }
+  assert.ok(failed, 'a piece served before verification was still pending when the failure arrived');
+  const after = (await request(base, `/torrents/${id}/stats/v1`)).body.vantara;
+  t.diagnostic(`hash failure on piece ${failed.piece} while reading: ${JSON.stringify(after)}`);
+  assert.equal(after.early_failures, 1, 'reported for the app to reload mpv at the position');
+  assert.equal(after.verified_only, true);
+  const body = (await reading).body;
+  assert.ok(body.equals(data.subarray(0, 8 * 1048576)), 'the read finishes with exact bytes (verified after the failure)');
+  const last = (await request(base, `/torrents/${id}/stats/v1`)).body.vantara;
+  assert.ok(last.early_bytes - after.early_bytes <= 1048576, `at most the span already in flight is early after the failure (${last.early_bytes - after.early_bytes})`);
+  const more = await request(base, `/torrents/${id}/stream/0`, { headers: { Range: `bytes=${16 * 1048576}-${17 * 1048576 - 1}` }, raw: true, timeout: 60000 });
+  assert.ok(more.body.equals(data.subarray(16 * 1048576, 17 * 1048576)));
+  assert.equal((await request(base, `/torrents/${id}/stats/v1`)).body.vantara.early_bytes, last.early_bytes, 'a new reader after the failure gets verified bytes only');
+});
+
 test('libtorrent host exits when its parent process disappears (no orphaned engine)', { skip, timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'vantara-torrent-parent-'));
   const apiPort = await port(), listenPort = await port();
