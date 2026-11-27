@@ -1,0 +1,34 @@
+name: VANTARA Add-on Kit
+on:
+  push:
+    branches:
+      - feat/addon-studio-platform-v1
+    paths:
+      - tools/create-vantara-addon.mjs
+      - tools/create-vantara-addon.test.mjs
+      - tools/addon-kit-server-template.mjs
+      - .github/workflows/addon-kit.yml
+  pull_request:
+    paths:
+      - tools/create-vantara-addon.mjs
+      - tools/create-vantara-addon.test.mjs
+      - tools/addon-kit-server-template.mjs
+      - .github/workflows/addon-kit.yml
+jobs:
+  addon-kit-contracts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check tools/create-vantara-addon.mjs
+          node --check tools/addon-kit-server-template.mjs
+          node --check tools/create-vantara-addon.test.mjs
+      - name: Test real generated addon manifests, endpoints and safe creation
+        run: node --test tools/create-vantara-addon.test.mjs
