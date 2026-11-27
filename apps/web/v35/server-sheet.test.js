@@ -340,33 +340,32 @@ it('قائمة المصدر المفتوحة تبقى مفتوحة حين يصل
   expect(menu.hidden).toBe(true);
 });
 
-it('a better server arriving later never moves the rows already shown (no jump under the finger)', () => {
-  const { el, body } = dom();
-  const onPick = vi.fn();
-  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
-  const a = { id: 'a', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probed: true, probeMs: 3000 };
-  const a2 = { id: 'a2', sourceId: 'witanime', server: 'uqload', quality: 480, state: 'READY', probed: true, probeMs: 4000 };
-  const b = { id: 'b', sourceId: 'witanime', server: 'videa', quality: 480, state: 'RESOLVING' };
-  ui.update({ routes: [a, a2, b], settled: false, status: { text: '…' } });
-  const rows = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
-  const [rowA, rowA2] = rows();
-  const filtersHeight = body.querySelector('.an-pick-filters');
-  // سيرفر أفضل (1080p وأسرع) يصل، وما كان يُفحص يتعذّر: الصفّان الظاهران بمكانهما والجديد تحتهما،
-  // والمتعذّر لم يحجز مكانًا ظاهرًا أصلًا
-  const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
-  // بعد أن يلمس المستخدم الورقة تثبت الصفوف الظاهرة (قبله تتبع الترتيب الصحيح: الاختبار التالي)
-  body.querySelector('.an-pick-scroll').dispatchEvent(new body.ownerDocument.defaultView.Event('pointerdown'));
-  ui.update({ routes: [a, a2, { ...b, state: 'UNAVAILABLE' }, best], settled: false, status: { text: '…' } });
-  expect(rows().slice(0, 2)).toEqual([rowA, rowA2]);
-  expect(rows()).toHaveLength(3);
-  expect(rows()[2].querySelector('.ss-name').textContent).toBe('okanime');
-  // الأفضل يُعرف بكلمة «مقترح» وبالزر، لا بنقل الصفوف
-  expect(rows()[2].className).toContain('ss-row--top');
-  // شريط المرشّحات هو نفسه من أول لحظة (لا يظهر متأخرًا فيدفع القائمة)
-  expect(body.querySelector('.an-pick-filters')).toBe(filtersHeight);
-  expect(filtersHeight.hidden).toBe(false);
-  rowA.onclick();
-  expect(onPick).toHaveBeenCalledWith(a);
+it('keeps existing direct rows under the finger and applies the latest ranking when scrolling stops', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body, document } = dom();
+    const onPick = vi.fn();
+    const ui = createServerSheet(body, { el, onPick });
+    const first = { id: 'a', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probed: true, probeMs: 3000 };
+    const second = { id: 'a2', sourceId: 'witanime', server: 'uqload', quality: 480, state: 'READY', probed: true, probeMs: 4000 };
+    const pending = { id: 'b', sourceId: 'witanime', server: 'videa', state: 'RESOLVING' };
+    const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
+    const rows = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
+    ui.update({ routes: [first, second, pending] });
+    const before = rows();
+    const filters = body.querySelector('.an-pick-filters');
+    ui.scroll.dispatchEvent(new document.defaultView.Event('touchstart'));
+    ui.update({ routes: [first, second, { ...pending, state: 'UNAVAILABLE' }, best] });
+    expect(rows()).toEqual(before);
+    before[0].onclick();
+    expect(onPick).toHaveBeenCalledWith(first);
+    ui.scroll.dispatchEvent(new document.defaultView.Event('touchend'));
+    vi.advanceTimersByTime(181);
+    expect(rows().slice(1)).toEqual(before);
+    expect(rows()[0].classList.contains('ss-row--top')).toBe(true);
+    expect(body.querySelector('.an-pick-filters')).toBe(filters);
+    ui.destroy();
+  } finally { vi.useRealTimers(); }
 });
 
 it('one torrent release is one row even when Torrentio arrives from three providers', () => {
@@ -400,7 +399,7 @@ it('each direct row shows its source picture beside the name, in a slot reserved
 });
 
 
-it('كل قسم 10 ظاهرة ثم «عرض N من الإضافية» (المالك، 27 نوفمبر): المباشر بالجودة، والتورنت جودة واحدة يُكمل العشرة بالسرب', () => {
+it('كل قسم 10 ظاهرة ثم «عرض N من الإضافية» (المالك، 27 نوفمبر): المباشر عشرة، والتورنت خمسة لكل جودة', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceId });
   const direct = Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, sourceId: 'witanime', server: `host${i}`, quality: 1080, state: 'READY', probed: true, probeMs: 500 + i }));
@@ -420,8 +419,8 @@ it('كل قسم 10 ظاهرة ثم «عرض N من الإضافية» (الما�
   expect(same()).toEqual(Array(10).fill(true));
   expect(more.textContent).toBe('إخفاء الروابط الإضافية');
   more.onclick({ stopPropagation() {} });
-  // جودة واحدة: أعلى عشرة منها (ضعف الخمسة)، والضعيف (CAM) خارجها
-  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row').length).toBe(10);
+  // جودة واحدة: أقوى خمسة، والنسخة المصوّرة في الإضافية.
+  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row').length).toBe(5);
   expect(body.querySelector('.ss-group--torrent > .an-srv-grid').textContent).not.toContain('CAM');
   // ما يصل بعدها بجودة أقل يذهب إلى الإضافية، والظاهر لا يتغير
   ui.update({ routes: [...direct, ...torrents, cam, { id: 'late', sourceId: 'witanime', server: 'late', quality: 720, state: 'READY', probed: true, probeMs: 900 }], settled: true, status: { text: '' } });
@@ -592,7 +591,7 @@ it('حقائق المحرك (حجم القطعة والسرب المقاس) تن
   expect(topName()).toContain('BBB');
 });
 
-it('التسخين (المالك، 27 نوفمبر): يسخن = برق ينبض بلون القسم، جاهز بإشارة المحرك = برق ثابت، والزارعون بلون قوة السرب', () => {
+it('التسخين (المالك، 27 نوفمبر): برق التسخين يبقى تحت المغناطيس ويختفي عندما تزول الجاهزية', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick: vi.fn() });
   const t = (id, seeds) => tor(`Show.S01E01.1080p.WEB.x264-${id}\n👤 ${seeds} 💾 1.4 GB ⚙️ Nyaa`, { id, quality: 1080, infoHash: id.padEnd(40, '0') });
@@ -619,6 +618,10 @@ it('التسخين (المالك، 27 نوفمبر): يسخن = برق ينبض 
   expect(row('aaa').classList.contains('ss-row--warm')).toBe(true);
   expect(row('aaa').classList.contains('ss-row--warming')).toBe(false);
   expect(row('aaa').querySelector('.ss-bolt')).not.toBeNull();
+  expect(row('aaa').querySelector('.ss-kind').children).toHaveLength(2);
+  ui.update({ routes, facts: {} });
+  expect(row('aaa').classList.contains('ss-row--warm')).toBe(false);
+  expect(row('aaa').querySelector('.ss-bolt')).toBeNull();
 });
 
 it('ترتيب التسخين الخلفي: السرب 16 ثم حجم القطعة 12 ثم العربي 2، وما سربه 20 فأقل يُترك إن وُجد أقوى', () => {
@@ -650,9 +653,9 @@ it('الورقة ترسل الصفوف الظاهرة غير «المقترح» 
     const ids = onWarmRows.mock.calls[0][0];
     const top = body.querySelector('.ss-row--top');
     const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')];
-    // جودة واحدة: عشرة ظاهرة (أعلى عشرة أسراب)، وتسعة غير المقترح تُسخَّن خلفيًا، ولا شيء من «نسخ إضافية»
-    expect(shown.length).toBe(10);
-    expect(ids).toHaveLength(9);
+    // جودة واحدة: أقوى خمسة. المرشحون للتسخين الخلفي من الظاهر فقط.
+    expect(shown.length).toBe(5);
+    expect(ids).toHaveLength(4);
     expect(ids).not.toContain('t0');
     expect(ids).not.toContain('t1');
     expect(ids).not.toContain(routes.find((r) => top.textContent.includes(r.label.split('\n')[0].split('-').pop())).id);
@@ -686,5 +689,28 @@ it('الفأرة على صف تورنت 120ms تسخّنه، والخروج يع
     vi.advanceTimersByTime(801);
     // «المقترح» (900 مشارك) يعود مسخَّنًا
     expect(onHover.mock.calls.map((c) => c[0].id)).toEqual(['b', 'a']);
+  } finally { vi.useRealTimers(); }
+});
+
+it('ranks late stronger torrents after a touch gesture, independent of language and arrival order', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body, document } = dom();
+    const ui = createServerSheet(body, { el, onPick() {} });
+    const mk = (seeders, index) => tor(`Show.1080p.WEB-G${index}.mkv\n👤 ${seeders} 💾 2 GB`, {
+      id: 'late-' + index, seeders, quality: 1080, infoHash: index.toString(16).padStart(40, '0'),
+      variant: index < 2 ? 'DUB' : 'SUB',
+    });
+    const first = [mk(19, 0), mk(1, 1)], late = [mk(381, 2), mk(379, 3), mk(258, 4)];
+    const displayed = () => [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv-seeds')].map(x => Number(x.textContent));
+    ui.update({ routes: first });
+    const Event = document.defaultView.Event;
+    ui.scroll.dispatchEvent(new Event('touchstart'));
+    ui.update({ routes: [...first, ...late] });
+    expect(displayed()).toEqual([19, 1]);
+    ui.scroll.dispatchEvent(new Event('touchend'));
+    vi.advanceTimersByTime(300);
+    expect(displayed()).toEqual([381, 379, 258, 19, 1]);
+    ui.destroy();
   } finally { vi.useRealTimers(); }
 });

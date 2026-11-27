@@ -16,7 +16,6 @@ import { parseRelease, swarmTier } from '../addons/release-info.js';
 import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
 import { glyph } from './icons.js';
 import { flingHoldRisk } from './collapse-hero.js';
-import { boltIn } from './motion.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
 import { isChecking, isUnavailable, isValid, measuredSeeds, pieceScore, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
@@ -83,7 +82,8 @@ const QUALITY_PREF = { 1080: 5, 2160: 4, 1440: 4, 720: 3, 480: 1 };
 export function describe(r, ctx = {}) {
   const torrent = isTorrentRoute(r);
   // وصف التورنت (البذور والحجم والموقع) من وسمه، لأي تورنت: إضافة Stremio أو إضافة Aniyomi (Torrentio Anime)
-  const info = (isAddonRoute(r) || torrent) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
+  let info = (isAddonRoute(r) || torrent) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
+  if (torrent && Number.isFinite(r.seeders)) info = { ...info, seeders: r.seeders };
   const q = bucket(r.quality ?? info?.quality);
   const name = torrent
     ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة')
@@ -162,12 +162,6 @@ export function learnStart(e) {
   if (!ok && e.outcome !== 'timeout' && e.outcome !== 'error') return;
   rememberStart(lastPick.features, Number(e.ms) || 0, ok);
   lastPick = null;
-}
-
-/** ترتيب صفوف التورنت: الأصح سربًا ثم الأعلى جودة ثم العربية ثم المشاركون. */
-function torrentOrder(a, b) {
-  const t = (d) => ({ strong: 4, fair: 3, weak: 1, dead: 0 }[d.tier] ?? 2) - (d.info?.source === 'CAM' ? 9 : 0);
-  return t(b.d) - t(a.d) || (b.d.q ?? 0) - (a.d.q ?? 0) || Number(Boolean(b.d.info?.arabic)) - Number(Boolean(a.d.info?.arabic)) || (b.d.info?.seeders ?? 0) - (a.d.info?.seeders ?? 0);
 }
 
 /**
@@ -254,34 +248,21 @@ export function factDate(v) {
 const TAP_GUARD_MS = 450;
 /** الظاهر من كل قسم (المالك، 27 نوفمبر): 10، وما بعده «عرض N من النسخ/الروابط الإضافية». */
 export const VISIBLE = 10;
-/** التورنت: حتى 5 من كل جودة بالترتيب (4K ثم 1080p ثم ما دونها)، ثم يُكمَل العشرة بالجودة والسرب. */
+/** حتى خمسة تورنتات من كل جودة، وعشرة إجمالًا في القائمة الأساسية. */
 export const PER_QUALITY = 5;
-const BOLT = '<svg class="icon ss-bolt" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M13.4 2.2 4.6 13.3a.7.7 0 0 0 .55 1.13h5.6l-1.1 7.2c-.1.66.74 1.02 1.15.5l8.8-11.1a.7.7 0 0 0-.55-1.13h-5.6l1.1-7.2c.1-.66-.74-1.02-1.15-.5Z"/></svg>';
+const BOLT = '<svg class="icon ss-bolt" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M13.4 2.2 4.6 13.3a.7.7 0 0 0 .55 1.13h5.6l-1.1 7.2c-.1.66.74 1.02 1.15.5l8.8-11.1a.7.7 0 0 0-.55-1.13h-5.6l1.1-7.2c.1-.66-.74-1.02-1.15-.5Z"/></svg>';
 
-/**
- * ترتيب التورنت الظاهر: الجودة أولًا ثم السرب داخلها. أول مرور يأخذ حتى [PER_QUALITY] من كل جودة من الأعلى (2 من 4K
- * ثم 5 من 1080p ثم 720p…)، والثاني يُكمل [VISIBLE] بما بقي. الناتج مرتب بالجودة ثم السرب.
- */
+/** الجودة أولًا، ثم عدد الزارعين المعلن، مع سقف لكل مجموعة وللقائمة كاملة. */
 export function torrentPlan(items, { quality, seeds }) {
-  const byQ = new Map();
-  for (const r of items) { const q = quality(r) ?? 0; if (!byQ.has(q)) byQ.set(q, []); byQ.get(q).push(r); }
-  const qs = [...byQ.keys()].sort((a, b) => b - a);
-  for (const q of qs) byQ.get(q).sort((a, b) => seeds(b) - seeds(a));
-  const out = [];
-  for (const q of qs) for (const r of byQ.get(q).slice(0, PER_QUALITY)) if (out.length < VISIBLE) out.push(r);
-  for (const q of qs) for (const r of byQ.get(q).slice(PER_QUALITY)) if (out.length < VISIBLE) out.push(r);
-  return out.sort((a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seeds(b) - seeds(a));
-}
-
-/**
- * الصفوف الظاهرة في قسم: قبل أن يلمس المستخدم الورقة تتبع الخطة كما هي (الترتيب الصحيح وقت الوصول)، وبعد لمسه
- * تثبت مكانها: ما وصل لاحقًا يملأ المكان الشاغر في آخرها، أو يذهب إلى الإضافية. لا صف يتحرك تحت الإصبع.
- */
-export function arrange(current, plan, { locked, present }) {
-  if (!locked) return plan.slice(0, VISIBLE);
-  const out = current.filter(present);
-  for (const id of plan) if (out.length < VISIBLE && !out.includes(id)) out.push(id);
-  return out;
+  const byQuality = new Map();
+  for (const route of items) {
+    const q = quality(route) ?? 0;
+    if (!byQuality.has(q)) byQuality.set(q, []);
+    byQuality.get(q).push(route);
+  }
+  return [...byQuality].sort(([a], [b]) => b - a)
+    .flatMap(([, routes]) => routes.sort((a, b) => seeds(b) - seeds(a)).slice(0, PER_QUALITY))
+    .slice(0, VISIBLE);
 }
 
 export function createServerSheet(body, o) {
@@ -451,6 +432,8 @@ export function createServerSheet(body, o) {
   const toolsHead = el('div', 'ss-tools-head');
   // لا عنوان «المصادر»: المرشّحات أول ما تحت الحلقة، وسطر الحالة يظهر وقت التجهيز فقط
   const status = el('div', 'an-srv-status');
+  const statusSpinner = el('i', 'ss-spin'), statusText = el('span');
+  status.append(statusText);
   toolsHead.append(status);
   const filters = el('div', 'an-pick-filters');
   tools.append(toolsHead, filters);
@@ -495,6 +478,7 @@ export function createServerSheet(body, o) {
   // ── الانكماش مع التمرير (الهاتف فقط): تحويل وشفافية لا غير، عبر متغيّرين ──
   const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : null);
   const wide = mq('(min-width: 900px)');
+  const scrollSurface = () => wide?.matches ? src : scroll;
   const placeActions = () => {
     if (wide?.matches) foot.append(best, ...(o.extraFoot ?? []));
     else {
@@ -621,7 +605,7 @@ export function createServerSheet(body, o) {
   let lastFilterKey = '';
   const view = (r) => {
     // الوصف يتغيّر بتغيّر الحالة لا بغيرها: يُحسب مرة لكل نسخة من السيرفر
-    const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}`;
+    const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}|${r.seeders}`;
     const hit = views.get(r.id);
     if (hit?.key === key) return hit.d;
     const d = describe(r, { sourceName: o.sourceName, prefer: o.prefer, directLang: o.directLang });
@@ -654,19 +638,38 @@ export function createServerSheet(body, o) {
     const moreGrid = el('div', 'ss-more-grid');
     moreGrid.hidden = true;
     s.append(h, grid, more, moreGrid);
-    const g = { s, ico, count, grid, more, moreGrid, noun, open: false, shown: [], extra: [] };
-    more.onclick = (e) => { e.stopPropagation(); g.open = !g.open; update(last); };
+    const g = { s, ico, count, grid, more, moreGrid, noun, open: false, shown: [] };
+    more.onclick = (e) => { e.stopPropagation(); g.open = !g.open; update(last, { immediate: true }); };
     return g;
   };
   // نفس أسماء أقسام مشغّل الجوال (تصميم واحد للمنصتين، قرار المالك 15 نوفمبر)
   const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع', 'الروابط الإضافية');
   const torrent = section('ss-group--torrent', 'تورنت', 'جودة أعلى · يبدأ أبطأ', 'النسخ الإضافية');
-  // لمسها المستخدم (لمس أو عجلة أو سحب): الصفوف الظاهرة تثبت مكانها ([arrange])
-  let locked = false;
-  const lock = () => { locked = true; };
-  listen(scroll, 'touchstart', lock, { passive: true });
-  listen(scroll, 'wheel', lock, { passive: true });
-  listen(scroll, 'pointerdown', lock, { passive: true });
+  const cloudstream = section('ss-group--direct ss-group--cloudstream', 'CloudStream', null, 'الروابط الإضافية');
+  let queued = null, gesture = false, interactionUntil = 0, interactionTimer = null, adjustedTop = null, anchorEvent = null;
+  const settle = () => {
+    clearTimeout(interactionTimer);
+    if (gesture || !queued || destroyed) return;
+    const remaining = interactionUntil - Date.now();
+    if (remaining > 0) { interactionTimer = setTimeout(settle, remaining); return; }
+    const model = queued;
+    queued = null;
+    update(model);
+  };
+  const moving = () => { interactionUntil = Date.now() + 180; settle(); };
+  for (const surface of [scroll, src]) {
+    listen(surface, 'touchstart', () => { gesture = true; }, { passive: true });
+    const endGesture = () => { gesture = false; moving(); };
+    listen(surface, 'touchend', endGesture, { passive: true });
+    listen(surface, 'touchcancel', endGesture, { passive: true });
+    listen(surface, 'wheel', moving, { passive: true });
+    listen(surface, 'scroll', (event) => {
+      if (surface !== scrollSurface()) return;
+      if (adjustedTop != null && Math.abs(surface.scrollTop - adjustedTop) < 1) { adjustedTop = null; anchorEvent = event; return; }
+      adjustedTop = null;
+      moving();
+    }, { passive: true });
+  }
   const fold = (cls) => {
     const d = el('details', `cn-srv-dead ${cls}`);
     const summary = el('summary');
@@ -688,42 +691,37 @@ export function createServerSheet(body, o) {
 
   // لحظة تحرّك فيها صف موجود: لمسة بعدها مباشرة كانت تشغّل سيرفرًا غير الذي قصده الإصبع
   let shiftedAt = 0;
-  // المالك (27 نوفمبر): في آخر الورقة «يرفعني فوق»، ويهدأ حين تصل سيرفرات CloudStream. أقسام الأسفل («قيد الفحص»،
-  // «غير متاح الآن»، «نسخ إضافية») تظهر وتختفي مع تدفق السيرفرات، فيقصر المحتوى والإصبع عند آخره، والمتصفح يقص موضع
-  // التمرير إلى الحد الجديد: قفزة للأعلى مع كل تحديث (اهتزاز). الارتفاع الذي بلغته القائمة يبقى محجوزًا ما دام أسفلها
-  // ظاهرًا، ويُترك حين يكون أسفلها خارج الشاشة (تقصيره هناك لا يحرّك ما تراه). تغيير المرشّح بيد المستخدم يبدأ من جديد.
-  //
-  // المالك (27 نوفمبر، بعد النشر): «أول ما أنزل يرتفع، أنزل يرتفع… وبعد فترة يهدأ». جذران في الحجز السابق:
-  //  1) أول تقلص بلا حجز: والمحتوى في أقصاه كان الحجز فارغًا (heldPx = الطبيعي)، فيقصر المحتوى في reconcile، ثم يقيس
-  //     holdHeight بـgetBoundingClientRect: تخطيط بالمحتوى المقصوص يقص التمرير فورًا، ثم يُحجز بعد فوات القص. في أول
-  //     الورقة المحتوى قصير والإصبع دائمًا قرب آخره، فكل سيرفر يصل يرفعه؛ ويهدأ حين تطول القائمة (التقلص تحت الشاشة).
-  //  2) الحجز كان min-height على .an-srv-list، أصل كل صف: تغيّر خاصية ارتفاع على أصل العنصر المثبِّت يوقف تثبيت التمرير
-  //     (scroll anchoring) لذلك التخطيط، فيتحرك ما على الشاشة بما يُضاف فوقه في التحديث نفسه.
-  // الآن: يُثبَّت الارتفاع قبل أي تغيير (holdBefore)، في عنصر بعد القائمة لا أصل للصفوف، ثم يُترك منه ما يسعه ما تحت الشاشة.
-  let heldPx = 0, heldKey = '';
-  const listHeight = () => list.getBoundingClientRect?.().height ?? 0;
-  /** قبل تغيير القائمة: المحتوى لا يقصر عن الحجز مهما فعلت القائمة، و«ما تحت الشاشة» يُقاس قبل أي تقليص. */
-  const holdBefore = (key) => {
-    if (key !== heldKey) return 0;
-    const below = Math.max(0, (scroll.scrollHeight || 0) - (scroll.clientHeight || 0) - (scroll.scrollTop || 0));
-    // الحجز كله مؤقتًا (القائمة + الحاجز ≥ heldPx في كل تخطيط أثناء البناء)؛ التقليص يقع تحت المحتوى ولا يقص التمرير
-    heldPx = Math.max(heldPx, listHeight());
-    hold.style.height = `${Math.round(heldPx)}px`;
-    return below;
-  };
-  const holdHeight = (key, below) => {
-    if (key !== heldKey) { heldKey = key; heldPx = listHeight(); hold.style.height = ''; return; }
-    const natural = listHeight();
-    // التقصير بمقدار Δ ينقص أقصى تمرير بمقدار Δ: لا قص ما دام ما تحت الشاشة قبل التحديث (D) أكبر منه. يُترك ما يسعه D فقط
-    heldPx = natural >= heldPx ? natural : natural + Math.max(0, heldPx - natural - below);
-    hold.style.height = heldPx > natural ? `${Math.round(heldPx - natural)}px` : '';
-  };
+  // احجز قاع المحتوى خلال تغيير البنية كي لا يقص المتصفح موضع التمرير قبل تثبيت الصف المرئي.
+  let heldKey = '';
+  function render(model, { preserve = true } = {}) {
+    const surface = scrollSurface(), y = surface.scrollTop || 0;
+    const anchors = preserve && y > 0 ? visibleRows(surface) : [];
+    const reserve = preserve && y > 0 && lastFilterKeyNow() === heldKey;
+    if (reserve) hold.style.height = `${surface.scrollHeight}px`;
+    else hold.style.height = '';
+    paint(model);
+    const sameFilter = heldKey === lastFilterKeyNow();
+    heldKey = lastFilterKeyNow();
+    const anchor = sameFilter && anchors.find(({ b }) => list.contains(b) && !b.closest('[hidden],details:not([open])'));
+    const shift = anchor ? anchor.b.getBoundingClientRect().top - surface.getBoundingClientRect().top - anchor.top : 0;
+    const target = Math.max(0, (surface.scrollTop || 0) + shift);
+    if (reserve) {
+      const natural = surface.scrollHeight - hold.offsetHeight;
+      hold.style.height = sameFilter ? `${Math.max(0, Math.ceil(target + surface.clientHeight - natural))}px` : '';
+    }
+    if (anchor && Math.abs(shift) >= 1) {
+      adjustedTop = Math.min(surface.scrollHeight - surface.clientHeight, target);
+      surface.scrollTop = adjustedTop;
+    }
+  }
+  const lastFilterKeyNow = () => `${filter.q}|${filter.v}|${filter.a}`;
   const reconcile = (parent, nodes) => {
     const before = new Map([...parent.children].map((node, i) => [node, i]));
+    const keep = new Set(nodes);
+    for (const node of before.keys()) if (!keep.has(node)) node.remove();
     nodes.forEach((node, i) => {
       if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
     });
-    while (parent.children.length > nodes.length) parent.lastElementChild.remove();
     if (nodes.some((node, i) => before.has(node) && before.get(node) !== i)) shiftedAt = Date.now();
   };
 
@@ -806,25 +804,29 @@ export function createServerSheet(body, o) {
     if (!b) {
       b = el('button');
       b.type = 'button';
-      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><i class="ss-ico" aria-hidden="true"></i><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
+      b.dataset.routeId = r.id;
+      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small class="ss-kind" aria-hidden="true"></small></span><span class="ss-main"><span class="ss-line"><i class="ss-ico" aria-hidden="true"></i><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
       rows.set(r.id, b);
       const id = r.id;
       b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') hoverRow(id); });
       b.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') leaveRows(); });
     }
+    const id = r.id;
     const top = r.id === topId;
     const starting = Boolean(last.busy && picked === r.id);
     const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
     // CLAUDE.md: الإضاءة بإشارة المحرك أن بيانات أول إطار على القرص (ready)، لا بمؤقت ولا بالمشاركين ولا بالبيانات
     const warm = Boolean(d.torrent && measured[r.id]?.ready === true);
     // يسخن الآن: في المحرك (له حقائق) ولم تصل إشارة الجاهزية بعد. البنفسجي له وحده (المالك، 27 نوفمبر)
-    const warming = Boolean(d.torrent && measured[r.id] && !warm);
+    const warming = Boolean(d.torrent && measured[r.id]?.ready === false);
     // الصف لا يُعاد بناؤه إن لم يتغير ما يُرسم منه (كان كل update يعيد DOM كل صف، ومنها مئات المطوية في «نسخ إضافية»:
     // خُمس كلفة التحديث). البصمة: وصف السيرفر (مفتاح view نفسه) وحالته وما يغيّر سطره وطرفه. اللمس يُربط دائمًا بالحالة الحالية
     const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}|${warm}|${warming}`;
     b.onclick = () => {
       if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
-      return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
+      const target = routeById(id);
+      if (!target) return;
+      return isSelectable(target) || isTryable(target) ? pick(target) : o.onUnavailable?.(target);
     };
     if (b.dataset.sig === sig) return b;
     b.dataset.sig = sig;
@@ -839,11 +841,19 @@ export function createServerSheet(body, o) {
     // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
     const wasWarm = b.dataset.warm === '1';
     b.dataset.warm = warm ? '1' : '';
-    qb.lastElementChild.textContent = '';
-    qb.lastElementChild.innerHTML = warm || warming ? BOLT : glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
-    qb.lastElementChild.setAttribute('aria-hidden', 'true');
-    // البرق يدخل بحركة GSAP مرة حين يسخن الصف (motion.js: لا حركة مع تقليل الحركة)
-    if (warm && !wasWarm) boltIn(qb.lastElementChild);
+    const kind = qb.lastElementChild;
+    if (!kind.firstElementChild || kind.dataset.kind !== String(d.torrent)) {
+      kind.dataset.kind = String(d.torrent);
+      kind.innerHTML = d.torrent
+        ? `${glyph('magnet', { size: 12 })}<span class="ss-bolt-slot"></span>`
+        : glyph('bolt', { size: 12 });
+    }
+    const boltSlot = kind.querySelector('.ss-bolt-slot');
+    if (boltSlot && Boolean(boltSlot.firstElementChild) !== (warm || warming)) boltSlot.innerHTML = warm || warming ? BOLT : '';
+    if (warm && !wasWarm && !still?.matches) boltSlot?.firstElementChild?.animate?.(
+      [{ transform: 'scale(.9)', opacity: .55 }, { transform: 'scale(1.2)', opacity: 1, offset: .32 }, { transform: 'scale(1)', opacity: 1 }],
+      { duration: 240, easing: 'ease-out' },
+    );
     b.querySelector('.ss-name').textContent = d.name;
     // صورة المصدر (إضافته: CloudStream أو Aniyomi) بجانب اسمه، في خانة محجوزة من البداية فلا يتحرك الاسم حين تصل
     const ico = b.querySelector('.ss-ico');
@@ -857,7 +867,14 @@ export function createServerSheet(body, o) {
     host.textContent = d.torrent ? '' : d.host ?? '';
     host.hidden = d.torrent || !d.host;
     b.querySelector('.ss-tag').hidden = !top;
-    b.querySelector('.ss-meta').replaceChildren(...metaChips(r, d, pending).map(chipNode));
+    const chips = metaChips(r, d, pending);
+    const size = d.torrent && chips.find((chip) => chip.cls === 'spec');
+    const meta = b.querySelector('.ss-meta');
+    if (size) {
+      const labels = el('span', 'ss-meta-labels');
+      labels.append(...chips.filter((chip) => chip !== size).map(chipNode));
+      meta.replaceChildren(labels, chipNode(size));
+    } else meta.replaceChildren(...chips.map(chipNode));
     const end = b.querySelector('.ss-end');
     b.classList.toggle('ss-row--busy', starting);
     if (starting) end.innerHTML = '<i class="ss-spin"></i><small>يبدأ…</small>';
@@ -907,7 +924,7 @@ export function createServerSheet(body, o) {
       box?.remove();
       b.classList.remove('ss-row--open');
     }
-    const why = [top ? 'مقترح' : null, warm ? 'جاهز للتشغيل الفوري' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
+    const why = [top ? 'مقترح' : null, warm ? 'جاهز للتشغيل الفوري' : warming ? 'جارٍ التسخين' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
     return b;
@@ -1024,7 +1041,7 @@ export function createServerSheet(body, o) {
   const langTabs = [['SUB', 'مترجم'], ['DUB', 'مدبلج']].map(([key, text]) => {
     const b = btn('ss-tab');
     b.textContent = text;
-    b.onclick = () => { filter.v = wanted.v = filter.v === key ? null : key; update(last); };
+    b.onclick = () => { filter.v = wanted.v = filter.v === key ? null : key; update(last, { immediate: true }); };
     lang.append(b);
     return [key, b];
   });
@@ -1040,10 +1057,10 @@ export function createServerSheet(body, o) {
     filter.a = wanted.a !== 'all' && names.includes(wanted.a) ? wanted.a : 'all';
     quality.set([['all', 'كل الجودات'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q,
       filter.q === 'all' ? (qs.length === 1 ? qualityLabel(qs[0]) : 'كل الجودات') : qualityLabel(filter.q),
-      (k) => { filter.q = wanted.q = k; update(last); });
+      (k) => { filter.q = wanted.q = k; update(last, { immediate: true }); });
     source.set([['all', 'كل المصادر'], ...names.map((n) => [n, n])], filter.a,
       filter.a === 'all' ? (names.length === 1 ? names[0] : 'كل المصادر') : filter.a,
-      (k) => { filter.a = wanted.a = k; update(last); });
+      (k) => { filter.a = wanted.a = k; update(last, { immediate: true }); });
     lang.hidden = !(dub && sub);
     for (const [key, b] of langTabs) {
       b.classList.toggle('on', filter.v === key);
@@ -1116,12 +1133,18 @@ export function createServerSheet(body, o) {
   const probing = () => o.jumpProbe ?? diagnosticsUi.visible();
   const nameOf = (n) => n.querySelector?.('summary, .ss-group-title, h3')?.textContent?.trim().slice(0, 32) || String(n.className || n.tagName).split(' ')[0];
   // كل الصفوف الظاهرة بمواضعها: بعد التحديث يُقارن أول صف بقي منها (الصف الأول قد يكون هو ما أُزيل)
-  const visibleRows = () => {
-    const view = scroll.getBoundingClientRect?.();
-    if (!view) return [];
-    return [...scroll.querySelectorAll('.ss-row')].map((b) => [b, b.getBoundingClientRect()])
-      .filter(([, r]) => r.height && r.bottom > view.top && r.top < view.bottom)
-      .map(([b, r]) => ({ b, top: r.top - view.top, key: (b.title || b.getAttribute('aria-label') || '').slice(0, 60) }));
+  const visibleRows = (surface) => {
+    const viewport = surface.getBoundingClientRect?.();
+    if (!viewport) return [];
+    const visible = [];
+    for (const b of list.querySelectorAll('.ss-row')) {
+      const bounds = b.getBoundingClientRect();
+      if (bounds.height && bounds.bottom > viewport.top && bounds.top < viewport.bottom) {
+        visible.push({ b, top: bounds.top - viewport.top, key: b.dataset.routeId });
+        if (visible.length === 6) break;
+      }
+    }
+    return visible;
   };
   const noteJump = (j) => {
     jumps.push({ ...j, at: Math.round(globalThis.performance?.now?.() ?? Date.now()) });
@@ -1144,37 +1167,49 @@ export function createServerSheet(body, o) {
     if (fingerY != null && Math.abs(y - fingerY) > 1) { fingerDir = y < fingerY ? 'down' : 'up'; fingerAt = Date.now(); }
     fingerY = y;
   }, { passive: true });
-  listen(scroll, 'scroll', () => {
+  listen(scroll, 'scroll', (event) => {
     const y = scroll.scrollTop || 0;
-    if (probing() && y < lastY - 24 && fingerDir === 'down' && Date.now() - fingerAt < 1200) {
+    if (event !== anchorEvent && probing() && y < lastY - 24 && fingerDir === 'down' && Date.now() - fingerAt < 1200) {
       noteJump({ kind: 'scroll', dy: Math.round(y - lastY), scrollTop: [Math.round(lastY), Math.round(y)], max: Math.round((scroll.scrollHeight || 0) - (scroll.clientHeight || 0)), handed });
     }
     lastY = y;
   }, { passive: true });
 
-  function update(model) {
+  let hasPainted = false;
+  function update(model, { immediate = false } = {}) {
     if (destroyed) return;
-    if (!probing()) return render(model);
-    const seen = visibleRows();
+    last = model;
+    if (hasPainted && !immediate && (gesture || Date.now() < interactionUntil)) {
+      // Results still arrive. Retain the DOM order and refresh attached, fixed-height rows
+      // until the latest snapshot can be laid out after the gesture.
+      queued = model;
+      measured = model.facts ?? {};
+      const present = new Map((model.routes ?? []).map((r) => [r.id, r]));
+      for (const node of list.querySelectorAll('.ss-row')) {
+        const route = present.get(node.dataset.routeId);
+        if (!route) node.onclick = null;
+        else if (!node.classList.contains('ss-row--open') && !node.closest('details:not([open]),[hidden]')) row(route);
+      }
+      settle();
+      return;
+    }
+    hasPainted = true;
+    queued = null;
+    const surface = scrollSurface();
+    if (!probing()) return render(model, { preserve: !immediate });
+    const seen = visibleRows(surface);
     const heights = new Map([...list.children].map((n) => [n, n.offsetHeight]));
-    const y0 = scroll.scrollTop || 0, max0 = (scroll.scrollHeight || 0) - (scroll.clientHeight || 0);
-    render(model);
+    const y0 = surface.scrollTop || 0, max0 = (surface.scrollHeight || 0) - (surface.clientHeight || 0);
+    render(model, { preserve: !immediate });
     const a = seen.find((x) => x.b.isConnected);
     if (!a) return;
-    const view = scroll.getBoundingClientRect();
-    const dy = Math.round(a.b.getBoundingClientRect().top - view.top - a.top);
+    const viewport = surface.getBoundingClientRect();
+    const dy = Math.round(a.b.getBoundingClientRect().top - viewport.top - a.top);
     if (Math.abs(dy) < 8) return;
     const nodes = [...new Set([...heights.keys(), ...list.children])];
     const changed = nodes.map((n) => [nameOf(n), heights.get(n) ?? 0, n.isConnected ? n.offsetHeight : 0]).filter(([, x, z]) => x !== z);
-    noteJump({ kind: 'update', dy, row: a.key, gone: seen.indexOf(a), scrollTop: [Math.round(y0), Math.round(scroll.scrollTop || 0)], max: [Math.round(max0), Math.round((scroll.scrollHeight || 0) - (scroll.clientHeight || 0))], changed, routes: model.routes?.length ?? 0 });
+    noteJump({ kind: 'update', dy, row: a.key, gone: seen.indexOf(a), scrollTop: [Math.round(y0), Math.round(surface.scrollTop || 0)], max: [Math.round(max0), Math.round((surface.scrollHeight || 0) - (surface.clientHeight || 0))], changed, routes: model.routes?.length ?? 0 });
   }
-
-  function render(model) {
-    const below = holdBefore(lastFilterKeyNow());
-    paint(model);
-    holdHeight(lastFilterKeyNow(), below);
-  }
-  const lastFilterKeyNow = () => `${filter.q}|${filter.v}|${filter.a}`;
 
   function paint(model) {
     last = model;
@@ -1191,7 +1226,7 @@ export function createServerSheet(body, o) {
     if (top && view(top).torrent) {
       const swarm = (r) => measuredSeeds({ ...view(r), measured: measured[r.id] }) ?? seedersOf(r);
       // من الظاهرة (خطة التورنت: الجودة أولًا) لا من كل التورنت: 720p بسرب أكبر ليس المقترح فوق 4K و1080p، ولا يُقترح مطويّ
-      const strong = torrentPlan(ready.filter((r) => view(r).torrent && view(r).tier !== 'dead' && view(r).info?.source !== 'CAM'), { quality: (r) => view(r).q, seeds: swarm });
+      const strong = torrentPlan(ready.filter((r) => view(r).torrent && view(r).tier !== 'dead' && view(r).info?.source !== 'CAM'), { quality: (r) => view(r).q, seeds: seedersOf });
       // المتقاربة سربًا (ضمن 15% من الأكبر) تفاضلها الدرجة (حجم القطعة المقاس، العربية): القطعة الأصغر تبدأ أسرع
       // والثبات: فوق 20 GB (حد «حجم معقول» في lib/route-validity.js) يحتاج سرعة عالية طوال المشاهدة، فلا يُقترح ما دام
       // بين الظاهرة ما هو أخف (ريمكس 61 GB بـ412 زارعًا يبدأ سريعًا ثم يتقطع)
@@ -1206,24 +1241,21 @@ export function createServerSheet(body, o) {
 
     // سطر الحالة: «55 جاهزة من 77 · البقية تصل»
     const st = model.status ?? {};
-    status.replaceChildren();
-    if (st.spin) status.append(el('i', 'ss-spin'));
-    status.append(el('span', null, st.text ?? ''));
+    if (st.spin && !statusSpinner.parentNode) status.prepend(statusSpinner);
+    else if (!st.spin && statusSpinner.parentNode) statusSpinner.remove();
+    if (statusText.textContent !== (st.text ?? '')) statusText.textContent = st.text ?? '';
     status.classList.toggle('ss-status--warn', Boolean(model.error || model.missing));
     // الملاحظة تقول الحال حين لا جاهز ولا انتظار: لا سطر يكرّرها
     const empty = !top && Boolean(model.settled || model.missing || model.error || model.noSources);
     status.hidden = empty;
 
-    // ترتيب الأقسام والصفوف (المالك، 27 نوفمبر): التورنت ثم المباشر دائمًا (CloudStream وغيرها)، وفي كل قسم 10 ظاهرة ثم
-    // «عرض N من النسخ/الروابط الإضافية». الخطة صحيحة الترتيب وقت الوصول، وبعد أن يلمس المستخدم الورقة تثبت الصفوف
-    // الظاهرة مكانها ([arrange]): الجديد يملأ الشاغر في آخرها أو يذهب إلى الإضافية، ولا صف يتحرك تحت الإصبع.
-    // تغيير المرشّح بيد المستخدم يبدأ الخطة من جديد
+    // رتّب أحدث دفعة بعد استقرار التمرير. اختيار المرشّح إجراء صريح يُرسم فورًا.
     const filterKey = `${filter.q}|${filter.v}|${filter.a}`;
     const refilter = filterKey !== lastFilterKey;
-    if (refilter) { lastFilterKey = filterKey; torrent.shown = []; direct.shown = []; }
+    if (refilter) { lastFilterKey = filterKey; torrent.shown = []; direct.shown = []; cloudstream.shown = []; }
     const gone = shown.filter((r) => !isPending(r) && !isSelectable(r));
     for (const r of shown) if (!placed.has(r.id)) placed.set(r.id, ++placedSeq);
-    const shownBefore = new Set([...torrent.shown, ...direct.shown]);
+    const shownBefore = new Set([...torrent.shown, ...direct.shown, ...cloudstream.shown]);
     // ما يُعرض في قسمه: الصالح، وما ظهر قبلًا ثم تعذّر (يبقى في مكانه بحالته)
     const live = shown.filter((r) => isSelectable(r) || shownBefore.has(r.id));
     const waiting = shown.filter((r) => isPending(r) && !shownBefore.has(r.id));
@@ -1236,19 +1268,17 @@ export function createServerSheet(body, o) {
       return qb - qa || ar(b) - ar(a) || scoreOf(b) - scoreOf(a) || placed.get(a.id) - placed.get(b.id);
     };
     const paintSection = (g, items, plan, order) => {
-      const ids = arrange(refilter ? [] : g.shown, plan.map((r) => r.id), { locked: locked && !refilter, present: (id) => byId.has(id) });
+      const ids = plan.slice(0, VISIBLE).map((r) => r.id);
+      // An expired transport is demoted immediately when a valid replacement exists.
+      // A temporarily failed direct option can retain an otherwise empty place.
+      if (g !== torrent) for (const id of g.shown) {
+        if (ids.length >= VISIBLE) break;
+        if (byId.has(id) && !ids.includes(id)) ids.push(id);
+      }
       g.shown = ids;
       const visible = ids.map((id) => byId.get(id));
-      let rest = items.filter((r) => !ids.includes(r.id)).sort(order);
-      // الإضافية المفتوحة تثبت كذلك بعد اللمس: كانت تُرتَّب من جديد مع كل تحديث، فالسرب المقاس الواصل (حقائق التسخين)
-      // أو صف جديد بينها ينقل ما تحت الإصبع (قياس Playwright: 256px). الجديد يُضاف في آخرها
-      if (g.open && locked && !refilter) {
-        const left = new Set(rest.map((r) => r.id));
-        const keep = g.extra.filter((id) => left.has(id));
-        const kept = new Set(keep);
-        rest = [...keep.map((id) => byId.get(id)), ...rest.filter((r) => !kept.has(r.id))];
-      }
-      g.extra = g.open ? rest.map((r) => r.id) : [];
+      const visibleIds = new Set(ids);
+      const rest = items.filter((r) => !visibleIds.has(r.id)).sort(order);
       reconcile(g.grid, visible.map(row));
       g.more.hidden = !rest.length;
       if (!rest.length) g.open = false;
@@ -1265,15 +1295,16 @@ export function createServerSheet(body, o) {
       g.ico.hidden = !icon;
     };
     const torrentLive = live.filter((r) => view(r).torrent);
-    const directLive = live.filter((r) => !view(r).torrent);
-    const seeds = (r) => measuredSeeds({ ...view(r), measured: measured[r.id] }) ?? seedersOf(r);
-    const torrentOrder = (a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seeds(b) - seeds(a) || placed.get(a.id) - placed.get(b.id);
-    paintSection(torrent, torrentLive, torrentPlan(torrentLive.filter((r) => isSelectable(r) && !weakTorrent(r)), { quality, seeds }), torrentOrder);
+    const directLive = live.filter((r) => !view(r).torrent && !isCloudStreamRoute(r));
+    const cloudstreamLive = live.filter((r) => isCloudStreamRoute(r));
+    const torrentOrder = (a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seedersOf(b) - seedersOf(a) || placed.get(a.id) - placed.get(b.id);
+    paintSection(torrent, torrentLive, torrentPlan(torrentLive.filter((r) => isSelectable(r) && !weakTorrent(r)), { quality, seeds: seedersOf }), torrentOrder);
     paintSection(direct, directLive, directLive.filter(isSelectable).sort(directOrder), directOrder);
+    paintSection(cloudstream, cloudstreamLive, cloudstreamLive.filter(isSelectable).sort(directOrder), directOrder);
     announceRows(warmRows(torrentLive
       .filter((r) => r.id !== topId && torrent.shown.includes(r.id) && isSelectable(r))
       .map((r) => ({ r, d: view(r), m: measured[r.id] }))));
-    const groups = [torrent, direct].filter((g) => !g.s.hidden);
+    const groups = [torrent, direct, cloudstream].filter((g) => !g.s.hidden);
     // ما تعذّر قبل أن يظهر أصلًا: مطويّ في الأسفل
     const neverShown = gone.filter((r) => !live.includes(r));
     reconcile(wait.grid, waiting.map(row));
@@ -1323,8 +1354,8 @@ export function createServerSheet(body, o) {
       });
     }
     best.onclick = () => {
-      if (best.disabled || !top) return;
-      pick(top);
+      const target = top && routeById(top.id);
+      if (!best.disabled && target && isSelectable(target)) pick(target);
     };
   }
 
@@ -1332,6 +1363,7 @@ export function createServerSheet(body, o) {
     if (destroyed) return;
     destroyed = true;
     clearTimeout(settleTimer);
+    clearTimeout(interactionTimer);
     clearTimeout(topTimer);
     clearTimeout(rowsTimer);
     clearTimeout(hoverTimer);

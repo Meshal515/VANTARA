@@ -59,9 +59,7 @@ class RuntimeSourceAdapter(
     override suspend fun section(index: Int, page: Int): SourcePage {
         require(page>0 && index>=0)
         val result=execute("catalogue",input("page" to JsonPrimitive(page),"section" to JsonPrimitive(index)))
-        val items=result["items"] as? JsonArray ?: error("INVALID_CATALOGUE_RESULT")
-        val flat=JsonArray(items.flatMap { (it.jsonObject["list"] as? JsonArray) ?: error("INVALID_CATALOGUE_SECTION") })
-        return SourcePage(flat.map { work(it.jsonObject) }.distinctBy { it.url },result["hasNext"]?.jsonPrimitive?.booleanOrNull ?: false)
+        return listingResult(result,false)
     }
     private fun input(vararg rows: Pair<String,JsonElement>)=JsonObject(mapOf(*rows))
     private fun work(item: JsonObject,previous: SourceAnime?=null): SourceAnime {
@@ -82,8 +80,11 @@ class RuntimeSourceAdapter(
         require(page>0)
         val result=if(listing==Listing.SEARCH) execute("search",input("query" to JsonPrimitive(query),"page" to JsonPrimitive(page)))
             else execute("catalogue",input("page" to JsonPrimitive(page)))
+        return listingResult(result,listing==Listing.SEARCH)
+    }
+    internal fun listingResult(result: JsonObject, search: Boolean): SourcePage {
         val items=result["items"] as? JsonArray ?: error("INVALID_CATALOGUE_RESULT")
-        val flat=if(listing==Listing.SEARCH)items else JsonArray(items.flatMap { (it.jsonObject["list"] as? JsonArray) ?: error("INVALID_CATALOGUE_SECTION") })
+        val flat=if(search)items else JsonArray(items.flatMap { (it.jsonObject["list"] as? JsonArray) ?: error("INVALID_CATALOGUE_SECTION") })
         return SourcePage(flat.map { work(it.jsonObject) }.distinctBy { it.url },result["hasNext"]?.jsonPrimitive?.booleanOrNull ?: false)
     }
     /**

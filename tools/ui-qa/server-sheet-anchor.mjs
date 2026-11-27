@@ -40,7 +40,7 @@ const page = await (await browser.newContext({ viewport: { width: 412, height: 8
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 await page.goto(`http://127.0.0.1:${server.address().port}/`);
-await page.waitForFunction(() => window.__ui);
+await page.waitForFunction(() => window.__ui, { timeout: 10_000 });
 const out = await page.evaluate(async () => {
   const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   const sc = __ui.scroll;
@@ -53,7 +53,11 @@ const out = await page.evaluate(async () => {
     const [row, r0] = [...sc.querySelectorAll('.ss-group--direct .ss-row')].filter((b) => b.checkVisibility()).map((b) => [b, b.getBoundingClientRect()]).filter(([, r]) => r.top > v.top && r.bottom < v.bottom).at(-1);
     const hold0 = [document.querySelector('.an-srv-list').style.minHeight, document.querySelector('.ss-hold')?.style.height ?? null];
     const m0 = [Math.round(sc.scrollTop), Math.round(sc.scrollHeight), Math.round(document.querySelector('.an-srv-list').getBoundingClientRect().height)];
-    __ui.update({ routes, settled: false, status: { text: '' } }); await frame();
+    __ui.update({ routes, settled: false, status: { text: label } });
+    const deadline = performance.now() + 1_000;
+    while (sc.querySelector('.an-srv-status span').textContent !== label && performance.now() < deadline) await frame();
+    await frame();
+    if (sc.querySelector('.an-srv-status span').textContent !== label) throw Error('لم يُرسم التحديث: ' + label);
     window.__m = [m0, [Math.round(sc.scrollTop), Math.round(sc.scrollHeight), Math.round(document.querySelector('.an-srv-list').getBoundingClientRect().height)]];
     const shift = Math.round(row.getBoundingClientRect().top - r0.top);
     return { label, shift, m: window.__m, hold: [hold0, [document.querySelector('.an-srv-list').style.minHeight, document.querySelector('.ss-hold')?.style.height ?? null]] };

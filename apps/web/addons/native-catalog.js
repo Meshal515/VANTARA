@@ -149,6 +149,14 @@ export async function createNativeCatalog(record, {
     catalogue: (number, options) => listing(manga ? 'catalogue' : 'popular', number, '', options),
     search: (query, number, options) => listing('search', number, String(query ?? ''), options),
   };
+  if (cloudstream) adapter.resumeVerifiedPage = (replay, { tab, page: number, query }) => {
+    if (replay?.sourceId !== id || replay.replayInput?.page !== number || !replay.result?.page) return null;
+    const search = query || tab === 'search';
+    if (search) return replay.replayedOperation === 'search' && replay.replayInput.query === query ? page(replay.result) : null;
+    const section = /^section:(\d+)$/.exec(tab)?.[1];
+    return replay.replayedOperation === 'catalogue' && replay.replayInput.section === (section == null ? undefined : Number(section))
+      ? page(replay.result) : null;
+  };
   if (!manga || typeof engine.popular === 'function') adapter.popular = (number, options) => listing('popular', number, '', options);
   // أقسام المصدر كما يعلنها هو (بلا طلب شبكة): أقسام CloudStream الرئيسية، و«آخر التحديثات» لإضافة Aniyomi إن أعلنته.
   // محرك أقدم بلا sections يبقى على الرائج والأحدث العامين.
@@ -205,7 +213,7 @@ export async function createNativeCatalog(record, {
     key: `core|${id}`,
     sourceId: id, pkg, name: selected.label ?? selected.name ?? record.name ?? id,
     version: record.version ?? selected.version ?? '', iconUrl: record.iconUrl ?? selected.iconUrl ?? null,
-    protocol: 'native', enabled: true, bundled: false, user: true, contentTypes: types, capabilities,
+    homepage: selected.domain ?? record.homepage, protocol: 'native', enabled: true, bundled: false, user: true, contentTypes: types, capabilities,
     compatibility: { apk: true, apkCapabilities: capabilities, pwa: false, desktop: false },
   };
   return { status: 'ready', addon, adapter, source: adapter, sourceId: id, alternatives };

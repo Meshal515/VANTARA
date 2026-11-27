@@ -128,4 +128,18 @@ class VerificationPolicyTest {
         assertEquals(listOf("dup" to "1"), VerificationPolicy.cookiePairs("dup=1; dup=2"))
         assertTrue(VerificationPolicy.cookiePairs(null).isEmpty())
     }
+    @Test fun staleRequiredChallengeExpiresAndAnActiveBrowserKeepsItsOwnWindow() {
+        val ledger = VerificationLedger(2, 100)
+        ledger.require("old.example.com", "https://old.example.com", "https://old.example.com/", "ua",
+            "cloudflare", "Old", 0, sourceId = "old")
+        ledger.expire(101)
+        ledger.expire(202)
+        ledger.require("open.example.com", "https://open.example.com", "https://open.example.com/", "ua",
+            "cloudflare", "Open", 210, sourceId = "open")
+        ledger.begin("open.example.com", 280)
+        assertEquals(listOf("old"), ledger.discardStale(301).map { it.sourceId })
+        assertEquals("active", ledger.snapshot().single().state)
+        assertEquals("open", ledger.discardSource("open").single().sourceId)
+        assertTrue(ledger.snapshot().isEmpty())
+    }
 }

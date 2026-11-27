@@ -49,7 +49,7 @@ const strings = (v, allowed) =>
   v.every((x) => typeof x === "string" && (!allowed || allowed.includes(x)));
 export function validateManifest(
   raw,
-  { origin, productVersion = PRODUCT_VERSION } = {},
+  { origin, manifestUrl = origin, productVersion = PRODUCT_VERSION } = {},
 ) {
   const errors = [],
     compatibility = { pwa: true, apk: false, desktop: true, reason: null };
@@ -158,7 +158,7 @@ export function validateManifest(
   let logo = null;
   try {
     if (raw.logo) {
-      const u = publicUrl(raw.logo);
+      const u = publicUrl(stremio && typeof raw.logo === "string" ? new URL(raw.logo.replaceAll("%size%", "128"), manifestUrl) : raw.logo);
       if (stremio || u.origin === base) logo = u.href;
     }
   } catch {

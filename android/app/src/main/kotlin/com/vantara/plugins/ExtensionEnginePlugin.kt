@@ -145,7 +145,7 @@ class ExtensionEnginePlugin : Plugin() {
             // التكملة الإنجليزية بعد العربي: لا تسبقه على خانات التحميل الأربع
             for (filler in FILLER_SOURCES) if (eager(filler.pkg)) launch { runCatching { obtain("${filler.pkg}@${filler.lang}") } }
             // ES1: حالة تالفة لا تُسقط الإقلاع من هذا المسار (الخطأ يظهر في نداءات الواجهة حيث يُلتقط)
-            for (ext in runCatching { userStore.state.extensions }.getOrDefault(emptyList())) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
+            for (ext in runCatching { userStore.state.extensions }.getOrDefault(emptyList()).filter { it.enabled }) for (src in ext.sources) launch { runCatching { obtain("${ext.pkg}#${src.id}") } }
             launch { runCatching { refreshBuiltinsDaily(::eager) } }
             // SE3: إضافات المستخدم تتحدث وحدها، بشرط أن يعمل الإصدار الجديد فعلًا (MangaSelfUpdate)
             launch { runCatching { autoUpdateUserExtensionsDaily() } }
@@ -246,6 +246,7 @@ class ExtensionEnginePlugin : Plugin() {
                                 .put("lang", src.lang)
                                 .put("filler", !src.lang.equals("ar", ignoreCase = true))
                                 .put("user", true)
+                                .put("enabled", ext.enabled)
                                 .put("repo", st.repos.firstOrNull { it.url == ext.repoUrl }?.name)
                                 .put("repoUrl", ext.repoUrl)
                                 .put("domain", runCatching { (loaded[id] as? HttpSource)?.baseUrl }.getOrNull())
@@ -376,7 +377,10 @@ class ExtensionEnginePlugin : Plugin() {
                         .put("readyCatalogDismissed", st.readyCatalogDismissed)
                         .put("repos", JSArray(st.repos.map { repoJson(it) }))
                         .put("installed", JSArray(st.extensions.map {
-                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl)
+                            val entries = it.sources.map { row -> LegacySourceIds.Entry(row.id, row.lang) }
+                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.versionName).put("repo", it.repoUrl).put("enabled", it.enabled)
+                                .put("lang", it.lang)
+                                .put("sourceIds", JSArray(entries.map { source -> LegacySourceIds.visibleId(it.pkg, source, entries) }))
                                 .withIcon(NativeExtensionIcons.iconUrl(context, "extensions", it.pkg, it.sha256)
                                     ?: RepoIndex.iconUrl(it.iconUrl, it.repoUrl)
                                     ?: RepoIndex.legacyIconUrl(it.repoUrl, it.pkg)
@@ -436,10 +440,12 @@ class ExtensionEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val state = userStore.state
+                val repo = state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val installed = state.extensions.associateBy { it.pkg }
                 val list = JSArray()
-                for (ext in repoClient.read(base).second) {
-                    val mine = userStore.extension(ext.pkg)
+                for (ext in repoClient.readTrusted(repo)) {
+                    val mine = installed[ext.pkg]
                     list.put(
                         JSObject()
                             .put("pkg", ext.pkg)
@@ -591,7 +597,7 @@ class ExtensionEnginePlugin : Plugin() {
         val last = runCatching { stamp.readText().trim().toLong() }.getOrDefault(0L)
         if (System.currentTimeMillis() - last < MangaSelfUpdate.DAILY_MS) return
         kotlinx.coroutines.delay(90_000)
-        val mine = runCatching { userStore.state.extensions }.getOrDefault(emptyList())
+        val mine = runCatching { userStore.state.extensions }.getOrDefault(emptyList()).filter { it.enabled }
         for ((repoUrl, exts) in mine.groupBy { it.repoUrl }) {
             val repo = userStore.state.repos.firstOrNull { it.url == repoUrl } ?: continue
             val index = runCatching { repoClient.readTrusted(repo) }.getOrNull() ?: continue
@@ -613,7 +619,7 @@ class ExtensionEnginePlugin : Plugin() {
         failureChecks[pkg] = now
         scope.launch(Dispatchers.IO) {
             runCatching {
-                val ext = userStore.extension(pkg) ?: return@runCatching
+                val ext = userStore.extension(pkg)?.takeIf { it.enabled } ?: return@runCatching
                 val repo = userStore.state.repos.firstOrNull { it.url == ext.repoUrl } ?: return@runCatching
                 val entry = repoClient.readTrusted(repo).firstOrNull { it.pkg == pkg && !it.anime } ?: return@runCatching
                 autoUpdate(ext, entry)
@@ -657,6 +663,22 @@ class ExtensionEnginePlugin : Plugin() {
                 .put("lastCode", last?.getOrNull(2))
                 .put("lastAt", last?.getOrNull(3)?.toLongOrNull()),
         )
+    }
+
+    @PluginMethod
+    fun enableExtension(call: PluginCall) {
+        val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
+        val enabled = call.getBoolean("enabled") ?: return call.reject("حالة التفعيل مطلوبة")
+        scope.launch {
+            try {
+                userStore.update { state ->
+                    check(state.extensions.any { it.pkg == pkg }) { NOT_INSTALLED }
+                    state.copy(extensions = state.extensions.map { if (it.pkg == pkg) it.copy(enabled = enabled) else it })
+                }
+                if (!enabled) forget(pkg)
+                call.resolve(JSObject().put("ok", true))
+            } catch (error: Throwable) { rejectMangaMutation(call, error) }
+        }
     }
 
     @PluginMethod
@@ -1215,14 +1237,20 @@ class ExtensionEnginePlugin : Plugin() {
      * نفس الحزمة وفكّ الـDEX مرتين.
      */
     private suspend fun obtain(sourceId: String): CatalogueSource {
+        val pkg = splitSourceId(sourceId.substringBefore('#')).first
+        check(userStore.extension(pkg)?.enabled != false) { "SOURCE_DISABLED" }
         // المحمَّل لا ينتظر أحدًا: قفلٌ واحد للكل كان يُوقف صور الفصل والأغلفة
         // خلف تحميل خمسة عشر مصدرًا آخر عند فتح التطبيق
         loaded[sourceId]?.let { return it }
         // القفل للحزمة لا للمعرّف: العربي والتكملة من حزمة واحدة يُفكّان مرة
-        val lock = loadLocks.getOrPut(splitSourceId(sourceId.substringBefore('#')).first) { Mutex() }
+        val lock = loadLocks.getOrPut(pkg) { Mutex() }
         return lock.withLock {
+            check(userStore.extension(pkg)?.enabled != false) { "SOURCE_DISABLED" }
             loaded[sourceId]?.let { return@withLock it }
-            loadSlots.withPermit { load(sourceId) }
+            loadSlots.withPermit {
+                check(userStore.extension(pkg)?.enabled != false) { "SOURCE_DISABLED" }
+                load(sourceId)
+            }
         }
     }
 
@@ -1482,9 +1510,18 @@ class ExtensionEnginePlugin : Plugin() {
     private fun fail(call: PluginCall, t: Throwable) {
         val healed = runCatching { recover(call.getString("sourceId"), t) }.getOrDefault(false)
         if (healed) return call.reject("تعطّل إصدار هذه الإضافة على جهازك فرجعنا تلقائيًا لآخر إصدار سليم؛ أعد المحاولة", "RECOVERED_TO_LKG", t as? Exception)
-        // تحدّي Cloudflare يبقى برمزه القديم (اسم الصنف) ورسالته: source-pulse.js يعرف به «تحتاج تحقق»
-        generateSequence(t) { it.cause }.take(4).firstOrNull { it.javaClass.simpleName == "CloudflareBypassException" }?.let {
-            return call.reject(it.message ?: "الموقع يطلب تحققًا (حماية Cloudflare)", it.javaClass.name, it as? Exception)
+        val challenge = generateSequence(t) { it.cause }.take(6)
+            .filterIsInstance<eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException>()
+            .firstOrNull()
+        if (challenge != null) {
+            if (!challenge.interactive) return call.reject("تعذّر الاتصال بالموقع", "SITE_NETWORK", challenge)
+            val host = com.vantara.verification.VerificationCoordinator.challengeHost(challenge.message)
+            val id = call.getString("sourceId").orEmpty()
+            val name = loaded[id]?.name ?: userStore.extension(splitSourceId(id.substringBefore('#')).first)?.name
+            if (id.isNotBlank() && name != null && host != null)
+                com.vantara.verification.VerificationCoordinator.annotate(host, id, name)
+            return call.reject("الموقع يطلب تحققًا قبل الجلب", "VERIFICATION_REQUIRED", challenge,
+                JSObject().put("needsHuman", true).put("verificationHost", host))
         }
         val verdict = ExtensionFailure.classify(t)
         android.util.Log.w("ExtensionEngine", "${verdict.code}:${verdict.owner} <- ${t.readable()}")

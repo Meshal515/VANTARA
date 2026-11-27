@@ -659,19 +659,30 @@ export async function torrentFacts(session) {
  * يتابع حقائق التسخين ما دامت الورقة تطلبها: كل `every` حتى `span` من آخر `poke()` (مقترح جديد يمدّها).
  * `onFacts` يُستدعى حين تتغير فقط. يرجع `{ poke, stop }`.
  */
-export function watchFacts(session, onFacts, { every = 1500, span = 20000, read = torrentFacts } = {}) {
-  let until = 0, timer = null, stopped = false, last = '';
+export function watchFacts(session, onFacts, { every = 1500, span = 20000, idleEvery = 5000, read = torrentFacts } = {}) {
+  let until = 0, timer = null, stopped = false, reading = false, last = '';
   const tick = async () => {
     timer = null;
     if (stopped) return;
-    const facts = await read(session);
+    reading = true;
+    let facts;
+    try { facts = await read(session); } catch { facts = {}; }
+    reading = false;
     if (stopped) return;
     const key = JSON.stringify(facts);
     if (key !== last) { last = key; onFacts(facts); }
     if (Date.now() < until) timer = setTimeout(tick, every);
+    else if (Object.values(facts).some((fact) => typeof fact?.ready === 'boolean')) timer = setTimeout(tick, idleEvery);
   };
   return {
-    poke() { if (stopped) return; until = Date.now() + span; if (!timer) timer = setTimeout(tick, every); },
+    poke() {
+      if (stopped) return;
+      const idle = Date.now() >= until;
+      until = Date.now() + span;
+      if (reading || timer != null && !idle) return;
+      clearTimeout(timer);
+      timer = setTimeout(tick, every);
+    },
     stop() { stopped = true; clearTimeout(timer); timer = null; },
   };
 }
@@ -868,6 +879,7 @@ export function repositories() {
   return {
     kind: 'anime',
     list: () => plugin.repos(),
+    enable: typeof plugin.enableExtension === 'function' ? (pkg, enabled) => plugin.enableExtension({ pkg, enabled }) : null,
     add: (url) => plugin.addRepo({ url }),
     remove: (url) => plugin.removeRepo({ url }),
     extensions: async (url) => (await plugin.repoIndex({ url })).extensions ?? [],

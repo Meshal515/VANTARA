@@ -16,7 +16,7 @@ import { collectFollowTime } from '../lib/follow-time.js';
  */
 
 import { createNativeCatalog, diagnoseManagedAddon } from '../addons/native-catalog.js';
-import { createSourceVerification } from '../lib/source-verification.js';
+import { createSourceVerification, isSourceChallenge } from '../lib/source-verification.js';
 import { SHELL_HTML } from './markup.js';
 import { createSheetController } from './sheet-lifecycle.js';
 import { createDownloadsUI } from './downloads.js';
@@ -65,7 +65,7 @@ import { addToAnimeList, createAnime, readWatch } from './anime.js';
 import { createCinema } from './cinema.js';
 import { createAnimeAccount, isAnimeRef, isMediaRef } from './anime-account.js';
 import { createRafiq } from './rafiq.js';
-import { momentRange, momentStart, repositories as animeRepositories, verify as verifyAnimeSource, withPhaseDeadline } from '../lib/anime-engine.js';
+import { momentRange, momentStart, repositories as animeRepositories, withPhaseDeadline } from '../lib/anime-engine.js';
 import { fetchAnimeDetail, fetchAnimeHome } from '../lib/anime-meta.js';
 import { fetchMangaDexIdentity, fetchMangaGenre, fetchMangaMatches, fetchMangaPopular } from '../lib/manga-meta.js';
 import { artRatio, createArtStore, isLocalArt } from '../lib/art.js';
@@ -5496,7 +5496,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     showPage('utility');
     q('utilityBody').replaceChildren(el('p', 'work-meta', 'جارٍ قراءة الإضافات…'));
     try {
-      const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(sync.user?.userId ?? "local"); await addons.reloadSources?.();
+      const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(profile);
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
       // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
       const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
@@ -5557,7 +5557,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       if(!active())return;
       const canonical=addons.registry.list().find(addon=>addon.sourceId===result.sourceId);
       if(!canonical)throw new Error('المصدر مثبت، لكن المحرك لم يربطه بكتالوج صالح بعد. أعد فتح الإضافات.');
-      await openAddonSource({...canonical,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter,lookup,generation});
+      await openAddonSource({...canonical,name:result.addon.name,homepage:result.addon.homepage??canonical.homepage,iconUrl:result.addon.iconUrl??canonical.iconUrl},undefined,{adapter:result.adapter,lookup,generation});
     }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openNativeAddonSource(record,sourceId));}
     finally{lookup.finish();}
   }
@@ -5590,7 +5590,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }
     }
     const adapter = nativeAdapter ?? addons.adapter(addon.key);
-    const openSelectedWork = async function openSelectedWork(item) {
+    const verify = nativeAdapter && addon.sourceId ? (error, retry) => sourceVerification.beginSource({
+      host: error?.data?.verificationHost ?? error?.verificationHost
+        ?? /^Cloudflare wants a human check for ([^;]+);/.exec(error?.message ?? '')?.[1],
+      domains: [addon.homepage, addon.domain, ...(addon.domains ?? [])].filter(Boolean),
+      sourceId: addon.sourceId, sourceName: addon.name, retry, isActive: active,
+    }) : null;
+    const openSelectedWork = async function openSelectedWork(item, replay = false) {
       if(!active())return;
       const workLookup=addonNavigation.begin();
       try {
@@ -5628,15 +5634,33 @@ export function mountV35(deps, { page = 'home' } = {}) {
         else { applySection('cinema'); buildDrawer(); await workLookup.wait(()=>cinema.openWork(work),'SOURCE_WORK_TIMEOUT'); }
       } catch (error) {
         if(!active() || error?.name==='AbortError')return;
+        if (replay) throw error;
+        if (verify && isSourceChallenge(error)) {
+          openSheet(body => {
+            const message = el('p', 'work-meta', 'الموقع يطلب تحققًا قبل فتح العمل.');
+            const check = sheetItem('shield', 'تحقق الآن', async () => {
+              check.disabled = true;
+              const result = await verify(error, async () => {
+                if (!active()) return { ok: false, cancelled: true };
+                return openSelectedWork(item, true);
+              });
+              if (check.isConnected && result.ok) closeSheet();
+              else if (active() && check.isConnected) {
+                check.disabled = false;
+                message.textContent = result.error ?? message.textContent;
+              }
+            });
+            body.append(message, check);
+          });
+          return;
+        }
         toast(error.message);
         openSheet(body=>{body.append(el('p','work-meta',error.message??'تعذّر فتح العمل'),sheetItem('refresh','أعد المحاولة',()=>{closeSheet();void openSelectedWork(item);}));});
       } finally { workLookup.finish(); }
     };
     // صفحة المصدر واحدة (source-mode.js): بحث وأعمال المصدر، والرجوع إلى الإضافات من شريط الصفحة
     sourceView?.close?.();
-    // مصدر أنمي/سينما أصلي (Aniyomi) يطلب تحقق Cloudflare: صفحة التحقق داخل التطبيق ثم إعادة الجلب
-    const verifiable = Boolean(nativeAdapter) && addon.sourceId && !String(addon.sourceId).startsWith('addon|cs3|') && !addon.contentTypes.includes('manga');
-    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: openSelectedWork, onVerify: verifiable ? () => verifyAnimeSource(addon.sourceId) : null });
+    sourceView = renderSourceMode({ addon, adapter, pulse: addons.pulse, state: sourceState ?? {}, onBack: openAddons, onOpenWork: (item) => openSelectedWork(item), onVerify: verify, trackRequests: Boolean(nativeAdapter) });
     q('utilityBody').replaceChildren(sourceView);
     }catch(error){if(active() && error?.name!=='AbortError')addonSourceError(error,()=>openAddonSource(addon,sourceState,{adapter:nativeAdapter}));}
     finally{lookup.finish();}

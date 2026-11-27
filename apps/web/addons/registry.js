@@ -100,7 +100,7 @@ export function createAddonRegistry({
       if (!slot?.manifestRaw || typeof slot.url !== "string") return null;
       assertBoundedData(slot.manifestRaw);
       if (slot.sha256 && (await printOf(slot.manifestRaw)) !== slot.sha256) return null;
-      const checked = validateManifest(slot.manifestRaw, { origin: publicUrl(slot.url).origin });
+      const checked = validateManifest(slot.manifestRaw, { origin: publicUrl(slot.url).origin, manifestUrl: slot.url });
       return checked.errors.length ? null : checked.manifest;
     };
     for (const row of (Array.isArray(saved?.value) ? saved.value : []).slice(0, MAX_INSTALLED * 2)) {
@@ -210,7 +210,7 @@ export function createAddonRegistry({
     // Public preview objects are editable DOM data, never installation authority.
     assertBoundedData(raw);
     const privateRaw = structuredClone(raw);
-    const checked = validateManifest(privateRaw, { origin: new URL(url).origin });
+    const checked = validateManifest(privateRaw, { origin: new URL(url).origin, manifestUrl: url });
     if (checked.errors.length)
       throw new Error(`بيانات الإضافة غير متوافقة (${checked.errors.join(", ")})`);
     const preview = { manifest: structuredClone(checked.manifest), compatibility: structuredClone(checked.compatibility) };
@@ -247,7 +247,7 @@ export function createAddonRegistry({
     return mutate(async () => {
       const hidden = previews.get(preview);
       if (!hidden) throw new Error("عاين الإضافة أولًا");
-      const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin });
+      const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin, manifestUrl: hidden.url });
       if (checked.errors.length) throw new Error("بيانات الإضافة غير متوافقة");
       const m = checked.manifest, target = entries.get(m.key), before = replaceKey ? row(replaceKey) : target;
       if (replaceKey && before.manifest.id !== m.id) throw new Error("هوية الإضافة مختلفة عن الإعداد المراد استبداله");
@@ -307,7 +307,7 @@ export function createAddonRegistry({
       }
       cancelled();
       assertBoundedData(raw);
-      const checked = validateManifest(raw, { origin: publicUrl(before.url).origin });
+      const checked = validateManifest(raw, { origin: publicUrl(before.url).origin, manifestUrl: before.url });
       if (checked.errors.length) throw new Error("بيانات إعادة التثبيت غير متوافقة؛ احتُفظ بالإضافة السابقة");
       const manifest = checked.manifest;
       if (manifest.key !== key || manifest.protocol !== before.manifest.protocol)
@@ -416,7 +416,7 @@ export function createAddonRegistry({
       key = resolveKey(key);
       const r = row(key);
       if (sessions || !r.staged) return false;
-      const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin });
+      const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin, manifestUrl: r.staged.url });
       if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة الجديدة غير متوافقة");
       if (r.staged.sha256 && (await printOf(r.staged.manifestRaw)) !== r.staged.sha256)
@@ -439,7 +439,7 @@ export function createAddonRegistry({
       const r = row(key);
       if (sessions || !r.previous) throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
       const prev = r.previous;
-      const checked = validateManifest(prev.manifestRaw, { origin: publicUrl(prev.url).origin });
+      const checked = validateManifest(prev.manifestRaw, { origin: publicUrl(prev.url).origin, manifestUrl: prev.url });
       if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة السابقة غير متوافقة");
       if (prev.sha256 && (await printOf(prev.manifestRaw)) !== prev.sha256)

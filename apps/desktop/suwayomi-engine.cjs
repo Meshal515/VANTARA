@@ -178,6 +178,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
     const st = await load();
     const ext = st.extensions.find((x) => x.pkg === pkg);
     if (!ext) throw arabic('هذا المصدر غير مثبت على هذا الجهاز؛ ثبّت إضافته من «إضافاتي»', 'SOURCE_NOT_INSTALLED');
+    if (ext.enabled === false) throw arabic('هذه الإضافة معطّلة', 'SOURCE_DISABLED');
     const endpoint = await runtime.start();
     if (loadedIn.get(pkg) === endpoint.base) return ext;
     const present = await engineExtensions();
@@ -316,7 +317,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
     const st = await load();
     return {
       readyCatalogDismissed: true, repos: st.repos.map(repoJson),
-      installed: st.extensions.map((x) => ({ pkg: x.pkg, name: x.name, version: x.version, repo: x.repo, ...(x.iconUrl ? { iconUrl: x.iconUrl } : {}) })),
+      installed: st.extensions.map((x) => ({ pkg: x.pkg, name: x.name, version: x.version, repo: x.repo, enabled: x.enabled !== false, ...(x.iconUrl ? { iconUrl: x.iconUrl } : {}) })),
     };
   }
   const addRepo = ({ url, fingerprint = null } = {}) => exclusive(async () => {
@@ -403,6 +404,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
     const record = {
       pkg: ext.pkg, repo: repo.url, name: ext.name, version: ext.version, versionCode: ext.versionCode, lib: ext.lib, lang: ext.lang,
       nsfw: ext.nsfw, iconUrl: ext.iconUrl ?? null, sha256: sha, sources: visible.map(({ id, name, lang }) => ({ id, name, lang })),
+      enabled: prev?.enabled !== false,
       previous: prev ? { version: prev.version, versionCode: prev.versionCode, lib: prev.lib, sha256: prev.sha256, sources: prev.sources } : null,
     };
     const fresh = await load();
@@ -433,6 +435,15 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
     const fresh = await load();
     if (fresh.updates?.[pkg]?.held) await save({ ...fresh, updates: { ...fresh.updates, [pkg]: { ...fresh.updates[pkg], held: null } } });
     return { pkg: record.pkg, version: record.version, sources: record.sources.map((s) => `${record.pkg}#${s.id}`) };
+  });
+
+  const enableExtension = ({ pkg, enabled } = {}) => exclusive(async () => {
+    const st = await load();
+    if (!st.extensions.some((x) => x.pkg === pkg)) throw arabic('الإضافة غير مثبتة');
+    if (typeof enabled !== 'boolean') throw arabic('حالة التفعيل مطلوبة');
+    await save({ ...st, extensions: st.extensions.map((x) => x.pkg === pkg ? { ...x, enabled } : x) });
+    changed();
+    return { ok: true };
   });
 
   const uninstallExtension = ({ pkg } = {}) => exclusive(async () => {
@@ -484,7 +495,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
     for (const repo of st.repos) {
       const list = await client.readTrusted(repo).catch(() => null);
       if (!list) continue;
-      for (const mine of (await load()).extensions.filter((x) => x.repo === repo.url)) {
+      for (const mine of (await load()).extensions.filter((x) => x.repo === repo.url && x.enabled !== false)) {
         const ext = list.find((x) => x.pkg === mine.pkg);
         const log = (await load()).updates?.[mine.pkg] ?? {};
         if (!ext || ext.version === mine.version || !(ext.versionCode > mine.versionCode)) continue;
@@ -516,7 +527,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
         list.push({
           id: `${ext.pkg}#${s.id}`, pkg: ext.pkg, label: s.name, lib: ext.lib, version: ext.version, warning: ext.nsfw ? 'MIXED' : 'SAFE',
           names: [s.name], lang: s.lang, filler: s.lang.toLowerCase() !== 'ar', user: true, repo: repo?.name ?? null, repoUrl: ext.repo,
-          domain: null, ready: running && loadedIn.has(ext.pkg), engine: 'suwayomi', ...(ext.iconUrl ? { iconUrl: ext.iconUrl } : {}),
+          domain: null, enabled: ext.enabled !== false, ready: running && loadedIn.has(ext.pkg), engine: 'suwayomi', ...(ext.iconUrl ? { iconUrl: ext.iconUrl } : {}),
         });
       }
     }
@@ -538,7 +549,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
     series, chapters, pages,
     image: async ({ page } = {}) => { if (!mediaPath(page?.imageUrl)) throw arabic('صفحة غير صالحة'); return { path: page.imageUrl, bytes: 0, cached: false }; },
     cover: async ({ url } = {}) => { if (!mediaPath(url)) throw arabic('غلاف غير صالح'); return { path: url }; },
-    repos, addRepo, removeRepo, repoIndex, installExtension, uninstallExtension, rollbackExtension, updateState, engineState, enableEngine,
+    repos, addRepo, removeRepo, repoIndex, installExtension, uninstallExtension, enableExtension, rollbackExtension, updateState, engineState, enableEngine,
   };
 
   /** نقطة الدخول الوحيدة من الواجهة: دالة معروفة فقط. */
@@ -555,7 +566,7 @@ function createSuwayomiEngine({ root, runtime, fetchBytes, convert = null, onEve
   async function warmUp() {
     if (!runtime.installed()) return false;
     const st = await load().catch(() => null);
-    if (!st?.extensions?.length) return false;
+    if (!st?.extensions?.some((x) => x.enabled !== false)) return false;
     await runtime.start({ quiet: true });
     return true;
   }

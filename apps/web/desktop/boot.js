@@ -106,7 +106,7 @@ export function installDesktopBridges(g = globalThis) {
   // ويندوز اليوم يشغّل إضافات Mihon بمحرك Suwayomi المحلي (apps/desktop/suwayomi-engine.cjs) حين يعلنه التطبيق
   // (`VantaraDesktop.mangaEngine`): المستودعات والتثبيت عبره، ومصادره `pkg#id` (معرّفات الـAPK نفسها) تُوجَّه إليه.
   const WEB_METHODS=['sources','prepare','popular','latest','catalogue','search','genre','series','chapters','pages','image','cover','sites','addSite','removeSite','clearImageCache'];
-  const REPO_METHODS=['repos','addRepo','removeRepo','repoIndex','installExtension','uninstallExtension','updateState','rollbackExtension','engineState'];
+  const REPO_METHODS=['repos','addRepo','removeRepo','repoIndex','installExtension','uninstallExtension','enableExtension','updateState','rollbackExtension','engineState'];
   const native=typeof g.VantaraDesktop?.mangaEngine==='function'?(method,args)=>g.VantaraDesktop.mangaEngine({method,args}):null;
   const MANGA_METHODS=new Set([...WEB_METHODS,...(native?REPO_METHODS:[])]);
   const engineSource=id=>/^[A-Za-z][\w]*(?:\.[\w]+)+#-?\d{1,20}$/.test(String(id??''));

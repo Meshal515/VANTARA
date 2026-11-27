@@ -96,17 +96,30 @@ data class VerificationPending(
     val host: String, val origin: String, val url: String, val userAgent: String,
     val kind: String, val sourceName: String, val createdAt: Long,
     val token: String = UUID.randomUUID().toString(), val state: String = "required",
+    val sourceId: String? = null,
+    val firstSeenAt: Long = createdAt,
 )
 
 /** Thread-safe through Coordinator's monitor; no Activity or WebView ownership here. */
 class VerificationLedger(private val capacity: Int = 8, private val ttlMs: Long = 10 * 60_000L) {
     private val entries = linkedMapOf<String, VerificationPending>()
     fun snapshot(): List<VerificationPending> = entries.values.toList()
-    fun require(host: String, origin: String, url: String, userAgent: String, kind: String, sourceName: String, now: Long): VerificationPending? {
+    fun require(host: String, origin: String, url: String, userAgent: String, kind: String, sourceName: String, now: Long, sourceId: String? = null): VerificationPending? {
         entries[host]?.let { return it }
         if (entries.size >= capacity) return null
-        return VerificationPending(host, origin, url, userAgent.take(1024), kind.take(40), sourceName.take(100), now).also { entries[host] = it }
+        return VerificationPending(host, origin, url, userAgent.take(1024), kind.take(40), sourceName.take(100), now, sourceId = sourceId).also { entries[host] = it }
     }
+    fun annotate(host: String, sourceId: String, sourceName: String): VerificationPending? {
+        val entry = entries[host]?.takeIf { it.state == "required" && it.sourceId == null } ?: return null
+        return entry.copy(sourceId = sourceId, sourceName = sourceName.take(100)).also { entries[host] = it }
+    }
+    fun discardSource(sourceId: String): List<VerificationPending> =
+        entries.values.filter { it.sourceId == sourceId }.onEach { entries.remove(it.host) }
+
+    fun discardStale(now: Long): List<VerificationPending> =
+        entries.values.filter { it.state == "required" && now - it.firstSeenAt >= 3 * ttlMs }
+            .onEach { entries.remove(it.host) }
+
     fun begin(host: String, now: Long): VerificationPending? {
         val entry = entries[host] ?: return null
         if (entry.state != "required" || now - entry.createdAt >= ttlMs || entries.values.any { it.state == "active" }) return null

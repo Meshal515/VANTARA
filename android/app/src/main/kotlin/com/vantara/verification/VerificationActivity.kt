@@ -46,6 +46,8 @@ class VerificationActivity : Activity() {
     private var completed = false
     private var resumed = false
     private var navigations = 0
+    private var pageRevision = 0
+    private var continueButton: Button? = null
     /** Same-site host the challenge moved to (e.g. www → ww3); its host-only cf_clearance counts too. */
     private var landed: String? = null
     /**
@@ -54,9 +56,9 @@ class VerificationActivity : Activity() {
      * (يضغط رجوع = إلغاء = يُطلب التحقق من جديد). الآن الكوكي الصالح مع صفحة بلا تحدٍّ نجاح.
      */
     @Volatile private var pageReady = false
+    private fun cookieOrigin(origin: String): String = landed ?: origin
     private fun clearanceNow(origin: String): String? =
-        VerificationPolicy.clearance(selectedCookies?.getCookie("$origin/"))
-            ?: landed?.takeIf { it != origin }?.let { VerificationPolicy.clearance(selectedCookies?.getCookie("$it/")) }
+        VerificationPolicy.clearance(selectedCookies?.getCookie("${cookieOrigin(origin)}/"))
     private var deadline = 0L
     private val timeout = Runnable { complete("failed", "timeout") }
     private val poll = object : Runnable {
@@ -64,6 +66,7 @@ class VerificationActivity : Activity() {
             if (completed || !resumed) return
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
+            continueButton?.isEnabled = pageReady && (runtimeProfile == null || clearance != null)
             if (clearance != null && (clearance != initialClearance || pageReady)) {
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
@@ -130,14 +133,15 @@ class VerificationActivity : Activity() {
         })
         // لكل الإضافات (كان لـCloudStream وحدها): بعد أن يفتح الموقع، المستخدم يرجع بنفسه ولا يبقى عالقًا.
         // الكوكي الصالح يُرسَل وإن لم يتغير؛ والمضيف يعيد طلب المصدر ويتحقق منه، فإن بقي التحدي طُلب من جديد.
-        container.addView(Button(this).apply {
-            text="تم التحقق، متابعة"
+        continueButton = Button(this).apply {
+            text = "متابعة إلى المصدر"
+            isEnabled = false
             setOnClickListener {
-                val value=clearanceNow(current.origin)
-                if(value!=null||pageReady)complete("verified",null,value)
-                else complete("cancelled","user_cancelled")
+                val value = clearanceNow(current.origin)
+                if (pageReady && (runtimeProfile == null || value != null)) complete("verified", null, value)
             }
-        })
+        }
+        container.addView(continueButton)
         setContentView(container)
     }
 
@@ -187,13 +191,20 @@ class VerificationActivity : Activity() {
                 override fun onPageStarted(view: WebView, url: String?, icon: android.graphics.Bitmap?) {
                     val target = VerificationPolicy.endpoint(url.orEmpty())
                     if (target == null || !VerificationPolicy.sameSite(current, target)) complete("failed", "navigation_blocked")
-                    else if (target.host != current.host) landed = target.origin
+                    else {
+                        landed = target.origin
+                        pageReady = false
+                        pageRevision++
+                        continueButton?.isEnabled = false
+                    }
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
                     val target = VerificationPolicy.endpoint(url.orEmpty()) ?: return
                     if (!VerificationPolicy.sameSite(current, target)) return
                     // صفحة بلا تحدٍّ؟ (نموذج Cloudflare أو Turnstile أو عنوان «لحظة») — تُفحص بعد كل تحميل كامل
+                    val revision = pageRevision
                     view.evaluateJavascript(CHALLENGE_PROBE) { r ->
+                        if (completed || revision != pageRevision || view.url != url) return@evaluateJavascript
                         pageReady = r == "true"
                         if (pageReady && resumed && !completed) { main.removeCallbacks(poll); main.post(poll) }
                     }
@@ -226,9 +237,9 @@ class VerificationActivity : Activity() {
         if (reason != null) result.putExtra("reason", reason)
         if (state == "verified" && clearance != null) result.putExtra("clearance", clearance)
         if (state == "verified") endpoint?.let { e ->
-            // كل كوكيز الموقع (ومضيف الهبوط إن انتقل التحدي إليه) لا cf_clearance وحده
-            val all = listOfNotNull(selectedCookies?.getCookie(e.origin + "/"), landed?.takeIf { it != e.origin }?.let { selectedCookies?.getCookie("$it/") })
-            if (all.isNotEmpty()) result.putExtra("cookies", all.joinToString("; ").take(65536))
+            val origin = cookieOrigin(e.origin)
+            result.putExtra("cookieOrigin", origin)
+            if (runtimeProfile == null) selectedCookies?.getCookie("$origin/")?.take(65536)?.let { result.putExtra("cookies", it) }
         }
         setResult(if (state == "verified") RESULT_OK else RESULT_CANCELED, result)
         releaseBrowser()

@@ -40,7 +40,7 @@ class VerificationPlugin : Plugin() {
 
     private fun json(item: VerificationPending, state: String = item.state, reason: String? = null): JSObject = JSObject()
         .put("host", item.host).put("origin", item.origin).put("sourceName", item.sourceName)
-        .put("kind", item.kind).put("token", item.token).put("state", state)
+        .put("sourceId", item.sourceId).put("kind", item.kind).put("token", item.token).put("state", state)
         .apply { if (reason != null) put("reason", reason) }
 
     private fun emit(item: VerificationPending, state: String, reason: String?) {
@@ -106,8 +106,11 @@ class VerificationPlugin : Plugin() {
         val state = if (matches) data?.getStringExtra("state") else "cancelled"
         val verified = matches && state == "verified" && result.resultCode == Activity.RESULT_OK
         val value = if (verified) data?.getStringExtra("clearance")?.let { VerificationPolicy.clearance("cf_clearance=$it") } else null
-        // كل كوكيز الموقع من متصفح التحقق (لا cf_clearance وحده)، والقيم محصورة في VerificationPolicy.cookiePairs
-        val pairs = if (verified) VerificationPolicy.cookiePairs(data?.getStringExtra("cookies")).filter { it.first != "cf_clearance" } else emptyList()
+        val target = data?.getStringExtra("cookieOrigin")?.let(VerificationPolicy::endpoint)
+            ?.takeIf { endpoint -> VerificationPolicy.endpoint(item.origin)?.let { VerificationPolicy.sameSite(it, endpoint) } == true }
+        val pairs = if (verified && target != null)
+            VerificationPolicy.cookiePairs(data?.getStringExtra("cookies")).filter { it.first != "cf_clearance" }
+        else emptyList()
         fun finish(state: String, reason: String?) {
             VerificationCoordinator.finish(item.host, item.token, state, reason)
             call?.resolve(json(item, state, reason))
@@ -116,17 +119,16 @@ class VerificationPlugin : Plugin() {
             finish(if (state == "cancelled" || !matches) "cancelled" else "failed", if (matches) data?.getStringExtra("reason") else "interrupted")
             return@post
         }
-        // صفحة فتحت بلا تحدٍّ ولا كوكي تنقله: لا شيء يُحفظ، والمصدر يُعاد طلبه كما هو
-        if (value == null && pairs.isEmpty()) { finish("verified", null); return@post }
-        // HTTPS فقط. cf_clearance بلا Max-Age قصير مفروض: كان 1800 ث يُرجع التحقق بعد نصف ساعة ولو كان الموقع
-        // أعطاه مدة أطول. الخادم يقرر صلاحيته؛ إن رفضه يظهر التحدي ويُحل كما الآن. بقية الكوكيز بالمدة نفسها.
+        if (target == null || value == null && pairs.isEmpty()) { finish("verified", null); return@post }
+        // CookieManager exposes a Cookie header, without expiry attributes. Import it only into
+        // this exact host as a session cookie, leaving the isolated WebView's original expiry intact.
         val jar = try { CookieManager.getInstance() } catch (_: RuntimeException) { return@post finish("failed", "cookie_store_unavailable") }
         val all = (listOfNotNull(value?.let { "cf_clearance" to it }) + pairs)
         var left = all.size
         var ok = false
         for ((name, v) in all) {
             try {
-                jar.setCookie(item.origin + "/", "$name=$v; Path=/; Max-Age=2592000; Secure; SameSite=Lax") { accepted ->
+                jar.setCookie(target.origin + "/", "$name=$v; Path=/; Secure; HttpOnly; SameSite=Lax") { accepted ->
                     if (accepted) ok = true
                     if (--left == 0) {
                         try { jar.flush() } catch (_: RuntimeException) {}

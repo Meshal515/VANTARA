@@ -21,7 +21,7 @@ const RETRY_MAX_MS = 60 * 60_000;
 
 // Only confirmed interactive evidence requests verification; HTTP 403 alone does not.
 function confirmedVerification(value) {
-  if (value?.needsHuman === true || value?.blocked === 'cloudflare_interactive' || (value?.code === 'challenge' && value?.challenge === 'interactive')) return true;
+  if (value?.data?.needsHuman === true || ['VERIFICATION_REQUIRED', 'SITE_VERIFICATION'].includes(value?.code) || value?.needsHuman === true || value?.blocked === 'cloudflare_interactive' || (value?.code === 'challenge' && value?.challenge === 'interactive')) return true;
   const native = /(?:^|\.)CloudflareBypassException$/.test(String(value?.code ?? value?.name ?? ''));
   return native && (value?.interactive === true || (value?.interactive !== false && /^Cloudflare wants a human check for [^;]+; open the site in the WebView to pass it$/.test(value?.message ?? '')));
 }

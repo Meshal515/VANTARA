@@ -175,7 +175,7 @@ export async function sources() {
 		recoveredSaid = true;
 		try { globalThis.dispatchEvent?.(new CustomEvent('vantara:extensions-recovered')); } catch { /* بيئة بلا أحداث */ }
 	}
-	return (list ?? []).filter((source) => visible(source));
+	return (list ?? []).filter((source) => source.enabled !== false && visible(source));
 }
 
 /**
@@ -325,6 +325,7 @@ export function repositories() {
 	const formerlyBundled = new Set();
 	return {
 		list: () => plugin.repos(),
+		enable: typeof plugin.enableExtension === 'function' ? changing((pkg, enabled) => plugin.enableExtension({ pkg, enabled })) : null,
 		add: async (url) => {
 			const out = await plugin.addRepo({ url });
 			if (out?.repo?.url) localChange({ type: 'repo', on: true, url: out.repo.url, name: out.repo.name, fingerprint: out.repo.fingerprint ?? null });

@@ -276,3 +276,18 @@ it('المعطّلة بعد الرجوع من التفاصيل: مبلورة و�
   expect(row.querySelector(':scope>.y-sw')).toBeTruthy();
   root.close();
 });
+
+it('renders a bounded available window and searches beyond it', async () => {
+  setup();
+  const api = manga({ installed: [] });
+  api.extensions.mockResolvedValue(Array.from({ length: 1154 }, (_, i) => ({
+    pkg: 'test.extensions.item' + i, name: 'Extension ' + String(i).padStart(4, '0'), lang: 'en',
+  })));
+  const root = mount({ repositories: api, initialState: { stack: [{ v: 'hub' }, { v: 'mihon' }], tab: { mihon: 'avail' } } });
+  await tick();
+  expect(root.querySelectorAll('.y-avail-row').length).toBeLessThan(40);
+  root.hub.S.q = 'Extension 1153';
+  root.hub.render();
+  expect(root.querySelector('.y-avail-row .y-nm').textContent).toBe('Extension 1153');
+  root.close();
+});

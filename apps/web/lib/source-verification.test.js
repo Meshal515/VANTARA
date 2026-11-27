@@ -170,3 +170,36 @@ describe('CF01: نجاح التحقق = نجاح الطلب الأصلي بعد�
     c.close();
   });
 });
+
+it('keeps the pending row visible after a native verified event until the source confirms the replay', async () => {
+  const f = fixture();
+  const verification = createSourceVerification(f);
+  await verification.ready;
+  let finish;
+  f.plugin.begin.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  let during;
+  verification.require({ host: 'source.example', state: 'required', retry: async () => {
+    during = verification.list();
+    return { ok: true };
+  } });
+  const result = verification.begin('source.example');
+  f.listeners.get('state')({ host: 'source.example', state: 'verified' });
+  expect(verification.list()).toMatchObject([{ host: 'source.example', verifying: true }]);
+  finish({ host: 'source.example', state: 'verified' });
+  expect(await result).toMatchObject({ ok: true });
+  expect(during).toMatchObject([{ host: 'source.example', verifying: true }]);
+  expect(verification.list()).toEqual([]);
+  verification.close();
+});
+
+it('treats a replay rejection flagged by the source as an unfinished verification without needing a native event', async () => {
+  const f = fixture();
+  const verification = createSourceVerification(f);
+  await verification.ready;
+  verification.require({ host: 'source.example', state: 'required', retry: async () => {
+    throw Object.assign(new Error('verification'), { code: 'VERIFICATION_REQUIRED' });
+  } });
+  expect(await verification.begin('source.example')).toMatchObject({ ok: false, reason: 'still_challenged' });
+  expect(verification.list()).toMatchObject([{ host: 'source.example', reason: 'still_challenged' }]);
+  verification.close();
+});

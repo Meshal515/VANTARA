@@ -403,3 +403,20 @@ describe('topWarmer refresh', () => {
     expect(calls).toHaveLength(4);
   });
 });
+
+it('clears expired warming indicators without starting another prewarm', async () => {
+  vi.useFakeTimers();
+  const seen = [];
+  const read = vi.fn().mockResolvedValueOnce({ first: { ready: true } }).mockResolvedValue({});
+  const watch = engine.watchFacts('warm-session', f => seen.push(f), { every: 50, span: 49, idleEvery: 100, read });
+  try {
+    watch.poke();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(seen).toEqual([{ first: { ready: true } }, {}]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(read).toHaveBeenCalledTimes(2);
+  } finally {
+    watch.stop();
+    vi.useRealTimers();
+  }
+});

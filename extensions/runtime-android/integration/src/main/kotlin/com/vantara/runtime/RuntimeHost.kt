@@ -15,6 +15,8 @@ import dev.vantara.runtime.android.*
 import dev.vantara.runtime.api.RuntimeHttpAccess
 import dev.vantara.runtime.http.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.*
@@ -62,6 +64,8 @@ class RuntimeHost(
     private data class Owner(val id: String, val epoch: Long, val store: RuntimePackageStore)
     @Volatile private var owner = Owner("local",0,RuntimePackageStore(File(directory,"packages").toPath(),"local"))
     private val indexes = ConcurrentHashMap<String,Pair<Long,JsonArray>>()
+    private val indexLocks = ConcurrentHashMap<String,Mutex>()
+    private val repositoryDownloads = Semaphore(4)
     private data class Retry(val owner: Owner,val generation: Long,val installed: RuntimePackageStore.Installed,val source: JsonObject,val id: String,val operation: String,val input: JsonObject,val url: String,val userAgent: String,val scope: AndroidRuntimeClient.Scope)
     private val pending = ConcurrentHashMap<String,Retry>()
     private val activeVerifications = ConcurrentHashMap<String,Retry>()
@@ -78,7 +82,8 @@ class RuntimeHost(
             workers.keys.forEach { it.close() }; workers.clear(); epoch++
             engine.setRuntimeSources(emptyList())
             owner = Owner(id,epoch,RuntimePackageStore(File(directory,"packages").toPath(),id))
-            indexes.clear()
+            indexes.clear();indexLocks.clear()
+            pending.keys.forEach(VerificationCoordinator::discardSource)
             pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear()
         }
         refresh(owner)
@@ -147,22 +152,37 @@ class RuntimeHost(
     fun removeRepository(url: String) {
         val o = owner
         saveRepositories(o,JsonArray(repositories(o).filter { it.jsonObject.text("url") != url }))
-        indexes.remove(o.id+"|"+url)
+        indexes.remove(o.id+"|"+url);indexLocks.remove(o.id+"|"+url)
         // Unlinking a repository never uninstalls its sources.
     }
     private suspend fun index(o: Owner,url: String,force: Boolean=false): JsonArray = withContext(Dispatchers.IO) {
-        checkOwner(o); val key=o.id+"|"+url
-        indexes[key]?.takeIf { !force && System.currentTimeMillis()-it.first < 300000 }?.let { return@withContext it.second }
-        val repo = repositories(o).map { it.jsonObject }.singleOrNull { it.text("url")==url } ?: error("REPOSITORY_NOT_SAVED")
-        val rows = mutableListOf<JsonElement>()
-        for (list in repo.getValue("pluginLists").jsonArray) {
-            val data = RuntimeJson.parse(fetch(o,list.jsonPrimitive.content).decodeToString()).jsonArray
-            require(rows.size + data.size <= 512) { "REPOSITORY_INDEX_LIMIT" }
-            for (entry in data) {
-                rows.add(RuntimeRepositoryEntry.decode(entry.jsonObject,url,repo.text("name")))
+        checkOwner(o)
+        val key = o.id + "|" + url
+        val repo = repositories(o).map { it.jsonObject }.singleOrNull { it.text("url") == url }
+            ?: error("REPOSITORY_NOT_SAVED")
+        indexLocks.computeIfAbsent(key) { Mutex() }.withLock {
+            checkOwner(o)
+            indexes[key]?.takeIf { !force && System.currentTimeMillis() - it.first < 15 * 60_000 }
+                ?.let { return@withLock it.second }
+            // Keep repository order for duplicates while reading independent lists concurrently.
+            val lists = coroutineScope {
+                repo.getValue("pluginLists").jsonArray.map { list ->
+                    async {
+                        val bytes = repositoryDownloads.withPermit { fetch(o, list.jsonPrimitive.content) }
+                        RuntimeJson.parse(bytes.decodeToString()).jsonArray.also { require(it.size <= 5000) { "REPOSITORY_INDEX_LIMIT" } }
+                    }
+                }.awaitAll()
             }
+            require(lists.sumOf { it.size } <= 5000) { "REPOSITORY_INDEX_LIMIT" }
+            val result = JsonArray(lists.flatten().map { RuntimeRepositoryEntry.decode(it.jsonObject, url, repo.text("name")) }
+                .distinctBy { it.text("pkg") })
+            synchronized(lock) {
+                checkOwner(o)
+                check(repositories(o).any { it == repo }) { "REPOSITORY_NOT_SAVED" }
+                indexes[key] = System.currentTimeMillis() to result
+            }
+            result
         }
-        checkOwner(o); val result=JsonArray(rows.distinctBy { it.jsonObject.text("pkg") }); indexes[key]=System.currentTimeMillis() to result; result
     }
     suspend fun extensions(url: String): JsonArray {
         val o=owner;val installed=o.store.inventory().installed().associateBy { it.packageId() }
@@ -424,7 +444,10 @@ class RuntimeHost(
     private fun stopPackage(pkg: String) {
         packageEpochs[pkg]=(packageEpochs[pkg] ?: 0L)+1L
         workers.filterValues { it.packageId()==pkg }.keys.forEach { it.close();workers.remove(it) }
-        pending.entries.removeAll { it.value.installed.packageId()==pkg }
+        pending.entries.filter { it.value.installed.packageId() == pkg }.map { it.key }.forEach { id ->
+            pending.remove(id)
+            VerificationCoordinator.discardSource(id)
+        }
         activeVerifications.entries.removeAll { it.value.installed.packageId()==pkg }
         dependencyOrigins.keys.removeAll { it.pkg==pkg }
     }
@@ -552,7 +575,7 @@ class RuntimeHost(
                         synchronized(lock) {
                             checkPackage(o,installed.packageId(),generation)
                             pending[id]=Retry(o,generation,installed,source,id,operation,input,challenged,actualUserAgent,scope)
-                            VerificationCoordinator.require(sourceEndpoint(challenged),actualUserAgent,kind="cloudstream",sourceName=source.text("name"))
+                            VerificationCoordinator.require(sourceEndpoint(challenged),actualUserAgent,kind="cloudstream",sourceName=source.text("name"),sourceId=id)
                         }
                     }
                     throw failure
@@ -698,14 +721,13 @@ class RuntimeHost(
     }
     fun verificationHosts(): List<String> = pending.values.filter { it.owner===owner }.map { sourceEndpoint(it.url).host }.distinct()
     fun beginVerification(host: String): VerificationPending = synchronized(lock) {
-        val retry=pending.values.firstOrNull { it.owner===owner && sourceEndpoint(it.url).host==host } ?: error("VERIFICATION_NOT_PENDING")
+        val challenge = VerificationCoordinator.pending().firstOrNull { it.host == host && it.kind == "cloudstream" }
+            ?: error("VERIFICATION_NOT_PENDING")
+        val retry = challenge.sourceId?.let(pending::get)?.takeIf { it.owner === owner && sourceEndpoint(it.url).host == host }
+            ?: error("VERIFICATION_NOT_PENDING")
         checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
-        VerificationCoordinator.pending().firstOrNull { it.host==host } ?: error("VERIFICATION_NOT_PENDING")
-        // The page presents the User-Agent and URL the replay will send: a clearance is bound to that User-Agent. The
-        // ledger keeps a host's first challenge, while this source's retry is its latest one; a plugin that changes its
-        // User-Agent between requests (or a second source on the same host) made them differ, and the button failed at
-        // once with no page (VERIFICATION_SESSION_MISMATCH).
-        val item=(VerificationCoordinator.begin(host) ?: error("VERIFICATION_BUSY")).copy(userAgent=retry.userAgent,url=retry.url)
+        val item=(VerificationCoordinator.begin(host, cloudstream = true) ?: error("VERIFICATION_BUSY"))
+            .copy(userAgent=retry.userAgent,url=retry.url)
         activeVerifications[item.token]=retry;item
     }
     fun verificationProfile(item: VerificationPending): String = synchronized(lock) {
@@ -713,26 +735,41 @@ class RuntimeHost(
         checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
         "runtime_"+digest(retry.scope.sourceId()) // sourceId already includes stable account and package identity.
     }
-    suspend fun completeVerification(item: VerificationPending,clearance: String): JsonObject {
+    fun cancelVerification(item: VerificationPending) { activeVerifications.remove(item.token) }
+    suspend fun completeVerification(item: VerificationPending,clearance: String, cookieOrigin: String): JsonObject {
         val retry=activeVerifications.remove(item.token) ?: error("VERIFICATION_EXPIRED")
         synchronized(lock) {
             checkPackage(retry.owner,retry.installed.packageId(),retry.generation)
             require(VerificationCoordinator.pending().any { it.host==item.host && it.token==item.token && it.state=="active" }) { "VERIFICATION_EXPIRED" }
             require(VerificationPolicy.clearance("cf_clearance=$clearance")==clearance) { "INVALID_CLEARANCE" }
-            val url=sourceEndpoint(retry.url)
-            require(url.host==item.host && HttpBroker.origin(url)==item.origin && item.userAgent==retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
-            val scope=HttpBroker.Scope(retry.scope.family(),retry.scope.packageId(),retry.scope.sourceId(),retry.scope.sessionId(),retry.scope.allowedOrigins())
-            // Precisely one host-only clearance, scoped to the challenged source/account.
-            // No login cookies, app CookieManager, localStorage or existing sessions are copied/cleared.
-            val cookie=Cookie.Builder().name("cf_clearance").value(clearance).hostOnlyDomain(url.host).path("/").secure().httpOnly().expiresAt(System.currentTimeMillis()+1800000).build()
+            val requested = sourceEndpoint(retry.url)
+            val url = endpoint(cookieOrigin)
+            require(requested.host == item.host && HttpBroker.origin(requested) == item.origin && item.userAgent == retry.userAgent) { "VERIFICATION_SESSION_MISMATCH" }
+            val targetOrigin = HttpBroker.origin(url)
+            require(targetOrigin in retry.scope.allowedOrigins() &&
+                VerificationPolicy.sameSite(VerificationPolicy.endpoint(item.origin)!!, VerificationPolicy.endpoint(targetOrigin)!!)) { "VERIFICATION_SESSION_MISMATCH" }
+            val scope = HttpBroker.Scope(retry.scope.family(),retry.scope.packageId(),retry.scope.sourceId(),retry.scope.sessionId(),retry.scope.allowedOrigins())
+            val cookie = Cookie.Builder().name("cf_clearance").value(clearance).hostOnlyDomain(url.host).path("/")
+                .secure().httpOnly().expiresAt(System.currentTimeMillis()+1800000).build()
             vaults.forScope(scope).save(url,listOf(cookie))
-            broker.verificationSucceeded(scope,HttpBroker.origin(url))
+            broker.verificationSucceeded(scope,item.origin)
+            if (targetOrigin != item.origin) broker.verificationSucceeded(scope,targetOrigin)
         }
-        // Exactly one replay of the real source operation; a repeated challenge remains a failure.
         val response=invoke(retry.owner,retry.installed,retry.source,retry.id,retry.operation,retry.input)
+        val page = if (retry.operation in setOf("catalogue","search"))
+            RuntimeSourceAdapter(retry.id,retry.source.text("name")) { _,_ -> response }.listingResult(response,retry.operation == "search")
+        else null
         pending.remove(retry.id,retry)
-        return buildJsonObject { put("ok",true);put("host",item.host);put("state","verified");put("replayedOperation",retry.operation);put("result",response) }
+        return buildJsonObject {
+            put("ok",true);put("host",item.host);put("state","verified");put("sourceId",retry.id)
+            put("replayedOperation",retry.operation)
+            if (page != null) {
+                put("replayInput",retry.input)
+                put("result",buildJsonObject { put("page",Json.encodeToJsonElement(SourcePage.serializer(),page)) })
+            }
+        }
     }
+
     fun close() = synchronized(lock) { closed=true;warm.clear();reaper.shutdownNow();workers.keys.forEach { it.close() };workers.clear();pending.clear();activeVerifications.clear();dependencyOrigins.clear();recoveryGate.clear() }
     companion object {
         private val WORKER_START_FAILURES=setOf("BINDING_TIMEOUT","BINDING_FAILED")

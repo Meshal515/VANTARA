@@ -9,6 +9,7 @@
  */
 import { configureLink } from './addons-view.js';
 import { afterMotion } from './page-motion.js';
+import { pulseView } from '../addons/source-pulse.js';
 import { adultSource } from '../lib/adult-filter.js';
 import { verificationMessage } from '../lib/source-verification.js';
 import { GROUPS as TRANSFER_GROUPS, collectExtensions, extensionsFromFile, fileName as transferFileName, installItem, planImport, serialize } from '../lib/extensions-transfer.js';
@@ -64,6 +65,8 @@ const PROV = {
   aniyomi: { name: 'Aniyomi' },
 };
 const NATIVE = ['mihon', 'cloudstream', 'aniyomi'];
+const AVAILABLE_OVERSCAN = 5;
+const AVAILABLE_INITIAL_ROWS = 18;
 const TYPE = { links: 'روابط', subs: 'ترجمات', cat: 'كتالوج' };
 const CONTENT_AR = { movie: 'أفلام', series: 'مسلسلات', anime: 'أنمي', tv: 'قنوات', channel: 'قنوات', manga: 'مانجا' };
 const LANGS = { ar: 'العربية', en: 'الإنجليزية', ja: 'اليابانية', es: 'الإسبانية', 'es-419': 'الإسبانية', id: 'الإندونيسية', fr: 'الفرنسية', pt: 'البرتغالية', 'pt-br': 'البرتغالية', tr: 'التركية', ru: 'الروسية', ko: 'الكورية', zh: 'الصينية', de: 'الألمانية', it: 'الإيطالية', vi: 'الفيتنامية', th: 'التايلاندية', all: 'متعدد اللغات', multi: 'متعدد اللغات', mul: 'متعدد اللغات' };
@@ -111,6 +114,7 @@ export function renderAddonsHub({
   const KIND = { mihon: 'manga', cloudstream: 'anime', aniyomi: 'anime' };
   const STORE = { mihon: { id: 'manga', kind: 'manga', api: repositories }, cloudstream: { id: 'cloudstream', kind: 'anime', family: 'cloudstream', api: cloudstreamRepositories }, aniyomi: { id: 'anime', kind: 'anime', api: animeRepositories } };
   const stores = [STORE.cloudstream, STORE.aniyomi, STORE.mihon].filter((s) => s.api);
+  const toggling = new Map();
   const canToggle = (p) => (p === 'stremio' ? typeof registry.enable === 'function' : typeof API[p]?.enable === 'function');
 
   // ── تفضيلات العرض المحفوظة على الجهاز (المفضّلة، ألقاب وصور المستودعات، اللغات) ──
@@ -132,23 +136,32 @@ export function renderAddonsHub({
 
   // ── الشعارات: صورة حقيقية بمرشحاتها بالترتيب، ثم الحرف الأول ──
   const letter = (n) => esc([...String(n || '').replace(/^[^\p{L}\p{N}]+/u, '')][0]?.toUpperCase() || '?');
+  const imageUrl = (u) => (typeof u === 'string' && u.length <= 90 * 1024 && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u || '') ? u : httpUrl(u));
   const logo = (k, n, cls = '', imgs = []) => MARK[k]
     ? `<span class="y-lg y-mk ${cls}" data-brand="${k}"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:58%;height:58%;stroke-width:2.1">${MARK[k]}</svg></span>`
-    : `<span class="y-lg ${cls}"><b>${letter(n)}</b>${imgs.length ? `<img src="${esc(imgs[0])}" data-alt="${esc(imgs.slice(1).join(' '))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}</span>`;
+    : `<span class="y-lg ${cls}" data-logo="${esc(JSON.stringify(imgs))}"><b aria-hidden="true">${letter(n)}</b>${imgs.length ? `<img src="${esc(imgs[0])}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ''}</span>`;
   const itLogo = (it, cls = '') => logo(null, it.name, cls, it.imgs || []);
-  const repoImage = (u) => (/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(u || '') ? u : httpUrl(u));
+  const repoImage = imageUrl;
   const repoLogo = (r, cls = '') => logo(null, r.name, `y-repo-logo ${cls}`, repoImage(r.image) ? [repoImage(r.image)] : []);
   const repoOf = (p, it) => S.repos[p]?.find((r) => r.id === it.repoId);
   const repoName = (p, it) => repoOf(p, it)?.name || it.repoName || 'غير محدد';
   const repoMatches = (p, it) => S.repoFilter[p] === 'all' || it.repoId === S.repoFilter[p];
   const langOk = (p, it) => !S.langs[p]?.size || S.langs[p].has(it.lang);
-  const availFor = (p) => S.avail[p].filter((it) => repoMatches(p, it) && (S.q ? true : langOk(p, it)) && match(it.name));
+  const availFor = (p) => {
+    const q = S.q.trim().toLowerCase();
+    return S.avail[p].filter((it) => repoMatches(p, it) && (q ? it.searchName.includes(q) : langOk(p, it)));
+  };
   const cur = () => S.stack[S.stack.length - 1];
   const pinFirst = (arr) => [...arr.filter((x) => x.pin), ...arr.filter((x) => !x.pin)];
   const orderGroups = (p, arr, draw, cls) => [true, false].map((pin) => { const list = arr.filter((x) => !!x.pin === pin); return list.length ? `<section class="y-order-section" data-k="order-${p}-${+pin}"><div class="y-order-head"><span>${pin ? 'المفضّلة' : 'البقية'}</span><span>${list.length}</span></div><div class="${cls} y-order-list" data-list="installed" data-order="${p}" data-pin="${+pin}">${list.map(draw).join('')}</div></section>` : ''; }).join('');
   const match = (n) => !S.q || String(n).toLowerCase().includes(S.q.toLowerCase());
   const upCount = (p) => S.items[p].filter((x) => x.nv).length;
-  const challengeOf = (it) => S.challenges.find((c) => (it.site && hostOf(it.site) === c.host) || (c.sourceName && String(c.sourceName).trim().toLowerCase() === String(it.name).trim().toLowerCase()));
+  const namesEqual = (a, b) => a && b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  const challengeMatches = (c, it) => c.sourceId && it.sourceIds?.length ? it.sourceIds.includes(c.sourceId)
+    : (it.site && hostOf(it.site) === c.host) || namesEqual(c.sourceName, it.name);
+  const challengeOf = (it) => S.challenges.find((c) => challengeMatches(c, it));
+  const healthOf = (it) => (it.sourceKeys ?? [it.id]).map((key) => pulse?.get?.(key)).filter(Boolean)
+    .sort((a, b) => b.at - a.at)[0];
 
   // ── المكوّنات ──
   const pinBtn = (p, it) => ib('pin', it.pin ? 'pinOn' : 'pin', { cls: it.pin ? 'on' : 'dim', id: `${p}|${it.id}`, label: it.pin ? 'أزل من المفضّلة' : 'للمفضّلة' });
@@ -185,13 +198,14 @@ export function renderAddonsHub({
   const extLine = (p, it) => {
     const b = S.busy[it.id];
     if (b) return `<span class="y-up">${busyWord(b)}</span>`;
-    if (challengeOf(it)) return '<span class="y-bad">تحتاج تحققًا</span>';
+    const challenge = challengeOf(it);
+    if (challenge) return challenge.verifying ? '<span class="y-up">جارٍ التحقق</span>' : '<span class="y-bad">تحتاج تحققًا</span>';
     if (it.pending) return '<span class="y-up">بانتظار الاستعادة</span>';
     if (it.bad) return '<span class="y-bad">تعذّر الاتصال</span>';
     if (it.nv) return '<span class="y-dot"></span><span class="y-up">تحديث</span>';
     return p === 'cloudstream' ? `${esc(it.lang || 'عربي')}${it.ver ? ` · v${esc(it.ver)}` : ''}` : esc(it.lang || 'عربي');
   };
-  const switchBtn = (p, it) => (canToggle(p) ? `<button class="y-sw ${it.on ? '' : 'off'}" data-y="toggle" data-id="${esc(p + '|' + it.id)}" role="switch" aria-checked="${!!it.on}" aria-label="تفعيل ${esc(it.name)}" ${S.busy[it.id] ? 'disabled' : ''}></button>` : '');
+  const switchBtn = (p, it) => (canToggle(p) ? `<button class="y-sw ${it.on ? '' : 'off'}" data-y="toggle" data-id="${esc(p + '|' + it.id)}" role="switch" aria-checked="${!!it.on}" aria-label="تفعيل ${esc(it.name)}" ${S.busy[it.id] || toggling.has(p + '|' + it.id) ? 'disabled' : ''}></button>` : '');
   const instRow = (p, it) => {
     if (D) return deskExtRow(p, it);
     const k = p + '|' + it.id, b = S.busy[it.id];
@@ -212,11 +226,11 @@ export function renderAddonsHub({
   const pinBtnD = (p, it) => dib('pin', it.pin ? 'pinOn' : 'pin', p + '|' + it.id, it.pin ? 'أزل من المفضّلة' : 'للمفضّلة', it.pin ? 'on' : 'dim');
   const deskExtRow = (p, it) => {
     const k = p + '|' + it.id, b = S.busy[it.id];
-    return `<div class="y-row y-ext-row y-drow ${it.on ? '' : 'is-off'}" data-k="${p}-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b || it.bad || it.nv || it.pending || challengeOf(it) ? extLine(p, it) : esc(it.lang || 'عربي')}${it.repoId ? ` · <span dir="auto">${esc(repoName(p, it))}</span>` : ''}</span></span></button><div class="y-dacts">${moveBtns(p, it)}<span class="y-dsep"></span>${pinBtnD(p, it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث v${esc(it.nv)}</button>` : ''}${it.pending && !b ? `<button class="y-dup" data-y="restore" data-id="${esc(k)}">${g('update', 18)}استعد</button>` : ''}${it.bad && !b ? dib('retry', 'retry', k, 'أعد المحاولة') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !copyUrl(p, it))}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}${canToggle(p) ? `<span class="y-dsep"></span>${switchBtn(p, it)}` : '<span class="y-dsep"></span>'}${it.isSite ? dib('open', 'open', k, 'التفاصيل') : dib('enterSource', 'open', k, 'افتح المصدر', '', !it.on || !!it.bad || !!it.pending || !!b)}</div>${prog(it.id)}</div>`;
+    return `<div class="y-row y-ext-row y-drow ${it.on ? '' : 'is-off'}" data-k="${p}-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b || it.bad || it.nv || it.pending || challengeOf(it) ? extLine(p, it) : esc(it.lang || 'عربي')}${it.repoId ? ` · <span dir="auto">${esc(repoName(p, it))}</span>` : ''}</span></span></button><div class="y-dacts">${!it.on ? switchBtn(p, it) : `${moveBtns(p, it)}<span class="y-dsep"></span>${pinBtnD(p, it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث v${esc(it.nv)}</button>` : ''}${it.pending && !b ? `<button class="y-dup" data-y="restore" data-id="${esc(k)}">${g('update', 18)}استعد</button>` : ''}${it.bad && !b ? dib('retry', 'retry', k, 'أعد المحاولة') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !copyUrl(p, it))}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${it.isSite ? dib('open', 'open', k, 'التفاصيل') : dib('enterSource', 'open', k, 'افتح المصدر', '', !it.on || !!it.bad || !!it.pending || !!b)}`}</div>${prog(it.id)}</div>`;
   };
   const deskStCard = (it) => {
     const k = 'stremio|' + it.id, b = S.busy[it.id];
-    return `<div class="y-row y-drow y-card-d ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : `${TYPE[it.type] || ''}${it.cont ? ' · ' + esc(it.cont) : ''}`}</span></span></button><div class="y-dacts">${moveBtns('stremio', it)}<span class="y-dsep"></span>${pinBtnD('stremio', it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث ${esc(it.nv)}</button>` : ''}${it.conf ? dib('conf', 'sliders', k, 'اضبط') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !it.url)}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${switchBtn('stremio', it).replace('role="switch"', `role="switch" data-tip="${it.on ? 'عطّلها' : 'فعّلها'}"`)}${it.open ? dib('enterSource', 'open', k, 'افتح الكتالوج', '', !it.on) : ''}</div>${prog(it.id)}</div>`;
+    return `<div class="y-row y-drow y-card-d ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : `${TYPE[it.type] || ''}${it.cont ? ' · ' + esc(it.cont) : ''}`}</span></span></button><div class="y-dacts">${!it.on ? switchBtn('stremio', it) : `${moveBtns('stremio', it)}<span class="y-dsep"></span>${pinBtnD('stremio', it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث ${esc(it.nv)}</button>` : ''}${it.conf ? dib('conf', 'sliders', k, 'اضبط') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !it.url)}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${it.open ? dib('enterSource', 'open', k, 'افتح الكتالوج', '', !it.on) : ''}`}</div>${prog(it.id)}</div>`;
   };
   const deskProv = (k) => {
     const pin = S.provPins.includes(k), a = S.items[k], up = upCount(k);
@@ -228,8 +242,8 @@ export function renderAddonsHub({
     if (D) return deskStCard(it);
     const k = 'stremio|' + it.id, b = S.busy[it.id];
     return `<div class="y-card ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}">
-  <div class="y-r1">${canOrder('stremio') ? `<button class="y-grip" data-y="grip" data-id="${esc(it.id)}" aria-label="اسحب للترتيب">${g('grip')}</button>` : ''}<div style="display:contents" data-y="open" data-id="${esc(k)}">${itLogo(it)}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : it.nv ? `<span class="y-dot"></span><span class="y-up">تحديث ${esc(it.nv)}</span>` : `${TYPE[it.type]}${it.ver ? ' · ' + esc(it.ver) : ''}`}</div></div></div>${switchBtn('stremio', it)}</div>
-  <div class="y-r2">${pinBtn('stremio', it)}${it.conf ? ib('conf', 'sliders', { id: k, label: 'ضبط' }) : ''}${it.nv && !b ? ib('update', 'update', { id: k, label: 'تحديث' }) : ''}<span class="y-sp"></span>${ib('itemMenu', 'more', { id: k, label: 'خيارات' })}${ib('open', 'open', { id: k, label: 'التفاصيل' })}</div>${prog(it.id)}</div>`;
+  <div class="y-r1">${canOrder('stremio') ? `<button class="y-grip" data-y="grip" data-id="${esc(it.id)}" aria-label="اسحب للترتيب">${g('grip')}</button>` : ''}<div style="display:contents" data-y="open" data-id="${esc(k)}">${itLogo(it)}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : it.nv ? `<span class="y-dot"></span><span class="y-up">تحديث ${esc(it.nv)}</span>` : `${TYPE[it.type]}${it.ver ? ' · ' + esc(it.ver) : ''}`}</div></div></div>${!it.on ? switchBtn('stremio', it) : ''}</div>
+  <div class="y-r2" ${it.on ? '' : 'inert aria-hidden="true"'}>${pinBtn('stremio', it)}${it.conf ? ib('conf', 'sliders', { id: k, label: 'ضبط' }) : ''}${it.nv && !b ? ib('update', 'update', { id: k, label: 'تحديث' }) : ''}<span class="y-sp"></span>${ib('itemMenu', 'more', { id: k, label: 'خيارات' })}${ib('open', 'open', { id: k, label: 'التفاصيل' })}</div>${prog(it.id)}</div>`;
   };
 
   // ── الشاشات ──
@@ -256,24 +270,26 @@ export function renderAddonsHub({
       ${list.length ? orderGroups('stremio', list, stCard, 'y-grid') : S.loading.stremio ? empty('يقرأ…', '') : empty('لا شيء هنا', 'غيّر التصنيف أو أضف رابطًا')}`;
     },
     ext(p) {
-      const inst = pinFirst(S.items[p]).filter((x) => match(x.name));
-      const av = availFor(p);
+      const t = S.tab[p];
+      const inst = t === 'inst' ? S.items[p].filter((x) => match(x.name)) : [];
+      const av = t === 'avail' ? availFor(p) : [];
       const repos = S.repos[p]; const up = upCount(p);
       const line = repos.length ? `${repos.map((r) => esc(r.name)).join(' · ')} · ${S.items[p].length} مثبتة` : S.loading[p] ? 'يقرأ…' : 'بلا مستودع';
       if (!repos.length && !S.items[p].length && !S.loading[p]) {
         return `${header(p, line)}<div class="y-empty"><span class="y-lg xl">${g('repo', 30)}</span><div class="y-nm">أضف مستودعًا</div><div class="y-mt">${S.errors[p] ? `<span class="y-bad">${esc(S.errors[p])}</span>` : 'الإضافات تأتي من المستودعات'}</div><button class="y-pri big" data-y="addRepo" data-id="${p}">${g('plus', 22)}مستودع</button></div>`;
       }
-      const t = S.tab[p];
       const body = t === 'inst'
         ? `${up ? `<div class="y-tools"><span class="y-sp"></span><button class="y-pri" data-y="updAll" data-id="${p}">${g('update', 20)}حدّث الكل <i style="font-style:normal;opacity:.75">${up}</i></button></div>` : ''}${inst.length ? orderGroups(p, inst, (x) => instRow(p, x), 'y-list') : S.loading[p] ? empty('يقرأ…', '') : empty('لا شيء مثبت', 'ثبّت من «متاحة»')}`
         : t === 'avail'
-          ? `<div class="y-tools">${langPill(p)}<button class="y-lang y-repo-filter" data-y="reposFilter" data-id="${p}" aria-haspopup="dialog">${g('repo', 18)}<span>المستودعات: ${esc(S.repos[p].find((r) => r.id === S.repoFilter[p])?.name || 'الكل')}</span>${g('down', 16)}</button></div>${av.length ? `<section class="y-order-section" data-k="available-${p}"><div class="y-list y-available-list">${av.map((x) => availRow(p, x)).join('')}</div></section>` : S.loading[p] ? empty('يقرأ الفهارس…', '') : empty('لا توجد إضافات مطابقة', 'غيّر المستودع أو اللغة أو البحث')}`
+          ? `<div class="y-tools">${langPill(p)}<button class="y-lang y-repo-filter" data-y="reposFilter" data-id="${p}" aria-haspopup="dialog">${g('repo', 18)}<span>المستودعات: ${esc(S.repos[p].find((r) => r.id === S.repoFilter[p])?.name || 'الكل')}</span>${g('down', 16)}</button></div>${av.length ? `<section class="y-order-section" data-k="available-${p}"><div class="y-list y-available-list">${drawAvailable(p, av)}</div></section>` : S.loading[p] ? empty('يقرأ الفهارس…', '') : empty('لا توجد إضافات مطابقة', 'غيّر المستودع أو اللغة أو البحث')}`
           : `<div class="y-list" style="grid-template-columns:1fr">${repos.map((r, i) => repoRow(p, r, i)).join('')}</div>`;
-      return `${header(p, line)}${tabs(p, [['inst', 'مثبتة', S.items[p].length], ['avail', 'متاحة', S.avail[p].filter((x) => langOk(p, x)).length], ['repos', 'المستودعات', repos.length]])}<div class="y-tb">${body}</div>`;
+      return `${header(p, line)}${tabs(p, [['inst', 'مثبتة', S.items[p].length], ['avail', 'متاحة', S.avail[p].filter((x) => langOk(p, x)).length], ['repos', 'المستودعات', repos.length]])}<div class="y-tb" data-k="pane-${p}-${t}">${body}</div>`;
     },
     details({ p, id }) {
       const it = S.items[p].find((x) => x.id === id); if (!it) return empty('لم تعد مثبتة', 'ارجع للقائمة');
       const st = p === 'stremio', b = S.busy[it.id], ch = challengeOf(it), k = p + '|' + it.id;
+      const health = healthOf(it);
+      const state = pulseView(health);
       const kv = [
         canToggle(p) ? `<div>تفعيل الإضافة${switchBtn(p, it)}</div>` : '',
         st ? `<div><span>تقدّم</span><b>${TYPE[it.type]}</b></div>` : '',
@@ -281,8 +297,11 @@ export function renderAddonsHub({
         !st && it.repoId ? `<div><span>المستودع</span><b dir="auto">${esc(repoName(p, it))}</b></div>` : '',
         !st ? `<div><span>اللغة</span><b>${esc(it.lang || 'العربية')}</b></div>` : '',
         it.site ? `<div><span>الموقع</span><b dir="ltr">${esc(hostOf(it.site))}</b></div>` : '',
-        ch ? `<div><span class="y-bad">${esc(ch.message || 'الموقع يطلب تحققًا')}</span><button class="y-ch-btn" data-y="verify" data-id="${esc(ch.host)}">تحقق</button></div>` : '',
-        it.pending ? '<div><span>الحالة</span><b class="y-up">بانتظار الاستعادة</b></div>' : it.bad ? `<div><span>الحالة</span><b class="y-bad">${esc(it.bad === true ? 'تعذّر الاتصال' : it.bad)}</b></div>` : '',
+        ch ? `<div><span class="y-bad">${esc(ch.message || 'الموقع يطلب تحققًا')}</span><button class="y-ch-btn" data-y="verify" data-id="${esc(ch.host)}" ${ch.verifying ? 'disabled' : ''}>تحقق</button></div>` : '',
+        `<div><span>الحالة</span><b class="${ch || it.bad ? 'y-bad' : ''}">${esc(!it.on ? 'معطّلة' : ch ? ch.verifying ? 'جارٍ التحقق' : 'يحتاج تحققًا'
+          : it.pending ? 'بانتظار الاستعادة' : it.bad || health?.state === 'failed' ? 'تعذّر الاتصال'
+          : !health ? 'لم يُفحص' : Date.now() - health.at > 30 * 60_000 && health.state !== 'verification' ? 'لم يُفحص مؤخرًا' : state.label)}</b></div>`,
+        !ch && health && state.detail ? `<div><span>آخر استجابة</span><b>${esc(state.detail)}</b></div>` : '',
         it.note ? `<div><span>ملاحظة</span><b>${esc(it.note)}</b></div>` : '',
       ].join('');
       const openable = st ? it.open : !it.isSite;
@@ -305,12 +324,11 @@ export function renderAddonsHub({
   const broken = {}; // p -> حزم مثبتة لا تُقرأ
   const indexes = {}; // p -> Map(url -> عناصر الفهرس)
   let siteRows = [];
+  const collator = new Intl.Collator();
   const regList = () => { try { return registry.list?.() || []; } catch { return []; } };
   // المصدر الأصلي (الموقع) لحزمة أصلية: من المصادر التي يعلنها المحرك لها (domain)
-  function nativeSite(pkg) {
-    for (const a of regList()) {
-      const own = (a.pkg && a.pkg === pkg) || nativePackage(a) === pkg;
-      if (!own) continue;
+  function nativeSite(sources) {
+    for (const a of sources) {
       const s = siteOf(a.homepage) || siteOf(a.domain) || siteOf(a.baseUrl) || siteOf(Array.isArray(a.domains) ? a.domains[0]?.url || a.domains[0] : '');
       if (s) return s;
     }
@@ -318,7 +336,7 @@ export function renderAddonsHub({
   }
   const iconCandidates = (p, x, url) => {
     const out = [];
-    for (const v of [x.iconUrl, x.icon, x.logo]) { const u = httpUrl(String(v || '').replace('%size%', '128')); if (u) out.push(u); }
+    for (const v of [x.iconUrl, x.icon, x.logo]) { const u = imageUrl(String(v || '').replace('%size%', '128')); if (u) out.push(u); }
     if (url && x.pkg && p !== 'cloudstream') {
       try { const base = /\.(?:json|pb)$/i.test(new URL(url).pathname) ? url : url.replace(/\/?$/, '/'); out.push(new URL(`icon/${x.pkg}.png`, base).href); } catch {}
     }
@@ -332,7 +350,7 @@ export function renderAddonsHub({
     const caps = a.capabilities || [];
     return {
       id: a.key, name: a.name || 'إضافة', ver: a.version ? String(a.version) : '', nv: a.stagedVersion ? String(a.stagedVersion) : null,
-      on: a.enabled !== false, pin: !!a.pinned, imgs: [httpUrl(a.logo)].filter(Boolean), type: remoteType(a), cont: conts,
+      on: toggling.get('stremio|' + a.key) ?? (a.enabled !== false), pin: !!a.pinned, imgs: [imageUrl(a.logo)].filter(Boolean), type: remoteType(a), cont: conts,
       conf: !!a.configuration?.configurable, url, site: siteOf(a.homepage) || (url ? new URL(url).origin : ''),
       bad: a.loadError ? fmtErr(a.loadError) : health ? fmtErr(health.reason || 'فشل الطلب الفعلي') : null,
       note: a.inRepository === false ? 'لم تعد في مستودعها؛ تعمل النسخة المحفوظة على جهازك' : null,
@@ -350,17 +368,25 @@ export function renderAddonsHub({
   }
   function rebuild(p) {
     const idx = indexes[p] || new Map(), store = STORE[p];
-    const byPkg = new Map();
+    const byPkg = new Map(), registered = new Map();
+    for (const addon of regList()) {
+      const pkg = nativePackage(addon);
+      if (!pkg) continue;
+      if (!registered.has(pkg)) registered.set(pkg, []);
+      registered.get(pkg).push(addon);
+    }
     for (const [url, list] of idx) for (const x of list || []) { const pkg = nativePackage(x); if (pkg && !byPkg.has(pkg)) byPkg.set(pkg, { x, url }); }
     const pins = new Set(pref.pins[p] || []), have = new Map();
     const vm = (m, from) => {
-      const pkg = nativePackage(m), hit = byPkg.get(pkg), x = hit?.x || {};
+      const pkg = nativePackage(m), hit = byPkg.get(pkg), x = hit?.x || {}, sources = registered.get(pkg) ?? [];
       const url = m.repo || from || hit?.url || '';
       return {
         id: pkg, pkg, name: String(m.name || x.name || pkg).replace(/^(Tachiyomi|Aniyomi|Mihon):\s*/i, ''), ver: String(m.version ?? m.versionName ?? x.installed ?? x.version ?? ''),
-        nv: x.update ? String(x.version ?? '') || 'جديد' : null, on: m.enabled !== false, pin: pins.has(pkg), lang: langName(m.lang ?? m.language ?? x.lang ?? x.language),
-        repoId: url || null, imgs: iconCandidates(p, { ...x, ...m, pkg }, url), site: nativeSite(pkg) || siteOf(m.homepage || x.homepage),
+        nv: x.update ? String(x.version ?? '') || 'جديد' : null, on: toggling.get(p + '|' + pkg) ?? (m.enabled !== false), pin: pins.has(pkg), lang: langName(m.lang ?? m.language ?? x.lang ?? x.language),
+        repoId: url || null, imgs: [...new Set([...iconCandidates(p, { ...x, ...m, pkg }, url), ...iconCandidates(p, x, '')])], site: nativeSite(sources) || siteOf(m.homepage || m.domain || x.homepage),
         bad: m.loadError || m.error ? fmtErr(m.loadError || m.error) : null, pending: !!m.pendingRestore, content: m.content || x.content || (p === 'cloudstream' ? cloudstreamContent(x) : undefined),
+        sourceIds: [...new Set([...(m.sourceIds ?? []), ...sources.map((a) => a.sourceId).filter(Boolean)])],
+        sourceKeys: [...new Set([...sources.map((a) => a.key), ...(m.sourceIds ?? []).map((id) => 'core|' + id)])],
         url, raw: { ...x, ...m, pkg },
       };
     };
@@ -371,13 +397,13 @@ export function renderAddonsHub({
     for (const [pkg, { x, url }] of byPkg) if (!have.has(pkg) && (x.installed || x.builtin)) have.set(pkg, vm({ ...x, name: x.name, version: x.installed || x.version, pendingRestore: x.pendingRestore }, url));
     if (p === 'mihon') for (const s of siteRows) { const id = 'site:' + (s.id ?? s.domain); if (!have.has(id)) have.set(id, { id, name: s.label || s.domain || 'موقع مانجا', ver: '', on: true, pin: pins.has(id), lang: 'موقع مانجا', imgs: [httpUrl(s.iconUrl)].filter(Boolean), site: siteOf(s.url || s.domain), url: '', isSite: true, raw: s }); }
     const prev = new Map(S.items[p].map((x, i) => [x.id, i]));
-    const saved = pref.order[p] || [], rk = (id) => { const i = saved.indexOf(id); return i < 0 ? 1e9 : i; };
+    const saved = new Map((pref.order[p] || []).map((id, i) => [id, i])), rk = (id) => saved.get(id) ?? 1e9;
     S.items[p] = pinFirst([...have.values()].sort((a, b) => rk(a.id) - rk(b.id) || (prev.get(a.id) ?? 1e9) - (prev.get(b.id) ?? 1e9) || a.name.localeCompare(b.name)));
     const wrong = (x) => (store.kind === 'manga' && x.anime === true) || (store.kind === 'anime' && p === 'aniyomi' && x.anime === false);
     S.avail[p] = [...byPkg.values()].filter(({ x }) => !have.has(nativePackage(x)) && !x.installed && !x.builtin && !adultSource(x) && !x.nsfw && !wrong(x)).map(({ x, url }) => ({
       id: nativePackage(x), pkg: nativePackage(x), name: String(x.name || nativePackage(x)).replace(/^(Tachiyomi|Aniyomi|Mihon):\s*/i, ''), ver: String(x.version ?? ''), lang: langName(x.lang ?? x.language),
       repoId: url, imgs: iconCandidates(p, x, url), content: p === 'cloudstream' ? cloudstreamContent(x) : x.content, raw: x, url,
-    })).sort((a, b) => (a.lang === 'العربية' ? 0 : 1) - (b.lang === 'العربية' ? 0 : 1) || a.name.localeCompare(b.name));
+    })).map((it) => ({...it, searchName: it.name.toLowerCase()})).sort((a, b) => Number(b.lang === 'العربية') - Number(a.lang === 'العربية') || collator.compare(a.name, b.name));
     // أول مرة: العربية مختارة إن وُجدت، وإلا كل اللغات
     if (!pref.langs[p] && S.avail[p].length && !S.langs[p].size && S.avail[p].some((x) => x.lang === 'العربية')) S.langs[p] = new Set(['العربية']);
   }
@@ -398,13 +424,13 @@ export function renderAddonsHub({
       if (!S.repos[p].some((r) => r.id === S.repoFilter[p])) S.repoFilter[p] = 'all';
       delete S.errors[p]; rebuild(p); scheduleRender();
       await pool(S.repos[p], 3, async (r) => {
-        try { const list = await api.extensions(r.url); if (!alive || run !== gen) return; indexes[p].set(r.url, (list || []).map((x) => ({ ...x }))); r.n = (list || []).length; r.err = null; }
+        try { const list = await api.extensions(r.url); if (!alive || run !== gen) return; indexes[p].set(r.url, list || []); r.n = (list || []).length; r.err = null; }
         catch (e) { if (alive && run === gen) r.err = fmtErr(e); }
         if (alive && run === gen) { rebuild(p); scheduleRender(); }
       });
     } catch (e) {
       if (alive && run === gen && e?.code !== 'UNSUPPORTED_ON_WEB') S.errors[p] = fmtErr(e);
-    } finally { if (alive && run === gen) { S.loading[p] = false; rebuild(p); scheduleRender(); } }
+    } finally { if (alive && run === gen) { S.loading[p] = false; scheduleRender(); } }
   }
   async function refresh() {
     if (!alive) return;
@@ -424,15 +450,12 @@ export function renderAddonsHub({
     S.challenges = (Array.isArray(items) ? items : []).filter((x) => typeof x?.host === 'string').map((x) => ({ ...x, host: x.host.toLowerCase() }));
     scheduleRender(); paintGuardSheet();
   }
-  const removeVerification = verification?.subscribe?.(receiveChallenges) || (() => {});
-  try { const saved = verification?.list?.(); if (saved?.then) saved.then(receiveChallenges).catch(() => {}); else if (saved) receiveChallenges(saved); } catch {}
-  const removePulse = pulse?.onChange?.(() => { if (API.stremio) { readStremio(); scheduleRender(); } }) || (() => {});
 
   // ── التركيب والرسم ──
   const root = doc.createElement('section');
   root.className = 'y-root'; root.dir = 'rtl'; root.setAttribute('data-y-root', '');
   const content = doc.createElement('div'); content.className = 'y'; root.append(content);
-  const layer = doc.createElement('div'); layer.className = 'y-layer';
+  const layer = doc.createElement('div'); layer.className = 'y-layer'; layer.dir = root.dir;
   let bar = null, titleEl = null, toolsEl = null, backBtn = null, barMode = '', barStyle = null;
   injectCss();
   function injectCss() {
@@ -467,11 +490,13 @@ export function renderAddonsHub({
   const compatible = (a, b) => a && a.nodeType === b.nodeType && (a.nodeType !== 1 || (a.tagName === b.tagName && nodeKey(a) === nodeKey(b)));
   function patchNode(a, b) {
     if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
-    for (const x of [...a.attributes]) if (!b.hasAttribute(x.name)) a.removeAttribute(x.name);
+    const sameLogo = a.hasAttribute('data-logo') && a.getAttribute('data-logo') === b.getAttribute('data-logo')
+      && a.firstElementChild?.textContent === b.firstElementChild?.textContent;
+    for (const x of [...a.attributes]) if (!b.hasAttribute(x.name) && !(sameLogo && x.name === 'data-loaded')) a.removeAttribute(x.name);
     for (const x of [...b.attributes]) if (a.getAttribute(x.name) !== x.value) a.setAttribute(x.name, x.value);
+    if (sameLogo) return;
+    if (b.hasAttribute('data-logo')) { a.replaceChildren(...b.childNodes); return; }
     if (a.tagName === 'INPUT') { if (a !== doc.activeElement && a.value !== b.value) a.value = b.value; return; }
-    // صورة فشل أول مرشح لها لا تُعاد إلى الرابط الفاشل
-    if (a.tagName === 'IMG' && a.dataset.tried) return;
     patchChildren(a, b);
   }
   function patchChildren(parent, next) {
@@ -486,15 +511,27 @@ export function renderAddonsHub({
     }
     for (const x of old) if (!used.has(x)) x.remove();
   }
-  function render({ flip = true } = {}) {
+  function render({ flip = true, indicatorFrom } = {}) {
     if (!alive) return;
     if (drag) { deferredRender = true; return; }
     const c = cur(), key = c.v + (c.p || '') + (c.id || ''); const same = renderedView === key;
-    const before = flip && same ? snap() : null;
+    const availableView = NATIVE.includes(c.v) && S.tab[c.v] === 'avail';
+    if (!availableView) available = null;
+    const before = flip && same && !availableView ? snap() : null;
     const html = c.v === 'hub' ? views.hub() : c.v === 'stremio' ? views.stremio() : c.v === 'details' ? views.details(c) : views.ext(c.v);
     const tpl = doc.createElement('template'); tpl.innerHTML = html;
     if (same) patchChildren(content, tpl.content); else { content.replaceChildren(tpl.content); renderedView = key; }
-    renderBar(); placeInd(); if (before) play(before);
+    if (availableView) {
+      scheduleAvailable();
+      if (!RM && available?.entrance) {
+        available.entrance = false;
+        [...content.querySelectorAll('.y-avail-row')].slice(0, 12).forEach((row, index) => {
+          row.animate?.([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }],
+            { duration: 180, delay: index * 9, easing: EASE, fill: 'backwards' });
+        });
+      }
+    }
+    renderBar(); placeInd(indicatorFrom); if (before) play(before);
   }
   const titleFor = (c) => (c.v === 'details' ? PROV[c.p].name : 'الإضافات');
   function renderBar() {
@@ -537,6 +574,41 @@ export function renderAddonsHub({
 
   // ── التنقّل: الرجوع داخل المدير أولًا، ثم للقشرة ──
   const scroller = () => { for (let e = root.parentElement; e && e !== doc.body; e = e.parentElement) { const o = win.getComputedStyle?.(e).overflowY; if (/auto|scroll/.test(o || '') && e.scrollHeight > e.clientHeight + 4) return e; } return null; };
+  let available = null, availableFrame = null;
+  const rowStride = () => D ? 106 : 74;
+  function availableRows(p, rows, first, last) {
+    const spacer = (key, count) => `<div data-k="${key}" aria-hidden="true" style="height:${count * rowStride()}px"></div>`;
+    return spacer('available-before', first) + rows.slice(first, last).map((it) => availRow(p, it)).join('')
+      + spacer('available-after', rows.length - last);
+  }
+  function drawAvailable(p, rows) {
+    const key = JSON.stringify([p, S.q, S.repoFilter[p], [...S.langs[p]]]);
+    if (available?.key !== key || !available?.rows.length) {
+      available = { key, p, first: 0, last: AVAILABLE_INITIAL_ROWS, rows, entrance: rows.length > 0 };
+    }
+    available.rows = rows;
+    available.first = Math.min(available.first, Math.max(0, rows.length - AVAILABLE_INITIAL_ROWS));
+    available.last = Math.min(rows.length, Math.max(available.last, available.first + AVAILABLE_INITIAL_ROWS));
+    return availableRows(p, rows, available.first, available.last);
+  }
+  function scheduleAvailable() {
+    if (!alive || !available || availableFrame != null || !win.requestAnimationFrame) return;
+    availableFrame = win.requestAnimationFrame(() => {
+      availableFrame = null;
+      const list = content.querySelector('.y-available-list');
+      if (!available || !list?.isConnected) return;
+      const box = list.getBoundingClientRect(), parent = scroller(), viewport = parent?.getBoundingClientRect();
+      const stride = rowStride(), top = Math.max(0, (viewport?.top ?? 0) - box.top);
+      const first = Math.max(0, Math.floor(top / stride) - AVAILABLE_OVERSCAN);
+      const last = Math.min(available.rows.length,
+        Math.ceil((top + (viewport?.height ?? win.innerHeight ?? 0)) / stride) + AVAILABLE_OVERSCAN);
+      if (first >= last || first === available.first && last === available.last) return;
+      Object.assign(available, {first, last});
+      const tpl = doc.createElement('template');
+      tpl.innerHTML = availableRows(available.p, available.rows, first, last);
+      patchChildren(list, tpl.content);
+    });
+  }
   const getScroll = () => { const s = scroller(); return s ? s.scrollTop : (win.scrollY || 0); };
   const setScroll = (y) => { const s = scroller(); if (s) s.scrollTop = y; else win.scrollTo?.(0, y); };
   function transition(dir, mutate) {
@@ -634,12 +706,12 @@ export function renderAddonsHub({
     setTimeout(() => sourcesChanged({ preserveAddonsView: true, reason: 'native-install', pkg: it.pkg, family: STORE[p].family || STORE[p].id }), 400);
   }
   async function verifyHost(host, btn) {
-    if (!verification?.begin && !cloudstreamRepositories?.verify) return;
+    if (!verification?.begin) return;
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="y-spin" style="display:grid">${g('spin', 18)}</span>`; }
     try {
-      const result = (await cloudstreamRepositories?.verify?.(host)) ?? (await verification.begin(host));
+      const result = await verification.begin(host);
       if (!alive) return;
-      if (result?.ok === true || result?.state === 'verified') toast(`تم التحقق من ${host}`);
+      if (result?.ok === true) toast('تم التحقق واستجاب المصدر');
       else toast(result?.error || (result?.state ? verificationMessage(result) : 'لم يكتمل التحقق. تقدر تحاول مرة ثانية.'));
     } catch (e) { if (alive) toast(fmtErr(e)); }
     finally { if (btn?.isConnected) { btn.disabled = false; btn.textContent = 'تحقق'; } paintGuardSheet(); render(); }
@@ -649,7 +721,17 @@ export function renderAddonsHub({
     if (!S.challenges.length) { list.innerHTML = empty('لا شيء ينتظر', 'كل المواقع مفتوحة'); return; }
     const tpl = doc.createElement('template'); tpl.innerHTML = guardRows(); patchChildren(list, tpl.content);
   }
-  const guardRows = () => S.challenges.map((c) => `<div class="y-up-row y-ch-row" data-k="ch-${esc(c.host)}"><span class="y-lg">${g('shield', 22)}</span><div class="y-tx"><div class="y-nm" dir="auto">${esc(c.sourceName || c.host)}</div><div class="y-mt"><span dir="ltr">${esc(c.host)}</span>${c.verifying ? ' · <span class="y-up">يتحقق…</span>' : c.message ? ` · <span class="y-bad">${esc(c.message)}</span>` : ''}</div></div><button class="y-ch-btn" data-y="verify" data-id="${esc(c.host)}" ${c.verifying ? 'disabled' : ''}>تحقق</button></div>`).join('');
+  const guardRows = () => {
+    const sources = PROVS.flatMap((p) => S.items[p]);
+    return S.challenges.map((c) => {
+      const matches = sources.filter((item) => challengeMatches(c, item));
+      const source = matches.find((item) => item.sourceIds?.includes(c.sourceId)) ?? matches[0];
+      const name = c.sourceName && !namesEqual(c.sourceName, c.host) ? c.sourceName : source?.name || c.host;
+      const url = httpUrl(c.origin) || source?.site || 'https://' + c.host;
+      const status = c.verifying ? 'جارٍ التحقق' : c.message;
+      return `<div class="y-up-row y-ch-row" data-k="ch-${esc(c.host)}"><span class="y-ch-logo">${logo(null, name, '', source?.imgs)}<span class="y-ch-shield">${g('shield', 14)}</span></span><div class="y-tx"><div class="y-nm" dir="auto">${esc(name)}</div>${namesEqual(name, c.host) ? '' : `<span class="y-ch-url" dir="ltr" title="${esc(url)}">${esc(url)}</span>`}${status ? `<span class="y-ch-url ${c.verifying ? 'y-up' : 'y-bad'}">${esc(status)}</span>` : ''}</div><button class="y-ch-btn" data-y="verify" data-id="${esc(c.host)}" ${c.verifying ? 'disabled' : ''}>تحقق</button></div>`;
+    }).join('');
+  };
 
   // ── المستودعات ──
   function ghAvatar(u) { try { const x = new URL(u); const parts = x.pathname.split('/').filter(Boolean); if (x.hostname === 'raw.githubusercontent.com' && parts[0]) return `https://github.com/${parts[0]}.png?size=128`; if (x.hostname.endsWith('github.io')) return `https://github.com/${x.hostname.split('.')[0]}.png?size=128`; if (x.hostname === 'github.com' && parts[0]) return `https://github.com/${parts[0]}.png?size=128`; } catch {} return ''; }
@@ -782,36 +864,35 @@ export function renderAddonsHub({
     toBottom(key) { const [p, , it] = find(key); if (!it || !canOrder(p)) return; shiftGroup(p, it, false); dismiss(); render(); void persistOrder(p); },
     async toFirst(key) { const [p, , it] = find(key); if (!it || !canOrder(p)) return; dismiss(); if (!it.pin) await A.pin(key); if (!it.pin) return; shiftGroup(p, it, true); render(); await persistOrder(p); toast('صارت الأولى'); },
     tab(key) {
-      const [p, k] = key.split('|'); if (S.tab[p] === k) return; const from = indPos(); S.tab[p] = k; render({ flip: false }); placeInd(from);
-      if (!RM) content.querySelector('.y-tb')?.animate?.([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: M.tab, easing: EASE });
+      const [p, k] = key.split('|'); if (S.tab[p] === k) return; const from = indPos(); S.tab[p] = k; setScroll(0); render({ flip: false, indicatorFrom: from });
+      if (!RM && k !== 'avail') content.querySelector('.y-tb')?.animate?.([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: M.tab, easing: EASE });
     },
     filter(k) { S.filter = k; render(); },
     async toggle(key) {
-      const [p, id, it] = find(key); if (!it || !canToggle(p) || S.busy[id]) return;
+      const [p, id, it] = find(key);
+      if (!it || !canToggle(p) || S.busy[id] || toggling.has(key)) return;
       const next = !it.on;
-      const paint = (v) => doc.querySelectorAll(`[data-y="toggle"][data-id="${cssEsc(p + '|' + id)}"]`).forEach((b) => { b.classList.toggle('off', !v); b.setAttribute('aria-checked', String(!!v)); });
-      paint(next); it.on = next;
-      try { await (p === 'stremio' ? registry.enable(id, next) : API[p].enable(it.pkg, next)); }
-      catch (e) { it.on = !next; paint(!next); toast(fmtErr(e)); return; }
-      sourcesChanged({ preserveAddonsView: true, reason: 'toggle' });
-      const sel = p === 'stremio' ? `[data-k="st-${cssEsc(id)}"]` : `[data-k="${cssEsc(p + '-' + id)}"]`; const row = content.querySelector(sel);
-      if (cur().v === 'details') { S.justToggled = p + '|' + id; render({ flip: false }); return; }
-      if (RM || !row) { render({ flip: false }); return; }
-      const swaps = p !== 'stremio' && !D; // في الجوال: المفتاح يحل محل المفضّلة و›
-      setTimeout(() => {
-        row.classList.toggle('is-off', !it.on);
-        if (!swaps) { render({ flip: false }); return; }
-        const out = [...row.querySelectorAll(':scope>.y-ib,:scope>.y-sw')];
-        out.forEach((x) => x.animate?.([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.86) translateX(-6px)' }], { duration: M.sheetOut, easing: EIN, fill: 'forwards' }));
-        setTimeout(() => {
-          render({ flip: false }); const r2 = content.querySelector(sel); if (!r2) return;
-          [...r2.querySelectorAll(':scope>.y-ib,:scope>.y-sw')].forEach((x, n) => x.animate?.([{ opacity: 0, transform: 'scale(.86) translateX(10px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: n * 50, easing: EASE, fill: 'backwards' }));
-        }, M.sheetOut);
-      }, 200);
+      toggling.set(key, next);
+      it.on = next;
+      render({ flip: false });
+      try {
+        await (p === 'stremio' ? registry.enable(id, next) : API[p].enable(it.pkg, next));
+        const record = installed[p]?.find((row) => nativePackage(row) === id);
+        if (record) record.enabled = next;
+        if (cur().v === 'details') S.justToggled = key;
+        sourcesChanged({ preserveAddonsView: true, reason: 'toggle' });
+      } catch (error) {
+        const current = find(key)[2];
+        if (current) current.on = !next;
+        if (alive) toast(fmtErr(error));
+      } finally {
+        toggling.delete(key);
+        render({ flip: false });
+      }
     },
     enterSource(key) {
       const [p, , it] = find(key); if (!it?.on || it.bad || it.pending || S.busy[it.id]) return;
-      const ch = challengeOf(it); if (ch) { void verifyHost(ch.host); return; }
+      const ch = challengeOf(it); if (ch && !onOpenNativeSource) { void verifyHost(ch.host); return; }
       if (p === 'stremio') { if (it.open) onOpenSource(it.raw); return; }
       if (it.isSite) return; // مواقع المانجا تُدار هنا ولا كتالوج مستقل لها (كما في المدير السابق)
       if (onOpenNativeSource) onOpenNativeSource({ ...it.raw, name: it.name, pkg: it.pkg, kind: KIND[p], content: it.content ?? it.raw?.content, _store: STORE[p], _url: it.url });
@@ -819,7 +900,7 @@ export function renderAddonsHub({
     },
     site(key) { const [, , it] = find(key); const u = it?.site; if (!u) return; try { win.open(u, '_blank', 'noopener,noreferrer'); } catch { toast('تعذّر فتح الموقع'); } },
     reposFilter(p) { const selected = S.repoFilter[p]; sheet(`<div class="y-ttl">المستودعات</div><div class="y-ls y-repo-options">${[{ id: 'all', name: 'الكل' }, ...S.repos[p]].map((r) => `<button data-y="pickRepo" data-id="${esc(p + '|' + r.id)}" aria-pressed="${selected === r.id}">${r.id === 'all' ? `<span class="y-lg">${g('repo', 22)}</span>` : repoLogo(r)}<span class="y-repo-option-name">${esc(r.name)}</span><span class="y-ck ${selected === r.id ? 'on' : ''}">${selected === r.id ? g('check', 18) : ''}</span></button>`).join('')}</div>`); },
-    pickRepo(key) { const i = key.indexOf('|'), p = key.slice(0, i), id = key.slice(i + 1); S.repoFilter[p] = id; dismiss(); render({ flip: false }); },
+    pickRepo(key) { const i = key.indexOf('|'), p = key.slice(0, i), id = key.slice(i + 1); S.repoFilter[p] = id; setScroll(0); dismiss(); render({ flip: false }); },
     conf(key) {
       const [, , it] = find(key); if (!it?.conf) return;
       const link = configureLink(it.raw, registry); if (!link) { toast('تعذّر فتح صفحة الضبط'); return; }
@@ -853,7 +934,7 @@ export function renderAddonsHub({
       pref.langs[p] = [...s]; savePref();
       const on = s.has(t); const ck = btn.querySelector('.y-ck'); ck.classList.toggle('on', on); ck.innerHTML = on ? g('check', 18) : '';
       if (on && !RM) { const pth = ck.querySelector('path'); const L = pth?.getTotalLength?.() || 20; pth?.animate?.([{ strokeDasharray: L, strokeDashoffset: L }, { strokeDasharray: L, strokeDashoffset: 0 }], { duration: M.enter, easing: EASE }); ck.animate?.([{ transform: 'scale(.8)' }, { transform: 'scale(1.08)', offset: 0.6 }, { transform: 'none' }], { duration: M.press, easing: EASE }); }
-      sheetEl.querySelector('[data-y-cnt]').textContent = s.size ? `${s.size} مختارة` : 'كل اللغات'; render({ flip: false });
+      sheetEl.querySelector('[data-y-cnt]').textContent = s.size ? `${s.size} مختارة` : 'كل اللغات'; setScroll(0); render({ flip: false });
     },
     done: () => dismiss(),
     search() { if (S.searching) return; S.searching = true; render({ flip: false }); },
@@ -964,7 +1045,7 @@ export function renderAddonsHub({
       if (p !== 'stremio') void readNative(p, gen);
     },
     guard() {
-      sheet(`<div class="y-ttl">تحديات الحماية<span>${S.challenges.length}</span></div><p class="y-source-note">مواقع تطلب التأكد أنك لست برنامجًا آليًا. تحقق مرة، فتحفظ فانتارا الجلسة لهذا الموقع.</p><div data-guard-list>${guardRows()}</div><button class="y-pri big" data-y="done">تم</button>`, { label: 'تحديات الحماية' });
+      sheet(`<div class="y-ttl">تحديات الحماية<span>${S.challenges.length}</span></div><p class="y-source-note">أكمل التحقق في صفحة الموقع. قد يطلب الموقع التحقق من جديد بعد انتهاء الجلسة.</p><div data-guard-list>${guardRows()}</div><button class="y-pri big" data-y="done">تم</button>`, { label: 'تحديات الحماية' });
     },
     verify(host, btn) { void verifyHost(host, btn); },
     hubMenu() {
@@ -999,7 +1080,7 @@ export function renderAddonsHub({
   }
   function onInput(e) {
     const a = e.target.dataset?.y;
-    if (a === 'q') { S.q = e.target.value; render({ flip: false }); }
+    if (a === 'q') { S.q = e.target.value; if (available) setScroll(0); render({ flip: false }); }
     if (a === 'raNick') e.target.dataset.touched = '1';
     if (a === 'raUrl' && sheetEl) { clearTimeout(sheetEl.raT); sheetEl.raT = setTimeout(() => raCheck(sheetEl), 400); }
     if (a === 'url') { S.url = e.target.value; e.target.classList.toggle('ltr', !!S.url); const b = content.querySelector('.y-add .y-pri'); if (b) b.disabled = !validUrl(S.url); }
@@ -1039,11 +1120,17 @@ export function renderAddonsHub({
       try { const d = extensionsFromFile(await f.text()); if (!d) throw new Error('هذا ليس ملف «إضافاتي» من فانتارا.'); showImport(d); } catch (err) { toast(fmtErr(err)); }
     }
   }
-  // صورة فشلت: المرشح التالي، ثم الحرف الأول
+  function onImgLoad(e) {
+    const img = e.target, box = img?.closest?.('[data-logo]');
+    if (box && img.naturalWidth > 0) box.dataset.loaded = '';
+  }
   function onImgError(e) {
-    const img = e.target; if (img?.tagName !== 'IMG' || !img.closest?.('.y-lg')) return;
-    const alt = (img.dataset.alt || '').split(' ').filter(Boolean);
-    if (alt.length) { img.dataset.alt = alt.slice(1).join(' '); img.dataset.tried = '1'; img.src = alt[0]; } else img.remove();
+    const img = e.target, box = img?.closest?.('[data-logo]');
+    if (!box) return;
+    delete box.dataset.loaded;
+    const candidates = JSON.parse(box.dataset.logo), next = Number(img.dataset.candidate ?? 0) + 1;
+    if (candidates[next]) { img.dataset.candidate = next; img.src = candidates[next]; }
+    else img.remove();
   }
   // ── الضغط: تصغير خفيف ثم ارتداد ──
   const PRESS = '.y-stat-btn.has,.y-ra-paste,.y-ib,.y-pri,.y-sec,.y-get,.y-chip,.y-act,.y-prov,.y-del,.y-tab,.y-lang,.y-ch-btn,.y-menu>button,.y-ls>button,.y-row[data-y="open"]';
@@ -1152,6 +1239,7 @@ export function renderAddonsHub({
     const n = (win.innerWidth || 0) >= 1000;
     if (n !== D) { D = n; injectCss(); closeSheet(true); renderedView = ''; render({ flip: false }); }
     else placeInd();
+    scheduleAvailable();
     scheduleSheetViewport();
   }
   for (const node of [root, layer]) {
@@ -1163,6 +1251,7 @@ export function renderAddonsHub({
     node.addEventListener('pointerup', pressUp, true);
     node.addEventListener('pointercancel', pressUp, true);
     node.addEventListener('pointermove', pressMove, { passive: true });
+    node.addEventListener('load', onImgLoad, true);
     node.addEventListener('error', onImgError, true);
     node.addEventListener('keydown', onKey);
   }
@@ -1171,6 +1260,10 @@ export function renderAddonsHub({
   layer.addEventListener('pointerup', grabEnd);
   layer.addEventListener('pointercancel', grabEnd);
   win.addEventListener?.('resize', onResize);
+  win.addEventListener?.('scroll', scheduleAvailable, { capture: true, passive: true });
+  const removeVerification = verification?.subscribe?.(receiveChallenges) || (() => {});
+  try { const saved = verification?.list?.(); if (saved?.then) saved.then(receiveChallenges).catch(() => {}); else if (saved) receiveChallenges(saved); } catch {}
+  const removePulse = pulse?.onChange?.(() => { if (API.stremio) readStremio(); scheduleRender(); }) || (() => {});
   win.visualViewport?.addEventListener('resize', scheduleSheetViewport);
   root.addEventListener('addon-configured', () => { if (!alive) return; readStremio(); render(); sourcesChanged({ preserveAddonsView: true }); });
 
@@ -1179,6 +1272,8 @@ export function renderAddonsHub({
   root.snapshot = () => ({ stack: S.stack.map((c) => ({ v: c.v, p: c.p, id: c.id })), tab: { ...S.tab }, scrollY: getScroll() });
   root.close = () => {
     alive = false; gen++; removeVerification(); removePulse(); clearTimeout(toastT);
+    win.removeEventListener?.('scroll', scheduleAvailable, true);
+    if (availableFrame != null) win.cancelAnimationFrame?.(availableFrame);
     win.removeEventListener?.('resize', onResize); win.visualViewport?.removeEventListener('resize', scheduleSheetViewport);
     closeSheet(true); layer.remove();
     if (bar) { bar.classList.remove('y-bar'); if (barStyle == null) bar.removeAttribute('style'); else bar.setAttribute('style', barStyle); bar.inert = false; bar.querySelector('.y-bar-q')?.remove(); bar.removeEventListener('input', onInput); }
@@ -1202,7 +1297,10 @@ function css(D, innerWidth) {
 .y{color:var(--text-1);padding-bottom:96px;-webkit-tap-highlight-color:transparent}
 .y button,.y-sheet button,.y-bar button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;-webkit-tap-highlight-color:transparent;text-align:inherit}
 .y .y-lg,.y-sheet .y-lg{width:${sz(52, 48)}px;height:${sz(52, 48)}px;border-radius:${sz(14, 13)}px;flex:none;overflow:hidden;background:var(--surface-3);display:grid;place-items:center}
-.y-lg img{width:100%;height:100%;object-fit:cover;display:block}
+.y-lg[data-logo]{position:relative}
+.y-lg[data-logo]>img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;visibility:hidden}
+.y-lg[data-loaded]>img{visibility:visible}
+.y-lg[data-loaded]>b{visibility:hidden}
 .y-lg b{font-size:${sz(21, 19)}px;font-weight:700;color:var(--text-1)}
 .y-lg.y-mk{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line-strong);color:var(--text-1)}
 .y .y-lg.xl,.y-sheet .y-lg.xl{width:${sz(72, 64)}px;height:${sz(72, 64)}px;border-radius:${sz(20, 18)}px}
@@ -1420,11 +1518,8 @@ ${D ? '.y-add{grid-template-columns:1fr auto;align-items:center}.y-add .y-pri.bi
 .y .y-ext-row .y-mt{font-size:13.5px;flex-wrap:nowrap}
 .y .y-ext-row .y-ext-info,.y .y-ext-row .y-lg,.y .y-ext-row .y-nm,.y .y-card .y-r1>[data-y="open"]>*,.y .y-card .y-r2{transition:opacity 260ms ${EASE},filter 260ms ${EASE}}
 .y .y-ext-row.is-off .y-ext-info{opacity:.36}
-.y .y-ext-row.is-off .y-lg,.y .y-card.is-off .y-lg{filter:grayscale(1) blur(1.6px)}
-.y .y-ext-row.is-off .y-nm{filter:blur(.4px)}
 .y .y-ext-row .y-sw{margin-inline:8px 10px}
 .y .y-card.is-off .y-r1>[data-y="open"]>*,.y .y-card.is-off .y-r2{opacity:.36}
-.y .y-card.is-off .y-r1>[data-y="open"]>.y-lg{opacity:.5}
 .y-ra{display:grid;gap:12px;padding:2px 0 4px}
 .y-ra-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .y-ra-head h2{font-size:20px;font-weight:700;margin:0;color:var(--text-1)}
@@ -1486,7 +1581,6 @@ ${D?`
 .y-dsep{width:1px;height:28px;background:var(--line-strong);margin-inline:8px;flex:none}
 .y-dup{height:46px;padding:0 16px!important;border-radius:14px;font-size:15.5px!important;background:var(--surface-3)!important;color:var(--text-1)!important;font-weight:700!important;font-size:14.5px!important;display:inline-flex!important;align-items:center;gap:8px;flex:none;transition:background-color .15s}
 @media (hover:hover){.y-dup:hover{background:var(--line-strong)!important}}
-.y .y-drow.is-off .y-ext-info,.y .y-drow.is-off .y-ext-info .y-lg{opacity:.4}
 .y .y-drow .y-sw{margin:0 6px}
 .y .y-dprov{min-height:128px!important;padding:22px 24px!important;gap:22px!important;border-radius:24px!important;border:0!important}
 .y .y-dprov .y-lg.dxl{width:96px!important;height:96px!important;border-radius:28px!important}
@@ -1563,7 +1657,20 @@ ${D?`
 .y-guard .y-lg{color:var(--warning,#e8b04b);background:color-mix(in srgb,var(--warning,#e8b04b) 14%,var(--surface-2))}
 .y-ch-btn{flex:none;min-height:40px;padding:0 16px!important;border-radius:20px!important;background:var(--surface-3)!important;color:var(--text-1)!important;font-weight:700!important;font-size:14px!important}
 .y-ch-btn[disabled]{opacity:.55}
-.y-ch-row{position:relative}
+.y-sheet [data-guard-list]{min-width:0;padding-inline:3px}
+.y-ch-row{display:grid;grid-template-columns:44px minmax(0,1fr) 76px;gap:10px;min-width:0;max-width:100%;padding-block:8px}
+.y-ch-row .y-ch-btn{width:76px;padding:0!important;text-align:center}
+.y-ch-row .y-tx,.y-ch-row .y-nm,.y-ch-url{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.y-ch-url{font-size:12px;color:var(--text-2);text-align:start;unicode-bidi:isolate}
+.y-ch-logo{position:relative;display:grid;width:44px}
+.y-ch-shield{position:absolute;inset-block-start:-5px;inset-inline-start:-4px;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--surface-3);color:var(--warning,#e8b04b);box-shadow:0 0 0 2px var(--surface-1)}
+.y .y-available-list{display:block;overflow-anchor:none}
+.y .y-available-list>.y-avail-row{box-sizing:border-box;height:${sz(96, 74)}px;min-height:0;margin-block-end:${sz(10, 0)}px}
+.y .y-available-list .y-nm,.y .y-available-list .y-mt{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.y .y-ext-row .y-nm,.y .y-ext-row .y-mt,.y .y-card .y-nm,.y .y-card .y-mt,.y .y-card-d .y-mt{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.y .y-card.is-off .y-r2{visibility:hidden}
+.y .y-card.is-off .y-grip{visibility:hidden}
+.y .y-ext-row.is-off .y-ext-info,.y .y-card-d.is-off .y-ext-info,.y .y-card.is-off .y-r1>[data-y="open"]>*{filter:blur(1.3px);opacity:.42}
 .y-in-ro{color:var(--text-3);gap:10px}.y-in-ro span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .y-menu>.y-menu-file{display:flex;align-items:center;gap:16px;min-height:60px;width:100%;font-size:17px;font-weight:600;color:var(--text-1);cursor:pointer}
 .y-danger{background:var(--danger)!important;color:#fff!important}

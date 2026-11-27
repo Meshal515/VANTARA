@@ -396,6 +396,20 @@ class AnimeEnginePlugin : Plugin() {
     private fun repoJson(repo: com.vantara.plugins.UserRepo) = JSObject().put("url", repo.url).put("name", repo.name).withIcon(repo.iconUrl)
     /** سبب عربي ورمز ثابت ومالك العطل (VANTARA، الإضافة، الموقع، غير مدعوم)؛ لا رمز خام مثل PROVIDER_FAILED. */
     private fun failure(call: PluginCall, t: Throwable) {
+        val challenge = generateSequence(t) { it.cause }.take(6)
+            .filterIsInstance<eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException>()
+            .firstOrNull()
+        if (challenge != null) {
+            if (!challenge.interactive) return call.reject("تعذّر الاتصال بالموقع", "SITE_NETWORK", challenge)
+            val host = com.vantara.verification.VerificationCoordinator.challengeHost(challenge.message)
+            val id = call.getString("sourceId") ?: call.getObject("anime")?.optString("sourceId").orEmpty()
+            val name = engine.sources().firstOrNull { it.id == id }?.name ?: id
+            host?.takeIf { id.isNotBlank() }?.let {
+                com.vantara.verification.VerificationCoordinator.annotate(it, id, name)
+            }
+            return call.reject("الموقع يطلب تحققًا قبل الجلب", "VERIFICATION_REQUIRED", challenge,
+                JSObject().put("needsHuman", true).put("verificationHost", host))
+        }
         val localCode = generateSequence(t) { it.cause }.take(6).mapNotNull { it.message }.firstOrNull {
             it.startsWith("EXTENSION_STATE_") || it in setOf("ANIYOMI_PACKAGE_CHANGED", "ANIYOMI_REPOSITORY_CHANGED", "ANIYOMI_REPOSITORY_KEY_CHANGED", "ANIYOMI_APK_VERSION_MISMATCH", "ANIYOMI_DOWNGRADE_REJECTED")
         }
@@ -423,7 +437,9 @@ class AnimeEnginePlugin : Plugin() {
                     JSObject()
                         .put("repos", JSArray(st.repos.map { repoJson(it) }))
                         .put("installed", JSArray(st.extensions.map {
-                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl)
+                            JSObject().put("pkg", it.pkg).put("name", it.name).put("version", it.version).put("content", it.content).put("repo", it.repoUrl).put("enabled", it.enabled)
+                                .put("homepage", it.baseUrl).put("lang", it.sourceLang)
+                                .put("sourceIds", JSArray(it.entries().map { entry -> entry.id }))
                                 .withIcon(NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
                                     ?: com.vantara.plugins.RepoIndex.iconUrl(it.iconUrl, it.repoUrl)
                                     ?: com.vantara.plugins.RepoIndex.legacyIconUrl(it.repoUrl, it.pkg)
@@ -469,10 +485,13 @@ class AnimeEnginePlugin : Plugin() {
         scope.launch {
             try {
                 val base = com.vantara.plugins.RepoIndex.base(call.getString("url") ?: error("رابط المستودع مطلوب"))
-                val repo = userStore.state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val state = userStore.state
+                val repo = state.repos.firstOrNull { it.url == base } ?: error("أضف المستودع أولًا")
+                val installed = state.extensions.associateBy { it.pkg }
+                val loaded = engine.sources().mapNotNull { it.extension }.associateBy { it.pkg }
                 val list = JSArray()
                 for (ext in repoClient.readTrusted(repo)) {
-                    val mine = userStore.state.extensions.firstOrNull { it.pkg == ext.pkg }
+                    val mine = installed[ext.pkg]
                     list.put(
                         JSObject()
                             .put("pkg", ext.pkg).put("name", ext.name.removePrefix("Aniyomi: ")).put("version", ext.version).put("lang", ext.lang)
@@ -483,7 +502,7 @@ class AnimeEnginePlugin : Plugin() {
                             .put("update", mine != null && if(mine.versionCode>0 && ext.versionCode>0) ext.versionCode>mine.versionCode else mine.version != ext.version)
                             .put("sources", JSArray(ext.sources.map { it.name }))
                             .withIcon(mine?.let { NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256) }
-                                ?: engine.sources().firstOrNull { it.extension?.pkg == ext.pkg }?.extension?.let {
+                                ?: loaded[ext.pkg]?.let {
                                     NativeExtensionIcons.iconUrl(context, "anime-extensions", it.pkg, it.sha256)
                                 }
                                 ?: ext.iconUrl ?: repo.iconUrl),
@@ -571,7 +590,7 @@ class AnimeEnginePlugin : Plugin() {
                     sourceName = primary.name, baseUrl = primary.baseUrl.ifBlank { "https://${pkg.substringAfterLast('.')}.invalid" },
                     stableId = previous?.id ?: "user-$pkg", sourceLang = primary.lang,
                     primarySourceId = primary.id, additionalSources = additional, versionCode = ext.versionCode,
-                    iconUrl = ext.iconUrl,
+                    iconUrl = ext.iconUrl, enabled = previous?.enabled != false,
                 )
                 val entries = user.entries()
                 val ids = entries.map { it.id }
@@ -610,6 +629,18 @@ class AnimeEnginePlugin : Plugin() {
                 call.resolve(JSObject().put("id", user.id).put("ids", JSArray(entries.map { it.id }))
                     .put("sourceCount", entries.size))
             } catch (t: Throwable) { failure(call, t) }
+        }
+    }
+
+    @PluginMethod
+    fun enableExtension(call: PluginCall) {
+        val pkg = call.getString("pkg") ?: return call.reject("الإضافة مطلوبة")
+        val enabled = call.getBoolean("enabled") ?: return call.reject("حالة التفعيل مطلوبة")
+        scope.launch {
+            try {
+                userStore.setEnabled(pkg, enabled) { state -> engine.setUserSources(state.extensions.flatMap { it.entries() }) }
+                call.resolve(JSObject().put("ok", true))
+            } catch (error: Throwable) { failure(call, error) }
         }
     }
 

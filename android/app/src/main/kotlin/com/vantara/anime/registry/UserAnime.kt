@@ -41,6 +41,7 @@ data class UserAnimeExtension(
     val versionCode: Long = 0,
     /** Publisher package icon; absent on older saved installations. */
     val iconUrl: String? = null,
+    val enabled: Boolean = true,
 ) {
     val id: String get() = stableId ?: ("user-" + pkg.substringAfterLast('.').ifEmpty { pkg })
 
@@ -50,6 +51,7 @@ data class UserAnimeExtension(
         lang = sourceLang,
         priority = 40,
         content = content,
+        enabled = enabled,
         extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256, version = version, sourceName = sourceName, sourceId = primarySourceId),
         domains = Domains(current = baseUrl),
     )
@@ -62,6 +64,7 @@ data class UserAnimeExtension(
             lang = source.lang,
             priority = 40,
             content = content,
+            enabled = enabled,
             extension = ExtensionRef(pkg = pkg, apk = apkUrl, sha256 = sha256,
                 version = version, sourceName = source.name, sourceId = source.sourceId),
             domains = Domains(current = source.baseUrl),
@@ -126,6 +129,15 @@ class UserAnimeStore(private val file: File) {
         check((repositoryRevisions[token.repository.url] ?: 0) == token.repositoryRevision &&
             state.repos.singleOrNull { it.url == token.repository.url } == token.repository) { "ANIYOMI_REPOSITORY_CHANGED" }
         val next = update { it.copy(extensions = it.extensions.filter { item -> item.pkg != user.pkg } + user) }
+        publish(next)
+        next
+    }
+
+    fun setEnabled(pkg: String, enabled: Boolean, publish: (UserAnimeState) -> Unit): UserAnimeState = synchronized(shared) {
+        val next = update { state ->
+            check(state.extensions.any { it.pkg == pkg }) { "PACKAGE_NOT_INSTALLED" }
+            state.copy(extensions = state.extensions.map { if (it.pkg == pkg) it.copy(enabled = enabled) else it })
+        }
         publish(next)
         next
     }
