@@ -45,6 +45,14 @@
             android:theme="@style/Theme.AppCompat.NoActionBar"
             android:exported="false" />
 
+        <!-- Stable 215 experimental direct verification; never shares a runtime WebView profile. -->
+        <activity
+            android:name="com.vantara.verification.Stable215VerificationActivity"
+            android:process=":verification_stable215"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:exported="false" />
+
         <!-- مشغّل الأنمي: Media3 أصلي، بالعرض، فوق الواجهة -->
         <activity
             android:name="com.vantara.addons.AddonConfigureActivity"

@@ -79,13 +79,17 @@ class VerificationPlugin : Plugin() {
         val item = VerificationCoordinator.begin(host) ?: return@post call.reject("التحقق غير متاح أو توجد جلسة مفتوحة")
         active = item
         try {
-            startActivityForResult(call, Intent(context, VerificationActivity::class.java)
+            val engineNetwork = com.vantara.anime.net.AnimeHostRouter.prefersDoh(item.host)
+            val verificationIntent = if (item.kind == "cloudflare" && !engineNetwork)
+                Intent(context, Stable215VerificationActivity::class.java)
+            else Intent(context, VerificationActivity::class.java)
+            startActivityForResult(call, verificationIntent
                 .putExtra("host", item.host).putExtra("origin", item.origin).putExtra("url", item.url)
                 .putExtra("userAgent", item.userAgent).putExtra("sourceName", item.sourceName)
                 // An anime source or video host reaches its site through the engine's network (encrypted DNS first,
                 // split ClientHello). The check page took the system network instead and failed in seconds on a
                 // blocked site; it now goes through the same path (VerificationTunnel), as CloudStream checks do.
-                .putExtra("engineNetwork", com.vantara.anime.net.AnimeHostRouter.prefersDoh(item.host))
+                .putExtra("engineNetwork", engineNetwork)
                 .putExtra("token", item.token), "verified")
         } catch (_: Exception) {
             active = null
