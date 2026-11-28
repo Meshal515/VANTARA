@@ -533,6 +533,9 @@ for (const path of [
   "tools/repository-safety.test.mjs",
   "apps/web/v35/addons-hub.js",
   "apps/web/lib/engine-marks.js",
+  // سياسة CI المعتمدة من المالك (28 نوفمبر، #412) بموافقته الصريحة على التسجيل
+  ".github/workflows/ci.yml",
+  ".github/workflows/deep-ci.yml",
   "apps/web/lib/verification-regression.test.js",
   "apps/web/lib/latest-threads.js",
   "apps/web/lib/latest-threads.test.js",
