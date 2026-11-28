@@ -1,5 +1,7 @@
 package com.vantara.verification
 
+import java.util.ArrayDeque
+
 /** Debug-only lifecycle evidence. No URLs, cookie values, tokens, HTML or request headers. */
 internal class VerificationTrace(private val clock: () -> Long, private val capacity: Int = 120) {
     enum class Event {
