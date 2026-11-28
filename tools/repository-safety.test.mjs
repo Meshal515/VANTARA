@@ -1178,6 +1178,8 @@ test('the reader app runs the exact engine the spike proved on device', () => {
     'dev/vantara/spike/SourceCompatRepairs.kt',
     'dev/vantara/spike/DilarCryptoCompat.kt',
     'dev/vantara/spike/ChromeUserAgent.kt',
+    // Sec-CH-UA المطابق: المحلّل الصامت وصفحة التحقق الظاهرة يستدعيان الدالة نفسها
+    'dev/vantara/spike/UserAgentMetadataAlign.kt',
     'dev/vantara/spike/CloudflareInteractionPolicy.kt',
     'dev/vantara/spike/ArabicSourceSelection.kt',
     'dev/vantara/spike/ProbeResiliencePolicy.kt',

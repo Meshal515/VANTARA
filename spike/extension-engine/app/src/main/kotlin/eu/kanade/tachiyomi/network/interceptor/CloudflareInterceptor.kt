@@ -39,10 +39,6 @@ import android.webkit.WebResourceResponse
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.webkit.UserAgentMetadata
-import androidx.webkit.WebSettingsCompat
-import androidx.webkit.WebViewFeature
-import dev.vantara.spike.ChromeUserAgent
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -574,34 +570,7 @@ class CloudflareInterceptor(
      * `settings.userAgentString` وحده غير كافٍ في Chromium الحديث: Sec-CH-UA
      * يبقى معلنًا عن Android WebView. Cloudflare يرى التناقض ويحجب الطلب.
      */
-    private fun setMatchingUserAgentMetadata(view: WebView, userAgent: String) {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return
-        val chrome = ChromeUserAgent.parse(userAgent) ?: return
-        try {
-            val current = WebSettingsCompat.getUserAgentMetadata(view.settings)
-            val brands = current.brandVersionList.map { item ->
-                val brand = when (item.brand) {
-                    "Android WebView" -> "Google Chrome"
-                    "Chromium" -> "Chromium"
-                    else -> return@map item
-                }
-                UserAgentMetadata.BrandVersion.Builder()
-                    .setBrand(brand)
-                    .setMajorVersion(chrome.major)
-                    .setFullVersion(chrome.full)
-                    .build()
-            }
-            WebSettingsCompat.setUserAgentMetadata(
-                view.settings,
-                UserAgentMetadata.Builder(current)
-                    .setBrandVersionList(brands)
-                    .setFullVersion(chrome.full)
-                    .build(),
-            )
-        } catch (t: Throwable) {
-            Log.w(TAG, "Failed to align WebView user-agent metadata", t)
-        }
-    }
+    private fun setMatchingUserAgentMetadata(view: WebView, userAgent: String) = dev.vantara.spike.alignUserAgentMetadata(view, userAgent)
 
     private fun destroyOnMain(view: WebView?, also: () -> Unit = {}) {
         handler.post {

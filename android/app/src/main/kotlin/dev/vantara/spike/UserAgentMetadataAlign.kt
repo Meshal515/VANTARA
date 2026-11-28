@@ -1,14 +1,13 @@
-package com.vantara.verification
+package dev.vantara.spike
 
 import android.util.Log
 import android.webkit.WebView
 import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
-import dev.vantara.spike.ChromeUserAgent
 
 /**
- * Sec-CH-UA مطابق للـUser-Agent المرسل (نسخة من CloudflareInterceptor.setMatchingUserAgentMetadata، الذي يبقى مطابقًا لنسخة الـspike حرفيًا). صفحة التحقق الظاهرة ترسل User-Agent الطلب الذي
+ * Sec-CH-UA مطابق للـUser-Agent المرسل للمحلّل الصامت (CloudflareInterceptor) ولصفحة التحقق الظاهرة (VerificationActivity) معًا، بلا نسخة ثانية. صفحة التحقق الظاهرة ترسل User-Agent الطلب الذي
  * رُفض، وبلا هذا تعلن Sec-CH-UA «Android WebView»: Cloudflare يرى التناقض بين البصمتين.
  */
 fun alignUserAgentMetadata(view: WebView, userAgent: String) {

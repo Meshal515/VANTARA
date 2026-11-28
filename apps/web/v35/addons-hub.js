@@ -226,11 +226,11 @@ export function renderAddonsHub({
   const pinBtnD = (p, it) => dib('pin', it.pin ? 'pinOn' : 'pin', p + '|' + it.id, it.pin ? 'أزل من المفضّلة' : 'للمفضّلة', it.pin ? 'on' : 'dim');
   const deskExtRow = (p, it) => {
     const k = p + '|' + it.id, b = S.busy[it.id];
-    return `<div class="y-row y-ext-row y-drow ${it.on ? '' : 'is-off'}" data-k="${p}-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b || it.bad || it.nv || it.pending || challengeOf(it) ? extLine(p, it) : esc(it.lang || 'عربي')}${it.repoId ? ` · <span dir="auto">${esc(repoName(p, it))}</span>` : ''}</span></span></button><div class="y-dacts">${!it.on ? switchBtn(p, it) : `${moveBtns(p, it)}<span class="y-dsep"></span>${pinBtnD(p, it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث v${esc(it.nv)}</button>` : ''}${it.pending && !b ? `<button class="y-dup" data-y="restore" data-id="${esc(k)}">${g('update', 18)}استعد</button>` : ''}${it.bad && !b ? dib('retry', 'retry', k, 'أعد المحاولة') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !copyUrl(p, it))}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${it.isSite ? dib('open', 'open', k, 'التفاصيل') : dib('enterSource', 'open', k, 'افتح المصدر', '', !it.on || !!it.bad || !!it.pending || !!b)}`}</div>${prog(it.id)}</div>`;
+    return `<div class="y-row y-ext-row y-drow ${it.on ? '' : 'is-off'}" data-k="${p}-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b || it.bad || it.nv || it.pending || challengeOf(it) ? extLine(p, it) : esc(it.lang || 'عربي')}${it.repoId ? ` · <span dir="auto">${esc(repoName(p, it))}</span>` : ''}</span></span></button><div class="y-dacts">${moveBtns(p, it)}<span class="y-dsep"></span>${pinBtnD(p, it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث v${esc(it.nv)}</button>` : ''}${it.pending && !b ? `<button class="y-dup" data-y="restore" data-id="${esc(k)}">${g('update', 18)}استعد</button>` : ''}${it.bad && !b ? dib('retry', 'retry', k, 'أعد المحاولة') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !copyUrl(p, it))}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}${canToggle(p) ? `<span class="y-dsep"></span>${switchBtn(p, it)}` : '<span class="y-dsep"></span>'}${it.isSite ? dib('open', 'open', k, 'التفاصيل') : dib('enterSource', 'open', k, 'افتح المصدر', '', !it.on || !!it.bad || !!it.pending || !!b)}</div>${prog(it.id)}</div>`;
   };
   const deskStCard = (it) => {
     const k = 'stremio|' + it.id, b = S.busy[it.id];
-    return `<div class="y-row y-drow y-card-d ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : `${TYPE[it.type] || ''}${it.cont ? ' · ' + esc(it.cont) : ''}`}</span></span></button><div class="y-dacts">${!it.on ? switchBtn('stremio', it) : `${moveBtns('stremio', it)}<span class="y-dsep"></span>${pinBtnD('stremio', it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث ${esc(it.nv)}</button>` : ''}${it.conf ? dib('conf', 'sliders', k, 'اضبط') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !it.url)}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${it.open ? dib('enterSource', 'open', k, 'افتح الكتالوج', '', !it.on) : ''}`}</div>${prog(it.id)}</div>`;
+    return `<div class="y-row y-drow y-card-d ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}"><button class="y-ext-info" data-y="open" data-id="${esc(k)}" aria-label="تفاصيل ${esc(it.name)}">${itLogo(it, 'dl')}<span class="y-tx"><span class="y-dn"><span>${esc(it.name)}</span>${it.ver ? `<span class="y-chipv">v${esc(it.ver)}</span>` : ''}</span><span class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : `${TYPE[it.type] || ''}${it.cont ? ' · ' + esc(it.cont) : ''}`}</span></span></button><div class="y-dacts">${moveBtns('stremio', it)}<span class="y-dsep"></span>${pinBtnD('stremio', it)}${it.nv && !b ? `<button class="y-dup" data-y="update" data-id="${esc(k)}">${g('update', 18)}تحديث ${esc(it.nv)}</button>` : ''}${it.conf ? dib('conf', 'sliders', k, 'اضبط') : ''}${dib('site', 'site', k, 'افتح الموقع', '', !it.site)}${dib('copy', 'link', k, 'انسخ الرابط', '', !it.url)}${dib('askDel', 'trash', k, 'احذف', 'danger', !!b)}<span class="y-dsep"></span>${switchBtn('stremio', it).replace('role="switch"', `role="switch" data-tip="${it.on ? 'عطّلها' : 'فعّلها'}"`)}${it.open ? dib('enterSource', 'open', k, 'افتح الكتالوج', '', !it.on) : ''}</div>${prog(it.id)}</div>`;
   };
   const deskProv = (k) => {
     const pin = S.provPins.includes(k), a = S.items[k], up = upCount(k);
@@ -242,7 +242,7 @@ export function renderAddonsHub({
     if (D) return deskStCard(it);
     const k = 'stremio|' + it.id, b = S.busy[it.id];
     return `<div class="y-card ${it.on ? '' : 'is-off'}" data-k="st-${esc(it.id)}" data-id="${esc(it.id)}">
-  <div class="y-r1">${canOrder('stremio') ? `<button class="y-grip" data-y="grip" data-id="${esc(it.id)}" aria-label="اسحب للترتيب">${g('grip')}</button>` : ''}<div style="display:contents" data-y="open" data-id="${esc(k)}">${itLogo(it)}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : it.nv ? `<span class="y-dot"></span><span class="y-up">تحديث ${esc(it.nv)}</span>` : `${TYPE[it.type]}${it.ver ? ' · ' + esc(it.ver) : ''}`}</div></div></div>${!it.on ? switchBtn('stremio', it) : ''}</div>
+  <div class="y-r1">${canOrder('stremio') ? `<button class="y-grip" data-y="grip" data-id="${esc(it.id)}" aria-label="اسحب للترتيب">${g('grip')}</button>` : ''}<div style="display:contents" data-y="open" data-id="${esc(k)}">${itLogo(it)}<div class="y-tx"><div class="y-nm">${esc(it.name)}</div><div class="y-mt">${b ? `<span class="y-up">${busyWord(b)}</span>` : it.bad ? '<span class="y-bad">تعذّر الاتصال</span>' : it.nv ? `<span class="y-dot"></span><span class="y-up">تحديث ${esc(it.nv)}</span>` : `${TYPE[it.type]}${it.ver ? ' · ' + esc(it.ver) : ''}`}</div></div></div>${switchBtn('stremio', it)}</div>
   <div class="y-r2" ${it.on ? '' : 'inert aria-hidden="true"'}>${pinBtn('stremio', it)}${it.conf ? ib('conf', 'sliders', { id: k, label: 'ضبط' }) : ''}${it.nv && !b ? ib('update', 'update', { id: k, label: 'تحديث' }) : ''}<span class="y-sp"></span>${ib('itemMenu', 'more', { id: k, label: 'خيارات' })}${ib('open', 'open', { id: k, label: 'التفاصيل' })}</div>${prog(it.id)}</div>`;
   };
 
@@ -868,27 +868,45 @@ export function renderAddonsHub({
       if (!RM && k !== 'avail') content.querySelector('.y-tb')?.animate?.([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: M.tab, easing: EASE });
     },
     filter(k) { S.filter = k; render(); },
+    // الحركة الأصلية (قبل 3fa9e80): المفتاح ينقلب فورًا في مكانه، وبعد 200ms يأخذ الصف تمويه التعطيل أو يتركه، وفي
+    // الجوال يخرج المفتاح بسلاسة ويدخل مكانه المفضّلة و› (أو العكس). إعادة الرسم الفورية كانت تقفز بالصف بلا حركة.
+    // ومن إصلاحات 3fa9e80 تبقى: نقرة ثانية لا تُرسل أثناء الأولى (toggling)، والسجل المثبت يُحدَّث، والفشل يعيد الحالة
     async toggle(key) {
       const [p, id, it] = find(key);
       if (!it || !canToggle(p) || S.busy[id] || toggling.has(key)) return;
       const next = !it.on;
       toggling.set(key, next);
-      it.on = next;
-      render({ flip: false });
+      const paint = (v) => doc.querySelectorAll(`[data-y="toggle"][data-id="${cssEsc(p + '|' + id)}"]`).forEach((b) => { b.classList.toggle('off', !v); b.setAttribute('aria-checked', String(!!v)); });
+      paint(next); it.on = next;
+      const settle = () => { toggling.delete(key); if (alive) render({ flip: false }); };
       try {
         await (p === 'stremio' ? registry.enable(id, next) : API[p].enable(it.pkg, next));
         const record = installed[p]?.find((row) => nativePackage(row) === id);
         if (record) record.enabled = next;
-        if (cur().v === 'details') S.justToggled = key;
-        sourcesChanged({ preserveAddonsView: true, reason: 'toggle' });
       } catch (error) {
         const current = find(key)[2];
         if (current) current.on = !next;
+        paint(!next);
         if (alive) toast(fmtErr(error));
-      } finally {
-        toggling.delete(key);
-        render({ flip: false });
+        settle();
+        return;
       }
+      sourcesChanged({ preserveAddonsView: true, reason: 'toggle' });
+      const sel = p === 'stremio' ? `[data-k="st-${cssEsc(id)}"]` : `[data-k="${cssEsc(p + '-' + id)}"]`; const row = content.querySelector(sel);
+      if (cur().v === 'details') { S.justToggled = key; settle(); return; }
+      if (RM || !row || !alive) { settle(); return; }
+      const swaps = p !== 'stremio' && !D; // في الجوال: المفتاح يحل محل المفضّلة و›
+      setTimeout(() => {
+        if (!alive) return void toggling.delete(key);
+        row.classList.toggle('is-off', !it.on);
+        if (!swaps) { settle(); return; }
+        const out = [...row.querySelectorAll(':scope>.y-ib,:scope>.y-sw')];
+        out.forEach((x) => x.animate?.([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.86) translateX(-6px)' }], { duration: M.sheetOut, easing: EIN, fill: 'forwards' }));
+        setTimeout(() => {
+          settle(); const r2 = content.querySelector(sel); if (!r2) return;
+          [...r2.querySelectorAll(':scope>.y-ib,:scope>.y-sw')].forEach((x, n) => x.animate?.([{ opacity: 0, transform: 'scale(.86) translateX(10px)' }, { opacity: 1, transform: 'none' }], { duration: 240, delay: n * 50, easing: EASE, fill: 'backwards' }));
+        }, M.sheetOut);
+      }, 200);
     },
     enterSource(key) {
       const [p, , it] = find(key); if (!it?.on || it.bad || it.pending || S.busy[it.id]) return;

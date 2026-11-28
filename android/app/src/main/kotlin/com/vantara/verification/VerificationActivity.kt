@@ -174,7 +174,7 @@ class VerificationActivity : Activity() {
             }
             selectedCookies?.apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, false) }
             // Sec-CH-UA مطابق للـUser-Agent المرسل، كما في المحلّل الصامت (وإلا يعلن «Android WebView» بجانب UA آخر)
-            intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { alignUserAgentMetadata(view, it) }
+            intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { dev.vantara.spike.alignUserAgentMetadata(view, it) }
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
