@@ -41,6 +41,19 @@ async function setup() {
 }
 
 describe('owner admin panel', () => {
+  it('restricts collector policy writes to the owner and leaves the thin threads available', async () => {
+    const { call, bearer } = await setup();
+    const owner = await bearer(OWNER), friend = await bearer(FRIEND);
+    expect((await call('/v1/admin/collector-policy', { mode: 'exclusive' }, friend)).status).toBe(403);
+    expect((await call('/v1/admin/collector-policy', { mode: 'bogus' }, owner)).status).toBe(400);
+    expect((await call('/v1/admin/collector-policy', { mode: 'exclusive' }, owner)).status).toBe(200);
+    expect(await (await call('/v1/latest/collector-policy', undefined, friend, 'GET')).json()).toMatchObject({mode:'exclusive'});
+    expect((await call('/v1/updates/observe', { works: [] }, friend)).status).toBe(409);
+    expect((await call('/v1/latest/signals', undefined, friend, 'GET')).status).toBe(200);
+    expect((await call('/v1/latest/backup', undefined, friend, 'GET')).status).toBe(200);
+    expect((await call('/v1/admin/collector-policy', {mode:'hybrid'}, owner)).status).toBe(200);
+  });
+
   it('is the owner\'s alone, checked on the server for every call', async () => {
     const { call, bearer } = await setup();
     expect((await call('/v1/admin/accounts', undefined, await bearer(FRIEND), 'GET')).status).toBe(403);
