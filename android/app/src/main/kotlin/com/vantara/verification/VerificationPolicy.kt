@@ -81,6 +81,38 @@ object VerificationPolicy {
         }.distinctBy { it.first }.take(40).toList()
     }
 
+    /** كتابة واحدة في مخزن المحرك: رابط تُنسب إليه وترويسة Set-Cookie كما يقبلها CookieManager.setCookie. */
+    data class CookieWrite(val url: String, val header: String, val remove: Boolean = false)
+
+    /** عمر الجلسة المنقولة: CookieManager لا يكشف انتهاءها الأصلي. الموقع يرفضها حين تنتهي عنده، فتُستبدل بتحقق جديد. */
+    const val IMPORT_MAX_AGE_S = 7L * 24 * 3600
+
+    /**
+     * نقل جلسة صفحة التحقق (عملية :verification ومخزنها المعزول) إلى مخزن المحرك، بديلًا عن المخزن الواحد في Mihon
+     * (WebViewScreenContent وAndroidCookieJar على CookieManager نفسه، وCloudflareInterceptor يحذف cf_clearance القديم قبل
+     * الحل). كان الاستيراد كوكي «للمضيف وحده» على المضيف الذي انتهت إليه الصفحة، والقديم لا يُحذف: كوكيان بالاسم نفسه
+     * يُرسلان معًا (الأقدم أولًا فيُرفض)، ومضيف الطلب (www أو دونها) قد لا يحمله أصلًا.
+     *
+     * الآن: يُحذف cf_clearance القديم بكل نطاقاته (المضيفان وجذر الموقع)، ثم يُكتب الجديد على جذر الموقع كما يكتبه
+     * Cloudflare (Domain=.site)، وبقية الكوكيز للمضيفين كليهما. [registrable] جذر الموقع (topPrivateDomain) أو null.
+     */
+    fun sessionImport(requestHost: String, landedHost: String, clearance: String?, pairs: List<Pair<String, String>>, registrable: String?): List<CookieWrite> {
+        val hosts = listOf(requestHost, landedHost).distinct()
+        val out = mutableListOf<CookieWrite>()
+        val attrs = "; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=$IMPORT_MAX_AGE_S"
+        if (clearance != null) {
+            for (h in hosts) out += CookieWrite("https://$h/", "cf_clearance=; Path=/; Max-Age=0", remove = true)
+            if (registrable != null) out += CookieWrite("https://$requestHost/", "cf_clearance=; Domain=.$registrable; Path=/; Max-Age=0", remove = true)
+            if (registrable != null) out += CookieWrite("https://$requestHost/", "cf_clearance=$clearance; Domain=.$registrable$attrs")
+            else for (h in hosts) out += CookieWrite("https://$h/", "cf_clearance=$clearance$attrs")
+        }
+        for ((name, value) in pairs.filter { it.first != "cf_clearance" }) for (h in hosts) out += CookieWrite("https://$h/", "$name=$value$attrs")
+        return out
+    }
+
+    /** جذر الموقع من قائمة اللواحق العامة (OkHttp) أو التقدير المحافظ. */
+    fun registrableOf(host: String): String? = registrable(host)
+
     /** CookieManager returns a request header: import precisely one bounded token. */
     fun clearance(header: String?): String? {
         if (header == null || header.length > 65536 || header.any { it == '\r' || it == '\n' }) return null

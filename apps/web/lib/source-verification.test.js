@@ -203,3 +203,27 @@ it('treats a replay rejection flagged by the source as an unfinished verificatio
   expect(verification.list()).toMatchObject([{ host: 'source.example', reason: 'still_challenged' }]);
   verification.close();
 });
+
+describe('verified means the site accepted the original request (native confirm)',()=>{
+  it('a native verified result without a replay is a confirmed success, not «open the source to confirm»',async()=>{
+    const f=fixture(),c=createSourceVerification(f);await c.ready;
+    c.require({host:'hijala.com',state:'required'});
+    const out=await c.begin('hijala.com');
+    expect(out).toMatchObject({ok:true,confirmed:true});
+    expect(c.list()).toHaveLength(0);c.close();
+  });
+  it('a site that still challenges after the import keeps the request pending with its real reason',async()=>{
+    const f=fixture();f.plugin.begin=vi.fn(async({host})=>({host,state:'failed',reason:'still_challenged'}));
+    const c=createSourceVerification(f);await c.ready;
+    c.require({host:'hijala.com',state:'required'});
+    const out=await c.begin('hijala.com');
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(/الموقع لم يقبل التحقق/);
+    expect(c.list()).toMatchObject([{host:'hijala.com',state:'failed'}]);c.close();
+  });
+  it('every native refusal reason has its own message',async()=>{
+    const {verificationMessage}=await import('./source-verification.js');
+    for(const reason of ['unconfirmed','no_clearance','no_session_cookie','cookie_scope_mismatch','still_challenged'])
+      expect(verificationMessage({reason})).not.toBe('لم يكتمل التحقق. تقدر تحاول مرة ثانية.');
+  });
+});

@@ -104,6 +104,7 @@ function createSourceBrowser({ BrowserWindow, session, net, userAgent, isChallen
       } catch { resolve({ host, state: 'failed', reason: 'launch_failed' }); return; }
       let done = false;
       let poll = null;
+      let confirming = false;
       const finish = (result) => {
         if (done) return;
         done = true;
@@ -133,11 +134,27 @@ function createSourceBrowser({ BrowserWindow, session, net, userAgent, isChallen
         if (!page || page.ready === 'loading' || !page.html || page.text < 1) return;
         const same = String(page.host).toLowerCase() === host || String(page.host).toLowerCase().endsWith(`.${host}`) || host.endsWith(`.${page.host}`);
         if (!same) return;
-        if (!isChallenge({ status: 200, headers: {}, text: `<title>${page.title}</title>${page.html}` })) finish({ state: 'verified' });
+        if (isChallenge({ status: 200, headers: {}, text: `<title>${page.title}</title>${page.html}` }) || confirming) return;
+        // الصفحة بلا تحدٍّ ليست الحكم: الموقع يقبل طلب الجلسة نفسه (كوكيها وبصمة Chromium، كما يطلب المحرك عبر جسر
+        // Cloudflare) أو لا «تم». ما زال يُتحدّى: النافذة تبقى ليكمل المستخدم، وتعذّر الوصول: لا نجاح مُعلن
+        confirming = true;
+        const verdict = await confirmAccepted(start.href);
+        confirming = false;
+        if (done || win.isDestroyed()) return;
+        if (verdict === 'accepted') finish({ state: 'verified' });
+        else if (verdict === 'unreachable') finish({ state: 'failed', reason: 'unconfirmed' });
       }, POLL_MS);
     }).finally(() => verifying.delete(host));
     verifying.set(host, job);
     return job;
+  }
+
+  /** هل يقبل الموقع طلبًا من جلسة المصادر الآن؟ «accepted» أو «challenged» أو «unreachable». */
+  async function confirmAccepted(url) {
+    try {
+      const res = await request({ url, limit: 512 * 1024, timeout: 15_000 });
+      return isChallenge({ status: res.status, headers: res.headers ?? {}, text: res.body.subarray(0, 64 * 1024).toString('utf8') }) ? 'challenged' : 'accepted';
+    } catch { return 'unreachable'; }
   }
 
   /** طلب من جلسة Chromium نفسها (كوكي التحقق وبصمة المتصفح)، كل تحويل يُفحص قبل اتباعه. */

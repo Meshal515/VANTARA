@@ -749,9 +749,13 @@ class RuntimeHost(
             require(targetOrigin in retry.scope.allowedOrigins() &&
                 VerificationPolicy.sameSite(VerificationPolicy.endpoint(item.origin)!!, VerificationPolicy.endpoint(targetOrigin)!!)) { "VERIFICATION_SESSION_MISMATCH" }
             val scope = HttpBroker.Scope(retry.scope.family(),retry.scope.packageId(),retry.scope.sourceId(),retry.scope.sessionId(),retry.scope.allowedOrigins())
-            val cookie = Cookie.Builder().name("cf_clearance").value(clearance).hostOnlyDomain(url.host).path("/")
-                .secure().httpOnly().expiresAt(System.currentTimeMillis()+1800000).build()
-            vaults.forScope(scope).save(url,listOf(cookie))
+            // المضيف الذي انتهت إليه الصفحة والمضيف الذي رُفض طلبه كلاهما (www أو دونها): كان للأول وحده، فيبقى طلب
+            // المزوّد للثاني بلا كوكي ويُتحدّى من جديد
+            for (target in listOf(url, requested).distinctBy { it.host }) {
+                val cookie = Cookie.Builder().name("cf_clearance").value(clearance).hostOnlyDomain(target.host).path("/")
+                    .secure().httpOnly().expiresAt(System.currentTimeMillis()+1800000).build()
+                vaults.forScope(scope).save(target,listOf(cookie))
+            }
             broker.verificationSucceeded(scope,item.origin)
             if (targetOrigin != item.origin) broker.verificationSucceeded(scope,targetOrigin)
         }

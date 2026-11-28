@@ -67,7 +67,9 @@ class VerificationActivity : Activity() {
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
             continueButton?.isEnabled = pageReady && (runtimeProfile == null || clearance != null)
-            if (clearance != null && (clearance != initialClearance || pageReady)) {
+            // لا إغلاق قبل صفحة الموقع نفسها: كان ظهور cf_clearance وحده يغلق النافذة والصفحة ما زالت تُحوَّل، فتضيع
+            // كوكيز يكتبها الموقع بعد التحويل. القديم حُذف قبل التحميل، فأي cf_clearance هنا جديد من هذا التحقق
+            if (clearance != null && pageReady) {
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
             else main.postDelayed(this, 500)
@@ -171,6 +173,8 @@ class VerificationActivity : Activity() {
                 intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { userAgentString = it }
             }
             selectedCookies?.apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, false) }
+            // Sec-CH-UA مطابق للـUser-Agent المرسل، كما في المحلّل الصامت (وإلا يعلن «Android WebView» بجانب UA آخر)
+            intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { alignUserAgentMetadata(view, it) }
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
@@ -223,8 +227,21 @@ class VerificationActivity : Activity() {
             }
             val root = (findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as LinearLayout)
             root.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            view.loadUrl(intent.getStringExtra("url")!!)
-            if (resumed) main.post(poll)
+            // كما يفعل Mihon قبل كل حل (CloudflareInterceptor: remove(url, ["cf_clearance"], 0)): cf_clearance القديم يُحذف
+            // قبل التحميل، فيُطلب التحدي من جديد ويُعرف الجديد بلا لبس (كوكيان بالاسم نفسه كانا يجعلان القراءة null)
+            // كوكي المضيف وحده، وكوكي جذر الموقع (Domain=.site) الذي يكتبه Cloudflare عادة
+            val stale = listOf("cf_clearance=; Path=/; Max-Age=0") +
+                listOfNotNull(VerificationPolicy.registrableOf(current.host)?.let { "cf_clearance=; Domain=.$it; Path=/; Max-Age=0" })
+            var left = stale.size
+            fun load() {
+                if (completed || browser !== view) return
+                initialClearance = null
+                view.loadUrl(intent.getStringExtra("url")!!)
+                if (resumed) main.post(poll)
+            }
+            val jar = selectedCookies
+            if (jar == null) load()
+            else for (header in stale) jar.setCookie("${current.origin}/", header) { main.post { if (--left == 0) load() } }
         } catch (_: RuntimeException) { complete("failed", "webview_unavailable") }
     }
 
@@ -239,7 +256,10 @@ class VerificationActivity : Activity() {
         if (state == "verified") endpoint?.let { e ->
             val origin = cookieOrigin(e.origin)
             result.putExtra("cookieOrigin", origin)
-            if (runtimeProfile == null) selectedCookies?.getCookie("$origin/")?.take(65536)?.let { result.putExtra("cookies", it) }
+            // كوكيز المضيفين كليهما: الذي انتهت إليه الصفحة والذي رُفض طلبه (www أو دونها)
+            if (runtimeProfile == null) listOf(origin, e.origin).distinct().mapNotNull { selectedCookies?.getCookie("$it/") }
+                .flatMap { it.split(';').map(String::trim) }.filter { it.isNotEmpty() }.distinctBy { it.substringBefore('=') }
+                .joinToString("; ").take(65536).takeIf { it.isNotEmpty() }?.let { result.putExtra("cookies", it) }
         }
         setResult(if (state == "verified") RESULT_OK else RESULT_CANCELED, result)
         releaseBrowser()

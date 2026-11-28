@@ -24,6 +24,11 @@ export function verificationMessage(result={}) {
     interrupted:'توقفت جلسة التحقق قبل اكتمالها.',
     proxy_unavailable:'تعذّر فتح مسار شبكة المصدر لصفحة التحقق. حدّث Android System WebView.',
     still_challenged:'الموقع لم يقبل التحقق بعد. افتحه مرة ثانية وأكمل التحدي حتى تظهر صفحة الموقع.',
+    // الحكم الأخير من الموقع نفسه (طلب المحرك بعد نقل الجلسة)، لا من إغلاق الصفحة
+    unconfirmed:'اكتمل التحقق في الصفحة، لكن تعذّر الوصول إلى الموقع للتأكد من قبوله. أعد المحاولة بعد قليل.',
+    no_clearance:'فتح الموقع في صفحة التحقق دون أن يصدر جلسة تحقق، فلا شيء يُنقل للمحرك. قد يرفض الموقع المحرك ببصمة الاتصال لا بالكوكي.',
+    no_session_cookie:'لم تُصدر صفحة التحقق أي جلسة يمكن نقلها للمحرك.',
+    cookie_scope_mismatch:'انتهت صفحة التحقق على موقع آخر؛ لم تُنقل جلستها حماية لحسابك.',
   };
   return Object.hasOwn(messages,result.reason)?messages[result.reason]:'لم يكتمل التحقق. تقدر تحاول مرة ثانية.';
 }
@@ -89,7 +94,8 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
         const resume = retry ?? (!privateRuntime ? item.retry : null);
         if (!resume) {
           pending.delete(host);
-          return privateRuntime ? result : {ok:false,sessionReady:true,error:'أُغلقت صفحة التحقق. افتح المصدر لتأكيد الاتصال.'};
+          // «verified» من المحرك يعني أن الموقع قبل الطلب المرفوض نفسه بعد نقل الجلسة (VerificationPlugin.confirm)
+          return privateRuntime ? result : {ok:true,confirmed:true,...result};
         }
         job.replaying = true;
         let retried;

@@ -521,6 +521,18 @@ for (const path of [
   "apps/web/v35/server-sheet.js",
   "apps/web/v35/server-sheet.test.js",
   "apps/web/sw.js",
+  // التحقق: نقل الجلسة كما في Mihon (حذف القديم، نطاق الموقع)، ولا «تم» قبل قبول الموقع الطلب نفسه
+  "android/app/src/main/kotlin/com/vantara/verification/VerificationActivity.kt",
+  "android/app/src/main/kotlin/com/vantara/verification/VerificationPlugin.kt",
+  "android/app/src/main/kotlin/com/vantara/verification/VerificationPolicy.kt",
+  "android/app/src/main/kotlin/com/vantara/verification/VerificationAcceptance.kt",
+  "android/app/src/main/kotlin/com/vantara/verification/UserAgentMetadataAlign.kt",
+  "android/app/src/test/java/com/vantara/verification/VerificationSessionTest.kt",
+  "extensions/runtime-android/integration/src/main/kotlin/com/vantara/runtime/RuntimeHost.kt",
+  "apps/web/lib/source-verification.js",
+  "apps/web/lib/source-verification.test.js",
+  "apps/desktop/source-browser.cjs",
+  "apps/desktop/source-browser.test.cjs",
 ]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
