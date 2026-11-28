@@ -1,7 +1,7 @@
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const engine = vi.hoisted(() => ({ listeners: new Map(), prepare: vi.fn(), routes: vi.fn(), close: vi.fn(), pick: vi.fn(), best: vi.fn(), open: vi.fn(), extend: vi.fn(), find: vi.fn(), addons: vi.fn(), detail: vi.fn() }));
+const engine = vi.hoisted(() => ({ listeners: new Map(), prepare: vi.fn(), routes: vi.fn(), close: vi.fn(), pick: vi.fn(), best: vi.fn(), open: vi.fn(), extend: vi.fn(), find: vi.fn(), addons: vi.fn(), detail: vi.fn(), warm: vi.fn() }));
 vi.mock('../lib/anime-meta.js', async original => ({ ...await original(), fetchAnimeDetail: engine.detail }));
 vi.mock('./motion.js', () => ({ pop() {}, pageIn() {}, revealIn() {}, stripIn() {} }));
 vi.mock('../lib/anime-engine.js', async original => ({
@@ -13,6 +13,9 @@ vi.mock('../lib/anime-engine.js', async original => ({
   prepare: engine.prepare, routes: engine.routes, closeSession: engine.close,
   pick: engine.pick, best: engine.best, open: engine.open, extend: engine.extend,
   findWorkStream: engine.find, withAddonCopies: engine.addons,
+  // تجهيز فتح المشغّل عمل خلفي على مستوى التطبيق (ربط IMDb ووحدتا اللون بـimport)، كمهلة الصندوق: يصل متأخرًا تحت
+  // الحمل فيترك مؤقتًا ليس من ورقة السيرفرات، وهذه الاختبارات تقيس مؤقتات الورقة وحدها
+  warmOpen: engine.warm,
 }));
 const { createAnime } = await import('./anime.js');
 const emit = (event, payload) => { for (const callback of engine.listeners.get(event) ?? []) callback(payload); };
@@ -303,4 +306,10 @@ it('settles pending metadata at the sheet deadline and ignores its late completi
   expect(engine.prepare).not.toHaveBeenCalled();
   expectRetry(view.body);
   view.anime.leaveDetail();
+});
+
+it('warms the player open once when the server sheet opens', async () => {
+  const { anime } = screen();
+  anime.play(media, 1); await vi.advanceTimersByTimeAsync(1);
+  expect(engine.warm).toHaveBeenCalledTimes(1);
 });
