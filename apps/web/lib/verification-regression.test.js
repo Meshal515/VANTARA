@@ -39,31 +39,34 @@ it('the old clearance is the reference, read from the request host first (Stable
   expect(code).toMatch(/fun clearanceNow\(origin: String\): String\? =\s*VerificationPolicy\.clearance\(selectedCookies\?\.getCookie\("\$origin\/"\)\)\s*\?: landed/);
 });
 
-it('one rejected side cookie does not fail a completed check (Stable 224)', () => {
+it('a rejected primary cookie write cannot be masked by an accepted side cookie', () => {
   const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt');
-  expect(plugin).not.toMatch(/else finish\("failed", "cookie_rejected"\) \}/);
-  expect(plugin).toMatch(/if \(ok \|\| \(value == null && pairs\.isEmpty\(\)\)\) finish\("verified", null\) else finish\("failed", "cookie_rejected"\)/);
+  expect(plugin).toMatch(/val imported = if \(value != null\) clearanceWritten else ok/);
+  expect(plugin).toMatch(/if \(imported\) finish\("verified", null\) else finish\("failed", "cookie_rejected"\)/);
+  expect(plugin).toMatch(/w\.url == "https:\/\/\$\{request\.host\}\/" && w\.header\.startsWith\("cf_clearance="\)/);
+  expect(plugin).not.toMatch(/catch \(_: RuntimeException\) \{ if \(ok\) finish\("verified"/);
 });
 
-/**
- * «الموقع لم يقبل التحقق بعد» بعد تحقق نجح (Debug 3518): نسخ Debug سابقة كتبت cf_clearance على جذر الموقع
- * (Domain=.site) سبعة أيام، والاستيراد الحالي لا يحذفه، فيرسل المحرك الكوكيين بالاسم نفسه والقديم أولًا.
- */
-it('the engine jar loses every old cf_clearance scope before the new one is written', () => {
+it('missing replacement cannot delete an existing session', () => {
   const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  expect(plugin).toMatch(/"cf_clearance=; Domain=\.\$it; Path=\/; Max-Age=0"/);
-  expect(plugin).toMatch(/"cf_clearance=; Path=\/; Max-Age=0"/);
+  expect(plugin).toMatch(/if \(item\.kind == "cloudflare" && value == null\) return@post finish\("failed", "unconfirmed"\)/);
+  expect(plugin).toMatch(/if \(value == null && pairs\.isEmpty\(\)\) return@post finish\("verified", null\)/);
+  expect(plugin).toMatch(/val stale = if \(value == null\) emptyList\(\) else/);
+  expect(plugin.indexOf('if (item.kind == "cloudflare" && value == null)')).toBeLessThan(plugin.indexOf('val stale ='));
   expect(plugin).toMatch(/val writes = stale \+ VerificationPolicy\.sessionImport\(/);
-  // الحذف يسبق كل كتابة ولا ينتظر وجود كوكي جديد
-  expect(plugin.indexOf('val stale')).toBeLessThan(plugin.indexOf('fun write('));
-  expect(plugin).not.toMatch(/if \(value == null && pairs\.isEmpty\(\)\) return@post finish/);
+});
+
+it('Debug observation does not send extra requests or compete with the original retry', () => {
+  const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt');
+  expect(plugin).not.toMatch(/VerificationAcceptance\.(?:probe|matrix)\s*\(/);
+  expect(plugin).not.toContain('verification-debug-probe');
 });
 
 /**
  * بلاغ المالك (Debug 3520): التشخيص يُنسخ والنافذة مفتوحة، فلا يظهر سبب الإغلاق ولا ما جرى للجلسة في المحرك.
- * Debug وحده يحفظ لحظة الإغلاق ومخزن المحرك بعد النقل وطلب فحص واحد منه، بلا قيم كوكيز، ولا يغيّر السلوك.
+ * Debug وحده يحفظ لحظة الإغلاق ومخزن المحرك بعد النقل بلا قيم كوكيز أو طلبات شبكة إضافية.
  */
-it('debug evidence covers the close, the engine jar and one engine probe, without cookie values', () => {
+it('debug evidence covers the close and engine jar without cookie values or extra requests', () => {
   const activity = kotlin('com/vantara/verification/VerificationActivity.kt');
   expect(activity).toMatch(/trace\.note\("close state=\$state/);
   expect(activity).toMatch(/if \(trace != null\) DebugVerificationLog\.start\(/);
