@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
-import { describe, expect, it, vi } from 'vitest';
-import { connectLocalTimeline, connectUpdates, timeline } from './update-engine.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { connectLocalTimeline, connectUpdates, timeline, setLegacyUpdateMode, legacyUpdatesAllowed } from './update-engine.js';
 import { createIndexedDbBackend, openLatestStore } from './latest-store.js';
 
 const ev = (id, at) => ({ id, work: 'w', section: 'manga', kind: 'chapter', number: at, title: 't', at, firstSeenAt: at, sources: [{ s: 'x' }] });
@@ -28,5 +28,28 @@ describe('الخط الزمني: المحلي بعد الهجرة، والخاد
     connectUpdates(send);
     connectLocalTimeline({ ready: () => true, mirror: async () => {}, store: { timeline: async () => { throw new Error('x'); } } });
     expect((await timeline('cinema')).events.map((e) => e.id)).toEqual(['srv2']);
+  });
+});
+
+describe('94% modes', () => {
+  afterEach(() => setLegacyUpdateMode('hybrid'));
+  it('exclusive displays preserved local events but neither mirrors nor falls back', async () => {
+    const store = openLatestStore({ account:'exclusive-test', backend:createIndexedDbBackend(indexedDB) });
+    await store.putEvents([ev('saved',1)], { pinned:true });
+    const mirror = vi.fn(), send = vi.fn();
+    connectUpdates(send);
+    connectLocalTimeline({store, ready:()=>true, mirror});
+    setLegacyUpdateMode('exclusive');
+    expect((await timeline('manga')).events.map(e=>e.id)).toEqual(['saved']);
+    expect(mirror).not.toHaveBeenCalled();
+    connectLocalTimeline({ready:()=>false});
+    expect(await timeline('manga')).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('manga-local leaves anime and cinema paths open', () => {
+    setLegacyUpdateMode('manga-local');
+    expect(legacyUpdatesAllowed('manga')).toBe(false);
+    expect(legacyUpdatesAllowed('anime')).toBe(true);
+    expect(legacyUpdatesAllowed('cinema')).toBe(true);
   });
 });
