@@ -1,0 +1,115 @@
+name: Verification A-B isolated APKs
+on:
+  push:
+    branches: ['qa/verification-ab-20261128']
+    paths: ['.github/workflows/verification-ab-qa.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pair:
+    if: github.ref == 'refs/heads/qa/verification-ab-20261128'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ORG_GRADLE_PROJECT_vantaraRuntimeDebug: 'true'
+      VANTARA_RUNTIME_DEBUG: 'true'
+      VANTARA_VERSION_NAME: '0.0.999999'
+      VANTARA_VERSION_CODE: '999999'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Identical web bundle and isolated application IDs
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/build.gradle')
+          s=p.read_text()
+          old='applicationId "com.vantara.app"'
+          assert s.count(old)==1
+          s=s.replace(old,'applicationId "com.vantara.app.verificationtest"')
+          old="resValue 'string', 'app_name', 'VANTARA اختبار'"
+          assert s.count(old)==1
+          s=s.replace(old,"resValue 'string', 'app_name', 'VANTARA QA Debug'")
+          old="        release {\n            minifyEnabled false"
+          assert s.count(old)==1
+          s=s.replace(old,"        release {\n            resValue 'string', 'app_name', 'VANTARA QA Release'\n            minifyEnabled false")
+          p.write_text(s)
+          p=Path('apps/web/lib/config.js')
+          s=p.read_text().replace('__VANTARA_VERSION__','0.0.999999').replace('__VANTARA_CHANNEL__','debug')
+          p.write_text(s)
+          PY
+          npx cap sync android
+          printf '{"version":"0.0.999999","native":"dev"}\n' > android/app/src/main/assets/public/vantara-bundle.json
+      - name: Verify and fetch pinned libtorrent binaries
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/lt-natives"
+          lock=android/app/libtorrent-natives.lock
+          test -f "$lock"
+          grep -v '^#' "$lock" | while read -r abi url sha; do
+            [ -n "$abi" ] || continue
+            mkdir -p "$dir/$abi"
+            curl -fsSL --retry 3 -o "$dir/$abi/libjlibtorrent.so" "$url"
+            echo "$sha  $dir/$abi/libjlibtorrent.so" | sha256sum -c -
+          done
+          test -s "$dir/arm64-v8a/libjlibtorrent.so"
+          echo "ORG_GRADLE_PROJECT_vantaraPatchedTorrentDir=$dir" >> "$GITHUB_ENV"
+      - name: Build both variants with a shared disposable QA signing key
+        working-directory: android
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/verification-qa.jks"
+          keytool -genkeypair -keystore "$key" -storepass android -keypass android -alias vantaraqa -dname "CN=VANTARA Verification QA" -keyalg RSA -keysize 2048 -validity 365 -storetype JKS
+          export ANDROID_KEYSTORE_PATH="$key"
+          export ANDROID_KEYSTORE_PASSWORD=android
+          export ANDROID_KEY_ALIAS=vantaraqa
+          export VANTARA_SIGN_DEBUG_CHANNEL=true
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+          rm -f "$key"
+      - name: Verify both APKs and their isolation
+        run: |
+          set -euo pipefail
+          mkdir -p qa-dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk qa-dist/VANTARA-QA-Debug.apk
+          cp android/app/build/outputs/apk/release/VANTARA-release.apk qa-dist/VANTARA-QA-Release.apk
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for variant in Debug Release; do
+            apk="qa-dist/VANTARA-QA-$variant.apk"
+            "$tools/apksigner" verify --print-certs "$apk" > "qa-dist/$variant-cert.txt"
+            "$tools/aapt2" dump badging "$apk" > "qa-dist/$variant-badging.txt"
+          done
+          grep -q "package: name='com.vantara.app.verificationtest.debug'" qa-dist/Debug-badging.txt
+          grep -q "package: name='com.vantara.app.verificationtest'" qa-dist/Release-badging.txt
+          grep -q 'application-debuggable' qa-dist/Debug-badging.txt
+          if grep -q 'application-debuggable' qa-dist/Release-badging.txt; then exit 1; fi
+          diff <(grep 'certificate SHA-256 digest:' qa-dist/Debug-cert.txt) <(grep 'certificate SHA-256 digest:' qa-dist/Release-cert.txt)
+          python3 - <<'PY'
+          import zipfile, hashlib
+          with zipfile.ZipFile('qa-dist/VANTARA-QA-Debug.apk') as a, zipfile.ZipFile('qa-dist/VANTARA-QA-Release.apk') as b:
+              def hashes(z):
+                  return {n:hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n.startswith('assets/public/') and not n.endswith('/')}
+              assert hashes(a)==hashes(b), 'Web bundles differ'
+              n='lib/arm64-v8a/libjlibtorrent.so'
+              assert a.read(n)==b.read(n), 'Torrent native differs'
+          PY
+          (cd qa-dist && sha256sum *.apk > SHA256SUMS)
+          printf 'Original source: cdec7fd870de2d0cae4252d1122579a833065e76\nSame web debug channel, identical temporary signer, separate application IDs, no production release.\n' > qa-dist/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VANTARA-verification-AB-APKs
+          path: qa-dist/
+          if-no-files-found: error
+          retention-days: 14
