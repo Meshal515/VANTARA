@@ -560,6 +560,9 @@ for (const path of [
 ]) seams.add(path);
 // اختبارات دورة التحقق وتشخيصها، دون تغيير نطاق حماية الشبكة.
 for (const path of ["apps/web/lib/source-verification-ledger.test.js","apps/web/lib/source-verification-replay.test.js","android/app/src/test/java/com/vantara/verification/VerificationLifecycleRegressionTest.kt","android/app/src/main/kotlin/com/vantara/verification/VerificationTrace.kt","android/app/src/test/java/com/vantara/verification/VerificationTraceTest.kt"]) seams.add(path);
+// Owner-approved Debug diagnostics: reviewed exact test and study paths; no additional runtime permission.
+seams.add("android/app/src/test/java/com/vantara/verification/MihonParityProbeTest.kt");
+seams.add("docs/audits/MIHON_NETWORK_PARITY_STUDY.md");
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);
