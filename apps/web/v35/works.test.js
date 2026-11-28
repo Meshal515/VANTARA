@@ -326,3 +326,34 @@ describe('البحث: صيغ الاستعلام وقرب النتيجة (بلا�
     expect(searchScore(work('The Savior’s Bucket List'), "The Savior's Bucket List")).toBe(4);
   });
 });
+
+import { safeAlternates } from './works.js';
+describe('safeAlternates — لا يُعرض فصل من عمل آخر أبدًا (P0، رجل المنشار/Lookism)', () => {
+  const row = { sourceId: 'ar.mangalek', number: 232, chapter: { url: '/manga/chainsaw-man/232/' } };
+  const lookism = { sourceId: 'ar.teamx', number: 232, chapter: { url: '/series/lookism/232/' } };
+  const otherSite = { sourceId: 'ar.azora', number: 232, chapter: { url: '/manga/chainsaw-man/232/' } };
+  const mirror = { sourceId: 'ar.mangastarz', number: 232, chapter: { url: 'https://starzmanga.net/manga/chainsaw-man/232/' } };
+  const mirrorWrongPath = { sourceId: 'ar.mangalink', number: 232, chapter: { url: '/manga/lookism/232/' } };
+  it('يرفض نسخة مصدر آخر بنفس الرقم (قد تكون دمجًا خاطئًا)', () => {
+    expect(safeAlternates(row, [lookism, otherSite])).toEqual([]);
+  });
+  it('يقبل مرآة الموقع نفسه بنفس مسار الفصل فقط', () => {
+    expect(safeAlternates(row, [lookism, mirror, mirrorWrongPath])).toEqual([mirror]);
+  });
+  it('فصل بلا رابط: لا بدائل', () => {
+    expect(safeAlternates({ ...row, chapter: {} }, [mirror])).toEqual([]);
+  });
+});
+
+import { reviewStoredEditions } from './works.js';
+describe('النسخ المحفوظة: لا تبقى نسخة عمل آخر في البطاقة (Lookism في رجل المنشار)', () => {
+  const work = { id: 'ext:chainsaw man', title: { english: 'Chainsaw Man', romaji: 'Chainsaw Man' }, _work: { title: 'Chainsaw Man', aliases: ['رجل المنشار'], editions: [{ sourceId: 'ar.mangastarz', manga: { url: '/manga/chainsaw-man/', title: 'Chainsaw Man' } }] } };
+  const own = { sourceId: 'ar.mangastarz', manga: { url: '/manga/chainsaw-man/', title: 'Chainsaw Man' } };
+  const arabic = { sourceId: 'ar.teamx', manga: { url: '/series/csm/', title: 'رجل المنشار' } };
+  const lookism = { sourceId: 'ar.azora', manga: { url: '/series/lookism/', title: 'Lookism' } };
+  it('نسخة باسم عمل آخر بلا دليل تخرج ويُسأل مصدرها من جديد', () => {
+    const { kept, dropped } = reviewStoredEditions(work, [own, arabic, lookism]);
+    expect(kept.map((e) => e.sourceId)).toEqual(['ar.mangastarz', 'ar.teamx']);
+    expect(dropped).toEqual(['ar.azora']);
+  });
+});

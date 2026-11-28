@@ -40,10 +40,10 @@ export function displayTitle(ref, ...candidates) {
   return titleFromRef(ref) || 'عمل';
 }
 
-/** نسخ العمل كما يحفظها الخادم: ما يلزم لفتحها فقط. */
+/** وصف العمل المشترك لا يحمل روابط النسخ المحفوظة من إضافات الجهاز. */
 export function compactEditions(editions) {
   return (editions ?? [])
-    .filter((e) => e?.sourceId && e.manga?.url)
+    .filter((e) => e?.sourceId && e.manga?.url && !e.localOnly && !String(e.sourceId).includes('#'))
     .map((e) => ({
       sourceId: e.sourceId,
       label: e.label ?? e.sourceId,

@@ -147,6 +147,10 @@ class PlayerActivity : Activity() {
         val clipEndMs: Long = -1,
         /** VANTARA Together (JSON: TogetherLaunch): المشغّل داخل غرفة مع الأصدقاء. */
         val together: String? = null,
+        /** تقرير الذهب: ضغطة السيرفر الحقيقية ورجوع pick ونداء play من الواجهة (elapsedRealtime؛ 0 = لم تُقس). */
+        val tappedAt: Long = 0L,
+        val pickedAt: Long = 0L,
+        val uiOpenAt: Long = 0L,
     ) {
         /** مرجع العمل في المرآة: `anime:<AniList>` أو `cinema:<IMDb>`. */
         fun ref() = "$section:$animeId"
@@ -611,6 +615,7 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        diag.launchedAt = intent?.getLongExtra(EXTRA_LAUNCHED_AT, 0L) ?: 0L
         // مشغّل الموسم الجديد ظهر: القديم (تحته بشاشة الغرفة) يُغلق الآن، فلا تظهر صفحة بينهما
         handoffFrom?.get()?.takeIf { it !== this && it.handingOff && !it.isFinishing }?.finish()
         handoffFrom = null
@@ -624,6 +629,12 @@ class PlayerActivity : Activity() {
 
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
+        // ما قبل نية المشغّل (الضغطة وpick ونداء play): لا تُقبل علامة بعد النية أو بترتيب معكوس
+        diag.launchedAt.takeIf { it > 0 }?.let { at ->
+            diag.tappedAt = launch.tappedAt.takeIf { it in 1..at } ?: 0L
+            diag.pickedAt = launch.pickedAt.takeIf { diag.tappedAt > 0 && it in diag.tappedAt..at } ?: 0L
+            diag.uiOpenAt = launch.uiOpenAt.takeIf { diag.tappedAt > 0 && it in maxOf(diag.tappedAt, diag.pickedAt)..at } ?: 0L
+        }
         Tone.use(launch.section, launch.accent)
         Glass.use(launch.material)
         sessionId = launch.session
@@ -643,10 +654,11 @@ class PlayerActivity : Activity() {
             .setLoadControl(PlaybackBuffering.create(Runtime.getRuntime().maxMemory()))
             .setSeekBackIncrementMs(SEEK_MS)
             .setSeekForwardIncrementMs(SEEK_MS)
-            .build()
+            .build().let { inner -> SeekGuardPlayer(inner) { to -> noteSeek(inner, to); seekNeedsCues(to) } }
         // العربية المضمّنة في الملف تُختار تلقائيًا (Media3 لا يفعّل الترجمة بلا لغة مفضلة)
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage("ar").build()
         player.addListener(listener)
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).addTurboListener(turboFailed) }
         player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             private fun current(event: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime): Boolean {
                 if (event.timeline.isEmpty || current == null) return false
@@ -654,7 +666,7 @@ class PlayerActivity : Activity() {
                 return id == activeMediaId
             }
             override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
-                if (BuildConfig.DEBUG && current(eventTime)) videoDecoder = decoderName
+                if (BuildConfig.DEBUG && current(eventTime)) { videoDecoder = decoderName; diag.decoderInitialized(decoderName, initializationDurationMs) }
             }
             override fun onRenderedFirstFrame(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
                 if (!current(eventTime)) return
@@ -665,6 +677,11 @@ class PlayerActivity : Activity() {
                 if (frameAt == 0L) { frameAt = SystemClock.elapsedRealtime(); android.util.Log.i("VantaraStartup", startupLine()) }
                 if (StartupReveal.hideOnFirstFrame(first, player.playbackState == Player.STATE_READY)) loading(false)
                 recordStartupOutput()
+                // P0 (المالك، 27 نوفمبر): بدأ بلا فهرس، فأول قفزة كانت تنتظر Cues من آخر الملف (11 ث، والمدة --:--). أول صورة
+                // ظهرت: الفهرس يُجلب الآن في الخلفية فتكون إعادة التجهيز عند القفزة من كتل مكتوبة
+                if (first && cuesDeferred) current?.url?.takeIf { it.startsWith("vantara-torrent:") }?.let { url ->
+                    runCatching { com.vantara.addons.torrent.TorrentEngine.get(this@PlayerActivity).fetchCues(android.net.Uri.parse(url)) }
+                }
             }
             override fun onAudioPositionAdvancing(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
                 if (!current(eventTime)) return
@@ -816,6 +833,7 @@ class PlayerActivity : Activity() {
         override fun onEvents(player: Player, events: Player.Events) {
             // A seek inside buffered media can stay READY without a state-change callback.
             if (player.playbackState == Player.STATE_READY) seekBudget.reset()
+            if (BuildConfig.DEBUG) diag.duration(player.duration)
         }
 
         override fun onPlaybackStateChanged(state: Int) {
@@ -860,7 +878,7 @@ class PlayerActivity : Activity() {
 
         override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
             main.removeCallbacksAndMessages(embeddedCues)
-            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seek(oldPosition.positionMs, newPosition.positionMs, player.playbackState == Player.STATE_READY)
+            if (BuildConfig.DEBUG && reason == Player.DISCONTINUITY_REASON_SEEK) diag.seekApplied(player.playbackState == Player.STATE_READY)
             if (reason == Player.DISCONTINUITY_REASON_SEEK) {
                 seekRecovery.seeked(SystemClock.elapsedRealtime())
                 seekBudget.seek(current?.url, SystemClock.elapsedRealtime())
@@ -916,6 +934,7 @@ class PlayerActivity : Activity() {
 
         override fun onTracksChanged(tracks: Tracks) {
             if (player.currentMediaItem?.mediaId == activeMediaId) {
+                if (BuildConfig.DEBUG && !tracks.isEmpty) diag.tracks()
                 startup.tracks(activeMediaId, tracks.containsType(C.TRACK_TYPE_VIDEO), tracks.containsType(C.TRACK_TYPE_AUDIO))
                 recordStartupOutput()
             }
@@ -965,6 +984,57 @@ class PlayerActivity : Activity() {
         watchStall()
     }
 
+    /** تشخيص القفز (نسخة الاختبار): كل قفزة لحظة طلبها، بطريقتها والمدة قبلها (PlaybackDiagnostics.seekRequested). */
+    private fun noteSeek(inner: androidx.media3.exoplayer.ExoPlayer, to: Long) {
+        if (!BuildConfig.DEBUG) return
+        val method = if (cuesDeferred && !inner.isCurrentMediaItemSeekable) "إعادة تجهيز بالفهرس" else "عادية"
+        diag.seekRequested(inner.currentPosition, to, method, inner.duration.takeIf { it > 0 } ?: 0L, inner.isCurrentMediaItemSeekable)
+    }
+
+    /** المصدر الحالي بدأ بلا فهرس الحاوية (CandidateMediaSources.deferCues) ولم يُعد تجهيزه بعد. */
+    private var cuesDeferred = false
+    /**
+     * قفزة على مصدر بدأ بلا فهرس: Media3 يرجعه إلى البداية لأنه غير قابل للقفز، فنعيد تجهيزه بالفهرس عند الموضع
+     * المطلوب. إن صار قابلًا للقفز (الفهرس قبل أول Cluster) تمر القفزة عادية.
+     */
+    private fun seekNeedsCues(positionMs: Long): Boolean {
+        if (!cuesDeferred || !::player.isInitialized) return false
+        val c = current ?: return false
+        cuesDeferred = false
+        if (player.isCurrentMediaItemSeekable) return false
+        reprepare(c, positionMs)
+        return true
+    }
+
+    /** الخيار B (TurboRead): فشل تحقق قطعة قُرئ منها قبل التحقق. المحرك صار موثقًا فقط لهذا التورنت. */
+    private val turboFailed: (String) -> Unit = { hash -> main.post { recoverVerified(hash) } }
+    private fun recoverVerified(hash: String) {
+        if (isDestroyed || !::player.isInitialized) return
+        val c = current ?: return
+        if (!c.url.startsWith("vantara-torrent:")) return
+        if (runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).requestOf(android.net.Uri.parse(c.url))?.infoHash }.getOrNull() != hash) return
+        if (BuildConfig.DEBUG) diag.error("turbo: a piece read before verification failed its hash; restarted from verified data")
+        cuesDeferred = false
+        reprepare(c, player.currentPosition)
+    }
+
+    /**
+     * المصدر نفسه بفهرس الحاوية عند [positionMs]، لا بدء جديد: [start] يمسح ترجمات الإضافات المختارة ويعيد شاشة
+     * التحميل وتشخيص البدء، وهذا قفزة لا تشغيل. المعرّف ([activeMediaId]) والصوت الخارجي كما بدأ.
+     * تُعامل كقفزة لمراقب التوقف (setMediaSource لا يطلق DISCONTINUITY_REASON_SEEK).
+     * يُستعمل لأول قفزة على مصدر بلا فهرس، وللرجوع إلى البيانات الموثقة حين يفشل تحقق قطعة قُرئت مبكرًا.
+     */
+    private fun reprepare(c: Candidate, positionMs: Long) {
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).deferTail(android.net.Uri.parse(c.url), false) }
+        val media = CandidateMediaSources.create(c, playbackDataSourceFactory(c), !retriedWithoutAudio, activeMediaId)
+        externalAudioUrls = media.externalAudioUrls
+        player.setMediaSource(media.mediaSource, positionMs.coerceAtLeast(0))
+        player.prepare()
+        seekRecovery.seeked(SystemClock.elapsedRealtime())
+        seekBudget.seek(c.url, SystemClock.elapsedRealtime())
+        watchStall()
+    }
+
     private fun start(c: Candidate, positionMs: Long, withoutExternalAudio: Boolean = false) {
         seekBudget.reset()
         main.removeCallbacks(stallWatchdog)
@@ -984,11 +1054,20 @@ class PlayerActivity : Activity() {
         startedAt = System.currentTimeMillis()
         openAt = SystemClock.elapsedRealtime(); readyAt = 0L; frameAt = 0L
         net.markStart()
-        if (BuildConfig.DEBUG) { diag.start(c.preparationMs); videoDecoder = null }
+        if (BuildConfig.DEBUG) { diag.start(c.preparationMs, c.firstCandidateMs); videoDecoder = null }
         together?.onPreparing()
         loading(true)
         val mediaFactory = playbackDataSourceFactory(c)
-        val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId)
+        // تورنت من أول الحلقة: أول صورة من الرأس بلا انتظار الفهرس، والذيل ينزل بعده. الاستئناف والغرفة والمقطع
+        // يحتاجون القفز من البداية فيبقون بالفهرس
+        val torrent = c.url.startsWith("vantara-torrent:")
+        val begin = if (torrent) PlaybackStart.torrent(positionMs, shared = together != null || clip != null) else positionMs
+        val deferCues = torrent && begin == 0L && together == null && clip == null
+        cuesDeferred = deferCues
+        if (c.url.startsWith("vantara-torrent:")) runCatching {
+            com.vantara.addons.torrent.TorrentEngine.get(this).deferTail(android.net.Uri.parse(c.url), deferCues)
+        }
+        val media = CandidateMediaSources.create(c, mediaFactory, !withoutExternalAudio, activeMediaId, deferCues = deferCues)
         // HLS المحلي يبقى على Media3. الملف المباشر يُقرأ من القرص لاستخراج إطار عند الطلب.
         if (::seekPreview.isInitialized) {
             val file = android.net.Uri.parse(c.url).takeIf { android.os.Build.VERSION.SDK_INT >= 27 && it.scheme == "file" }?.path
@@ -1006,7 +1085,7 @@ class PlayerActivity : Activity() {
         }
         // جودة اختارها المستخدم تخص السيرفر السابق؛ السيرفر الجديد يبدأ تلقائيًا
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
-        player.setMediaSource(media.mediaSource, positionMs.coerceAtLeast(0))
+        player.setMediaSource(media.mediaSource, begin.coerceAtLeast(0))
         player.prepare()
         // في غرفة لم تبدأ: لا تشغيل تلقائي (كان يُحسب ضغطة «تشغيل» من المضيف فيبدأ الغرفة قبل «ابدأ»)
         setPlayingQuietly(clip == null && together?.mayAutoplay() != false)
@@ -2410,7 +2489,11 @@ class PlayerActivity : Activity() {
         val url = current?.url
         val facts = t?.let {
             val blocks = if (it.waitingPiece >= 0 && url != null) runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).pieceBlocks(android.net.Uri.parse(url), it.waitingPiece) }.getOrNull() else null
-            PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps)
+            PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps, it.firstPeerAt, it.firstPayloadAt,
+                turbo = it.turbo, earlyBytes = it.earlyBytes, earlyFailures = it.earlyFailures,
+                hintsSent = it.hintsSent, hintsFailed = it.hintsFailed, waits = it.waits,
+                addedAt = it.addedAt, metadataCached = it.metadataCached, firstKnownAt = it.firstKnownAt,
+                warmReadyAt = it.warmReadyAt, warmTargets = it.warmTargets, mkvClusterAt = it.mkvClusterAt, mkvCuesAt = it.mkvCuesAt)
         }
         val f = player.videoFormat
         val groups = player.currentTracks.groups
@@ -2418,8 +2501,9 @@ class PlayerActivity : Activity() {
             player.playbackState, player.currentPosition, player.totalBufferedDuration, player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L,
             f?.containerMimeType, f?.let { listOfNotNull(it.sampleMimeType ?: it.codecs, if (it.width > 0) "${it.width}x${it.height}" else null).joinToString(" ") },
             videoDecoder, groups.count { it.type == C.TRACK_TYPE_TEXT }, groups.count { it.type == C.TRACK_TYPE_AUDIO },
+            playWhenReady = player.playWhenReady,
         )
-        val report = diag.report(facts, p)
+        val report = diag.report(facts, p, build = "${BuildConfig.VERSION_NAME} · ${if (BuildConfig.DEBUG) "Debug" else "Stable"} · ${BuildConfig.VERSION_CODE} · native ${BuildConfig.VANTARA_NATIVE.take(12)}")
         body.addView(label("تشخيص (نسخة الاختبار)", 13.5f, Tone.ACCENT_TEXT, bold = true).apply { setPadding(0, dp(14), 0, dp(4)) })
         body.addView(label(diag.verdict(facts, p), 14f, Tone.TEXT, bold = true).apply { setPadding(0, 0, 0, dp(6)) })
         body.addView(label(report.lines().drop(1).dropLast(1).joinToString("\n"), 11.5f, Tone.TEXT_2).apply {
@@ -2496,6 +2580,14 @@ class PlayerActivity : Activity() {
                 settings.edit().putBoolean(com.vantara.addons.torrent.TorrentPrefetch.WARM_ON_METERED, !warmOn).apply()
                 sheet.refresh()
             })
+            if (BuildConfig.DEBUG) {
+                // الخيار B: مفتاح الرجوع إلى الوضع الموثق (Stable مقفل بالكود في TorrentEngine.turboAllowed)
+                val turboOn = settings.getBoolean(com.vantara.addons.torrent.TurboRead.PREF, true)
+                body.addView(sheetRow("أول صورة قبل اكتمال التحقق (تجريبي)", "تورنت: أول قطعة من كتلها المكتوبة قبل التحقق منها، وفشل التحقق يعيد التشغيل من بيانات موثقة", trailing = if (turboOn) check() else null, selected = turboOn) {
+                    settings.edit().putBoolean(com.vantara.addons.torrent.TurboRead.PREF, !turboOn).apply()
+                    sheet.refresh()
+                })
+            }
             body.addView(sheetRow("الشبكة", netSummary(), leading = glyphView(Glyph.Kind.SERVERS)) { showNetwork() })
             if (friends().isNotEmpty() || launch.animeId.isNotEmpty()) {
                 body.addView(sheetRow(if (isMovie()) "رشّح الفيلم لصديق" else "رشّح الحلقة لصديق", "تصله في المجلس ويفتحها من عندك", leading = glyphView(Glyph.Kind.SEND)) {
@@ -2844,6 +2936,7 @@ class PlayerActivity : Activity() {
         attemptAbandon()
         together?.destroy()
         unlisten?.invoke()
+        runCatching { com.vantara.addons.torrent.TorrentEngine.get(this).removeTurboListener(turboFailed) }
         clearAddonSubtitles()
         scope.cancel()
         main.removeCallbacksAndMessages(null)
@@ -2889,5 +2982,8 @@ class PlayerActivity : Activity() {
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_LAUNCH, json.encodeToString(Launch.serializer(), launch))
                 .putExtra(EXTRA_SESSION, launch.session)
+                .putExtra(EXTRA_LAUNCHED_AT, android.os.SystemClock.elapsedRealtime())
+        /** لحظة الضغط على التشغيل، لخط البدء في التشخيص (من الضغط حتى أول صورة). */
+        const val EXTRA_LAUNCHED_AT = "vantara.launchedAt"
     }
 }

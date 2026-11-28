@@ -17,3 +17,18 @@ export const isTorrentRoute = (r) => r?.type === 'torrent' || Boolean(r?.infoHas
   // their torrent runtime by the readiness field. Named direct/CS3 sources
   // never use that fallback, so runtimeReady cannot hide their video rows.
   (r?.sourceId == null && r?.runtimeReady != null);
+
+const sid = (r) => String(r?.sourceId ?? '');
+/**
+ * هوية المحرك من بيانات الطريق نفسها، بالصيغ التي يعرّفها المحرك الأصلي (AnimeEngine.RUNTIME_SOURCE_PREFIX
+ * «addon|cs3|»، وإضافات Stremio «addon|…»، وإضافات Aniyomi المثبتة UserAnime «user-…»)، والنقل (تورنت) أولًا.
+ * لا تصنيف بلا دليل: ما لا يطابق شيئًا هويته null ويبقى في «مباشر».
+ * [own]: قسم خاص في ورقة السيرفرات بعنوانه وعلامته؛ وإلا يبقى صفه في «مباشر». محرك جديد = صف هنا، لا شرط في الورقة.
+ */
+export const ROUTE_ENGINES = Object.freeze([
+  { id: 'torrent', title: 'تورنت', own: true, match: (r) => isTorrentRoute(r) },
+  { id: 'cloudstream', title: 'CloudStream', own: true, match: (r) => isCloudStreamRoute(r) },
+  { id: 'stremio', title: 'Stremio', own: false, match: (r) => sid(r).startsWith('addon|') },
+  { id: 'aniyomi', title: 'Aniyomi', own: false, match: (r) => sid(r).startsWith('user-') },
+]);
+export const routeEngine = (r) => ROUTE_ENGINES.find((e) => e.match(r))?.id ?? null;

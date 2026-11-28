@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs } from './services.mjs';
+import { createDesktopServices, selectTorrentFile, validateCandidate, resolvePublicURL, validateTorrentStorage, validateSubtitleText, retryableMetadataFailure, PUBLIC_TRACKERS, MAX_ANNOUNCE, mergeTrackers, initialPeers, engineArgs, PREWARM_ROLES, peerPort } from './services.mjs';
 import { createTorrentReplayCache } from './torrent-replay-cache.mjs';
 
 const hash = 'a'.repeat(40);
@@ -40,11 +40,23 @@ test('mpv uses a trusted embedded HWND and releases it after process cleanup',as
   assert.ok(args.includes('--wid=123456'));assert.ok(args.includes('--osc=no'));
   await services.stopPlayback({session:'embedded'});assert.equal(released,1);
 });
+test('أول توقف للتخزين بعد بدء العرض يرفع انتظار الاستئناف إلى 3 ث مرة واحدة (البدء نصف ثانية)',async t=>{
+  const {dir,services}=await fixture(t,'rebuffer');
+  await services.startPlayback({session:'rebuffer',candidate:{url:'https://video.example.com/test.mp4'}});
+  await new Promise(r=>setTimeout(r,500));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const raised=commands.filter(m=>JSON.stringify(m.command)==='["set_property","cache-pause-wait",3]');
+  assert.equal(raised.length,1);
+  await services.stopPlayback({session:'rebuffer'});
+});
 test('مشغل Windows يطلب حتى دقيقة كاش أمامي بحد RAM ويحاول التسريع العتادي الآمن',async t=>{
   const {dir,services}=await fixture(t);
   await services.startPlayback({session:'memory-cache',candidate:{url:'https://video.example.com/test.mp4'}});
   const args=JSON.parse(await readFile(join(dir,'mpv-log'),'utf8'));
-  assert.ok(args.includes('--cache-secs=60'));
+  // لا سقف بالثواني (كان 60 ث فالشريط لا يتجاوز دقيقة): الحد هو الحجم وحده حسب ذاكرة الجهاز
+  assert.ok(!args.some(x=>x.startsWith('--cache-secs')));
+  // البدء بعد نصف ثانية مخزنة لا ثلاث (قياس: 2.04 ← 0.84 ث حتى الحركة)، وcache-pause-initial لا يغيّر شيئًا فأُزيل
+  assert.ok(args.includes('--cache-pause-wait=0.5'));assert.ok(!args.some(x=>x.startsWith('--cache-pause-initial')));
   assert.ok(args.some(x=>/^--demuxer-max-bytes=(128|256|512)MiB$/.test(x)));
   assert.ok(args.some(x=>/^--demuxer-max-back-bytes=(32|64|128)MiB$/.test(x)));
   assert.ok(args.includes('--cache-on-disk=no'));
@@ -54,7 +66,9 @@ test('native stages describe metadata, one selected file, and first-frame decodi
   const {services,events}=await fixture(t);
   await services.startPlayback({session:'stages',candidate:{infoHash:hash,fileIdx:0}});
   const stages=events.filter(e=>e.type==='playback/stage').map(e=>e.stage);
-  assert.ok(stages.includes('engine-start'));assert.ok(stages.includes('metadata'));assert.ok(stages.includes('file-selected'));assert.ok(stages.includes('first-frame'));
+  assert.ok(stages.includes('engine-start'));assert.ok(stages.includes('metadata'));assert.ok(stages.includes('file-selected'));assert.ok(stages.includes('player-ipc-ready'));
+  // جاهزية IPC لا تُسمّى أول إطار: «first-frame» كان يُطلق قبل أي فك (عينة المالك: 0.15 ث مقابل 10.30 ث)
+  assert.ok(!stages.includes('first-frame'),'IPC readiness is not a first frame');
   assert.ok(events.filter(e=>e.type==='playback/stage').every(e=>!JSON.stringify(e).includes('http')));
 });
 test('تعاد محاولات metadata على أخطاء مؤقتة فقط، وليس عند بيانات غير صالحة',()=>{
@@ -113,8 +127,8 @@ async function fixture(t, mode='normal', serviceOptions={}) {
 const args=process.argv.slice(2),port=Number(args[args.indexOf('--http-api-listen-addr')+1].split(':').pop());
 fs.appendFileSync(${JSON.stringify(join(dir,'rqbit-attempts'))},JSON.stringify(args)+'\\n');if(${JSON.stringify(mode)}==='dht-conflict'&&!args.includes('--disable-dht-persistence'))process.exit(1);
 fs.writeFileSync(${JSON.stringify(join(dir,'rqbit-log'))},JSON.stringify({args,pid:process.pid,auth:process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS}));
-const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');if(${JSON.stringify(mode)}==='initializing'&&req.url.includes('/stream/')){const f=${JSON.stringify(join(dir,'init-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));if(n<2){res.writeHead(500,{'content-type':'application/json'});return res.end('{"error_kind":"internal_error","human_readable":"with_storage_and_file: invalid state: initializing","status":500}');}res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}if(${JSON.stringify(mode)}==='headers-before-body'&&req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});res.flushHeaders();const gate=setInterval(()=>{if(fs.existsSync(${JSON.stringify(join(dir,'release-stream'))})){clearInterval(gate);res.end('abcd');}},10);res.once('close',()=>clearInterval(gate));return;}res.setHeader('content-type','application/json');if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats'))return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}}}));res.end('{}');});});server.listen(port,'127.0.0.1');`);
-  await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let nextTrackId=0,paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-remove'){const at=tracks.findIndex(t=>t.id===m.command[1]);if(at>=0)tracks.splice(at,1);c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:++nextTrackId,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
+const server=http.createServer((req,res)=>{if(req.headers.authorization!=='Basic '+Buffer.from(process.env.RQBIT_HTTP_BASIC_AUTH_USERPASS).toString('base64')){res.writeHead(401);return res.end();}let body='';req.on('data',x=>body+=x);req.on('end',()=>{fs.appendFileSync(${JSON.stringify(join(dir,'requests'))},JSON.stringify({url:req.url,body})+'\\n');if(${JSON.stringify(mode)}==='initializing'&&req.url.includes('/stream/')){const f=${JSON.stringify(join(dir,'init-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));if(n<2){res.writeHead(500,{'content-type':'application/json'});return res.end('{"error_kind":"internal_error","human_readable":"with_storage_and_file: invalid state: initializing","status":500}');}res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});return res.end('abcd');}if(${JSON.stringify(mode)}==='headers-before-body'&&req.url.includes('/stream/')){res.writeHead(206,{'content-type':'video/mp4','content-length':'4','content-range':'bytes 0-3/20','accept-ranges':'bytes'});res.flushHeaders();const gate=setInterval(()=>{if(fs.existsSync(${JSON.stringify(join(dir,'release-stream'))})){clearInterval(gate);res.end('abcd');}},10);res.once('close',()=>{clearInterval(gate);fs.appendFileSync(${JSON.stringify(join(dir,'stream-closed'))},'1\\n');});return;}res.setHeader('content-type','application/json');if(${JSON.stringify(mode)}==='no-idle'&&req.url.endsWith('/idle')){res.writeHead(404);return res.end('{}');}if(req.method==='POST'&&req.url.startsWith('/torrents?')){if(${JSON.stringify(mode)}==='slow')return;const u=new URL(req.url,'http://local');if(${JSON.stringify(mode)}==='transient-metadata'&&u.searchParams.has('list_only')&&!fs.existsSync(${JSON.stringify(join(dir,'metadata-once'))})){fs.writeFileSync(${JSON.stringify(join(dir,'metadata-once'))},'1');res.writeHead(503);return res.end('{}');}if(!u.searchParams.has('list_only')&&u.searchParams.get('only_files')!=='0'){res.writeHead(400);return res.end('{}');}if(${JSON.stringify(mode)}==='reject-peers'&&u.searchParams.has('initial_peers')){res.writeHead(400);return res.end('{}');}return res.end(JSON.stringify({...(${JSON.stringify(mode)}==='deeptrace'?{vantara:{timeline:{marks:{'peer-known':300,'peer-connected':900,metadata:2400,'tracker-reply':700},adds:2,tracker_replies:2,tracker_peers:31,tracker_errors:1,dht_replies:0,dht_peers:0}}}:{}),id:u.searchParams.has('list_only')?null:0,...(u.searchParams.has('list_only')&&['peers','reject-peers'].includes(${JSON.stringify(mode)})?{seen_peers:['93.184.216.34:6881','10.0.0.7:6881','[2a00:1450:4001::5]:51413','[fe80::1]:6881','bad','8.8.8.8:0','93.184.216.34:6881']}:{}),details:{info_hash:${JSON.stringify(hash)},files:[{name:'clip.mp4',length:${mode==='oversize'?90*1024**3:mode==='unknown'?JSON.stringify('unknown'):20}},{name:'other.mkv',length:900}]}}));}if(req.url.includes('stats')){const f=${JSON.stringify(join(dir,'stats-count'))};const n=fs.existsSync(f)?Number(fs.readFileSync(f,'utf8')):0;fs.writeFileSync(f,String(n+1));return res.end(JSON.stringify({live:{download_speed:{mbps:1},snapshot:{peer_stats:{live:3}}},vantara:{early_failures:${JSON.stringify(mode)}==='early-failure'&&n>=1?1:0}}));}res.end('{}');});});server.listen(port,'127.0.0.1');`);
+  await writeFile(mpv, `#!${process.execPath}\nimport net from 'node:net';import fs from 'node:fs';const args=process.argv.slice(2),tracks=[],videoParams=${mode==='audio-only'?'null':'{w:320,h:180}'};let nextTrackId=0,paused=args.includes('--pause=yes'),time=2;fs.writeFileSync(${JSON.stringify(join(dir,'mpv-log'))},JSON.stringify(args));const socket=args.find(x=>x.startsWith('--input-ipc-server=')).split('=').slice(1).join('=');net.createServer(c=>{let pending='';c.on('data',b=>{pending+=b;while(pending.includes('\\n')){const i=pending.indexOf('\\n'),m=JSON.parse(pending.slice(0,i));pending=pending.slice(i+1);fs.appendFileSync(${JSON.stringify(join(dir,'commands'))},JSON.stringify(m)+'\\n');c.write(JSON.stringify({request_id:m.request_id,error:'success',data:m.command[0]==='get_property'?(m.command[1]==='track-list'?tracks:m.command[1]==='time-pos'?time:videoParams):undefined})+'\\n');if(m.command[0]==='observe_property')c.write(JSON.stringify({event:'property-change',name:m.command[2],data:m.command[2]==='duration'?60:m.command[2]==='time-pos'?time:m.command[2]==='video-out-params'?videoParams:m.command[2]==='track-list'?tracks:m.command[2]==='pause'?paused:false})+'\\n');if(m.command[0]==='set_property'&&m.command[1]==='pause'){paused=m.command[2];c.write(JSON.stringify({event:'property-change',name:'pause',data:paused})+'\\n');}if(m.command[0]==='seek'){time=m.command[1];c.write(JSON.stringify({event:'seek'})+'\\n');c.write(JSON.stringify({event:'property-change',name:'time-pos',data:time})+'\\n');c.write(JSON.stringify({event:'playback-restart'})+'\\n');}if(m.command[0]==='sub-remove'){const at=tracks.findIndex(t=>t.id===m.command[1]);if(at>=0)tracks.splice(at,1);c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='sub-add'){if(m.command[2]==='select')for(const track of tracks)track.selected=false;tracks.push({id:++nextTrackId,type:'sub',lang:m.command[4],title:m.command[3],selected:m.command[2]==='select'});c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='set_property'&&m.command[1]==='sid'){for(const track of tracks)track.selected=track.id===m.command[2];c.write(JSON.stringify({event:'property-change',name:'track-list',data:tracks})+'\\n');}if(m.command[0]==='loadfile'){c.write(JSON.stringify({event:'file-loaded'})+'\\n');if(${JSON.stringify(mode)}==='rebuffer')for(const at of [120,240])setTimeout(()=>c.write(JSON.stringify({event:'property-change',name:'paused-for-cache',data:true})+'\\n'),at);if(${JSON.stringify(mode)}!=='not-decoded')c.write(JSON.stringify({event:'playback-restart'})+'\\n');}}});c.write(JSON.stringify({event:'file-loaded'})+'\\n');}).listen(socket);`);
   const {chmod}=await import('node:fs/promises');await chmod(rqbit,0o755);await chmod(mpv,0o755);
   const events=[];services=createDesktopServices({userData:dir,binaries:{rqbit,mpv,...(serviceOptions.extraBinaries??{})},onEvent:e=>events.push(e),platform:process.platform,dnsOverHttps:false,torrentMetadataStrategy:'list-only',replayCache:false,...serviceOptions});
   return {dir,services,events,binaries:{rqbit,mpv}};
@@ -159,17 +173,69 @@ test('rqbit 500 «initializing» is retried by the proxy and never reaches the p
   assert.equal(await readFile(join(dir,'init-count'),'utf8'),'3');
   assert.ok(events.some(e=>e.stage==='engine-file-initializing'));
 });
-test('a prewarmed torrent is adopted by playback: one engine add, paused while waiting, resumed on play',async t=>{
-  const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+test('a prewarmed torrent is adopted by playback: one engine add, idle and still connected while waiting (no pause), used on play',async t=>{
+  // pause يقطع المشاركين وlibtorrent لا يعيد الاتصال بهم قبل min_reconnect_time: المتابعة بعد التسخين 53 ث في المحاكي
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
   const requests=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}}),{prewarmed:true});
   assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}}),{prewarmed:true});
-  for(let i=0;i<200&&!(await requests()).some(r=>r.url.endsWith('/pause'));i++)await new Promise(r=>setTimeout(r,25));
-  assert.ok((await requests()).some(r=>r.url.endsWith('/pause')),'the prewarm stops downloading after the edges');
+  for(let i=0;i<200&&!(await requests()).some(r=>r.url.endsWith('/idle'));i++)await new Promise(r=>setTimeout(r,25));
+  assert.ok((await requests()).some(r=>r.url.endsWith('/idle')),'the prewarm goes idle after the edges');
   await services.startPlayback({session:'prewarmed',candidate:{infoHash:hash,fileIdx:0}});
   const all=await requests();
   assert.equal(all.filter(r=>r.url.startsWith('/torrents?')).length,1,'playback reuses the prewarmed engine and torrent');
-  assert.ok(all.findIndex(r=>r.url.endsWith('/start'))>all.findIndex(r=>r.url.endsWith('/pause')));
+  assert.ok(!all.some(r=>r.url.endsWith('/pause')),'a prewarm never pauses (that disconnects every peer)');
+  // تشخيص الجلسة يصل كاملًا بعد preparing (اللوحة تفتح معه): مراحل التسخين واختيار المصدر «مُسخَّن»
+  const mine=events.filter(e=>e.session==='prewarmed');
+  const opened=mine.findIndex(e=>e.type==='playback/preparing');
+  const after=mine.slice(opened).filter(e=>e.type==='playback/diagnostic').map(e=>`${e.stage}${e.mode?`:${e.mode}`:''}`);
+  assert.ok(after.includes('source-selected:prewarmed'),after.join(','));
+  assert.ok(after.includes('engine-ready:cold')||after.includes('engine-ready:cache'),after.join(','));
+});
+test('محرك بلا idle (rqbit): التسخين يرجع إلى pause ويُستأنف عند التشغيل',async t=>{
+  const {dir,services}=await fixture(t,'no-idle',{torrentMetadataStrategy:'direct-index'});
+  const requests=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}});
+  for(let i=0;i<200&&!(await requests()).some(r=>r.url.endsWith('/pause'));i++)await new Promise(r=>setTimeout(r,25));
+  await services.startPlayback({session:'fallback',candidate:{infoHash:hash,fileIdx:0}});
+  const all=await requests();
+  assert.ok(all.findIndex(r=>r.url.endsWith('/idle'))>=0&&all.findIndex(r=>r.url.endsWith('/pause'))>all.findIndex(r=>r.url.endsWith('/idle')));
+  assert.ok(all.findIndex(r=>r.url.endsWith('/start'))>all.findIndex(r=>r.url.endsWith('/pause')),'resumed on play');
+});
+test('تبنّي تسخين لم تكتمل أطرافه يلغي قراءاتها الجارية فلا تنافس طلب المشغّل الأول',async t=>{
+  const {dir,services}=await fixture(t,'headers-before-body',{torrentMetadataStrategy:'direct-index'});
+  const streams=async()=>(await readFile(join(dir,'requests'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(r=>r.url.includes('/stream/')).length;
+  const closed=async()=>(await readFile(join(dir,'stream-closed'),'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).length;
+  await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0}});
+  // أطراف التسخين معلّقة (الباذر لا يرسل الجسم)
+  for(let i=0;i<200&&await streams()<1;i++)await new Promise(r=>setTimeout(r,25));
+  assert.ok(await streams()>=1);
+  assert.equal(await closed(),0);
+  void services.startPlayback({session:'adopt-mid-edges',candidate:{infoHash:hash,fileIdx:0}}).catch(()=>{});
+  for(let i=0;i<200&&await closed()<1;i++)await new Promise(r=>setTimeout(r,25));
+  assert.ok(await closed()>=1,'قراءات أطراف التسخين أُغلقت عند التبنّي');
+  await writeFile(join(dir,'release-stream'),'1');
+  await services.stopPlayback({session:'adopt-mid-edges'}).catch(()=>{});
+});
+test('المرور بالفأرة على خيار آخر يُسخَّن بجانب «المقترح» ولا يرميه، والتشغيل يتبنّى «المقترح»',async t=>{
+  const {services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'top'}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:1},role:'hover'}),{prewarmed:true});
+  // المرور على «المقترح» نفسه لا يعيد تسخينه بدور أدنى
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'hover'}),{prewarmed:true});
+  await services.startPlayback({session:'top-survives-hover',candidate:{infoHash:hash,fileIdx:0}});
+  const stages=events.filter(e=>e.session==='top-survives-hover'&&e.type==='playback/diagnostic').map(e=>`${e.stage}${e.mode?`:${e.mode}`:''}`);
+  assert.ok(stages.includes('source-selected:prewarmed'),stages.join(','));
+  await services.stopPlayback({session:'top-survives-hover'}).catch(()=>{});
+});
+test('أدوار التسخين: الخلفي اثنان كحد، والأطراف أصغر من 24MB+8MB القديمة',async t=>{
+  const {services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
+  assert.equal(PREWARM_ROLES.top.head,8*1024*1024);assert.equal(PREWARM_ROLES.top.tail,2*1024*1024);
+  assert.equal(PREWARM_ROLES.background.tail,0);
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'background'}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:1},role:'background'}),{prewarmed:true});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:'b'.repeat(40),fileIdx:0},role:'background'}),{prewarmed:false});
+  assert.deepEqual(await services.prewarmTorrent({candidate:{infoHash:hash,fileIdx:0},role:'nope'}),{prewarmed:false});
 });
 test('playing a different torrent discards the prewarm instead of competing with it',async t=>{
   const {dir,services}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index'});
@@ -235,8 +301,10 @@ test('عمليات حقيقية: rqbit خاص وملف واحد ثم mpv IPC و�
   assert.ok(commands.some(m=>JSON.stringify(m.command)==='["seek",9,"absolute"]'));
   await services.stopPlayback({session:'one'});
   assert.equal(events.filter(e=>e.type==='playback/closed').length,1);
-  assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
-  await services.close();await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
+  // المحرك الدائم يبقى بعد الإيقاف (التشغيل التالي لا ينتظر تشغيله)، ويُنهى مع إغلاق الخدمات
+  assert.doesNotThrow(()=>process.kill(rq.pid,0));
+  await services.close();assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
+  await assert.rejects(services.startPlayback({session:'two',candidate:{infoHash:hash,fileIdx:0}}),/أغلقت/);
 });
 // Playback start acknowledges the process before mpv's asynchronous first-frame event.
 // Assert the real event with a bounded wait, not a race with the Node scheduler.
@@ -297,6 +365,29 @@ test('عند تعليق أول إطار يعيد فتح proxy مرة واحدة 
   assert.equal(requests.filter(r=>r.url.includes('only_files=0')).length,1);
   assert.ok(events.some(e=>e.type==='playback/retrying'));
   assert.ok(events.some(e=>e.type==='playback/error'));
+});
+test('فشل تحقق قطعة سُلّمت قبل التحقق (الخيار B): mpv يُعاد تحميله مرة من الموضع نفسه ببيانات موثقة، بلا إعادة إضافة',async t=>{
+  const {dir,services,events}=await fixture(t,'early-failure');
+  await services.startPlayback({session:'early',candidate:{infoHash:hash,fileIdx:0}});
+  await new Promise(resolve=>setTimeout(resolve,3200));
+  const commands=(await readFile(join(dir,'commands'),'utf8')).trim().split('\n').map(JSON.parse);
+  const loads=commands.filter(r=>r.command[0]==='loadfile');
+  assert.equal(loads.length,2,'تحميل أول ثم إعادة واحدة (الفشل يُعدّ مرة)');
+  assert.equal(loads[1].command[2],'replace');
+  assert.match(loads[1].command[4],/^start=[\d.]+,pause=(yes|no)$/);
+  const requests=(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(requests.filter(r=>r.url.includes('only_files=0')).length,1,'لا إعادة إضافة للتورنت');
+  assert.ok(events.some(e=>e.type==='playback/retrying'&&/موثقة/.test(e.message)));
+});
+test('DeepTrace: خط Metadata الزمني من رد إضافة المحرك يدخل تشخيص الجلسة بحقوله، والتورنت المُعاد يُعلن «reused»',async t=>{
+  const {services,events}=await fixture(t,'deeptrace');
+  await services.startPlayback({session:'trace',candidate:{infoHash:hash,fileIdx:0}});
+  const meta=events.find(e=>e.type==='playback/diagnostic'&&e.stage==='engine-metadata');
+  assert.ok(meta,'engine-metadata recorded');
+  assert.equal(meta.metadataMs,2400);assert.equal(meta.peerConnectedMs,900);assert.equal(meta.peerKnownMs,300);assert.equal(meta.trackerReplyMs,700);
+  assert.equal(meta.trackerReplies,2);assert.equal(meta.trackerPeers,31);assert.equal(meta.trackerErrors,1);
+  assert.equal(meta.mode,'reused','adds > 1 = a torrent already in the engine');
+  assert.ok(!JSON.stringify(meta).match(/magnet|btih|\d+\.\d+\.\d+\.\d+/),'no magnet, hash or address');
 });
 test('الإغلاق أثناء metadata يلغي الطلب ولا يترك عملية أو حدث جلسة قديمة',async t=>{
   const {services,events}=await fixture(t,'slow');
@@ -409,6 +500,7 @@ test('فشل callback الأحداث لا يمنع إنهاء العمليات �
   await services.startPlayback({session:'callback',candidate:{infoHash:hash,fileIdx:0}});
   const rq=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8'));
   await services.stopPlayback({session:'callback'});
+  await services.close();
   assert.throws(()=>process.kill(rq.pid,0),{code:'ESRCH'});
   const {readdir}=await import('node:fs/promises');const {cacheNamespace}=await import('./torrent-cache.mjs');
   await assert.rejects(readdir(join(dir,cacheNamespace(dir))),{code:'ENOENT'});
@@ -790,4 +882,36 @@ test('صفحة تحقق الموقع تُحل بالمتصفح المخفي كا
   assert.equal(challengePage({status:200,headers:{},text:'<title>One moment, please...</title>'}),true);
   assert.equal(challengePage({status:403,headers:{'cf-mitigated':'challenge'},text:''}),true);
   assert.equal(challengePage({status:200,headers:{},text:'<html><title>مانجا ليك</title><p>One moment please read</p></html>'}),false);
+});
+
+test('المحرك الدائم: تشغيلان متتاليان على عملية محرك واحدة، والتورنت المتروك يخمل متصلًا ثم يعود دافئًا ثم يُحذف بعد المهلة',async t=>{
+  const {dir,services,events}=await fixture(t,'normal',{torrentMetadataStrategy:'direct-index',warmTorrentMs:400});
+  const requests=async()=>(await readFile(join(dir,'requests'),'utf8')).trim().split('\n').map(JSON.parse).map(r=>r.url);
+  await services.startPlayback({session:'p1',candidate:{infoHash:hash,fileIdx:0}});
+  const first=JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8')).pid;
+  await services.stopPlayback({session:'p1'});
+  // ترك التورنت: يتوقف (لا ينزّل لأحد) ولا يُحذف فورًا
+  await new Promise(r=>setTimeout(r,100));
+  // الدفء بعد الإغلاق خامل متصل لا pause: العودة للحلقة خلال المهلة لا تنتظر إعادة الاتصال بالمشاركين
+  assert.ok((await requests()).includes('/torrents/0/idle'));
+  assert.ok(!(await requests()).includes('/torrents/0/pause'));
+  assert.ok(!(await requests()).includes('/torrents/0/delete'));
+  // العودة قبل المهلة: نفس المحرك، والتورنت يُستأنف بدل إعادة تنزيله
+  events.length=0;
+  await services.startPlayback({session:'p2',candidate:{infoHash:hash,fileIdx:0}});
+  assert.equal(JSON.parse(await readFile(join(dir,'rqbit-log'),'utf8')).pid,first,'لا عملية محرك جديدة');
+  assert.equal((await readFile(join(dir,'rqbit-attempts'),'utf8')).trim().split('\n').length,1);
+  assert.ok((await requests()).includes('/torrents/0/start'));
+  assert.ok(events.some(e=>e.type==='playback/diagnostic'&&e.stage==='engine-ready'&&e.mode==='cache'),'التشخيص يقول إن المحرك كان جاهزًا');
+  await services.stopPlayback({session:'p2'});
+  // بعد مهلة الدفء: يُحذف بملفه
+  await new Promise(r=>setTimeout(r,700));
+  assert.ok((await requests()).includes('/torrents/0/delete'));
+});
+
+test('منفذ المشاركين حر لـUDP أيضًا: نطاق UDP محجوز في ويندوز (Hyper-V) يُتخطى بدل ربط uTP وDHT الفاشل بصمت', async () => {
+  const picks = [50001, 50002, 50003]; const tried = [];
+  const got = await peerPort(async () => picks.shift(), async (p) => { tried.push(p); return p !== 50001; });
+  assert.equal(got, 50002);
+  assert.deepEqual(tried, [50001, 50002]);
 });

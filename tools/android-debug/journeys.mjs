@@ -291,7 +291,7 @@ try {
       try {
         results[name] = await step(`open-${name}`, async () => {
           await js(`(()=>{document.querySelector('[data-act="openDrawer"]').click();[...document.querySelectorAll('.drawer-item')].find(b=>b.textContent.trim()==='الإضافات').click();return true})()`);
-          await wait(`document.querySelector('#utility.active .v7-addon')`, 'addons page');
+          await wait(`document.querySelector('#utility.active .y-root .y > *')`, 'addons page');
           await js(`[...document.querySelectorAll('.v7-tab')].find(b=>b.textContent.includes('المثبتة')).click()`);
           await wait(`[...document.querySelectorAll('.v7-row')].some(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)})`, 'installed row');
           await js(`(()=>{const r=[...document.querySelectorAll('.v7-row')].find(r=>r.querySelector('.v7-name')?.textContent.trim()===${JSON.stringify(name)});[...r.querySelectorAll('button')].find(b=>b.textContent.includes('فتح')).click();return true})()`);

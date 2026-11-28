@@ -16,6 +16,12 @@ import java.io.FileOutputStream
 @CapacitorPlugin(name = "AccountBackup")
 class AccountBackupPlugin : Plugin() {
     private val lock = Any()
+    /**
+     * خيط خاص بالترتيب نفسه (FIFO): خيط Capacitor واحد لكل الإضافات، والكتابة هنا نسخة الحساب كلها (تحليل JSON
+     * ثم fsync) عند أول هدوء 1.5 ث، أي وأنت تنتظر في ورقة السيرفرات. عليه كان `pick` و`play` ينتظرانها:
+     * «يبدأ…» يبقى والمشغّل لا يُفتح.
+     */
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "vantara-account-backup").apply { isDaemon = true } }
 
     private fun file(call: PluginCall): AtomicFile {
         val userId = call.getString("userId") ?: error("missing account")
@@ -28,7 +34,7 @@ class AccountBackupPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun read(call: PluginCall) {
+    fun read(call: PluginCall) = io.execute {
         synchronized(lock) {
             try {
                 val backup = file(call)
@@ -46,7 +52,7 @@ class AccountBackupPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun write(call: PluginCall) {
+    fun write(call: PluginCall) = io.execute {
         synchronized(lock) {
             var backup: AtomicFile? = null
             var output: FileOutputStream? = null

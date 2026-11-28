@@ -23,6 +23,12 @@ export function verificationMessage(result={}) {
     launch_failed:'تعذّر فتح صفحة التحقق. تقدر تعيد المحاولة يدويًا.',
     interrupted:'توقفت جلسة التحقق قبل اكتمالها.',
     proxy_unavailable:'تعذّر فتح مسار شبكة المصدر لصفحة التحقق. حدّث Android System WebView.',
+    still_challenged:'الموقع لم يقبل التحقق بعد. افتحه مرة ثانية وأكمل التحدي حتى تظهر صفحة الموقع.',
+    // الحكم الأخير من الموقع نفسه (طلب المحرك بعد نقل الجلسة)، لا من إغلاق الصفحة
+    unconfirmed:'اكتمل التحقق في الصفحة، لكن تعذّر الوصول إلى الموقع للتأكد من قبوله. أعد المحاولة بعد قليل.',
+    no_clearance:'فتح الموقع في صفحة التحقق دون أن يصدر جلسة تحقق، فلا شيء يُنقل للمحرك. قد يرفض الموقع المحرك ببصمة الاتصال لا بالكوكي.',
+    no_session_cookie:'لم تُصدر صفحة التحقق أي جلسة يمكن نقلها للمحرك.',
+    cookie_scope_mismatch:'انتهت صفحة التحقق على موقع آخر؛ لم تُنقل جلستها حماية لحسابك.',
   };
   return Object.hasOwn(messages,result.reason)?messages[result.reason]:'لم يكتمل التحقق. تقدر تحاول مرة ثانية.';
 }
@@ -31,69 +37,174 @@ export function nativeVerificationPlugin() {
   if (globalThis.Capacitor?.getPlatform?.() === 'android') return globalThis.Capacitor?.Plugins?.Verification ?? null;
   return desktopPlugin('Verification');
 }
-export function createSourceVerification({plugin=nativeVerificationPlugin(),runtimePlugin=globalThis.Capacitor?.Plugins?.VantaraRuntime,document=globalThis.document}={}) {
-  let closed=false;
-  const pending=new Map(),active=new Map(),handles=[],listeners=new Set();
-  // Background network challenges update the Add-ons list only. No toast,
-  // system notification, automatic WebView or focus-stealing overlay.
-  function render(){
-    if(closed)return;
-    const snapshot=[...pending.values()].map(({retry,...item})=>({...item}));
-    for(const listener of listeners){
-      try{listener(snapshot);}catch{/* Observers cannot break verification. */}
+export function isSourceChallenge(error) {
+  const code = String(error?.code ?? '');
+  return error?.needsHuman === true || error?.data?.needsHuman === true
+    || ['VERIFICATION_REQUIRED', 'SITE_VERIFICATION'].includes(code)
+    || /(?:^|\.)CloudflareBypassException$/.test(code) && (!error?.message || /^Cloudflare wants a human check for /i.test(error.message));
+}
+
+export function createSourceVerification({plugin=nativeVerificationPlugin(),runtimePlugin=globalThis.Capacitor?.Plugins?.VantaraRuntime}={}) {
+  let closed = false, ledgerRevision = 0;
+  const pending = new Map(), active = new Map(), handles = [], listeners = new Set();
+  const snapshot = () => [...pending.values()].map(({retry, ...item}) => ({...item}));
+  function render() {
+    if (closed) return;
+    const rows = snapshot();
+    for (const listener of listeners) {
+      try { listener(rows); } catch { /* Observers cannot break verification. */ }
     }
   }
-  function require(item){if(closed||!validHost(item?.host))return;const host=item.host.toLowerCase(),old=pending.get(host);if(!old&&pending.size>=24)pending.delete(pending.keys().next().value);pending.set(host,{...old,...item,...(['expired','failed','cancelled'].includes(item.state)?{message:verificationMessage(item)}:{}),host});render();}
-  async function begin(host){
-    if(closed||!plugin||!pending.has(host))return {ok:false,error:'التحقق غير متاح لهذا المصدر'};
-    if(active.has(host))return active.get(host);
-    const item=pending.get(host);
-    const job=(async()=>{
-      try{
-        const result=item.kind==='cloudstream'
+  function require(item) {
+    if (closed || !validHost(item?.host)) return;
+    const host = item.host.toLowerCase(), previous = pending.get(host), job = active.get(host);
+    if (job?.replaying && item.state === 'required') { job.rechallenged = true; job.rechallengeItem = {...item,host}; return; }
+    ledgerRevision++;
+    if (!previous && pending.size >= 24) pending.delete(pending.keys().next().value);
+    pending.set(host, {
+      ...previous, ...item, host, verifying: !!job || item.state === 'active',
+      message: ['expired', 'failed', 'cancelled'].includes(item.state) ? verificationMessage(item) : null,
+    });
+    render();
+  }
+  function begin(host, { retry } = {}) {
+    host = String(host).toLowerCase();
+    if (active.has(host)) return active.get(host).promise;
+    const item = pending.get(host);
+    if (closed || !plugin || !item) return Promise.resolve({ok:false,error:'التحقق غير متاح لهذا المصدر'});
+    if (active.size) return Promise.resolve({ok:false,error:'تحقق آخر مفتوح الآن. أكمله ثم أعد المحاولة.'});
+    const job = { replaying: false, rechallenged: false };
+    const failed = (reason) => {
+      require({...item,state:'failed',reason});
+      return {ok:false,state:'failed',reason,error:verificationMessage({reason})};
+    };
+    job.promise = Promise.resolve().then(async () => {
+      try {
+        const privateRuntime = item.kind === 'cloudstream';
+        const result = privateRuntime
           ? await (runtimePlugin?.verify?.({host}) ?? Promise.reject(new Error('Private verification unavailable')))
           : await plugin.begin({host});
-        if(closed)return {ok:false,cancelled:true};
-        if(result?.host!==host||result?.state!=='verified'){
-          const failure=result?.host===host?result:{state:'failed',reason:'invalid_result'};
-          const message=verificationMessage(failure);
-          require({...item,state:failure.state,reason:failure.reason,message});return {...failure,ok:false,error:message};
+        if (closed || job.discarded) return {ok:false,cancelled:true};
+        if (result?.host !== host || result?.state !== 'verified' || privateRuntime && result.ok !== true) {
+          const failure = result?.host === host && result.state !== 'verified' ? result : {state:'failed',reason:'invalid_result'};
+          require({...item,state:failure.state,reason:failure.reason});
+          return {...failure,ok:false,error:verificationMessage(failure)};
         }
-        pending.delete(host);render();
-        // One callback per explicitly opened verification, never per state event.
-        try {
-          const retried=item.kind!=='cloudstream'&&typeof item.retry==='function'?await item.retry():null;
-          return retried??{ok:true,...result};
-        } catch {
-          // Verification succeeded; a separate content error is not another challenge.
+        // CloudStream already replays its scoped operation on the native bridge.
+        // A foreground consumer may reuse that result or restore a different operation.
+        const resume = retry ?? (!privateRuntime ? item.retry : null);
+        if (!resume) {
+          pending.delete(host);
+          // «verified» من المحرك يعني أن الموقع قبل الطلب المرفوض نفسه بعد نقل الجلسة (VerificationPlugin.confirm)
+          return privateRuntime ? result : {ok:true,confirmed:true,...result};
+        }
+        job.replaying = true;
+        let retried;
+        try { retried = await resume(result); }
+        catch (error) {
+          if (closed || job.discarded) return {ok:false,cancelled:true};
+          if (job.rechallenged || isSourceChallenge(error)) return failed('still_challenged');
+          pending.delete(host);
           return {ok:false,verified:true,error:'اكتمل التحقق، لكن تعذّر إعادة تحميل المحتوى'};
         }
-      }catch{if(!closed)require({...item,message:'تعذّر التحقق من المصدر. تقدر تحاول مرة ثانية.'});return {ok:false,error:'تعذّر التحقق'};}
-      finally{active.delete(host);render();}
-    })();active.set(host,job);render();return job;
+        if (closed || job.discarded) return {ok:false,cancelled:true};
+        if (retried?.needsHuman || (job.rechallenged && retried?.ok !== true)) return failed('still_challenged');
+        pending.delete(host);
+        // A completed content request is not invalidated by another pending request.
+        // Keep that request visible; do not mark the entire host as accepted.
+        if (job.rechallengeItem) { job.replaying = false; require(job.rechallengeItem); }
+        return retried ?? {ok:true,...result};
+      } catch (error) {
+        if (closed || job.discarded) return {ok:false,cancelled:true};
+        return failed(isSourceChallenge(error) ? 'still_challenged' : error?.code === 'VERIFICATION_NOT_PENDING' ? 'timeout' : 'launch_failed');
+      } finally {
+        active.delete(host);
+        const latest = pending.get(host);
+        if (latest) latest.verifying = false;
+        render();
+      }
+    });
+    active.set(host, job);
+    require({...item});
+    return job.promise;
   }
-  function state(item){if(closed||!validHost(item?.host))return;if(item.state==='verified'){pending.delete(item.host.toLowerCase());render();}else if(['required','expired','failed','cancelled'].includes(item.state))require(item);}
-  const ready=(async()=>{
-    if(!plugin)return;
-    await Promise.all(['required','state'].map(async name=>{
-      try{const handle=await plugin.addListener(name,name==='required'?require:state);if(closed)await handle?.remove?.();else handles.push(handle);}catch{/* Optional old APK bridge; never break shell startup. */}
+  function state(item) {
+    if (closed || !validHost(item?.host)) return;
+    if (item.state === 'discarded') {
+      ledgerRevision++;
+      const host = item.host.toLowerCase();
+      const job = active.get(host);
+      if (job) job.discarded = true;
+      pending.delete(host);
+      render();
+    } else if (item.state === 'verified') {
+      const host = item.host.toLowerCase();
+      if (!active.has(host)) { ledgerRevision++; pending.delete(host); render(); }
+    } else if (['active', 'required', 'expired', 'failed', 'cancelled'].includes(item.state)) require(item);
+  }
+  async function refresh() {
+    if (!plugin || closed) return;
+    const revision = ledgerRevision;
+    try {
+      const out = await plugin.pending();
+      // A complete native snapshot is authoritative, but not if a newer event
+      // changed the ledger while the bridge call was in flight.
+      if (closed || !Array.isArray(out?.pending) || revision !== ledgerRevision) return;
+      const rows = out.pending.filter(item => validHost(item?.host));
+      const hosts = new Set(rows.map(item => item.host.toLowerCase()));
+      let removed = false;
+      for (const host of pending.keys()) {
+        if (!hosts.has(host) && !active.has(host)) {
+          pending.delete(host);
+          removed = true;
+        }
+      }
+      if (removed) { ledgerRevision++; render(); }
+      for (const item of rows) {
+        const previous = pending.get(item.host.toLowerCase());
+        if (!previous || previous.token !== item.token) require(item);
+      }
+    } catch { /* The previous observation remains visible if the bridge is unavailable. */ }
+  }
+  async function beginSource({host, domains = [], sourceId, sourceName, retry, isActive = () => true} = {}) {
+    await ready;
+    await refresh();
+    if (!isActive()) return {ok:false,cancelled:true};
+    const hosts = new Set(domains.map(value => {
+      try { return new URL(value?.url ?? value).hostname.toLowerCase(); } catch { return null; }
+    }).filter(Boolean));
+    const rows = snapshot();
+    const byId = sourceId ? rows.filter(item => item.sourceId === sourceId) : [];
+    const byName = sourceName ? rows.filter(item => item.sourceName?.trim().toLowerCase() === sourceName.trim().toLowerCase()) : [];
+    const item = host ? pending.get(String(host).toLowerCase()) : byId.length === 1 ? byId[0]
+      : rows.find(row => hosts.has(row.host) && (!row.sourceId || row.sourceId === sourceId)) ?? (byName.length === 1 ? byName[0] : null);
+    if (!item) return {ok:false,error:'لا يوجد طلب تحقق مسجّل لهذا المصدر الآن.'};
+    return begin(item.host, {retry});
+  }
+  const ready = (async () => {
+    if (!plugin) return;
+    await Promise.all(['required','state'].map(async name => {
+      try {
+        const handle = await plugin.addListener(name,name === 'required' ? require : state);
+        if (closed) await handle?.remove?.(); else handles.push(handle);
+      } catch { /* Optional old bridge. */ }
     }));
-    try{const out=await plugin.pending();if(!closed)for(const item of out?.pending??[])require(item);}catch{/* Host detection can be unavailable without affecting the app. */}
+    await refresh();
   })();
   return {
-    ready,require,begin,
-    list:()=>[...pending.values()].map(({retry,...item})=>({...item})),
-    subscribe(listener){
-      if(typeof listener!=='function'||closed)return ()=>{};
+    ready,require,begin,beginSource,list:snapshot,
+    subscribe(listener) {
+      if (typeof listener !== 'function' || closed) return () => {};
       listeners.add(listener);
-      try{listener([...pending.values()].map(({retry,...item})=>({...item})));}catch{}
-      return ()=>listeners.delete(listener);
+      try { listener(snapshot()); } catch {}
+      return () => listeners.delete(listener);
     },
-    close(){
-      if(closed)return;closed=true;
-      pending.clear();listeners.clear();
-      for(const h of handles)void Promise.resolve(h?.remove?.()).catch(()=>{});
-      handles.length=0;
+    close() {
+      if (closed) return;
+      closed = true;
+      pending.clear(); listeners.clear();
+      for (const handle of handles) void Promise.resolve(handle?.remove?.()).catch(() => {});
+      handles.length = 0;
     },
   };
 }

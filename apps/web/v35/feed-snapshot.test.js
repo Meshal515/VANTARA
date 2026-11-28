@@ -24,3 +24,24 @@ describe('stable feeds', () => {
     expect(feed.accept([{ id: 'b', updated: true }, { id: 'c' }, { id: 'a' }, { id: 'c' }], { append: true }).map((x) => x.id)).toEqual(['a', 'b', 'c']);
   });
 });
+
+import { acceptSearchResults, createFeedSnapshot as snap2 } from './feed-snapshot.js';
+describe('نتائج البحث لا تتجمّد على أول دفعة (بلاغ «بوروتو»)', () => {
+  const boruto = { id: 'boruto' }, op = { id: 'one-piece' }, opx = { id: 'one-piece-x' };
+  it('لقطة الخلاصة القديمة تجمّد أول دفعة (السبب الجذري)', () => {
+    const s = snap2();
+    s.accept([boruto]);
+    expect(s.accept([op, opx, boruto]).map((x) => x.id)).toEqual(['boruto']);
+    expect(s.pending).toBe(2);
+  });
+  it('قبل اللمس: الترتيب الأحدث بالصلة كاملًا', () => {
+    const s = snap2();
+    acceptSearchResults(s, [boruto]);
+    expect(acceptSearchResults(s, [op, opx, boruto]).map((x) => x.id)).toEqual(['one-piece', 'one-piece-x', 'boruto']);
+  });
+  it('بعد اللمس: يُلحق الجديد آخرًا بلا قفز تحت الإصبع', () => {
+    const s = snap2();
+    acceptSearchResults(s, [op]);
+    expect(acceptSearchResults(s, [opx, op, boruto], { touched: true }).map((x) => x.id)).toEqual(['one-piece', 'one-piece-x', 'boruto']);
+  });
+});

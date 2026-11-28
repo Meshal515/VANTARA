@@ -42,7 +42,7 @@ it('الورقة: «قيد الفحص» الجاهز يُلمس فيُجرَّب
   expect(row.disabled).toBe(false);
   expect(row.textContent).toContain('قيد الفحص');
   row.onclick();
-  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 'u' }));
+  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 'u' }), { tapAt: expect.any(Number) });
 });
 
 it('native CloudStream video readiness follows HTTP probes not torrent seeder counts', () => {
@@ -62,4 +62,18 @@ it('source-less legacy torrent ticket compatibility does not mask real named HTT
   expect(validity({state:'READY',runtimeReady:true}).state).toBe(VALIDITY.CHECKING);
   expect(validity({state:'READY',runtimeReady:false}).state).toBe(VALIDITY.UNAVAILABLE);
   expect(validity({sourceId:'addon|cs3|cs3_123|id',state:'READY',runtimeReady:true,probed:true}).state).toBe(VALIDITY.VALID);
+});
+
+it('حجم القطعة المقاس: الأصغر أعلى، والمجهول وسط، والمباشر لا يتأثر', () => {
+  const r = { id: 't', sourceId: 'addon|https://torrentio.strem.fun|com.stremio.torrentio.addon', sourceName: 'Torrentio', state: 'READY', runtimeReady: true, label: 'Show.S01E01.1080p.WEB.x264\n👤 300 💾 1.4 GB' };
+  const d = describeRoute(r);
+  const piece = (m) => scoreRoute(r, { ...d, measured: m }).parts.find((p) => p.id === 'piece').value;
+  expect(piece(undefined)).toBe(75);
+  expect(piece({ pieceLength: 512 << 10, seeds: 10, peers: 2 })).toBe(150);
+  expect(piece({ pieceLength: 4 << 20, seeds: 10, peers: 2 })).toBe(90);
+  expect(piece({ pieceLength: 16 << 20, seeds: 10, peers: 2 })).toBe(0);
+  const start = (m) => scoreRoute(r, { ...d, measured: m }).parts.find((p) => p.id === 'start').value;
+  // السرب المقاس يحل محل المعلن حين يصل المحرك للسرب، والصفر المبكر بلا اتصال لا يُحتسب
+  expect(start({ pieceLength: 1 << 20, seeds: 3, peers: 1 })).toBeLessThan(start(undefined));
+  expect(start({ pieceLength: 1 << 20, seeds: 0, peers: 0 })).toBe(start(undefined));
 });

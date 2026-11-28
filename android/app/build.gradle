@@ -33,6 +33,10 @@ def appVersionName = System.getenv('VANTARA_VERSION_NAME') ?: '1.0.0'
 // الـAPK الذي يحمل بصمتها نفسها. «dev» للبناء المحلي: لا تحديثات تلقائية.
 def nativeFingerprint = System.getenv('VANTARA_NATIVE') ?: 'dev'
 def runtimeDebug = providers.gradleProperty('vantaraRuntimeDebug').orNull == 'true'
+// libtorrent مخصص (tools/libtorrent-patches، سير android-libtorrent.yml): مجلد فيه arm64-v8a/ وx86_64/ بملف
+// libjlibtorrent.so مبني من وصفة jlibtorrent 2.0.12.9 نفسها مع تعديلي VANTARA. بلا الخاصية = المكتبة الأصلية كما هي.
+def patchedTorrentDir = providers.gradleProperty('vantaraPatchedTorrentDir').orNull
+def patchedTorrent = patchedTorrentDir != null && file("${patchedTorrentDir}/arm64-v8a/libjlibtorrent.so").isFile()
 
 /**
  * CloudStream runtime (Debug and Stable): every OkHttpClient.Builder.build() first calls NetworkBridge.adopt (extensions/runtime-android).
@@ -92,6 +96,7 @@ android {
         versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "VANTARA_NATIVE", "\"${nativeFingerprint}\""
+        buildConfigField "boolean", "VANTARA_PATCHED_TORRENT", patchedTorrent ? "true" : "false"
         // أجهزة المالكين كلها arm64؛ حصر المكتبات الأصلية (ONNX Runtime، QuickJS)
         // فيه يُبقي الـAPK بحجمه تقريبًا بدل أن يحمل أربع نسخ من كل مكتبة
         ndk { abiFilters 'arm64-v8a' }
@@ -222,9 +227,11 @@ dependencies {
     // ── مشغّل الأنمي: Media3 أصلي (لا WebView). الرابط + ترويساته يمرّان
     // عبر OkHttp نفسه فيحملان كوكيز Cloudflare وترويسات السيرفر ──
     implementation "com.frostwire:jlibtorrent:2.0.12.9"
-    implementation "com.frostwire:jlibtorrent-android-arm64:2.0.12.9"
-    // Filtered out of production APK by its existing arm64 ABI filter.
-    implementation "com.frostwire:jlibtorrent-android-x86_64:2.0.12.9"
+    if (!patchedTorrent) {
+        implementation "com.frostwire:jlibtorrent-android-arm64:2.0.12.9"
+        // Filtered out of production APK by its existing arm64 ABI filter.
+        implementation "com.frostwire:jlibtorrent-android-x86_64:2.0.12.9"
+    }
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
     implementation "androidx.media3:media3-exoplayer-dash:$media3Version"
@@ -261,6 +268,8 @@ dependencies {
     implementation "com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597"
 
     testImplementation "junit:junit:$junitVersion"
+    // org.json الحقيقي لاختبارات JVM (نسخة أندرويد في الاختبار بدائل فارغة): LatestRulesTest
+    testImplementation "org.json:json:20240303"
     testImplementation "com.squareup.okhttp3:mockwebserver:$okhttpVersion"
     // شهادات TLS محلية لاختبار شبكة يحجبها فلتر SNI (CensoredNetworkTest)
     testImplementation "com.squareup.okhttp3:okhttp-tls:$okhttpVersion"
@@ -295,4 +304,9 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+if (patchedTorrent) {
+    // المكتبة المخصصة مكان ملفات jlibtorrent-android-*؛ jlibtorrent يحمّل libjlibtorrent.so قبل النسخة المرقّمة
+    android.sourceSets.main.jniLibs.srcDir(patchedTorrentDir)
 }

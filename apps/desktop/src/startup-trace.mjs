@@ -1,5 +1,5 @@
-const numeric = new Set(['fileIdx','fileBytes','knownPeers','connectedPeers','speedBytes','checkedBytes','checkedPieces','requestedPiece','rangeStart','rangeEnd','cursor','bytes','waitMs','position','cacheBytesRead','requestId']);
-const modes = new Set(['cold','replay-descriptor','cache','torrent','network','decoded','render-unmeasured']);
+const numeric = new Set(['patched','readHints','stallCapMs','hedgeMs','earlyReadMb','reconnectS','criticalPieces','adds','chokedMs','dhtPeers','dhtReplies','dhtReplyMs','diskWriteMs','earlyGapMs','firstBlockMs','metadataMs','noPeerConnectedMs','noPeerKnownMs','notRequestedMs','peerConnectedMs','peerKnownMs','piece','pieceReadMs','requestedMs','totalMs','trackerAnnounceMs','trackerErrorMs','trackerErrors','trackerPeers','trackerReplies','trackerReplyMs','unknownMs','unsampledMs','verifyMs','waits','fileIdx','fileBytes','knownPeers','connectedPeers','speedBytes','checkedBytes','checkedPieces','requestedPiece','rangeStart','rangeEnd','cursor','bytes','waitMs','position','cacheBytesRead','requestId']);
+const modes = new Set(['cold','prewarmed','replay-descriptor','cache','torrent','network','decoded','render-unmeasured','reused']);
 /** Device-local engineering events. Never accept URLs, titles, headers, paths,
  * account IDs or arbitrary strings, even when an upstream error includes them. */
 export function createStartupTrace(publish, clock = () => performance.now()) {

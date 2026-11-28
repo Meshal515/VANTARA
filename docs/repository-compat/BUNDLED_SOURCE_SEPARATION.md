@@ -85,3 +85,11 @@ Separating source packages from the application does not erase historical Git
 objects or guarantee protection from a hosting complaint. Review redistributed
 code/package licenses and preserve their notices. Use a factual release
 description; do not claim a 90% risk reduction without evidence.
+
+## تحديث 27 نوفمبر 2026 (قرار المالك: «لا 19 إضافة جاهزة»)
+
+- الحساب القديم (`legacy`) لم يعد يرى كل المدمجة: يرى منها ما **يستعمله فعلًا** فقط (مصدر عمل في المكتبة،
+  أو نسخ عمل له تقدّم أو علامة قراءة: `usedPackagesFrom`)، إضافة إلى ما أضافه صراحة. الإزالة الصريحة تُخفي ولو مستعملًا.
+- قبل اكتمال المزامنة (`sync.ready`) الاستعمال «مجهول» فلا يختفي شيء لحظة الإقلاع.
+- لا حذف: المكتبة والتقدّم والإعدادات كما هي؛ المصدر المخفي يُضاف من صفحة الإضافات.
+- ⚠️ سطر CLAUDE.md «مصادر المانجا المدمجة تُحافظ عليها أثناء الانتقال» صار يخالف هذا القرار: يحتاج تعديلًا من المالك.

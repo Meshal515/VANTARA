@@ -44,18 +44,22 @@ it.each([false, true])('73 native torrent choices remain selectable while HTTP p
   // ما يُفحص يبقى بمكانه في قسمه (لا يُطوى ثم يقفز)؛ لا قسم «تُجهَّز بالخلفية»
   // سيرفر HTTP قيد الفحص ينتظر في «قيد الفحص» ولا يحجز مكانًا ظاهرًا (المالك، 15 نوفمبر)
   expect(Boolean(sheet.querySelector('.cn-srv-wait'))).toBe(httpPending);
-  expect(sheet.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv').length).toBe(6);
+  // تُعرض أقوى خمسة تورنتات من الجودة الواحدة وتبقى بقية النسخ في طيّها.
+  expect(sheet.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv').length).toBe(5);
   expect(sheet.querySelectorAll('.ss-group--direct > .an-srv-grid .an-srv').length).toBe(0);
-  const more=sheet.querySelector('.an-srv-group details');
-  expect(more.open).toBeFalsy();
-  expect(more.querySelector('summary').textContent).toContain('67');
-  expect(more.querySelectorAll('.an-srv').length).toBe(67);
-  more.open=true;
+  // «عرض N من النسخ الإضافية»: زر بارتفاع ثابت، وصفوفها لا تُبنى حتى تُفتح، ويبقى مفتوحًا مع كل سيرفر يصل
+  const more=sheet.querySelector('.ss-group--torrent .ss-more-btn');
+  const extra=()=>sheet.querySelectorAll('.ss-group--torrent .ss-more-grid .an-srv').length;
+  expect(more.getAttribute('aria-expanded')).toBe('false');
+  expect(more.textContent).toBe('عرض 68 من النسخ الإضافية');
+  expect(extra()).toBe(0);
+  more.onclick({stopPropagation(){}});
+  expect(extra()).toBe(68);
   state.listeners.get('route')({session:state.session,route:{...state.routes[0],state:'FAILED',runtimeReady:false}});
   await vi.advanceTimersByTimeAsync(1);
-  expect(more.querySelector('summary').textContent).toContain('66');
-  expect(more.querySelectorAll('.an-srv').length).toBe(66);
-  expect(more.open).toBe(true);
+  expect(extra()).toBe(67);
+  expect(more.getAttribute('aria-expanded')).toBe('true');
+  expect(more.textContent).toBe('إخفاء النسخ الإضافية');
   await first.onclick();
   await vi.advanceTimersByTimeAsync(0);
   expect(state.pick).toHaveBeenCalled();

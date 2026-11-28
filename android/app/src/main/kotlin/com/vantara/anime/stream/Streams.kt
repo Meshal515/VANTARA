@@ -60,6 +60,9 @@ data class Candidate(
      * Null means no preparation session has measured this candidate (including legacy payloads).
      */
     val preparationMs: Long? = null,
+    /** Monotonic milliseconds from PreparedEpisode creation to the FIRST candidate of the session (any server).
+     * Next to [preparationMs] it separates «extraction is slow» from «a fast server arrived but the chosen one was later». */
+    val firstCandidateMs: Long? = null,
     /**
      * هوية التورنت الثابتة «hash:fileIdx» (أو «hash:» بلا ملف محدد). تذكرة التشغيل (`vantara-torrent://uuid`)
      * عشوائية لكل جلسة، فلا يُعرف منها أن تورنتين في جلستين هما نفس الإصدار. التنزيلات تثبّت اختيار المستخدم بها.

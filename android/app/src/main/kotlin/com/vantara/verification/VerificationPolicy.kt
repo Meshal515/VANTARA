@@ -81,6 +81,38 @@ object VerificationPolicy {
         }.distinctBy { it.first }.take(40).toList()
     }
 
+    /** كتابة واحدة في مخزن المحرك: رابط تُنسب إليه وترويسة Set-Cookie كما يقبلها CookieManager.setCookie. */
+    data class CookieWrite(val url: String, val header: String, val remove: Boolean = false)
+
+    /** عمر الجلسة المنقولة: CookieManager لا يكشف انتهاءها الأصلي. الموقع يرفضها حين تنتهي عنده، فتُستبدل بتحقق جديد. */
+    const val IMPORT_MAX_AGE_S = 7L * 24 * 3600
+
+    /**
+     * نقل جلسة صفحة التحقق (عملية :verification ومخزنها المعزول) إلى مخزن المحرك، بديلًا عن المخزن الواحد في Mihon
+     * (WebViewScreenContent وAndroidCookieJar على CookieManager نفسه، وCloudflareInterceptor يحذف cf_clearance القديم قبل
+     * الحل). كان الاستيراد كوكي «للمضيف وحده» على المضيف الذي انتهت إليه الصفحة، والقديم لا يُحذف: كوكيان بالاسم نفسه
+     * يُرسلان معًا (الأقدم أولًا فيُرفض)، ومضيف الطلب (www أو دونها) قد لا يحمله أصلًا.
+     *
+     * الآن: يُحذف cf_clearance القديم بكل نطاقاته (المضيفان وجذر الموقع)، ثم يُكتب الجديد على جذر الموقع كما يكتبه
+     * Cloudflare (Domain=.site)، وبقية الكوكيز للمضيفين كليهما. [registrable] جذر الموقع (topPrivateDomain) أو null.
+     */
+    fun sessionImport(requestHost: String, landedHost: String, clearance: String?, pairs: List<Pair<String, String>>, registrable: String?): List<CookieWrite> {
+        val hosts = listOf(requestHost, landedHost).distinct()
+        val out = mutableListOf<CookieWrite>()
+        val attrs = "; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=$IMPORT_MAX_AGE_S"
+        if (clearance != null) {
+            for (h in hosts) out += CookieWrite("https://$h/", "cf_clearance=; Path=/; Max-Age=0", remove = true)
+            if (registrable != null) out += CookieWrite("https://$requestHost/", "cf_clearance=; Domain=.$registrable; Path=/; Max-Age=0", remove = true)
+            if (registrable != null) out += CookieWrite("https://$requestHost/", "cf_clearance=$clearance; Domain=.$registrable$attrs")
+            else for (h in hosts) out += CookieWrite("https://$h/", "cf_clearance=$clearance$attrs")
+        }
+        for ((name, value) in pairs.filter { it.first != "cf_clearance" }) for (h in hosts) out += CookieWrite("https://$h/", "$name=$value$attrs")
+        return out
+    }
+
+    /** جذر الموقع من قائمة اللواحق العامة (OkHttp) أو التقدير المحافظ. */
+    fun registrableOf(host: String): String? = registrable(host)
+
     /** CookieManager returns a request header: import precisely one bounded token. */
     fun clearance(header: String?): String? {
         if (header == null || header.length > 65536 || header.any { it == '\r' || it == '\n' }) return null
@@ -96,17 +128,30 @@ data class VerificationPending(
     val host: String, val origin: String, val url: String, val userAgent: String,
     val kind: String, val sourceName: String, val createdAt: Long,
     val token: String = UUID.randomUUID().toString(), val state: String = "required",
+    val sourceId: String? = null,
+    val firstSeenAt: Long = createdAt,
 )
 
 /** Thread-safe through Coordinator's monitor; no Activity or WebView ownership here. */
 class VerificationLedger(private val capacity: Int = 8, private val ttlMs: Long = 10 * 60_000L) {
     private val entries = linkedMapOf<String, VerificationPending>()
     fun snapshot(): List<VerificationPending> = entries.values.toList()
-    fun require(host: String, origin: String, url: String, userAgent: String, kind: String, sourceName: String, now: Long): VerificationPending? {
+    fun require(host: String, origin: String, url: String, userAgent: String, kind: String, sourceName: String, now: Long, sourceId: String? = null): VerificationPending? {
         entries[host]?.let { return it }
         if (entries.size >= capacity) return null
-        return VerificationPending(host, origin, url, userAgent.take(1024), kind.take(40), sourceName.take(100), now).also { entries[host] = it }
+        return VerificationPending(host, origin, url, userAgent.take(1024), kind.take(40), sourceName.take(100), now, sourceId = sourceId).also { entries[host] = it }
     }
+    fun annotate(host: String, sourceId: String, sourceName: String): VerificationPending? {
+        val entry = entries[host]?.takeIf { it.state == "required" && it.sourceId == null } ?: return null
+        return entry.copy(sourceId = sourceId, sourceName = sourceName.take(100)).also { entries[host] = it }
+    }
+    fun discardSource(sourceId: String): List<VerificationPending> =
+        entries.values.filter { it.sourceId == sourceId }.onEach { entries.remove(it.host) }
+
+    fun discardStale(now: Long): List<VerificationPending> =
+        entries.values.filter { it.state == "required" && now - it.firstSeenAt >= 3 * ttlMs }
+            .onEach { entries.remove(it.host) }
+
     fun begin(host: String, now: Long): VerificationPending? {
         val entry = entries[host] ?: return null
         if (entry.state != "required" || now - entry.createdAt >= ttlMs || entries.values.any { it.state == "active" }) return null

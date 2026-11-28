@@ -338,3 +338,108 @@ describe('Glass في المشغّل الأصلي', () => {
     expect((await run(null)).material).toBeUndefined();
   });
 });
+
+describe('من الضغطة إلى المشغّل', () => {
+  afterEach(() => { delete globalThis.Capacitor; delete globalThis.document; });
+  it('يمرّر علامات الضغطة الحقيقية ورجوع pick ونداء play، ولا يمرّر marks نفسها', async () => {
+    const sent = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { play: async (a) => { sent.push(a); return {}; } } } };
+    globalThis.document = { documentElement: { dataset: {} } };
+    const before = Date.now();
+    await engine.open({ session: 's1', title: 'x', section: 'cinema', marks: { tapAt: before - 900, pickedAt: before - 100 } });
+    expect(sent[0].tapAt).toBe(before - 900);
+    expect(sent[0].pickedAt).toBe(before - 100);
+    expect(sent[0].uiOpenAt).toBeGreaterThanOrEqual(before);
+    expect(sent[0].marks).toBeUndefined();
+  });
+  it('بلا ضغطة (شغّل الأفضل): لا علامات مختلقة', async () => {
+    const sent = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { play: async (a) => { sent.push(a); return {}; } } } };
+    globalThis.document = { documentElement: { dataset: {} } };
+    await engine.open({ session: 's1', title: 'x', section: 'anime' });
+    expect(sent[0].tapAt).toBeUndefined();
+    expect(sent[0].uiOpenAt).toBeUndefined();
+  });
+});
+
+describe('watchFacts', () => {
+  afterEach(() => vi.useRealTimers());
+  it('يقرأ حقائق المحرك حتى ينتهي الامتداد، ويُبلغ عند التغير فقط، ويتوقف نهائيًا', async () => {
+    vi.useFakeTimers();
+    const seen = [];
+    let n = 0;
+    const read = vi.fn(async () => (++n < 3 ? {} : { r1: { pieceLength: 1 << 20, seeds: 40, peers: 6 } }));
+    const w = engine.watchFacts('s1', (f) => seen.push(f), { every: 100, span: 450, read });
+    w.poke();
+    await vi.advanceTimersByTimeAsync(1000);
+    // 100..500ms: خمس قراءات ثم يتوقف (الامتداد 450ms)
+    expect(read).toHaveBeenCalledTimes(5);
+    expect(seen).toEqual([{}, { r1: { pieceLength: 1 << 20, seeds: 40, peers: 6 } }]);
+    w.poke();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(read).toHaveBeenCalledTimes(6);
+    w.stop();
+    w.poke();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe('topWarmer', () => {
+  it('إغلاق الورقة يهدّئ التسخين الخلفي مرة واحدة، ولا تسخين بعده', async () => {
+    const calls = [];
+    const rec = (name) => async (args) => { calls.push([name, args]); return { warming: 1 }; };
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { configure: async () => ({ ok: true, errors: [] }), warm: rec('warm'), warmBackground: rec('warmBackground'), torrentFacts: async () => ({ facts: {} }) } } };
+    try {
+      await configure({ force: true, fetchImpl: async () => ({ json: async () => ({}) }) });
+      const t = engine.topWarmer(() => {}, { every: 10_000, span: 1 });
+      t.top('s1', 'r0');
+      t.rows('s1', ['r1', 'r2']);
+      await new Promise((r) => setTimeout(r, 0));
+      t.stop();
+      t.rows('s1', ['r3']);
+      t.stop();
+      await new Promise((r) => setTimeout(r, 0));
+    } finally { delete globalThis.Capacitor; }
+    expect(calls.map(([n, a]) => [n, a.routes ?? a.route, a.stop ?? false])).toEqual([
+      ['warm', 'r0', false], ['warmBackground', ['r1', 'r2'], false], ['warmBackground', [], true],
+    ]);
+  });
+});
+
+describe('topWarmer refresh', () => {
+  afterEach(() => { vi.useRealTimers(); delete globalThis.Capacitor; });
+  it('يجدد تسخين «المقترح» كل دقيقة ما دامت الورقة مفتوحة، ويتوقف بالإغلاق', async () => {
+    const calls = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { configure: async () => ({ ok: true, errors: [] }), warm: async (a) => { calls.push(a.route); return { warming: true }; }, torrentFacts: async () => ({ facts: {} }), warmBackground: async () => ({ warming: 0 }) } } };
+    await configure({ force: true, fetchImpl: async () => ({ json: async () => ({}) }) });
+    vi.useFakeTimers();
+    const t = engine.topWarmer(() => {}, { every: 10_000_000, span: 1, refreshMs: 60_000 });
+    t.top('s1', 'r0');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(calls).toEqual(['r0']);
+    t.top('s1', 'r1');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toEqual(['r0', 'r1', 'r1', 'r1']);
+    t.stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toHaveLength(4);
+  });
+});
+
+it('clears expired warming indicators without starting another prewarm', async () => {
+  vi.useFakeTimers();
+  const seen = [];
+  const read = vi.fn().mockResolvedValueOnce({ first: { ready: true } }).mockResolvedValue({});
+  const watch = engine.watchFacts('warm-session', f => seen.push(f), { every: 50, span: 49, idleEvery: 100, read });
+  try {
+    watch.poke();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(seen).toEqual([{ first: { ready: true } }, {}]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(read).toHaveBeenCalledTimes(2);
+  } finally {
+    watch.stop();
+    vi.useRealTimers();
+  }
+});

@@ -47,3 +47,17 @@ it('فيلم أنمي: IMDb وحده، وفشل الشبكة لا يكسر ال�
 it('parseAniZip يتجاهل الحلقات الخاصة والمعرّف غير الصالح', () => {
   expect(parseAniZip({ mappings: { imdb_id: 'x' }, episodes: { S1: {}, 1: { seasonNumber: 1, episodeNumber: 1 } } })).toEqual({ imdb: null, episodes: { 1: [1, 1] } });
 });
+
+it('طلب واحد في الطريق لكل عمل: تجهيز الورقة مسبقًا والضغطة ينتظران الطلب نفسه', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const fetchImpl = async () => { calls++; await gate; return { ok: true, json: async () => RE_ZERO }; };
+  const warm = withImdbEpisode(id(2), { fetchImpl });
+  const tap = withImdbEpisode(id(2), { fetchImpl });
+  release();
+  const [a, b] = await Promise.all([warm, tap]);
+  expect(calls).toBe(1);
+  expect(a.externalIds.imdb).toBe('tt5607616');
+  expect(b.externalIds.imdb).toBe('tt5607616');
+});

@@ -29,7 +29,7 @@
  * يحسب البصمة من بايتات ملفات `SHELL` ويفشل إن خالفت المكتوب هنا، فتعديلُ
  * ملف قشرةٍ بلا تحديثها يكسر البناء — وهو بالضبط وقت إبطال الكاش.
  */
-const SHELL_DIGEST = '877741baff4e9d2d94b1c50590fcfd7efdc72e98857efd70a6c3f66de59c4b50';
+const SHELL_DIGEST = 'eb88ab98cf222b8bfc99ab040ce5f5da608c2fe8f604ccfd65822f4b0d4eede9';
 
 const VERSION = `vantara-shell-${SHELL_DIGEST.slice(0, 16)}`;
 
@@ -74,7 +74,9 @@ const SHELL = [
   '/lib/plugin-failure.js',
   '/lib/host-breaker.js',
   '/lib/route-family.js',
+  '/lib/engine-marks.js',
   '/lib/route-validity.js',
+  '/lib/deeptrace.js',
   '/addons/native-catalog.js',
   '/v35/reader-scroll.js',
   '/v35/reader-zoom.js',
@@ -304,6 +306,7 @@ const SHELL = [
   '/v35/addons.css',
   '/v35/addons-v7.css',
   '/v35/addons-v7.js',
+  '/v35/addons-hub.js',
   '/account.css',
   '/v35/side-dock.js',
   '/v35/sections.js',
@@ -328,6 +331,13 @@ const SHELL = [
   '/lib/cinema-identity.js',
   '/lib/source-states.js',
   '/lib/update-engine.js',
+  '/lib/update-decision.js',
+  '/lib/latest-store.js',
+  '/lib/latest-migrate.js',
+  '/lib/latest-engine.js',
+  '/lib/latest-runner.js',
+  '/lib/latest-threads.js',
+  '/addons/latest-providers.js',
   '/lib/follow-time.js',
   '/lib/watch-position.js',
   '/lib/storage-relief.js',

@@ -7,7 +7,8 @@
 .v7-addon button:focus:not(:focus-visible),.v7-addon input:focus{outline:none;box-shadow:none}
 .v7-addon button:focus-visible{outline:2px solid var(--v7-accent);outline-offset:3px}
 .v7-addon input::selection{background:#b6a2ff4b}
-.v7-addon svg{width:19px;height:19px;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none}
+/* كان 19px وخط 1.9 يُفرض على كل أيقونة فيصغّرها ويبهتها (شكوى المالك): الافتراضي الآن 24px وخط 2 */
+.v7-addon svg{width:24px;height:24px;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none}
 .v7-addon .v7-heading{display:flex;justify-content:flex-end;align-items:center;gap:16px;margin-bottom:8px}
 .v7-addon .v7-heading h2{font-size:28px;font-weight:790;letter-spacing:-1px;margin:0;line-height:1.15}
 .v7-addon .v7-heading p{font-size:13px;color:var(--v7-muted);margin:8px 0 0}
@@ -219,3 +220,68 @@
 .v7-addon .v7-transfer-row[data-status="unavailable"]{opacity:.62}
 .v7-addon .v7-transfer-row[data-status="failed"] .v7-transfer-meta{color:#ff9d9d}
 .v7-addon .v7-transfer-actions{flex-wrap:wrap}
+/* UX10: فشل قراءة الإضافات مع زر إعادة المحاولة (خارج .v7-addon لأن المدير لم يُرسم) */
+.addons-load-failed{display:grid;gap:12px;justify-items:start;padding:16px 0}
+.addons-load-failed .v7-simple-btn{height:44px;min-width:106px;padding-inline:16px;background:var(--surface-1,#121019);border:1px solid #2b2b34;border-radius:13px;color:#efedf4;font-weight:800}
+.v7-addon .v7-busy-note{margin:12px 0 0;color:var(--text-2,#bdb8c8);font-size:13px;font-weight:700}
+
+/* ═══ تصميم الإضافات المعتمد (v1.2.6، 27 نوفمبر): تباين كامل وأحجام مريحة ═══
+ * المرجع: docs/design/addons-v1.2.6. النص بالدرجتين الأولى والثانية (لا الثالثة والرابعة الباهتتين)، والأيقونات 22–26px بخط 2،
+ * ولون الثيم للفعل الأساسي وحده («تثبيت» مصمت). «فتح» والحذف محايدان واضحان، والحذف يحمرّ عند المرور فقط. */
+.v7-addon .v7-tab{font-size:16px;font-weight:700;color:var(--text-2,#d6d2dd);padding:13px 0 14px}
+.v7-addon .v7-tab.active{color:var(--text-1,#f7f5fb);border-color:var(--v7-accent)}
+.v7-addon .v7-count{font-size:13px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-tabs .v7-plus{font-size:16px}
+.v7-addon .v7-tabs .v7-plus svg{width:22px;height:22px}
+.v7-addon .v7-search{color:var(--text-2,#d6d2dd);font-size:15.5px}
+.v7-addon .v7-search svg,.v7-addon .v7-filter svg{width:22px;height:22px}
+.v7-addon .v7-search input::placeholder{color:var(--text-3,#99949f)}
+.v7-addon .v7-filter{font-size:15px;color:var(--text-1,#f7f5fb)}
+.v7-addon .v7-section-head h3,.v7-addon .v7-group-title{font-size:14px;font-weight:700;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-section-head span{font-size:13px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-row{min-height:74px;gap:14px;padding:10px 0}
+.v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{width:50px;height:50px;border-radius:14px;background:var(--surface-2,#18161f)}
+.v7-addon .v7-logo img{border-radius:14px}
+.v7-addon .v7-fallback.v7-initial{border-radius:14px;font-size:20px;background:var(--surface-2,#18161f);color:var(--text-1,#f7f5fb)}
+.v7-addon .v7-fallback svg{width:26px;height:26px;stroke:var(--text-2,#d6d2dd)}
+.v7-addon .v7-name{font-size:17px;font-weight:700;color:var(--text-1,#f7f5fb)}
+.v7-addon .v7-meta{font-size:13.5px;margin-top:3px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-why{font-size:13px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-actions{gap:6px}
+.v7-addon .v7-flip,.v7-addon .v7-flip[class]{width:88px;min-width:88px;height:40px}
+.v7-addon .v7-face{font-size:15px;font-weight:750}
+.v7-addon .v7-front{background:var(--v7-accent);color:var(--on-accent,#fff)}
+.v7-addon .v7-rear{background:var(--surface-2,#18161f);color:var(--text-1,#f7f5fb)}
+.v7-addon .v7-rear svg{width:20px;height:20px}
+.v7-addon .v7-trash,.v7-addon .v7-trash-holder{width:44px;min-width:44px}
+.v7-addon .v7-trash{height:44px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-trash svg,.v7-addon .v7-go svg{width:22px;height:22px}
+@media (hover:hover){.v7-addon .v7-trash:hover{color:#ff8391;background:#ff83911a}.v7-addon .v7-row:hover{background:var(--surface-1,#121019)}}
+.v7-addon .v7-simple-btn{height:40px;padding:0 14px;background:var(--surface-2,#18161f);color:var(--text-1,#f7f5fb);font-size:15px}
+.v7-addon .v7-simple-btn svg{width:20px;height:20px}
+.v7-addon .v7-empty h3{font-size:21px;color:var(--text-1,#f7f5fb)}
+.v7-addon .v7-empty p{font-size:14.5px;color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-empty-symbol{color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-dialog p,.v7-addon .v7-field strong,.v7-addon .v7-notice,.v7-addon .v7-transfer-meta{color:var(--text-2,#d6d2dd)}
+.v7-addon .v7-verification-name small{color:var(--text-2,#d6d2dd)}
+@media(max-width:380px){.v7-addon .v7-flip,.v7-addon .v7-flip[class]{width:76px;min-width:76px}.v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{width:44px;height:44px}.v7-addon .v7-name{font-size:16px}}
+/* الكمبيوتر (قرار المالك): عمود واحد عريض مثل Nuvio، بطاقة لكل إضافة، أحجام كبيرة */
+@media (min-width:1000px) and (pointer:fine){
+  .v7-addon{max-width:1100px;padding-inline:24px}
+  .v7-addon .v7-list{display:grid;gap:10px}
+  .v7-addon .v7-row{min-height:96px;padding:14px 20px;border:0;border-radius:20px;background:var(--surface-1,#121019);gap:18px}
+  .v7-addon .v7-row:last-child{border-bottom:0}
+  @media (hover:hover){.v7-addon .v7-row:hover{background:var(--surface-2,#18161f)}}
+  .v7-addon .v7-logo,.v7-addon .v7-logo.is-repo{width:64px;height:64px;border-radius:18px}
+  .v7-addon .v7-name{font-size:20px}
+  .v7-addon .v7-meta{font-size:14.5px}
+  .v7-addon .v7-flip,.v7-addon .v7-flip[class]{width:110px;min-width:110px;height:46px}
+  .v7-addon .v7-face{font-size:16px}
+  .v7-addon .v7-trash,.v7-addon .v7-trash-holder{width:50px;min-width:50px}
+  .v7-addon .v7-trash{height:50px}
+  .v7-addon .v7-trash svg,.v7-addon .v7-go svg{width:26px;height:26px}
+  .v7-addon .v7-tab{font-size:18px}
+  .v7-addon .v7-search{font-size:17px}
+}
+.v7-addon .v7-go,.v7-addon .v7-simple-btn.v7-go{width:44px;min-width:44px;padding:0;font-size:0;background:transparent;color:var(--text-1,#f7f5fb)}
+@media (min-width:1000px) and (pointer:fine){.v7-addon .v7-go,.v7-addon .v7-simple-btn.v7-go{width:50px;min-width:50px}}

@@ -144,3 +144,86 @@ it('a CloudStream verification closed by the page (not the user) shows its real 
   expect(await verifySourceDomains({plugin,runtimePlugin,domains:['https://rift.example/']})).toEqual({ok:false,error:message});
  }
 });
+
+describe('CF01: نجاح التحقق = نجاح الطلب الأصلي بعده', () => {
+  it('تحدٍّ جديد أثناء إعادة الطلب يبقي المصدر في «تحتاج تحقق» برسالة صادقة (لا «تم» كاذبة)', async () => {
+    const f = fixture(), c = createSourceVerification(f); await c.ready;
+    c.require({ host: 'source.example', retry: async () => { f.listeners.get('required')({ host: 'source.example', state: 'required' }); return { ok: false }; } });
+    const out = await c.begin('source.example');
+    expect(out).toMatchObject({ ok: false, reason: 'still_challenged' });
+    expect(c.list()).toEqual([expect.objectContaining({ host: 'source.example', state: 'failed', reason: 'still_challenged' })]);
+    c.close();
+  });
+  it('إعادة طلب ناجحة بلا تحدٍّ جديد: يخرج من القائمة', async () => {
+    const f = fixture(), c = createSourceVerification(f); await c.ready;
+    c.require({ host: 'source.example', retry: async () => ({ ok: true }) });
+    expect(await c.begin('source.example')).toEqual({ ok: true });
+    expect(c.list()).toEqual([]);
+    c.close();
+  });
+  it('أثناء إعادة الطلب يبقى ظاهرًا بحالة «يتحقق» (لا يختفي قبل الإثبات)', async () => {
+    const f = fixture(), c = createSourceVerification(f); await c.ready;
+    let during = null;
+    c.require({ host: 'source.example', retry: async () => { during = c.list(); return { ok: true }; } });
+    await c.begin('source.example');
+    expect(during).toEqual([expect.objectContaining({ host: 'source.example', verifying: true })]);
+    c.close();
+  });
+});
+
+it('keeps the pending row visible after a native verified event until the source confirms the replay', async () => {
+  const f = fixture();
+  const verification = createSourceVerification(f);
+  await verification.ready;
+  let finish;
+  f.plugin.begin.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  let during;
+  verification.require({ host: 'source.example', state: 'required', retry: async () => {
+    during = verification.list();
+    return { ok: true };
+  } });
+  const result = verification.begin('source.example');
+  f.listeners.get('state')({ host: 'source.example', state: 'verified' });
+  expect(verification.list()).toMatchObject([{ host: 'source.example', verifying: true }]);
+  finish({ host: 'source.example', state: 'verified' });
+  expect(await result).toMatchObject({ ok: true });
+  expect(during).toMatchObject([{ host: 'source.example', verifying: true }]);
+  expect(verification.list()).toEqual([]);
+  verification.close();
+});
+
+it('treats a replay rejection flagged by the source as an unfinished verification without needing a native event', async () => {
+  const f = fixture();
+  const verification = createSourceVerification(f);
+  await verification.ready;
+  verification.require({ host: 'source.example', state: 'required', retry: async () => {
+    throw Object.assign(new Error('verification'), { code: 'VERIFICATION_REQUIRED' });
+  } });
+  expect(await verification.begin('source.example')).toMatchObject({ ok: false, reason: 'still_challenged' });
+  expect(verification.list()).toMatchObject([{ host: 'source.example', reason: 'still_challenged' }]);
+  verification.close();
+});
+
+describe('verified means the site accepted the original request (native confirm)',()=>{
+  it('a native verified result without a replay is a confirmed success, not «open the source to confirm»',async()=>{
+    const f=fixture(),c=createSourceVerification(f);await c.ready;
+    c.require({host:'hijala.com',state:'required'});
+    const out=await c.begin('hijala.com');
+    expect(out).toMatchObject({ok:true,confirmed:true});
+    expect(c.list()).toHaveLength(0);c.close();
+  });
+  it('a site that still challenges after the import keeps the request pending with its real reason',async()=>{
+    const f=fixture();f.plugin.begin=vi.fn(async({host})=>({host,state:'failed',reason:'still_challenged'}));
+    const c=createSourceVerification(f);await c.ready;
+    c.require({host:'hijala.com',state:'required'});
+    const out=await c.begin('hijala.com');
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(/الموقع لم يقبل التحقق/);
+    expect(c.list()).toMatchObject([{host:'hijala.com',state:'failed'}]);c.close();
+  });
+  it('every native refusal reason has its own message',async()=>{
+    const {verificationMessage}=await import('./source-verification.js');
+    for(const reason of ['unconfirmed','no_clearance','no_session_cookie','cookie_scope_mismatch','still_challenged'])
+      expect(verificationMessage({reason})).not.toBe('لم يكتمل التحقق. تقدر تحاول مرة ثانية.');
+  });
+});

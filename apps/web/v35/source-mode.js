@@ -1,4 +1,5 @@
 import { publicUrl } from "../addons/manifest.js";
+import { isSourceChallenge } from "../lib/source-verification.js";
 import { pulseView } from "../addons/source-pulse.js";
 import { nativeCover } from "./covers.js";
 import { imageLoadingNode, imageFallbackNode } from "./image-loading.js";
@@ -90,8 +91,9 @@ export function renderSourceMode({
   onOpenWork = () => {},
   onBack = () => {},
   onKind = () => {},
-  /** تحقّق Cloudflare للمصدر داخل التطبيق: `async () => ({ ok, error })`، أو null حيث لا يتوفر. */
+  /** فتح التحقق ثم استئناف طلب هذه الشاشة بعينه. */
   onVerify = null,
+  trackRequests = false,
   pulse = null,
 }) {
   const root = node("div", "addon-hub addon-source"),
@@ -136,9 +138,12 @@ export function renderSourceMode({
   paintKind();
   heading.append(eyebrow, name, status);
   header.append(mark, heading);
+  let verifying = false;
   const paintStatus = () => {
-    if (!pulse || !addon.key) return void (status.hidden = true);
-    const st = pulseView(pulse.get(addon.key), { checking: pending && !grid.querySelector(".up-card") });
+    if (!pulse || !addon.key) return void (status.hidden = !verifying);
+    status.hidden = false;
+    const st = verifying ? { level: "checking", label: "جارٍ التحقق" }
+      : pulseView(pulse.get(addon.key), { checking: pending && !grid.querySelector(".up-card") });
     status.className = `addon-pulse addon-pulse--${st.level}`;
     status.replaceChildren(node("i", "addon-pulse-dot"), node("b", null, st.label));
     if (st.detail) status.append(node("span", null, st.detail));
@@ -319,17 +324,18 @@ export function renderSourceMode({
     signal?.addEventListener("abort", () => { if (!entry.done && pageCache.get(key) === entry) pageCache.delete(key); }, { once: true });
     return entry.value;
   };
-  const tabFetch = (tab, page, signal) => {
+  const tabFetch = (tab, page, signal, onFetch = () => {}) => {
     const o = signal ? { signal } : {};
+    const fetch = (run) => () => { onFetch(); return run(); };
     if (typeof adapter.section === "function" && /^(?:section:\d+|popular|latest)$/.test(tab))
-      return cached(`${tab}|${page}`, () => adapter.section(tab, page, o), signal);
-    if (tab === "catalogue") return cached(`catalogue|${page}`, () => adapter.catalogue(page, o), signal);
-    if (tab === "popular") return cached(`popular|${page}`, () => adapter.popular(page, o), signal);
-    return cached(`home|${page}`, () => adapter.home(page, o), signal);
+      return cached(`${tab}|${page}`, fetch(() => adapter.section(tab, page, o)), signal);
+    if (tab === "catalogue") return cached(`catalogue|${page}`, fetch(() => adapter.catalogue(page, o)), signal);
+    if (tab === "popular") return cached(`popular|${page}`, fetch(() => adapter.popular(page, o)), signal);
+    return cached(`home|${page}`, fetch(() => adapter.home(page, o)), signal);
   };
   let prefetched = false;
   const prefetchTabs = () => {
-    if (prefetched || closed || catalogs.length) return;
+    if (prefetched || closed || catalogs.length || onVerify) return;
     prefetched = true;
     // القسمان التاليان فقط: مصدر CloudStream قد يعلن عشرة أقسام، وجلبها كلها مرة إغراق للموقع
     const at = choices.findIndex(([tab]) => tab === state.tab);
@@ -340,9 +346,10 @@ export function renderSourceMode({
     const id = work.id ?? work.url;
     return id == null ? null : JSON.stringify([work.type ?? addon.contentTypes?.[0] ?? null, id]);
   };
-  async function load({ append = false, previousPage } = {}) {
+  async function load({ append = false, previousPage, replay = false, replayResult } = {}) {
     clearTimeout(retryTimer);
     retryTimer = null;
+    root.querySelector(":scope > .addon-source-error")?.remove();
     controller?.abort();
     controller = new AbortController();
     const activeController = controller,
@@ -355,10 +362,17 @@ export function renderSourceMode({
     if (!append) { seen.clear(); autoMore = true; }
     if (!append) grid.replaceChildren(...Array.from({ length: 9 }, () => node("div", "up-skel")));
     paintStatus();
+    const started = performance.now(), requestedPage = state.page;
+    let didFetch = false;
+    const fetched = () => { didFetch = true; };
     try {
       let out;
       const options = { signal: activeController.signal };
-      if (adapter.catalog) {
+      const nativeReplay = adapter.resumeVerifiedPage?.(replayResult, {
+        tab: state.tab, page: state.page, query: state.query,
+      });
+      if (nativeReplay) { fetched(); out = nativeReplay; }
+      else if (adapter.catalog) {
         const catalog = selectedCatalog();
         if (!catalog) {
           grid.replaceChildren();
@@ -402,20 +416,21 @@ export function renderSourceMode({
         (state.query || state.tab === "search") &&
         adapter.search &&
         (addon.capabilities ?? []).includes("search")
-      )
+      ) {
+        fetched();
         out = await adapter.search(state.query, state.page, options);
-      else if (searchOnly) {
+      } else if (searchOnly) {
         grid.replaceChildren();
         note.textContent = "هذا المصدر بلا صفحة رئيسية: اكتب اسم العمل للبحث فيه.";
         return;
       } else if (typeof adapter.section === "function" && /^(?:section:\d+|popular|latest)$/.test(state.tab))
-        out = await tabFetch(state.tab, state.page, activeController.signal);
+        out = await tabFetch(state.tab, state.page, activeController.signal, fetched);
       else if (state.tab === "catalogue" && fullCatalogue)
-        out = await tabFetch("catalogue", state.page, activeController.signal);
+        out = await tabFetch("catalogue", state.page, activeController.signal, fetched);
       else if (state.tab === "popular" && adapter.popular)
-        out = await tabFetch("popular", state.page, activeController.signal);
+        out = await tabFetch("popular", state.page, activeController.signal, fetched);
       else if (adapter.home && (addon.capabilities ?? []).includes("home"))
-        out = await tabFetch("home", state.page, activeController.signal);
+        out = await tabFetch("home", state.page, activeController.signal, fetched);
       else {
         grid.replaceChildren();
         note.textContent = "اكتب اسم العمل للبحث في هذا المصدر.";
@@ -423,6 +438,9 @@ export function renderSourceMode({
       }
       if (run !== generation || activeController.signal.aborted) return;
       const items = out.mangas ?? out.items ?? (Array.isArray(out) ? out : []);
+      if (trackRequests && didFetch && addon.key) pulse?.record?.(addon.key, items.length ? "ok" : "empty", {
+        ms: performance.now() - started, items: items.length, version: addon.version ?? null,
+      });
       if (!append) {
         grid.replaceChildren();
         state.skip = 0;
@@ -556,6 +574,7 @@ export function renderSourceMode({
       autoMore = true;
       paintStatus();
       if (!append && !state.query) setTimeout(prefetchTabs, 400);
+      return { ok: true };
     } catch (error) {
       // المصدر لا يقدّم «آخر التحديثات» (إضافات Aniyomi كثيرة): القسم يُحذف ويُفتح التالي بصمت، لا خطأ للمصدر كله
       if (run === generation && !activeController.signal.aborted && !append && !state.query && state.tab === "home"
@@ -575,35 +594,55 @@ export function renderSourceMode({
           if (previousPage != null) state.page = previousPage;
           more.hidden = false;
         }
-        const text = String(error.message ?? "تعذر جلب المصدر").replace(
-          /https?:\/\/[^\s]+/gi,
-          "[رابط الخدمة]",
+        const challenge = isSourceChallenge(error);
+        if (trackRequests && didFetch && addon.key && error?.name !== "AbortError") pulse?.record?.(
+          addon.key, challenge ? "verification" : "failed", {
+            ms: performance.now() - started, error: error?.message, version: addon.version ?? null,
+          },
         );
+        if (replay) throw error;
+        const text = String(error.message ?? "تعذر جلب المصدر").replace(/https?:\/\/[^\s]+/gi, "[رابط الخدمة]");
         paintStatus();
+        if (challenge) {
+          const box = node("div", "addon-source-error");
+          box.append(node("b", null, "الموقع يطلب تحققًا قبل التصفح"));
+          if (onVerify) {
+            const verify = btn("تحقّق الآن", async () => {
+              if (verifying) return;
+              verify.disabled = true;
+              verifying = true;
+              paintStatus();
+              let resumed = false;
+              const resume = async (result) => {
+                if (closed || run !== generation) return { ok: false, cancelled: true };
+                resumed = true;
+                state.page = requestedPage;
+                return load({ append, previousPage, replay: true, replayResult: result });
+              };
+              const out = await Promise.resolve().then(() => onVerify(error, resume)).catch(() => ({ ok: false }));
+              verifying = false;
+              if (closed) return;
+              paintStatus();
+              if (out?.ok && !resumed && run === generation) {
+                state.page = requestedPage;
+                void load({ append, previousPage });
+              } else if (!out?.ok && (run === generation || resumed && run + 1 === generation)) {
+                verify.disabled = false;
+                if (!append) grid.replaceChildren(box);
+                else if (!box.isConnected) grid.after(box);
+                note.textContent = out?.error || "لم يكتمل التحقق. تقدر تحاول مرة ثانية.";
+              }
+            }, "addon-button addon-button-primary");
+            box.append(node("p", null, "أكمل التحقق في صفحة الموقع، ثم نعيد الطلب هنا."), verify);
+          } else box.append(node("p", null, "التحقق لهذا الموقع متاح داخل التطبيق عند دعمه."));
+          if (append) { more.hidden = true; note.textContent = ""; grid.after(box); }
+          else { grid.replaceChildren(box); note.textContent = ""; }
+          return;
+        }
         if (append) note.textContent = text;
         else {
-          // الإصلاح الذاتي: محاولة ثانية تلقائية بعد لحظات، ثم زر صريح
           failures++;
           const box = node("div", "addon-source-error");
-          // الموقع يطلب تحققًا بشريًا (Cloudflare): لا فائدة من الإعادة الصامتة؛ زر واحد يفتح صفحة التحقق ثم يعيد الجلب
-          if (onVerify && /cloudflare|CLOUDFLARE|needsHuman|تحقق بشري/i.test(`${error?.code ?? ""} ${error?.message ?? ""}`)) {
-            const verify = btn("تحقّق الآن", async () => {
-              verify.disabled = true;
-              const out = await Promise.resolve().then(onVerify).catch((e) => ({ ok: false, error: e?.message }));
-              if (closed) return;
-              verify.disabled = false;
-              if (out?.ok) { failures = 0; void load(); }
-              else note.textContent = `لم يكتمل التحقق${out?.error ? `: ${String(out.error).slice(0, 120)}` : ""}`;
-            }, "addon-button addon-button-primary");
-            box.append(
-              node("b", null, "الموقع يطلب تحققًا قبل التصفح"),
-              node("p", null, "افتح صفحة التحقق مرة، ثم نعيد جلب المصدر تلقائيًا."),
-              verify,
-            );
-            grid.replaceChildren(box);
-            note.textContent = "";
-            return;
-          }
           box.append(
             node("b", null, failures > 1 ? "المصدر لا يستجيب الآن" : "تعذّر الجلب؛ نعيد المحاولة…"),
             node("p", null, text),

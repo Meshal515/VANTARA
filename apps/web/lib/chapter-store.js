@@ -9,26 +9,50 @@
  * وعند غيابه (متصفح خاص) يعمل كل شيء بلا كاش — أبطأ لا أقل.
  */
 
+import { normalizeTitle } from './catalog.js';
 import { refsOf } from './manga-alias-store.js';
 
 const DB = 'vantara-chapters';
 const STORE = 'works';
+const SOURCE_TITLES = 'sourceTitles';
 const MAX_WORKS = 200;
 /** قوائم الرئيسية والاستكشاف: آخر ما رأيته يُعرض قبل أن تردّ المصادر. */
 const KV = 'kv';
 
 let opening = null;
+function sourceTitles(id, work) {
+  if (!String(id).startsWith('ext:manga|') || !Array.isArray(work?.editions)) return [];
+  return [...new Set(work.editions.filter((e) => e?.chapters?.length)
+    .map((e) => normalizeTitle(e.manga?.title)).filter(Boolean))];
+}
+
 function db() {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
   opening ??= new Promise((resolve) => {
     try {
-      const req = indexedDB.open(DB, 2);
+      const req = indexedDB.open(DB, 3);
       req.onupgradeneeded = () => {
         const names = req.result.objectStoreNames;
-        if (!names.contains(STORE)) req.result.createObjectStore(STORE);
+        const existed = names.contains(STORE);
+        const works = existed ? req.transaction.objectStore(STORE) : req.result.createObjectStore(STORE);
         if (!names.contains(KV)) req.result.createObjectStore(KV);
+        works.createIndex(SOURCE_TITLES, SOURCE_TITLES, { multiEntry: true });
+        if (existed) {
+          const records = works.openCursor();
+          records.onsuccess = () => {
+            const cursor = records.result;
+            if (!cursor) return;
+            const titles = sourceTitles(cursor.primaryKey, cursor.value);
+            if (titles.length) cursor.update({ ...cursor.value, sourceTitles: titles });
+            cursor.continue();
+          };
+        }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const connection = req.result;
+        connection.onversionchange = () => { connection.close(); opening = null; };
+        resolve(connection);
+      };
       req.onerror = () => resolve(null);
       req.onblocked = () => resolve(null);
     } catch {
@@ -57,9 +81,17 @@ function run(mode, fn, store = STORE) {
 }
 
 /** @returns {Promise<{ editions: object[], detail: object|null, at: number, discoveredAt: number }|null>} */
-export async function readWork(id) {
-  const caches = (await Promise.all(refsOf(id).map((ref) => run('readonly', (s) => s.get(ref)).catch(() => null)))).filter(Boolean);
-  if (caches.length < 2) return caches[0] ?? null;
+export async function readWork(id, { sourceTitle = '' } = {}) {
+  const [matches, indexed] = await Promise.all([
+    Promise.all(refsOf(id).map((ref) => run('readonly', (s) => s.get(ref)).catch(() => null))),
+    sourceTitle ? run('readonly', (s) => s.index(SOURCE_TITLES).getAll(sourceTitle)) : null,
+  ]);
+  const caches = matches.filter(Boolean);
+  const localSourceEditions = (indexed ?? []).flatMap((work) => work.editions ?? [])
+    .filter((edition) => edition?.chapters?.length && normalizeTitle(edition.manga?.title) === sourceTitle);
+  if (caches.length < 2) {
+    return localSourceEditions.length ? { ...caches[0], localSourceEditions } : caches[0] ?? null;
+  }
   const editions = new Map();
   for (const cached of caches) for (const edition of cached.editions ?? []) {
     const key = JSON.stringify([edition.sourceId, edition.manga?.url ?? '']);
@@ -77,6 +109,7 @@ export async function readWork(id) {
   return {
     ...caches[caches.length - 1], ...caches[0],
     editions: [...editions.values()],
+    localSourceEditions,
     detail: caches.find((c) => c.detail)?.detail ?? null,
     // An older contributing cache must still trigger the usual refresh.
     at: Math.min(...caches.map((c) => c.at ?? 0)),
@@ -85,7 +118,8 @@ export async function readWork(id) {
 }
 
 export async function writeWork(id, value) {
-  await run('readwrite', (s) => s.put({ ...value, at: Date.now() }, id)).catch(() => null);
+  const titles = sourceTitles(id, value);
+  await run('readwrite', (s) => s.put({ ...value, ...(titles.length ? { sourceTitles: titles } : {}), at: Date.now() }, id)).catch(() => null);
   // سقف بسيط: كل مئتي كتابة تقريبًا يُقصّ الأقدم
   if (Math.random() < 0.02) void prune();
 }

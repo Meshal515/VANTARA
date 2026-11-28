@@ -235,8 +235,25 @@ export async function topChapters() {
   return res?.status === 200 && Array.isArray(res.body?.works) ? res.body.works : null;
 }
 
+/**
+ * آخر التحديثات المحلي (المرحلة 6): بعد اكتمال الهجرة يُقرأ الخط الزمني من المخزن الدائم على الجهاز، ويُجلب جديد
+ * الخادم إليه أولًا (مرآة متزايدة) أثناء فترة المقارنة، فلا يصير العرض أفقر من اليوم. قبل الاكتمال أو عند أي فشل
+ * محلي: الخادم كما كان.
+ */
+let local = null;
+export function connectLocalTimeline(source) { local = source; }
+const mirrored = new Map();
+const MIRROR_MS = 60_000;
+
 /** الخط الزمني من ذاكرة VANTARA: الأحدث أولًا، بمؤشر ثابت للصفحات التالية. */
 export async function timeline(section, { before = null, limit = 40 } = {}) {
+  if (local?.ready?.()) {
+    try {
+      if (!before && Date.now() - (mirrored.get(section) ?? 0) > MIRROR_MS) { mirrored.set(section, Date.now()); await local.mirror(section).catch(() => {}); }
+      const page = await local.store.timeline(section, { before, limit });
+      return { ...page, snapshotAt: Date.now(), local: true };
+    } catch { /* المخزن المحلي غير متاح: الخادم كما كان */ }
+  }
   if (!transport) return null;
   const q = new URLSearchParams({ section, limit: String(limit), ...(before ? { before } : {}) });
   const res = await transport(`/v1/updates?${q}`).catch(() => null);

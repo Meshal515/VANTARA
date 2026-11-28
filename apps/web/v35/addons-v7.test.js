@@ -879,3 +879,34 @@ it('exports my extensions and imports them on another device: list, one trust co
   expect(other.querySelector('.v7-dialog .v7-notice').textContent).toContain('2 مثبّتة');
   other.close();
 });
+
+it('UX05: لكل تبويب بحثه؛ الرجوع إلى تبويب يعيد ما كُتب فيه بدل مسحه',async()=>{
+ const d=setup();
+ const view=renderV7Addons({registry:registry([])});d.body.append(view);await tick();
+ const input=view.querySelector('input');
+ const tabs=()=>[...view.querySelectorAll('.v7-tab')];
+ input.value='anime';input.oninput();
+ tabs()[1].click();await tick();
+ expect(input.value).toBe('');
+ input.value='manga';input.oninput();
+ tabs()[0].click();await tick();
+ expect(input.value).toBe('anime');
+ tabs()[1].click();await tick();
+ expect(input.value).toBe('manga');
+});
+
+it('UX04: الرجوع أثناء إزالة جارية يرد بوضوح ولا يقطعها، والنجاح يغلق النافذة وحده',async()=>{
+ const d=setup();let finish;const remove=vi.fn(()=>new Promise(resolve=>{finish=resolve;}));
+ const api={list:async()=>({repos:[{url:'https://repo.example/saved',name:'Saved Repo'}]}),extensions:async()=>[],remove};
+ const view=renderV7Addons({registry:registry(),repositories:api});d.body.append(view);await tick();
+ view.querySelector('[data-remove-repo]').click();[...view.querySelectorAll('.v7-dialog button')].find(b=>b.textContent==='إزالة').click();await tick();
+ expect(view.back()).toBe(true);
+ const layer=view.querySelector('.v7-dialog').parentElement;
+ expect(layer.hidden).toBe(false);
+ expect(view.querySelector('.v7-busy-note').textContent).toContain('جارٍ التنفيذ');
+ expect(view.querySelector('.v7-busy-note').getAttribute('role')).toBe('status');
+ finish();await tick();
+ expect(remove).toHaveBeenCalledTimes(1);
+ expect(view.querySelector('.v7-busy-note')).toBe(null);
+ view.close();
+});

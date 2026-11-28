@@ -71,20 +71,28 @@ class UsagePlugin : Plugin() {
         }
     }
 
+    /**
+     * القراءة على طابور الكتابة نفسه (خيط واحد بالترتيب): ما قبل هذا النداء (إغلاق القارئ) يُكتب أولًا كما كان،
+     * بلا `drain` على خيط Capacitor. ذلك الخيط واحد لكل الإضافات، وانتظاره (حتى ثانية لكل دفعة) كان يؤخر
+     * `pick` و`play` خلفه: ضغطة سيرفر تبقى على «يبدأ…» والمشغّل لا يُفتح.
+     */
     @PluginMethod fun pending(call: PluginCall) {
         val user = call.getString("userId")?.takeIf { it.isNotBlank() } ?: return call.reject("userId مطلوب")
-        // خيط الإضافة لا الرئيسي: ما قبل هذا النداء (إغلاق القارئ) يُكتب أولًا، فالترتيب كما كان
-        writer.drain(1_000)
-        try { call.resolve(JSObject().put("items", JSArray(Json.encodeToString(UsageStore.get(context).peek(user))))) }
-        catch (e: Exception) { call.reject("تعذّر قراءة الوقت المحفوظ", e) }
+        io.execute {
+            try { call.resolve(JSObject().put("items", JSArray(Json.encodeToString(UsageStore.get(context).peek(user))))) }
+            catch (e: Exception) { call.reject("تعذّر قراءة الوقت المحفوظ", e) }
+        }
     }
 
     @PluginMethod fun acknowledge(call: PluginCall) {
         val user = call.getString("userId")?.takeIf { it.isNotBlank() } ?: return call.reject("userId مطلوب")
         val ids = call.getArray("ids") ?: return call.reject("ids مطلوب")
-        try {
-            UsageStore.get(context).ack(user, (0 until ids.length()).map { ids.getString(it) }.toSet())
-            call.resolve()
-        } catch (e: Exception) { call.reject("تعذّر تأكيد الوقت", e) }
+        val list = (0 until ids.length()).map { ids.getString(it) }.toSet()
+        io.execute {
+            try {
+                UsageStore.get(context).ack(user, list)
+                call.resolve()
+            } catch (e: Exception) { call.reject("تعذّر تأكيد الوقت", e) }
+        }
     }
 }

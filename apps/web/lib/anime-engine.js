@@ -628,6 +628,102 @@ export async function best(session, prefer = null, waitMs = 45_000) {
 }
 
 /** أفضل رابط داخل سيرفر اختاره المستخدم. */
+/** «المقترح» في الورقة تورنت: يُسخَّن الآن قبل غيره (أندرويد). بلا جسر أصلي (ويب/ويندوز): لا شيء. */
+export async function warm(session, route, at = 0, { hover = false } = {}) {
+  try { return (await call('warm', { session, route, ...(at > 0 ? { at } : {}), ...(hover ? { hover: true } : {}) }))?.warming === true; } catch { return false; }
+}
+
+/**
+ * موضع الاستئناف كنسبة من الحلقة (0..0.98) لتسخين قطعته قبل الضغط، أو 0 حين يبدأ من أوله أو لا تُعرف المدة.
+ * عينة الجهاز (26 نوفمبر): استئناف عند 21:17 والتسخين جهّز الرأس والذيل فقط، فانتظر طلب الموضع 2.5 ث.
+ */
+export function resumeFraction(positionMs, totalMs) {
+  const p = Number(positionMs), t = Number(totalMs);
+  if (!(p > 5000) || !(t > p)) return 0;
+  return Math.min(0.98, p / t);
+}
+/**
+ * الصفوف الظاهرة غير «المقترح» بترتيب الورقة: تسخين خلفي محدود (أندرويد). `[]` أو `stop` يهدّئه كله.
+ * بلا جسر أصلي: لا شيء.
+ */
+export async function warmBackground(session, routes, { stop = false } = {}) {
+  try { return (await call('warmBackground', { session, routes: routes ?? [], stop }))?.warming ?? 0; } catch { return 0; }
+}
+
+/** حقائق المحرك لتورنتات الجلسة المُسخَّنة: `{ routeId: { pieceLength, seeds, peers } }`. بلا جسر أصلي: `{}`. */
+export async function torrentFacts(session) {
+  try { return (await call('torrentFacts', { session }))?.facts ?? {}; } catch { return {}; }
+}
+
+/**
+ * يتابع حقائق التسخين ما دامت الورقة تطلبها: كل `every` حتى `span` من آخر `poke()` (مقترح جديد يمدّها).
+ * `onFacts` يُستدعى حين تتغير فقط. يرجع `{ poke, stop }`.
+ */
+export function watchFacts(session, onFacts, { every = 1500, span = 20000, idleEvery = 5000, read = torrentFacts } = {}) {
+  let until = 0, timer = null, stopped = false, reading = false, last = '';
+  const tick = async () => {
+    timer = null;
+    if (stopped) return;
+    reading = true;
+    let facts;
+    try { facts = await read(session); } catch { facts = {}; }
+    reading = false;
+    if (stopped) return;
+    const key = JSON.stringify(facts);
+    if (key !== last) { last = key; onFacts(facts); }
+    if (Date.now() < until) timer = setTimeout(tick, every);
+    else if (Object.values(facts).some((fact) => typeof fact?.ready === 'boolean')) timer = setTimeout(tick, idleEvery);
+  };
+  return {
+    poke() {
+      if (stopped) return;
+      const idle = Date.now() >= until;
+      until = Date.now() + span;
+      if (reading || timer != null && !idle) return;
+      clearTimeout(timer);
+      timer = setTimeout(tick, every);
+    },
+    stop() { stopped = true; clearTimeout(timer); timer = null; },
+  };
+}
+
+/**
+ * «المقترح» في الورقة: يسخّنه ويتابع حقائق المحرك (حجم القطعة والسرب المقاس) لتدخل درجته.
+ * `top(session, routeId)` لكل مقترح جديد، و`rows(session, ids)` للصفوف الظاهرة (تسخين خلفي)،
+ * و`stop()` عند إغلاق الورقة: يهدّئ الخلفي ويترك «المقترح» لمدته (غالبًا هو ما يُشغَّل).
+ */
+export function topWarmer(onFacts, options) {
+  let watch = null, session = null, ended = false, refresh = null, last = null;
+  // المحرك يمسك التسخين 90 ث ثم يهدّئه (وقد يُخلى). الورقة المفتوحة أطول من ذلك (عينة الجهاز: 100.7 ث) تجدّده كل
+  // دقيقة، فيبقى «المقترح» دافئًا حتى الضغط أو الإغلاق
+  const every = options?.refreshMs ?? 60000;
+  return {
+    top(s, route) {
+      if (ended || !s || !route) return;
+      last = { s, route };
+      if (!refresh) refresh = setInterval(() => { if (!ended && last) void warm(last.s, last.route, options?.at); }, every);
+      void warm(s, route, options?.at);
+      if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
+      watch.poke();
+    },
+    /** مرور الفأرة على صف (ويندوز): يُسخَّن بجانب «المقترح» لا بدله، ولا يأخذ مكانه في التجديد. */
+    hover(s, route) {
+      if (ended || !s || !route) return;
+      void warm(s, route, options?.at, { hover: true });
+    },
+    rows(s, ids) {
+      if (ended || !s) return;
+      void warmBackground(s, ids);
+      if (session !== s) { watch?.stop(); session = s; watch = watchFacts(s, onFacts, options); }
+      watch.poke();
+    },
+    stop() {
+      if (!ended && session) void warmBackground(session, [], { stop: true });
+      ended = true; clearInterval(refresh); refresh = null; last = null; watch?.stop(); watch = null; session = null;
+    },
+  };
+}
+
 export async function pick(session, route) {
   return (await call('pick', { session, route }))?.candidate ?? null;
 }
@@ -653,30 +749,55 @@ export async function subtitleContext(identity) {
   return { subtitleIdentity, addonSubtitleProviders };
 }
 
+async function addonSubtitleProvidersNow() {
+  if (!(globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine)) return null;
+  try { const a = await getAddonRuntime(); await a.ready; return a.nativeSubtitleProviders(); }
+  catch { return null; /* ترجمة الإضافة لا تمنع الفيديو */ }
+}
+async function playerAccent(section) {
+  try {
+    const [{ liveAccent }, { readStructure }] = await Promise.all([import('../v35/appearance.js'), import('../v35/experience.js')]);
+    return liveAccent(section === 'cinema' ? 'cinema' : 'anime', { unified: readStructure().unifyContent });
+  } catch { return null; /* اللون تحسين لا شرط */ }
+}
+
+/**
+ * يجهّز ما يحتاجه فتح المشغّل قبل الضغطة (يُنادى مع فتح ورقة السيرفرات): ربط الأنمي بـIMDb، وإضافات الترجمة، ووحدتا
+ * اللون. كلها مخزّنة بعد أول مرة، فالضغطة لا تنتظر شبكة ولا تهيئة. لا يغيّر شيئًا مما يصل المشغّل.
+ */
+export function warmOpen(identity) {
+  if (identity) void withImdbEpisode(identity).catch(() => {});
+  void addonSubtitleProvidersNow();
+  void playerAccent('anime');
+}
+
 export async function open(args) {
   const plugin = bridge();
   if (!plugin) return null;
+  // علامات الضغطة (تقرير الذهب): ساعة الواجهة، يحوّلها المشغّل لساعته
+  const { marks, ...rest } = args;
+  args = rest;
   const identity = addonDiscoverySessions.get(args.session)?.identity;
   if (identity && identity.canonicalId === args.subtitleIdentity?.canonicalId && identity.kind === args.subtitleIdentity?.kind) args = { ...args, subtitleIdentity: { ...args.subtitleIdentity, externalIds: { ...args.subtitleIdentity.externalIds, ...identity.externalIds } } };
-  // إضافات الترجمة تعرف الحلقة بـIMDb + الموسم: نربط الأنمي بهما قبل فتح المشغّل
-  if (args.subtitleIdentity) args = { ...args, subtitleIdentity: await withImdbEpisode(args.subtitleIdentity) };
+  // معًا لا واحدًا بعد الآخر: ربط IMDb (شبكة حتى 4 ث في أول مرة)، وتهيئة الإضافات، ووحدتا اللون كانت تنتظر بالتتابع قبل
+  // play، والمشغّل لا يُفتح حتى تنتهي كلها. ما يصل المشغّل هو نفسه
+  const [subtitleIdentity, addonSubtitleProviders, accent] = await Promise.all([
+    // إضافات الترجمة تعرف الحلقة بـIMDb + الموسم: نربط الأنمي بهما قبل فتح المشغّل
+    args.subtitleIdentity ? withImdbEpisode(args.subtitleIdentity).catch(() => args.subtitleIdentity) : Promise.resolve(args.subtitleIdentity),
+    addonSubtitleProvidersNow(),
+    // المشغّل الأصلي بلون الواجهة نفسه دائمًا: لون القسم المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد
+    playerAccent(args.section),
+  ]);
+  if (args.subtitleIdentity) args = { ...args, subtitleIdentity };
   // شعار وخلفية Stremio نفسيهما من رقم IMDb إن لم تمرّرهما الصفحة
   const imdb = args.subtitleIdentity?.externalIds?.imdb;
   if (/^tt\d+$/.test(imdb ?? '')) args = { ...args, logo: args.logo ?? `https://images.metahub.space/logo/medium/${imdb}/img`, backdrop: args.backdrop ?? `https://images.metahub.space/background/medium/${imdb}/img` };
-  if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
-    try {
-      const a = await getAddonRuntime(); await a.ready;
-      args = {...args, addonSubtitleProviders: a.nativeSubtitleProviders()};
-    } catch { /* ترجمة الإضافة لا تمنع الفيديو */ }
-  }
-  // المشغّل الأصلي بلون الواجهة نفسه دائمًا: لون القسم المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد
-  try {
-    const [{ liveAccent }, { readStructure }] = await Promise.all([import('../v35/appearance.js'), import('../v35/experience.js')]);
-    args = { ...args, accent: liveAccent(args.section === 'cinema' ? 'cinema' : 'anime', { unified: readStructure().unifyContent }) };
-  } catch { /* اللون تحسين لا شرط */ }
+  if (addonSubtitleProviders) args = { ...args, addonSubtitleProviders };
+  if (accent) args = { ...args, accent };
   // التأثير الزجاجي كما يطبّقه الويب فعلًا (syncGlass يزيله مع «تقليل الشفافية» أو الدرجة off): المشغّل الأصلي يلبس
   // أزراره «مظهرًا زجاجيًا» (Ui.kt: Glass)، وغيره يبقى كما هو
   if (globalThis.document?.documentElement?.dataset?.material === 'glass') args = { ...args, material: 'glass' };
+  if (Number.isFinite(marks?.tapAt)) args = { ...args, tapAt: marks.tapAt, ...(Number.isFinite(marks.pickedAt) ? { pickedAt: marks.pickedAt } : {}), uiOpenAt: Date.now() };
   await plugin.play(args);
   return true;
 }
@@ -783,6 +904,7 @@ export function repositories() {
   return {
     kind: 'anime',
     list: () => plugin.repos(),
+    enable: typeof plugin.enableExtension === 'function' ? (pkg, enabled) => plugin.enableExtension({ pkg, enabled }) : null,
     add: (url) => plugin.addRepo({ url }),
     remove: (url) => plugin.removeRepo({ url }),
     extensions: async (url) => (await plugin.repoIndex({ url })).extensions ?? [],

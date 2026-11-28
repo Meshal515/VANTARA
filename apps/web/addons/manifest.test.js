@@ -153,3 +153,10 @@ it('declares desktop compatibility and refuses interactive Remote verification t
   const blocked = check({ ...native(), permissions: { networkHosts: ['demo.test'], verification: true } });
   expect(blocked.compatibility.desktop).toBe(false);
 });
+
+it('resolves a relative Stremio logo against the manifest location', () => {
+  const result = validateManifest({ ...observed('subdl'), logo: './logo-%size%.png' }, {
+    origin: 'https://addons.example', manifestUrl: 'https://addons.example/configured/manifest.json',
+  });
+  expect(result.manifest.logo).toBe('https://addons.example/configured/logo-128.png');
+});

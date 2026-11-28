@@ -257,6 +257,23 @@ jobs:
         run: |
           printf '{"version":"%s","native":"%s"}\n' "$VERSION_NAME" "$NATIVE" > android/app/src/main/assets/public/vantara-bundle.json
 
+      - name: VANTARA libtorrent natives (pinned SHA-256; stock jlibtorrent without a lock)
+        # android/app/libtorrent-natives.lock (داخل android/ فيدخل بصمة الطبقة الأصلية): «معالج رابط بصمة» لكل سطر. بصمة لا تطابق تُفشل البناء
+        # (لا رجوع صامت للمكتبة الأصلية مع إعداد H). بلا الملف يبقى jlibtorrent الأصلي كما هو.
+        run: |
+          set -euo pipefail
+          lock=android/app/libtorrent-natives.lock
+          if [ ! -f "$lock" ]; then echo "no lock: stock jlibtorrent"; exit 0; fi
+          dir="$RUNNER_TEMP/lt-natives"
+          grep -v '^#' "$lock" | while read -r abi url sha; do
+            [ -n "$abi" ] || continue
+            mkdir -p "$dir/$abi"
+            curl -fsSL --retry 3 -o "$dir/$abi/libjlibtorrent.so" "$url"
+            echo "$sha  $dir/$abi/libjlibtorrent.so" | sha256sum -c -
+          done
+          test -s "$dir/arm64-v8a/libjlibtorrent.so"
+          echo "ORG_GRADLE_PROJECT_vantaraPatchedTorrentDir=$dir" >> "$GITHUB_ENV"
+
       - name: Build updateable debug APK and run native unit tests
         working-directory: android
         env:

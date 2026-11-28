@@ -75,7 +75,7 @@ class RuntimePlugin : Plugin() {
                 .putExtra("userAgent",item.userAgent).putExtra("sourceName",item.sourceName).putExtra("token",item.token)
                 .putExtra("runtimeProfile",host.verificationProfile(item)),"verified")
         }catch(failure:Exception){
-            active?.let { VerificationCoordinator.finish(it.host,it.token,"failed","launch_failed") };active=null
+            active?.let { host.cancelVerification(it); VerificationCoordinator.finish(it.host,it.token,"failed","launch_failed") };active=null
             // The reason, never only «تعذر فتح التحقق»: the button had nothing to say when no page opened
             val code=failure.message?.takeIf { it.matches(Regex("[A-Z_]{3,64}")) } ?: "VERIFICATION_LAUNCH_FAILED"
             call.reject(when(code) {
@@ -87,22 +87,34 @@ class RuntimePlugin : Plugin() {
     } }
     @ActivityCallback private fun verified(call: PluginCall?,result: ActivityResult) {
         val item=active;active=null
-        if(call==null || item==null)return
+        if(item==null)return
+        if(call==null) {
+            host.cancelVerification(item)
+            VerificationCoordinator.finish(item.host,item.token,"cancelled","interrupted")
+            return
+        }
         val data=result.data
         val matches=data?.getStringExtra("host")==item.host && data?.getStringExtra("token")==item.token
         val value=if(matches && result.resultCode==Activity.RESULT_OK && data?.getStringExtra("state")=="verified")
             data.getStringExtra("clearance")?.let { VerificationPolicy.clearance("cf_clearance=$it") } else null
-        if(value==null) {
+        val cookieOrigin=data?.getStringExtra("cookieOrigin")
+        if(value==null || cookieOrigin==null) {
+            host.cancelVerification(item)
             VerificationCoordinator.finish(item.host,item.token,"cancelled",if(matches)data?.getStringExtra("reason") else "interrupted")
             // السبب الحقيقي (حجب، مهلة، انتقال نطاق...) يصل للواجهة؛ كان كل إغلاق يُعرض «أُلغي التحقق»
             call.resolve(JSObject().put("host",item.host).put("state","cancelled").put("reason",(if(matches)data?.getStringExtra("reason") else null) ?: "interrupted"));return
         }
         run(call) {
-            try { host.completeVerification(item,value).also { VerificationCoordinator.finish(item.host,item.token,"verified") } }
+            try { host.completeVerification(item,value,cookieOrigin).also { VerificationCoordinator.finish(item.host,item.token,"verified") } }
             catch(error:Exception) { VerificationCoordinator.finish(item.host,item.token,"failed","source_retry_failed");throw error }
         }
     }
     override fun handleOnResume() { foreground=true }
     override fun handleOnPause() { foreground=false }
-    override fun handleOnDestroy() { jobs.cancel();if(::host.isInitialized)host.close() }
+    override fun handleOnDestroy() {
+        active?.let { VerificationCoordinator.finish(it.host,it.token,"cancelled","interrupted") }
+        active = null
+        jobs.cancel()
+        if (::host.isInitialized) host.close()
+    }
 }

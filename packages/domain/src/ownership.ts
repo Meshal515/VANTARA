@@ -206,6 +206,22 @@ export const DATA_OWNERSHIP: readonly DataDomainSpec[] = [
     why: 'حكم المصدر ودليله يُبنيان بالفحص عندنا، ولا يأتيان من Uchiyomi.',
   },
   {
+    key: 'updates.timeline',
+    owner: 'DEVICE',
+    mirrors: ['D1'],
+    tables: { D1: ['latest_backups', 'latest_backup_events'] },
+    retired: {},
+    why: 'آخر التحديثات المحلي (خطة 27 نوفمبر): الجهاز يكشف من إضافاته ويقرر ويحفظ (SQLite/IndexedDB). D1 يحمل نسخة حساب صغيرة بلا روابط لما كشفه الجهاز نفسه، تُستعاد في تثبيت جديد فقط ولا تُقرأ كحقيقة.',
+  },
+  {
+    key: 'updates.signals',
+    owner: 'D1',
+    mirrors: [],
+    tables: { D1: ['latest_signals'] },
+    retired: {},
+    why: 'إشارات الأصحاب: ترحيل مؤقت (30 يومًا) لما يكتشفه جهاز إلى بقية حسابات النسخة، بلا روابط ولا هوية المرسل في الرد. ليست نتائج محفوظة؛ جهاز المستقبل يقبلها لمصدر مثبت عنده وبسياسته.',
+  },
+  {
     key: 'device.downloads',
     owner: 'DEVICE',
     mirrors: [],

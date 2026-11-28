@@ -154,7 +154,7 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
   const sourceBrowser = session?.fromPartition ? createSourceBrowser({ BrowserWindow, session, net, userAgent: chromeUserAgent(process.versions.chrome), isChallenge: challengePage }) : null;
   // إضافات Mihon (Suwayomi) تحل Cloudflare بالمتصفح نفسه عبر جسر محلي بواجهة FlareSolverr (cf-bridge.cjs)
   const cloudflareBridge = sourceBrowser ? require('./cf-bridge.cjs').createCloudflareBridge({
-    solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent,
+    solve: sourceBrowser.solve, cookies: sourceBrowser.cookies, request: sourceBrowser.request, userAgent: sourceBrowser.userAgent, isChallenge: challengePage,
     onChallenge: host => publish({ type: 'source-verification/required', host }),
   }) : null;
   if(process.platform==='win32')videoHost=createVideoHost({
@@ -219,6 +219,10 @@ Promise.all([app.whenReady(),profileReady]).then(async () => {
     if (!mangaEngineReportOption) setTimeout(() => { void mangaEngine.warmUp().then((on) => on && mangaEngine.autoUpdate()).catch(() => {}); }, 8000).unref?.();
   }
   register('open-external', ({ url }) => openSettings(url));
+  // آخر التحديثات المحلي: SQLite في مجلد بيانات المستخدم (يبقى بعد التحديث)، قاعدة لكل حساب. يُفتح عند أول طلب.
+  let latestStore = null;
+  register('latest-store', (request = {}) => { latestStore ??= require('./latest-store.cjs').createSqliteLatestStore({ dir: path.join(app.getPath('userData'), 'latest') }); return latestStore.call(request); });
+  app.on('will-quit', () => latestStore?.close());
   register('open-update-page', async ({ url } = {}) => {
     await shell.openExternal(updater.officialInstallerUrl(url, channelInfo.channel));
     return true;

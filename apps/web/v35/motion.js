@@ -106,6 +106,18 @@ export function progressFill(bar, seconds, onDone) {
   return g.fromTo(bar, { scaleX: 0 }, { scaleX: 1, duration: seconds, ease: 'none', onComplete: onDone });
 }
 
+/**
+ * برق التسخين في ورقة السيرفرات: يظهر مرة حين يقول المحرك إن أول إطار على القرص. تحويل وشفافية على الرمز وحده
+ * (خانة الجودة محجوزة المقاس فلا يتحرك الصف)، ونبضة لون قصيرة بلون الثيم. بلا حركة: يظهر كما هو.
+ */
+export function boltIn(node) {
+  const g = live();
+  if (!g || !node) return;
+  g.killTweensOf(node);
+  g.fromTo(node, { opacity: 0, scale: 0.4, rotate: -18 }, { opacity: 1, scale: 1, rotate: 0, duration: 0.55, ease: EASE.spring, clearProps: 'opacity,transform' });
+  g.fromTo(node, { filter: 'drop-shadow(0 0 0 transparent)' }, { filter: 'drop-shadow(0 0 6px var(--accent))', duration: 0.3, ease: EASE.soft, yoyo: true, repeat: 1, clearProps: 'filter' });
+}
+
 /** نبضة صغيرة لما يُضغط: تأكيد بصري أن اللمسة وصلت. */
 export function pop(node) {
   const g = live();

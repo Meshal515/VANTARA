@@ -103,7 +103,7 @@ test('المضيفات المسموحة عامة فقط', () => {
 });
 
 /** نافذة ظاهرة بديلة: صفحات متتالية لكل نداء فحص، وإغلاق يدوي بـclose(). */
-function fakeVisible(pages) {
+function fakeVisible(pages, net = null) {
   const log = { windows: [] };
   const ses = { setUserAgent() {}, setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, on() {} };
   class BrowserWindow {
@@ -128,7 +128,28 @@ function fakeVisible(pages) {
     destroy() { this.destroyed = true; }
     close() { this.destroyed = true; this.handlers.closed?.(); }
   }
-  return { BrowserWindow, session: { fromPartition: () => ses }, net: {}, log };
+  // طلب الجلسة نفسها بعد زوال التحدي (قبول الموقع): ردود متتالية، الأخيرة تتكرر
+  const replies = net ?? [{ status: 200, body: '<html><title>Manga Lek</title>chapters</html>' }];
+  let r = 0;
+  const fakeNet = {
+    request() {
+      const handlers = {};
+      const reply = replies[Math.min(r++, replies.length - 1)];
+      return {
+        setHeader() {}, on(name, fn) { handlers[name] = fn; }, abort() {}, write() {}, followRedirect() {},
+        end() {
+          setTimeout(() => {
+            if (reply === 'error') return handlers.error?.(new Error('net'));
+            const res = { statusCode: reply.status, headers: reply.headers ?? {}, on(name, fn) { res[name] = fn; } };
+            handlers.response(res);
+            res.data?.(Buffer.from(reply.body)); res.end?.();
+          }, 0);
+        },
+      };
+    },
+  };
+  log.netCalls = () => r;
+  return { BrowserWindow, session: { fromPartition: () => ses }, net: fakeNet, log };
 }
 const page = (over) => ({ host: 'mangalek.com', ready: 'complete', title: 'Manga Lek', text: 500, html: '<html>chapters</html>', ...over });
 
@@ -163,4 +184,19 @@ test('صفحة التحقق الظاهرة: لا تُفتح لعنوان محل�
   assert.equal(a, b);
   assert.deepEqual(await a, { host: 'mangalek.com', state: 'failed', reason: 'timeout' });
   assert.equal(e.log.windows.length, 1);
+});
+
+test('صفحة التحقق الظاهرة: لا «تم» حتى يقبل الموقع طلب الجلسة نفسه', async () => {
+  // الصفحة زال تحديها لكن طلب الجلسة ما زال يُتحدّى: النافذة تبقى، ثم يقبل فتُغلق ناجحة
+  const e = fakeVisible([page()], [{ status: 403, headers: { 'cf-mitigated': 'challenge' }, body: '<title>Just a moment...</title>' }, { status: 200, body: '<title>Manga Lek</title>ok' }]);
+  const browser = createSourceBrowser({ ...e, userAgent: 'UA', isChallenge });
+  const out = await browser.verify({ url: 'https://mangalek.com/' });
+  assert.deepEqual(out, { host: 'mangalek.com', state: 'verified' });
+  assert.ok(e.log.netCalls() >= 2, 'سُئل الموقع نفسه قبل النجاح');
+});
+
+test('صفحة التحقق الظاهرة: تعذّر الوصول للموقع بعد الصفحة لا يُعلن نجاحًا', async () => {
+  const e = fakeVisible([page()], ['error']);
+  const browser = createSourceBrowser({ ...e, userAgent: 'UA', isChallenge });
+  assert.deepEqual(await browser.verify({ url: 'https://mangalek.com/' }), { host: 'mangalek.com', state: 'failed', reason: 'unconfirmed' });
 });

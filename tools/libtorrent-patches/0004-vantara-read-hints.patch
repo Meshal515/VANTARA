@@ -1,0 +1,486 @@
+diff --git a/include/libtorrent/piece_picker.hpp b/include/libtorrent/piece_picker.hpp
+index 761a297..f127efc 100644
+--- a/include/libtorrent/piece_picker.hpp
++++ b/include/libtorrent/piece_picker.hpp
+@@ -356,6 +356,13 @@ namespace libtorrent {
+ 		// peer pointer
+ 		void clear_peer(torrent_peer* peer);
+ 
++		// VANTARA (read-hints): order in which this piece's blocks are offered to
++		// the pickers, nearest-ahead first to any reader position inside it
++		// (vantara_block_order). Empty clears it. The default (no entry) is the
++		// stock ascending order.
++		void vantara_set_block_order(piece_index_t piece, std::vector<int> order);
++		std::vector<int> const* vantara_block_order(piece_index_t piece) const;
++
+ #if TORRENT_USE_INVARIANT_CHECKS
+ 		// this is an invariant check
+ 		void check_peers();
+@@ -878,6 +885,9 @@ namespace libtorrent {
+ 		// its storage
+ 		aux::vector<block_info> m_block_info;
+ 
++		// VANTARA (read-hints): per-piece block order (see vantara_set_block_order)
++		std::unordered_map<int, std::vector<int>> m_vantara_order;
++
+ 		// these are block ranges in m_block_info that are free. The numbers
+ 		// in here, when multiplied by blocks_per_piece is the index to the
+ 		// first block in the range that's free to use by a new downloading_piece.
+diff --git a/include/libtorrent/torrent.hpp b/include/libtorrent/torrent.hpp
+index 59bc425..8e0cab7 100644
+--- a/include/libtorrent/torrent.hpp
++++ b/include/libtorrent/torrent.hpp
+@@ -117,6 +117,11 @@ namespace ssl {
+ 
+ namespace libtorrent {
+ 
++	// VANTARA (read-hints): true while any torrent has a reader hint, so the
++	// session tick only visits torrents when there is something to rescue
++	TORRENT_EXTRA_EXPORT bool vantara_read_hints_active();
++
++
+ 	class http_parser;
+ 	struct tracker_request;
+ 	struct bt_peer_connection;
+@@ -645,6 +650,12 @@ namespace libtorrent {
+ 		void cancel_non_critical();
+ 		void set_piece_deadline(piece_index_t piece, int t, deadline_flags_t flags);
+ 		void reset_piece_deadline(piece_index_t piece);
++		// VANTARA (read-hints): a reader waits at byte [offset] of [piece]. Its blocks
++		// are picked nearest-ahead first, its frontier blocks are rescued every
++		// session tick, and scheduling runs at once (not at the next second_tick).
++		void vantara_set_read_hint(int reader, piece_index_t piece, int offset);
++		void vantara_clear_read_hint(int reader);
++		void vantara_hint_tick();
+ 		void clear_time_critical();
+ #endif // TORRENT_DISABLE_STREAMING
+ 
+@@ -1404,6 +1415,20 @@ namespace libtorrent {
+ #ifndef TORRENT_DISABLE_STREAMING
+ 		// this list is sorted by time_critical_piece::deadline
+ 		std::vector<time_critical_piece> m_time_critical_pieces;
++
++		// VANTARA (read-hints): one per open reader
++		struct vantara_read_hint
++		{
++			int reader;
++			piece_index_t piece;
++			int block;
++			int frontier;
++			time_point frontier_since;
++		};
++		std::vector<vantara_read_hint> m_vantara_hints;
++		int m_vantara_rr = 0;
++		void vantara_reorder(piece_index_t piece);
++		void vantara_frontier(std::set<peer_connection*>& with_requests);
+ #endif
+ 
+ 		std::string m_trackerid;
+diff --git a/include/libtorrent/torrent_handle.hpp b/include/libtorrent/torrent_handle.hpp
+index 88a7630..2f0e42b 100644
+--- a/include/libtorrent/torrent_handle.hpp
++++ b/include/libtorrent/torrent_handle.hpp
+@@ -425,6 +425,12 @@ namespace aux {
+ 		// the torrent. As if reset_piece_deadline() was called on all pieces.
+ 		void set_piece_deadline(piece_index_t index, int deadline, deadline_flags_t flags = {}) const;
+ 		void reset_piece_deadline(piece_index_t index) const;
++		// VANTARA (read-hints): reader [reader] waits at byte [offset_in_piece] of
++		// [index]. Its blocks are scheduled from there, its next blocks rescued from
++		// slow peers, at once. Clear when the reader closes. See VANTARA_LT_READ_HINTS.
++#define VANTARA_LT_READ_HINTS 1
++		void vantara_set_read_hint(int reader, piece_index_t index, int offset_in_piece) const;
++		void vantara_clear_read_hint(int reader) const;
+ 		void clear_piece_deadlines() const;
+ 
+ #if TORRENT_ABI_VERSION == 1
+diff --git a/src/piece_picker.cpp b/src/piece_picker.cpp
+index 2a1828b..ad3d990 100644
+--- a/src/piece_picker.cpp
++++ b/src/piece_picker.cpp
+@@ -2675,13 +2675,30 @@ get_out:
+ 
+ 		if (prefer_contiguous_blocks == 0)
+ 		{
++			int const all_payload = payload_blocks;
+ 			if (payload_blocks > num_blocks)
+ 				payload_blocks = num_blocks;
+ 			TORRENT_ASSERT(is_piece_free(piece, pieces));
+-			for (int j = 0; j < payload_blocks; ++j)
++			std::vector<int> const* const order = vantara_block_order(piece);
++			if (order == nullptr)
+ 			{
+-				TORRENT_ASSERT(j < blocks_in_piece(piece));
+-				interesting_blocks.emplace_back(piece, j);
++				for (int j = 0; j < payload_blocks; ++j)
++				{
++					TORRENT_ASSERT(j < blocks_in_piece(piece));
++					interesting_blocks.emplace_back(piece, j);
++				}
++			}
++			else
++			{
++				// VANTARA (read-hints): the reader's block first, then onward
++				int taken = 0;
++				for (int const j : *order)
++				{
++					if (taken >= payload_blocks) break;
++					if (j < 0 || j >= all_payload) continue;
++					interesting_blocks.emplace_back(piece, j);
++					++taken;
++				}
+ 			}
+ 			num_blocks -= payload_blocks;
+ 		}
+@@ -2753,6 +2770,12 @@ get_out:
+ 		// we're interested in it. In fact, we really want the opposite.
+ 		if (prefer_contiguous_blocks == 0) first_block = 0;
+ 
++		// VANTARA (read-hints): a reader waits inside this piece; offer its blocks
++		// nearest-ahead first. Only when no contiguous run is wanted (time-critical
++		// and streaming picks), and only for an order of exactly this piece's size.
++		std::vector<int> const* hinted = prefer_contiguous_blocks == 0 ? vantara_block_order(dp.index) : nullptr;
++		if (hinted != nullptr && int(hinted->size()) != num_blocks_in_piece) hinted = nullptr;
++
+ 		// peers on parole are only allowed to pick blocks from
+ 		// pieces that only they have downloaded/requested from
+ 		if ((options & on_parole) && !exclusive) return num_blocks;
+@@ -2774,7 +2797,7 @@ get_out:
+ 			for (int j = 0; j < num_blocks_in_piece; ++j)
+ 			{
+ 				// ignore completed blocks and already requested blocks
+-				int const block_idx = (j + first_block) % num_blocks_in_piece;
++				int const block_idx = hinted ? (*hinted)[std::size_t(j)] : (j + first_block) % num_blocks_in_piece;
+ 				block_info const& info = binfo[block_idx];
+ 				TORRENT_ASSERT(info.piece_index == dp.index);
+ 				if (info.state != block_info::state_none) continue;
+@@ -2786,7 +2809,7 @@ get_out:
+ 		for (int j = 0; j < num_blocks_in_piece; ++j)
+ 		{
+ 			// ignore completed blocks and already requested blocks
+-			int const block_idx = (j + first_block) % num_blocks_in_piece;
++			int const block_idx = hinted ? (*hinted)[std::size_t(j)] : (j + first_block) % num_blocks_in_piece;
+ 			block_info const& info = binfo[block_idx];
+ 			TORRENT_ASSERT(info.piece_index == dp.index);
+ 			if (info.state != block_info::state_none) continue;
+@@ -3961,4 +3984,18 @@ get_out:
+ 		TORRENT_ASSERT(m_have_pad_bytes >= pad_bytes);
+ 		m_have_pad_bytes -= pad_bytes;
+ 	}
++
++	void piece_picker::vantara_set_block_order(piece_index_t const piece, std::vector<int> order)
++	{
++		int const key = static_cast<int>(piece);
++		if (order.empty()) m_vantara_order.erase(key);
++		else m_vantara_order[key] = std::move(order);
++	}
++
++	std::vector<int> const* piece_picker::vantara_block_order(piece_index_t const piece) const
++	{
++		if (m_vantara_order.empty()) return nullptr;
++		auto const it = m_vantara_order.find(static_cast<int>(piece));
++		return it == m_vantara_order.end() ? nullptr : &it->second;
++	}
+ }
+diff --git a/src/session_impl.cpp b/src/session_impl.cpp
+index 6f017e6..371ff8b 100644
+--- a/src/session_impl.cpp
++++ b/src/session_impl.cpp
+@@ -3467,6 +3467,13 @@ namespace {
+ 		m_ssl_utp_socket_manager.tick(now);
+ #endif
+ 
++#ifndef TORRENT_DISABLE_STREAMING
++		// VANTARA (read-hints): readers' frontier blocks are rescued every tick,
++		// not only in the once-per-second critical pass
++		if (vantara_read_hints_active())
++			for (auto& t : m_torrents) t->vantara_hint_tick();
++#endif
++
+ 		// only tick the following once per second
+ 		if (now - m_last_second_tick < seconds(1)) return;
+ 
+diff --git a/src/torrent.cpp b/src/torrent.cpp
+index a8cdff6..bd059d3 100644
+--- a/src/torrent.cpp
++++ b/src/torrent.cpp
+@@ -56,6 +56,8 @@ POSSIBILITY OF SUCH DAMAGE.
+ #include <cstdarg> // for va_list
+ #include <ctime>
+ #include <algorithm>
++#include <atomic>
++#include <limits>
+ #include <set>
+ #include <map>
+ #include <vector>
+@@ -152,6 +154,16 @@ namespace {
+ 		return value;
+ 	}
+ 
++	// VANTARA (read-hints): how long a reader's frontier may stand still before
++	// its next blocks are also asked from another peer
++	int vantara_frontier_ms()
++	{
++		static int const value = [] { int const v = vantara_env_int("VANTARA_LT_FRONTIER_MS"); return v > 0 ? v : 300; }();
++		return value;
++	}
++
++	std::atomic<int> g_vantara_hinted_torrents{0};
++
+ 	// VANTARA (urgent-hedge): proactive, bounded duplicate requests for the head
+ 	// of the piece the player is blocked on. Stock libtorrent only re-requests a
+ 	// busy block after the piece "times out" and stops issuing critical requests
+@@ -857,6 +869,9 @@ aux::vector<download_priority_t, piece_index_t> file_to_piece_prio(
+ 
+ 	torrent::~torrent()
+ 	{
++#ifndef TORRENT_DISABLE_STREAMING
++		if (!m_vantara_hints.empty()) g_vantara_hinted_torrents.fetch_sub(1, std::memory_order_relaxed);
++#endif
+ 		// TODO: 3 assert there are no outstanding async operations on this
+ 		// torrent
+ 
+@@ -11281,6 +11296,214 @@ namespace {
+ 	}
+ #endif // TORRENT_DISABLE_STREAMING
+ 
++	bool vantara_read_hints_active()
++	{
++		return g_vantara_hinted_torrents.load(std::memory_order_relaxed) > 0;
++	}
++
++#ifndef TORRENT_DISABLE_STREAMING
++	// VANTARA (read-hints): libtorrent offers a piece's blocks from block 0 upward
++	// (piece_picker::add_blocks, add_blocks_downloading). A player fed written
++	// blocks before the piece is verified needs the blocks at its read position:
++	// a season-pack episode starts inside a piece shared with the previous file,
++	// and an MKV index sits at the end of the last piece. Each open reader has a
++	// hint (piece, block): the picker offers that piece's blocks nearest-ahead to
++	// any reader first, and the frontier (the first unfinished blocks from the
++	// reader) is rescued from slow peers every session tick, fairly across readers.
++	void torrent::vantara_reorder(piece_index_t const piece)
++	{
++		if (!has_picker()) return;
++		int const n = m_picker->blocks_in_piece(piece);
++		std::vector<int> starts;
++		for (auto const& h : m_vantara_hints)
++			if (h.piece == piece) starts.push_back(h.block);
++		if (starts.empty() || n <= 0)
++		{
++			m_picker->vantara_set_block_order(piece, {});
++			return;
++		}
++		std::vector<int> order(static_cast<std::size_t>(n));
++		std::vector<int> key(static_cast<std::size_t>(n));
++		for (int j = 0; j < n; ++j)
++		{
++			order[std::size_t(j)] = j;
++			int best = n;
++			for (int const b : starts) best = std::min(best, (j - b + n) % n);
++			key[std::size_t(j)] = best;
++		}
++		std::stable_sort(order.begin(), order.end()
++			, [&key](int const a, int const b) { return key[std::size_t(a)] < key[std::size_t(b)]; });
++		m_picker->vantara_set_block_order(piece, std::move(order));
++	}
++
++	void torrent::vantara_set_read_hint(int const reader, piece_index_t const piece, int const offset)
++	{
++		if (!valid_metadata() || !has_picker()) return;
++		if (piece < piece_index_t(0) || piece >= m_torrent_file->end_piece()) return;
++		int const n = m_picker->blocks_in_piece(piece);
++		if (n <= 0) return;
++		int const block = std::max(0, std::min(n - 1, std::max(0, offset) / block_size()));
++		time_point const now = aux::time_now();
++		bool const was_empty = m_vantara_hints.empty();
++		auto it = std::find_if(m_vantara_hints.begin(), m_vantara_hints.end()
++			, [reader](vantara_read_hint const& h) { return h.reader == reader; });
++		if (it != m_vantara_hints.end())
++		{
++			if (it->piece == piece && it->block == block) return;
++			piece_index_t const old = it->piece;
++			it->piece = piece;
++			it->block = block;
++			it->frontier = -1;
++			it->frontier_since = now;
++			if (old != piece) vantara_reorder(old);
++		}
++		else m_vantara_hints.push_back({reader, piece, block, -1, now});
++		if (was_empty) g_vantara_hinted_torrents.fetch_add(1, std::memory_order_relaxed);
++		vantara_reorder(piece);
++		if (have_piece(piece) || upload_mode() || is_paused()) return;
++		// start or seek: schedule now, not at the next once-per-second critical pass
++		if (!m_time_critical_pieces.empty()) request_time_critical_pieces();
++		std::set<peer_connection*> with_requests;
++		vantara_frontier(with_requests);
++		for (auto* p : with_requests) p->send_block_requests();
++	}
++
++	void torrent::vantara_clear_read_hint(int const reader)
++	{
++		auto it = std::find_if(m_vantara_hints.begin(), m_vantara_hints.end()
++			, [reader](vantara_read_hint const& h) { return h.reader == reader; });
++		if (it == m_vantara_hints.end()) return;
++		piece_index_t const piece = it->piece;
++		m_vantara_hints.erase(it);
++		vantara_reorder(piece);
++		if (m_vantara_hints.empty()) g_vantara_hinted_torrents.fetch_sub(1, std::memory_order_relaxed);
++	}
++
++	void torrent::vantara_hint_tick()
++	{
++		if (m_vantara_hints.empty() || !has_picker() || upload_mode() || is_paused()) return;
++		std::set<peer_connection*> with_requests;
++		vantara_frontier(with_requests);
++		for (auto* p : with_requests) p->send_block_requests();
++	}
++
++	void torrent::vantara_frontier(std::set<peer_connection*>& with_requests)
++	{
++		int constexpr frontier_blocks = 8;
++		int constexpr max_owners = 3;
++		// a block whose holder delivers later than the best alternative by this much is
++		// duplicated at once, not after the frontier stands still
++		std::int64_t constexpr early_margin_ms = 150;
++		int budget = 12;
++		if (m_vantara_hints.empty() || !has_picker()) return;
++		std::vector<peer_connection*> candidates;
++		for (auto* c : m_connections)
++			if (c->can_request_time_critical()) candidates.push_back(c);
++		if (candidates.empty()) return;
++		time_point const now = aux::time_now();
++		milliseconds const stall(vantara_frontier_ms());
++		int const block_bytes = block_size();
++		auto const queue = m_picker->get_download_queue();
++		int const count = int(m_vantara_hints.size());
++		for (int k = 0; k < count && budget > 0; ++k)
++		{
++			// round-robin: the head, the tail, a warm-up and a seek all advance
++			auto& h = m_vantara_hints[std::size_t((m_vantara_rr + k) % count)];
++			if (m_picker->have_piece(h.piece)) continue;
++			int const n = m_picker->blocks_in_piece(h.piece);
++			auto const dp = std::find_if(queue.begin(), queue.end()
++				, [&h](piece_picker::downloading_piece const& d) { return d.index == h.piece; });
++			span<piece_picker::block_info const> blocks;
++			if (dp != queue.end()) blocks = m_picker->blocks_for_piece(*dp);
++			auto const state_of = [&](int const b) {
++				return blocks.empty() ? piece_picker::block_info::state_none : int(blocks[b].state);
++			};
++			int first = -1;
++			for (int b = h.block; b < n; ++b)
++			{
++				int const st = state_of(b);
++				if (st != piece_picker::block_info::state_finished
++					&& st != piece_picker::block_info::state_writing) { first = b; break; }
++			}
++			// everything from the reader to the end of the piece is on disk already
++			if (first < 0) continue;
++			if (first != h.frontier) { h.frontier = first; h.frontier_since = now; }
++			bool const stalled = now - h.frontier_since >= stall;
++			int seen = 0;
++			for (int b = first; b < n && seen < frontier_blocks && budget > 0; ++b)
++			{
++				int const st = state_of(b);
++				if (st == piece_picker::block_info::state_finished
++					|| st == piece_picker::block_info::state_writing) continue;
++				++seen;
++				piece_block const block(h.piece, b);
++				bool const requested = st == piece_picker::block_info::state_requested;
++				int const owners = blocks.empty() ? 0 : int(blocks[b].num_peers);
++				if (owners >= max_owners) continue;
++				// expected delivery (ms): the blocks ahead in the peer's queue at its measured
++				// rate. An idle peer is not a fast one (the slow peer is idle because the
++				// pickers avoid it); unknown speed counts as 500 ms plus 100 ms per block.
++				auto const eta = [&](peer_connection const* c, std::int64_t const ahead) {
++					int const rate = c->statistics().download_payload_rate();
++					return rate > 0 ? ahead * block_bytes * 1000 / rate : 500 + (ahead - 1) * 100;
++				};
++				std::int64_t holder_eta = std::numeric_limits<std::int64_t>::max();
++				peer_connection const* holder = nullptr;
++				if (requested && !blocks.empty() && blocks[b].peer != nullptr)
++				{
++					holder = static_cast<peer_connection const*>(blocks[b].peer->connection);
++					if (holder != nullptr)
++					{
++						auto const& dq = holder->download_queue();
++						auto const& rq = holder->request_queue();
++						auto const it = std::find_if(dq.begin(), dq.end(), aux::has_block(block));
++						std::int64_t ahead;
++						if (it != dq.end()) ahead = (it - dq.begin()) + 1;
++						else
++						{
++							auto const jt = std::find_if(rq.begin(), rq.end(), aux::has_block(block));
++							ahead = std::int64_t(dq.size()) + (jt != rq.end() ? (jt - rq.begin()) + 1 : std::int64_t(rq.size()) + 1);
++						}
++						holder_eta = eta(holder, ahead);
++					}
++				}
++				peer_connection* best = nullptr;
++				std::int64_t best_score = std::numeric_limits<std::int64_t>::max();
++				for (auto* c : candidates)
++				{
++					if (c == holder || !c->has_piece(h.piece)) continue;
++					auto const& dq = c->download_queue();
++					auto const& rq = c->request_queue();
++					if (std::find_if(dq.begin(), dq.end(), aux::has_block(block)) != dq.end()) continue;
++					if (std::find_if(rq.begin(), rq.end(), aux::has_block(block)) != rq.end()) continue;
++					std::int64_t const score = eta(c, std::int64_t(dq.size() + rq.size()) + 1);
++					if (score < best_score) { best = c; best_score = score; }
++				}
++				if (best == nullptr) continue;
++				// a requested block: duplicate when its holder is clearly slower than the
++				// best alternative, or once the frontier stands still. An unrequested one:
++				// the pickers take it in this order already; step in only when stalled.
++				bool const slower = requested && holder_eta != std::numeric_limits<std::int64_t>::max()
++					&& holder_eta > best_score + early_margin_ms;
++				// cold start: nobody's speed is measured yet, so a frontier block held by a
++				// peer of unknown speed races a second peer at once (the slow peer is one of
++				// them, and its blocks are exactly the reader's next ones). One extra copy each.
++				bool const race = requested && holder != nullptr && owners < 2
++					&& holder->statistics().download_payload_rate() == 0;
++				if (!stalled && !slower && !race) continue;
++				request_flags_t const flags = peer_connection::time_critical
++					| (requested ? peer_connection::busy : request_flags_t{});
++				if (best->add_request(block, flags))
++				{
++					with_requests.insert(best);
++					--budget;
++				}
++			}
++		}
++		if (count > 0) m_vantara_rr = (m_vantara_rr + 1) % count;
++	}
++#endif // TORRENT_DISABLE_STREAMING
++
+ 	std::set<std::string> torrent::web_seeds(web_seed_entry::type_t const type) const
+ 	{
+ 		TORRENT_ASSERT(is_single_thread());
+diff --git a/src/torrent_handle.cpp b/src/torrent_handle.cpp
+index 6e55eb2..fbb5672 100644
+--- a/src/torrent_handle.cpp
++++ b/src/torrent_handle.cpp
+@@ -937,6 +937,25 @@ namespace libtorrent {
+ #endif
+ 	}
+ 
++	void torrent_handle::vantara_set_read_hint(int const reader, piece_index_t const index
++		, int const offset_in_piece) const
++	{
++#ifndef TORRENT_DISABLE_STREAMING
++		async_call(&torrent::vantara_set_read_hint, reader, index, offset_in_piece);
++#else
++		TORRENT_UNUSED(reader); TORRENT_UNUSED(index); TORRENT_UNUSED(offset_in_piece);
++#endif
++	}
++
++	void torrent_handle::vantara_clear_read_hint(int const reader) const
++	{
++#ifndef TORRENT_DISABLE_STREAMING
++		async_call(&torrent::vantara_clear_read_hint, reader);
++#else
++		TORRENT_UNUSED(reader);
++#endif
++	}
++
+ 	void torrent_handle::reset_piece_deadline(piece_index_t index) const
+ 	{
+ #ifndef TORRENT_DISABLE_STREAMING

@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('VantaraDesktop', Object.freeze({
   verifySource: call('verify-source'),
   // محرك إضافات المانجا (Suwayomi محليًا): دالة واحدة بأسماء معروفة فقط تُفحص في العملية الرئيسية
   mangaEngine: call('manga-engine'),
+  // مخزن «آخر التحديثات» الدائم (SQLite): أسماء عمليات معروفة فقط تُفحص في العملية الرئيسية
+  latestStore: call('latest-store'),
   showApp:call('show-app'),
   showPlayer:call('show-player'),
   playerViewport:call('player-viewport'),

@@ -178,7 +178,7 @@ it('retains the player and its source controls after an error followed by native
  expect(f.document.querySelector('.desktop-player')).toBeTruthy();expect(f.document.querySelector('[data-action=servers]')).toBeTruthy();f.player.dispose();
 });
 
-it('keeps torrent phase and cache rebuild diagnostics out of the viewing surface',()=>{const f=fixture();f.event({type:'playback/preparing',session:'one'});for(const stage of ['metadata','first-frame','cache-selected'])f.event({type:'playback/stage',session:'one',stage,volume:'E:'});f.event({type:'playback/retrying',session:'one',message:'رجعت لجزء حُذف من الكاش'});const text=f.document.querySelector('.desktop-player-status').textContent;expect(text).not.toMatch(/إطار|مغناطيس|كاش|حذف/);f.player.dispose();});
+it('keeps torrent phase and cache rebuild diagnostics out of the viewing surface',()=>{const f=fixture();f.event({type:'playback/preparing',session:'one'});for(const stage of ['metadata','player-ipc-ready','cache-selected'])f.event({type:'playback/stage',session:'one',stage,volume:'E:'});f.event({type:'playback/retrying',session:'one',message:'رجعت لجزء حُذف من الكاش'});const text=f.document.querySelector('.desktop-player-status').textContent;expect(text).not.toMatch(/إطار|مغناطيس|كاش|حذف/);f.player.dispose();});
 
 it('keeps startup controls away from an unconnected player without presenting a playback failure',async()=>{
  const f=fixture();f.event({type:'playback/preparing',session:'one'});

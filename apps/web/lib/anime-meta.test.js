@@ -119,3 +119,38 @@ describe('مواسم الغرفة', () => {
     expect(chain[2].episodes).toBe(24);
   });
 });
+
+import { looseProbes, nameScore, rankLoose, searchAnime } from './anime-meta.js';
+describe('البحث المتسامح (بلاغ المالك: «one p» بلا نتائج)', () => {
+  const media = (id, romaji, english = null, popularity = 1000) => ({ id, title: { romaji, english, native: null }, coverImage: {}, genres: [], popularity, isAdult: false });
+  // AniList حقيقي (قيس 27 نوفمبر): كلمة ناقصة أو ملتصقة أو خطأ إملائي = لا شيء؛ الكلمات المكتملة تعمل
+  const fake = (db) => async (_url, init) => {
+    const { variables } = JSON.parse(init.body);
+    const words = String(variables.search ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+    const hits = db.filter((m) => words.every((w) => [m.title.romaji, m.title.english].some((t) => String(t ?? '').toLowerCase().split(/[^a-z0-9]+/).includes(w))));
+    return { ok: true, json: async () => ({ data: { Page: { pageInfo: { hasNextPage: false }, media: hits } } }) };
+  };
+  const db = [media(1, 'One Punch Man', 'One-Punch Man', 900), media(2, 'ONE PIECE', 'ONE PIECE', 800), media(3, 'Shingeki no Kyojin', 'Attack on Titan', 700), media(4, 'AS ONE', null, 10)];
+  it('«one p» تجد One Piece وOne-Punch Man ولا تجد «AS ONE»', async () => {
+    const { items } = await searchAnime({ search: 'one p' }, { fetchImpl: fake(db) });
+    expect(items.map((x) => x.id)).toEqual([1, 2]);
+  });
+  it('خطأ إملائي «atack on titan» يجد Attack on Titan', async () => {
+    const { items } = await searchAnime({ search: 'atack on titan' }, { fetchImpl: fake(db) });
+    expect(items[0]?.id).toBe(3);
+  });
+  it('بلا مسافة «onepiece»', async () => {
+    const { items } = await searchAnime({ search: 'onepiece' }, { fetchImpl: fake(db) });
+    expect(items[0]?.id).toBe(2);
+  });
+  it('كلام بلا معنى لا يطابق شيئًا (لا دمج خاطئ)', async () => {
+    const { items } = await searchAnime({ search: 'xqzvbn' }, { fetchImpl: fake(db) });
+    expect(items).toEqual([]);
+  });
+  it('المجسّات: الكلمات المكتملة أولًا وبحد 3', () => {
+    expect(looseProbes('one p')[0]).toBe('one');
+    expect(looseProbes('atack on titan').length).toBeLessThanOrEqual(3);
+    expect(nameScore('one p', 'ONE PIECE')).toBe(1);
+    expect(rankLoose('zzz', [{ id: 1, title: 'ONE PIECE' }])).toEqual([]);
+  });
+});

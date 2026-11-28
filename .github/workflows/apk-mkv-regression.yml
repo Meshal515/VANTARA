@@ -3,12 +3,24 @@ name: APK subtitled MKV regression
 # بلا خطأ (Media3 1.5.1 كان يتوقف بـ «Out of range»). لا ينشر شيئًا.
 on:
   push:
-    branches: ['claude/manga-translation-system-9a2zjl', 'claude/media3-1.6.1-clean']
+    branches: ['claude/manga-translation-system-9a2zjl', 'claude/media3-1.6.1-clean', 'ccr-e88a4b6c-3dl430']
     paths:
       - '.github/workflows/apk-mkv-regression.yml'
       - 'android/app/build.gradle'
+      - 'android/app/libtorrent-natives.lock'
       - 'android/app/src/androidTest/java/com/vantara/addons/torrent/MkvSubtitleRegressionDeviceTest.kt'
+      - 'android/app/src/androidTest/java/com/vantara/addons/torrent/TorrentSeekDeviceTest.kt'
   workflow_dispatch:
+    inputs:
+      natives:
+        description: 'libtorrent: patched (lock file) | stock (jlibtorrent as published) — same test, A/B'
+        type: string
+        default: 'patched'
+      suite:
+        # android-emulator-runner ينفّذ كل سطر من script وحده: الاختيار بتعبير في سطر الأمر نفسه لا بكتلة if
+        description: 'mkv (subtitled MKV reaches READY) | seek (P0: +10s/-10s/scrub from cold, warm and cached starts, TorrentSeekDeviceTest)'
+        type: string
+        default: 'mkv'
 permissions:
   contents: read
 concurrency:
@@ -17,7 +29,7 @@ concurrency:
 jobs:
   mkv:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +44,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec cap sync android
+      - name: VANTARA libtorrent natives (pinned SHA-256), as in the signed Debug build
+        run: |
+          set -euo pipefail
+          lock=android/app/libtorrent-natives.lock
+          if [ "${{ inputs.natives }}" = stock ]; then echo "A/B: stock jlibtorrent requested"; exit 0; fi
+          if [ ! -f "$lock" ]; then echo "no lock: stock jlibtorrent"; exit 0; fi
+          dir="$RUNNER_TEMP/lt-natives"
+          grep -v '^#' "$lock" | while read -r abi url sha; do
+            [ -n "$abi" ] || continue
+            mkdir -p "$dir/$abi"
+            curl -fsSL --retry 3 -o "$dir/$abi/libjlibtorrent.so" "$url"
+            echo "$sha  $dir/$abi/libjlibtorrent.so" | sha256sum -c -
+          done
+          echo "ORG_GRADLE_PROJECT_vantaraPatchedTorrentDir=$dir" >> "$GITHUB_ENV"
       - name: Build emulator APKs
         run: |
           cat > "$RUNNER_TEMP/x86.gradle" <<'GRADLE'
@@ -53,9 +79,9 @@ jobs:
             mkdir -p mkv-regression
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w -r -e mkvRegression 1 -e class com.vantara.addons.torrent.MkvSubtitleRegressionDeviceTest com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee mkv-regression/instrumentation.txt
+            adb shell am instrument -w -r -e ${{ inputs.suite == 'seek' && 'seekRegression' || 'mkvRegression' }} 1 -e class com.vantara.addons.torrent.${{ inputs.suite == 'seek' && 'TorrentSeekDeviceTest' || 'MkvSubtitleRegressionDeviceTest' }} com.vantara.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee mkv-regression/instrumentation.txt
             for f in $(adb shell run-as com.vantara.app.debug ls files/addon-proof | tr -d '\r'); do adb exec-out run-as com.vantara.app.debug cat "files/addon-proof/$f" > "mkv-regression/$f"; done
-            adb logcat -d -s System.out | grep READS || true
+            adb logcat -d -s System.out | grep -E "READS|SEEK" || true
             ls -la mkv-regression
             grep -q "OK (1 test)" mkv-regression/instrumentation.txt
       - uses: actions/upload-artifact@v4

@@ -4,7 +4,7 @@
  */
 import { parseHTML } from 'linkedom';
 import { expect, it, vi } from 'vitest';
-import { addonName, createServerSheet, describe as describeRoute, hostName, releaseGroup, sourceLabel } from './server-sheet.js';
+import { addonName, createServerSheet, describe as describeRoute, hostName, releaseGroup, sourceLabel, warmRows, warmScore } from './server-sheet.js';
 
 const TORR = 'addon|https://torrentio.strem.fun|com.stremio.torrentio.addon';
 const COMET = 'addon|https://comet.elfhosted.com|comet.elfhosted.com';
@@ -71,9 +71,9 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   // ما تعذّر قبل أن يظهر مطويّ في الأسفل
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
-  expect(onPick).toHaveBeenCalledWith(routes[2]);
+  expect(onPick).toHaveBeenCalledWith(routes[2], { tapAt: expect.any(Number) });
   top[0].onclick();
-  expect(onPick).toHaveBeenLastCalledWith(routes[2]);
+  expect(onPick).toHaveBeenLastCalledWith(routes[2], { tapAt: expect.any(Number) });
 });
 
 const dom = () => {
@@ -170,7 +170,7 @@ it('filters by quality and source as two side-by-side menus, and language as two
   // المقترح والزر يتبعان المرشّح
   expect(body.querySelector('.ss-row--top .ss-name').textContent).toBe('Comet');
   body.querySelector('.an-pick-best').onclick();
-  expect(onPick).toHaveBeenLastCalledWith(routes[3]);
+  expect(onPick).toHaveBeenLastCalledWith(routes[3], { tapAt: expect.any(Number) });
   choose(body, 'all');
   [...body.querySelectorAll('.ss-tab')].find((b) => b.textContent === 'مدبلج').onclick();
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
@@ -287,7 +287,7 @@ it('CloudStream sources that arrive after torrents join quietly below them (no j
   dropBtn(body, 1).onclick({ stopPropagation() {} });
   // No user filter interaction needed: all 3 are visible, directly selectable.
   body.querySelector('.ss-group--direct .ss-row').onclick();
-  expect(onPick).toHaveBeenCalledWith(rift);
+  expect(onPick).toHaveBeenCalledWith(rift, { tapAt: expect.any(Number) });
   choose(body, 'Anime4up');
   expect([...body.querySelectorAll('.ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Anime4up']);
   choose(body, 'all');
@@ -340,31 +340,32 @@ it('قائمة المصدر المفتوحة تبقى مفتوحة حين يصل
   expect(menu.hidden).toBe(true);
 });
 
-it('a better server arriving later never moves the rows already shown (no jump under the finger)', () => {
-  const { el, body } = dom();
-  const onPick = vi.fn();
-  const ui = createServerSheet(body, { el, onPick, sourceName: (r) => r.sourceId });
-  const a = { id: 'a', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probed: true, probeMs: 3000 };
-  const a2 = { id: 'a2', sourceId: 'witanime', server: 'uqload', quality: 480, state: 'READY', probed: true, probeMs: 4000 };
-  const b = { id: 'b', sourceId: 'witanime', server: 'videa', quality: 480, state: 'RESOLVING' };
-  ui.update({ routes: [a, a2, b], settled: false, status: { text: '…' } });
-  const rows = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
-  const [rowA, rowA2] = rows();
-  const filtersHeight = body.querySelector('.an-pick-filters');
-  // سيرفر أفضل (1080p وأسرع) يصل، وما كان يُفحص يتعذّر: الصفّان الظاهران بمكانهما والجديد تحتهما،
-  // والمتعذّر لم يحجز مكانًا ظاهرًا أصلًا
-  const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
-  ui.update({ routes: [a, a2, { ...b, state: 'UNAVAILABLE' }, best], settled: false, status: { text: '…' } });
-  expect(rows().slice(0, 2)).toEqual([rowA, rowA2]);
-  expect(rows()).toHaveLength(3);
-  expect(rows()[2].querySelector('.ss-name').textContent).toBe('okanime');
-  // الأفضل يُعرف بكلمة «مقترح» وبالزر، لا بنقل الصفوف
-  expect(rows()[2].className).toContain('ss-row--top');
-  // شريط المرشّحات هو نفسه من أول لحظة (لا يظهر متأخرًا فيدفع القائمة)
-  expect(body.querySelector('.an-pick-filters')).toBe(filtersHeight);
-  expect(filtersHeight.hidden).toBe(false);
-  rowA.onclick();
-  expect(onPick).toHaveBeenCalledWith(a);
+it('keeps existing direct rows under the finger and applies the latest ranking when scrolling stops', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body, document } = dom();
+    const onPick = vi.fn();
+    const ui = createServerSheet(body, { el, onPick });
+    const first = { id: 'a', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probed: true, probeMs: 3000 };
+    const second = { id: 'a2', sourceId: 'witanime', server: 'uqload', quality: 480, state: 'READY', probed: true, probeMs: 4000 };
+    const pending = { id: 'b', sourceId: 'witanime', server: 'videa', state: 'RESOLVING' };
+    const best = { id: 'c', sourceId: 'okanime', server: 'streamwish', quality: 1080, state: 'READY', probed: true, probeMs: 500 };
+    const rows = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
+    ui.update({ routes: [first, second, pending] });
+    const before = rows();
+    const filters = body.querySelector('.an-pick-filters');
+    ui.scroll.dispatchEvent(new document.defaultView.Event('touchstart'));
+    ui.update({ routes: [first, second, { ...pending, state: 'UNAVAILABLE' }, best] });
+    expect(rows()).toEqual(before);
+    before[0].onclick();
+    expect(onPick).toHaveBeenCalledWith(first, { tapAt: expect.any(Number) });
+    ui.scroll.dispatchEvent(new document.defaultView.Event('touchend'));
+    vi.advanceTimersByTime(181);
+    expect(rows().slice(1)).toEqual(before);
+    expect(rows()[0].classList.contains('ss-row--top')).toBe(true);
+    expect(body.querySelector('.an-pick-filters')).toBe(filters);
+    ui.destroy();
+  } finally { vi.useRealTimers(); }
 });
 
 it('one torrent release is one row even when Torrentio arrives from three providers', () => {
@@ -398,17 +399,362 @@ it('each direct row shows its source picture beside the name, in a slot reserved
 });
 
 
-it('كل سيرفر مباشر صالح ظاهر مهما كثر، والتورنت ستة إصدارات ظاهرة (المالك، 15 نوفمبر)', () => {
+it('كل قسم 10 ظاهرة ثم «عرض N من الإضافية» (المالك، 27 نوفمبر): المباشر عشرة، والتورنت خمسة لكل جودة', () => {
   const { el, body } = dom();
   const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceId });
   const direct = Array.from({ length: 20 }, (_, i) => ({ id: `d${i}`, sourceId: 'witanime', server: `host${i}`, quality: 1080, state: 'READY', probed: true, probeMs: 500 + i }));
   const torrents = Array.from({ length: 10 }, (_, i) => ({ id: `t${i}`, sourceId: TORR, sourceName: 'Torrentio', quality: 1080, state: 'READY', runtimeReady: true, label: `Show.S01E01.1080p.WEB-DL-G${i}.mkv\n👤 ${100 + i} 💾 1.${i} GB ⚙️ Nyaa` }));
   const cam = { id: 'cam', sourceId: TORR, sourceName: 'Torrentio', quality: 720, state: 'READY', runtimeReady: true, label: 'Show.S01E01.HDCAM.mkv\n👤 3 💾 700 MB ⚙️ Nyaa' };
   ui.update({ routes: [...direct, ...torrents, cam], settled: true, status: { text: '' } });
-  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(20);
-  expect(body.querySelector('.ss-group--direct .ss-more-copies, .ss-group--direct details:not([hidden])')).toBeNull();
-  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')).toHaveLength(6);
-  // وما يصل بعدها صالحًا يظهر كذلك، تحت الموجود
+  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row').length).toBe(10);
+  const more = body.querySelector('.ss-group--direct .ss-more-btn');
+  expect(more.hidden).toBe(false);
+  expect(more.textContent).toBe('عرض 10 من الروابط الإضافية');
+  // المطويّة لا تُبنى حتى تُفتح، والفتح يعرضها تحت الظاهرة دون أن يحرّكها
+  expect(body.querySelectorAll('.ss-group--direct .ss-more-grid .ss-row').length).toBe(0);
+  const firstTen = [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')];
+  more.onclick({ stopPropagation() {} });
+  expect(body.querySelectorAll('.ss-group--direct .ss-more-grid .ss-row').length).toBe(10);
+  const same = () => [...body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')].map((n, i) => n === firstTen[i]);
+  expect(same()).toEqual(Array(10).fill(true));
+  expect(more.textContent).toBe('إخفاء الروابط الإضافية');
+  more.onclick({ stopPropagation() {} });
+  // جودة واحدة: أقوى خمسة، والنسخة المصوّرة في الإضافية.
+  expect(body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row').length).toBe(5);
+  expect(body.querySelector('.ss-group--torrent > .an-srv-grid').textContent).not.toContain('CAM');
+  // ما يصل بعدها بجودة أقل يذهب إلى الإضافية، والظاهر لا يتغير
   ui.update({ routes: [...direct, ...torrents, cam, { id: 'late', sourceId: 'witanime', server: 'late', quality: 720, state: 'READY', probed: true, probeMs: 900 }], settled: true, status: { text: '' } });
-  expect(body.querySelectorAll('.ss-group--direct > .an-srv-grid .ss-row')).toHaveLength(21);
+  expect(same()).toEqual(Array(10).fill(true));
+  expect(more.textContent).toBe('عرض 11 من الروابط الإضافية');
+});
+
+it('التورنت: حتى 5 من كل جودة بالترتيب (4K ثم 1080p) والسرب داخلها، والباقي في «عرض N من النسخ الإضافية» (المالك، 27 نوفمبر)', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick() {} });
+  const mk = (q, i, seeds) => ({ id: `${q}-${i}`, sourceId: TORR, sourceName: 'Torrentio', quality: q, state: 'READY', runtimeReady: true, infoHash: `${q}${i}`.padEnd(40, '0'),
+    label: `Show.S01E01.${q}p.WEB-DL-G${q}x${i}.mkv\n👤 ${seeds} 💾 ${q === 2160 ? 6 : 2}.${i} GB ⚙️ TPB` });
+  // تصل مختلطة: السرب الأكبر ليس أولًا
+  const routes = [
+    ...[12, 86, 15, 7, 11, 10, 3].map((s, i) => mk(2160, i, s)),
+    ...[40, 9, 120, 33, 5, 60, 2].map((s, i) => mk(1080, i, s)),
+    ...[500, 400].map((s, i) => mk(720, i, s)),
+  ];
+  ui.update({ routes, settled: true, status: { text: '' } });
+  const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')].map((b) => `${b.querySelector('.ss-q b').textContent} ${b.querySelector('.an-srv-seeds')?.textContent}`);
+  expect(shown).toEqual(['4K 86', '4K 15', '4K 12', '4K 11', '4K 10', '1080p 120', '1080p 60', '1080p 40', '1080p 33', '1080p 9']);
+  expect(body.querySelector('.ss-group--torrent .ss-more-btn').textContent).toBe('عرض 6 من النسخ الإضافية');
+  // المقترح تورنت: الأكبر سربًا لا الأضعف
+  expect(body.querySelector('.ss-row--top .an-srv-seeds').textContent).toBe('120');
+  // قبل أن يلمس المستخدم الورقة: سرب أقوى يصل لاحقًا يأخذ مكانه الصحيح في الخمسة
+  ui.update({ routes: [...routes, mk(2160, 9, 300)], settled: true, status: { text: '' } });
+  const again = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')].map((b) => b.querySelector('.an-srv-seeds')?.textContent);
+  expect(again.slice(0, 5)).toEqual(['300', '86', '15', '12', '11']);
+});
+
+it('جودة غير معلنة تظهر «تلقائي» لا «HD» (UX11)، والمعلنة كما هي', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const unknown = { id: 'u', sourceId: 'witanime', sourceName: 'Witanime', server: 'hls', state: 'READY', probed: true, probeMs: 400 };
+  const known = { id: 'k', sourceId: 'witanime', sourceName: 'Witanime', server: 'mp4', quality: 720, state: 'READY', probed: true, probeMs: 400 };
+  ui.update({ routes: [unknown, known], settled: true, status: { text: '2' } });
+  const labels = Object.fromEntries([...body.querySelectorAll('.ss-row')].map((row) => [row.querySelector('.ss-name').textContent, row.querySelector('.ss-q')]));
+  const qs = [...body.querySelectorAll('.ss-row .ss-q')];
+  const texts = qs.map((q) => q.firstElementChild.textContent);
+  expect(texts).toContain('تلقائي');
+  expect(texts).toContain('720p');
+  expect(texts).not.toContain('HD');
+  expect(qs.find((q) => q.firstElementChild.textContent === 'تلقائي').classList.contains('ss-q--auto')).toBe(true);
+  expect(qs.find((q) => q.firstElementChild.textContent === '720p').classList.contains('ss-q--auto')).toBe(false);
+  expect(Object.keys(labels).length).toBeGreaterThan(0);
+});
+
+it('اختيار الجودة لا يُمسح بصمت إن غاب خياره مؤقتًا، ويعود حين يظهر (UX13)', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const a = { id: 'a', sourceId: 'witanime', server: 'streamwish', quality: 1080, state: 'READY', probeMs: 700 };
+  const b = { id: 'b', sourceId: 'witanime', server: 'mp4upload', quality: 720, state: 'READY', probeMs: 900 };
+  const c = { id: 'c', sourceId: 'witanime', server: 'vidmoly', quality: 480, state: 'READY', probeMs: 900 };
+  ui.update({ routes: [a, b, c], settled: false, status: { text: '3' } });
+  choose(body, 1080, 0);
+  const hosts = () => [...body.querySelectorAll('.ss-row')].map((r) => r.querySelector('.ss-host').textContent.toLowerCase());
+  expect(hosts()).toEqual(['streamwish']);
+  // سيرفر 1080 الوحيد سقط: تُعرض الكل بدل قائمة فارغة
+  ui.update({ routes: [{ ...a, state: 'UNAVAILABLE' }, b, c], settled: false, status: { text: '2' } });
+  expect(hosts().length).toBeGreaterThan(1);
+  // وصل سيرفر 1080 جديد: اختيار المستخدم يعود
+  const d = { id: 'd', sourceId: 'witanime', server: 'filemoon', quality: 1080, state: 'READY', probeMs: 600 };
+  ui.update({ routes: [{ ...a, state: 'UNAVAILABLE' }, b, c, d], settled: true, status: { text: '3' } });
+  // السيرفر الساقط يبقى ظاهرًا بسببه («غير متاح») كما هو مقصود؛ المهم أن 720/480 خرجا
+  expect(hosts()).toContain('filemoon');
+  expect(hosts()).not.toContain('mp4upload');
+  expect(hosts()).not.toContain('vidmoly');
+  // واختيار «كل الجودات» صراحة يُحترم أيضًا
+  choose(body, 'all', 0);
+  expect(hosts()).toContain('mp4upload');
+});
+
+it('UX14: البصمة هوية التورنت؛ الاسم والحجم احتياط فقط حين تغيب', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const H1 = 'a'.repeat(40), H2 = 'b'.repeat(40);
+  const label = 'Show.S01E01.1080p.WEB.x264\n👤 300 💾 1.4 GB ⚙️ Nyaa';
+  const rows = () => body.querySelectorAll('.ss-row').length;
+  // نفس الإصدار من مصدرين: البصمة نفسها واسم مختلف قليلًا ← صف واحد
+  ui.update({ routes: [tor(label, { id: 's1', quality: 1080, infoHash: H1 }), tor('Show S01E01 1080p WEB x264 (copy)\n👤 120 💾 1.4 GB ⚙️ Nyaa', { id: 's2', quality: 1080, infoHash: H1 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(1);
+  // بصمتان مختلفتان بالاسم والحجم نفسيهما ← صفّان
+  ui.update({ routes: [tor(label, { id: 'd1', quality: 1080, infoHash: H1 }), tor(label, { id: 'd2', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(2);
+  // بلا بصمة عند أحدهما: الاسم والحجم يجمعانهما كما كان
+  ui.update({ routes: [tor(label, { id: 'n1', quality: 1080, infoHash: H1 }), tor(label, { id: 'n2', quality: 1080 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(1);
+  // ومسار بلا بصمة لا يربط بصمتين مختلفتين
+  ui.update({ routes: [tor(label, { id: 'c1', quality: 1080, infoHash: H1 }), tor(label, { id: 'c2', quality: 1080 }), tor(label, { id: 'c3', quality: 1080, infoHash: H2 })], settled: true, status: { text: '' } });
+  expect(rows()).toBe(2);
+});
+
+it('المقترح تورنت يُعلن للتسخين مرة واحدة بعد أن يثبت، والمباشر لا', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onTop = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onTop });
+    const t = tor('Show.S01E01.1080p.WEB.x264\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'tt', quality: 1080, infoHash: 'c'.repeat(40) });
+    ui.update({ routes: [t], settled: false, status: { text: '1' } });
+    ui.update({ routes: [t], settled: false, status: { text: '1' } });
+    vi.advanceTimersByTime(399);
+    expect(onTop).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(onTop).toHaveBeenCalledTimes(1);
+    expect(onTop.mock.calls[0][0].id).toBe('tt');
+    // نفس المقترح في تحديثات لاحقة: لا إعادة
+    ui.update({ routes: [t], settled: true, status: { text: '1' } });
+    vi.advanceTimersByTime(1000);
+    expect(onTop).toHaveBeenCalledTimes(1);
+    // مقترح مباشر لا تورنت: لا تسخين
+    const { el: el2, body: body2 } = dom();
+    const onTop2 = vi.fn();
+    const ui2 = createServerSheet(body2, { el: el2, onPick: vi.fn(), onTop: onTop2 });
+    ui2.update({ routes: [{ id: 'd', sourceId: 'witanime', server: 'mp4upload', quality: 1080, state: 'READY', probed: true, probeMs: 400 }], settled: true, status: { text: '1' } });
+    vi.advanceTimersByTime(1000);
+    expect(onTop2).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
+it('المقترح الثابت يُسخَّن بعد 400ms من ظهوره ولو تتابعت تحديثات الورقة (لا يجوّعه وصول السيرفرات)', () => {
+  // الورقة تُحدَّث مع كل حدث من المحرك (سيرفر يصل، فحص يكتمل، حقائق كل 1.5 ث)، أسرع من 400ms ما دامت المصادر
+  // تتوالى. كان كل update يلغي مؤقت «المقترح» ويعيد عدّه، فلا يبدأ التسخين حتى تهدأ الورقة (عينة المالك:
+  // التسخين بدأ 0.7 و4.7 ث فقط قبل الضغط والورقة مفتوحة أطول). وكذلك الصفوف الخلفية.
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onTop = vi.fn(), onWarmRows = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onTop, onWarmRows });
+    const t = tor('Show.S01E01.1080p.WEB.x264\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'tt', quality: 1080, infoHash: 'c'.repeat(40) });
+    const extra = Array.from({ length: 12 }, (_, i) => tor(`Show.S01E01.720p.WEB.x264-G${i}\n👤 ${40 + i} 💾 700 MB ⚙️ Nyaa`, { id: `x${i}`, quality: 720, infoHash: String(i % 10).repeat(40) }));
+    // سيرفر جديد كل 100ms على مدى 3 ث، و«المقترح» نفسه لا يتغير
+    for (let i = 0; i < 30; i++) {
+      ui.update({ routes: [t, ...extra.slice(0, Math.min(extra.length, Math.floor(i / 2)))], settled: false, status: { text: String(i) } });
+      vi.advanceTimersByTime(100);
+      if (i === 4) expect(onTop).toHaveBeenCalledTimes(1);
+    }
+    expect(onTop).toHaveBeenCalledTimes(1);
+    expect(onTop.mock.calls[0][0].id).toBe('tt');
+    // الصفوف الخلفية: قائمتها ثبتت في آخر 600ms (الاثنا عشر وصلوا) والتحديثات ما زالت كل 100ms، فأُعلنت مرة
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+    // والقائمة نفسها في تحديثات لاحقة لا تُعاد
+    for (let i = 0; i < 10; i++) {
+      ui.update({ routes: [t, ...extra], settled: false, status: { text: `s${i}` } });
+      vi.advanceTimersByTime(100);
+    }
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
+it('حقائق المحرك (حجم القطعة والسرب المقاس) تنقل «المقترح» بين المتقاربين ولا تحرك الصفوف', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const big = tor('Show.S01E01.1080p.WEB.x264-AAA\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'big', quality: 1080, infoHash: 'a'.repeat(40) });
+  const small = tor('Show.S01E01.1080p.WEB.x264-BBB\n👤 850 💾 1.4 GB ⚙️ Nyaa', { id: 'small', quality: 1080, infoHash: 'b'.repeat(40) });
+  const order = () => [...body.querySelectorAll('.ss-group--torrent .ss-row')].map((b) => (b.textContent.includes('AAA') ? 'AAA' : b.textContent.includes('BBB') ? 'BBB' : '?'));
+  const topName = () => body.querySelector('.ss-row--top')?.textContent ?? '';
+  ui.update({ routes: [big, small], settled: true, status: { text: '' } });
+  const before = order();
+  expect(before).toEqual(['AAA', 'BBB']);
+  expect(topName()).toContain('AAA');
+  // المُسخَّن الأول قطعه 8MB والثاني 1MB، والسرب المقاس متقارب: الأصغر قطعةً يبدأ أسرع
+  ui.update({ routes: [big, small], facts: { big: { pieceLength: 8 << 20, seeds: 700, peers: 12 }, small: { pieceLength: 1 << 20, seeds: 650, peers: 10 } }, settled: true, status: { text: '' } });
+  expect(topName()).toContain('BBB');
+  expect(order()).toEqual(before);
+  // صفر مقاس بلا اتصال ليس دليل موت: يبقى المعلن
+  ui.update({ routes: [big, small], facts: { small: { pieceLength: 1 << 20, seeds: 0, peers: 0 } }, settled: true, status: { text: '' } });
+  expect(topName()).toContain('BBB');
+});
+
+it('التسخين (المالك، 27 نوفمبر): برق التسخين يبقى تحت المغناطيس ويختفي عندما تزول الجاهزية', () => {
+  const { el, body } = dom();
+  const ui = createServerSheet(body, { el, onPick: vi.fn() });
+  const t = (id, seeds) => tor(`Show.S01E01.1080p.WEB.x264-${id}\n👤 ${seeds} 💾 1.4 GB ⚙️ Nyaa`, { id, quality: 1080, infoHash: id.padEnd(40, '0') });
+  const routes = [t('aaa', 900), t('bbb', 12), t('ccc', 3)];
+  const row = (id) => [...body.querySelectorAll('.ss-group--torrent .ss-row')].find((b) => b.textContent.toLowerCase().includes(id));
+  ui.update({ routes, settled: true, status: { text: '' } });
+  // لا شيء في المحرك: مغناطيس، ولا بنفسجي
+  for (const id of ['aaa', 'bbb', 'ccc']) {
+    expect(row(id).classList.contains('ss-row--warming')).toBe(false);
+    expect(row(id).querySelector('.ss-bolt')).toBeNull();
+  }
+  // الزارعون: قوي ≥20 أخضر، 5–19 برتقالي، 1–4 أحمر (صنف الطبقة؛ اللون في CSS)
+  expect(row('aaa').querySelector('.ss-seeds--strong')).not.toBeNull();
+  expect(row('bbb').querySelector('.ss-seeds--fair')).not.toBeNull();
+  expect(row('ccc').querySelector('.ss-seeds--weak')).not.toBeNull();
+  // aaa في المحرك ولم يجهز: يسخن
+  ui.update({ routes, facts: { aaa: { pieceLength: 2 << 20, seeds: 800, peers: 9, ready: false } }, settled: true, status: { text: '' } });
+  expect(row('aaa').classList.contains('ss-row--warming')).toBe(true);
+  expect(row('aaa').classList.contains('ss-row--warm')).toBe(false);
+  expect(row('aaa').querySelector('.ss-bolt')).not.toBeNull();
+  expect(row('bbb').classList.contains('ss-row--warming')).toBe(false);
+  // إشارة المحرك: جاهز
+  ui.update({ routes, facts: { aaa: { pieceLength: 2 << 20, seeds: 800, peers: 9, ready: true } }, settled: true, status: { text: '' } });
+  expect(row('aaa').classList.contains('ss-row--warm')).toBe(true);
+  expect(row('aaa').classList.contains('ss-row--warming')).toBe(false);
+  expect(row('aaa').querySelector('.ss-bolt')).not.toBeNull();
+  expect(row('aaa').querySelector('.ss-kind').children).toHaveLength(2);
+  ui.update({ routes, facts: {} });
+  expect(row('aaa').classList.contains('ss-row--warm')).toBe(false);
+  expect(row('aaa').querySelector('.ss-bolt')).toBeNull();
+});
+
+it('ترتيب التسخين الخلفي: السرب 16 ثم حجم القطعة 12 ثم العربي 2، وما سربه 20 فأقل يُترك إن وُجد أقوى', () => {
+  const row = (id, seeders, { arabic = false, piece } = {}) => ({ r: { id }, d: { torrent: true, info: { seeders, arabic }, langs: [] }, m: piece ? { pieceLength: piece, seeds: seeders, peers: 3 } : undefined });
+  // السرب الأقوى وزنًا: 900 بقطعة 2MB فوق 40 بقطعة 512KB
+  expect(warmRows([row('small', 40, { piece: 512 << 10 }), row('big', 900, { piece: 2 << 20 })])).toEqual(['big', 'small']);
+  // لكن القطعة الضخمة (8MB = 16 ضعف 512KB قبل أول صورة) تخسر أمام سرب كافٍ (60) بقطعة صغيرة
+  expect(warmScore(row('a', 900, { piece: 8 << 20 }).d, row('a', 900, { piece: 8 << 20 }).m)).toBeCloseTo(19.4, 1);
+  expect(warmRows([row('small', 60, { piece: 512 << 10 }), row('big', 900, { piece: 8 << 20 })])).toEqual(['small', 'big']);
+  // حجم القطعة يحسم السرب المتقارب
+  expect(warmRows([row('p8', 400, { piece: 8 << 20 }), row('p1', 380, { piece: 1 << 20 })])).toEqual(['p1', 'p8']);
+  // العربي يحسم المتساوي فقط
+  expect(warmRows([row('en', 300), row('ar', 300, { arabic: true })])).toEqual(['ar', 'en']);
+  // قاعدة 20: الضعيف يُترك مع وجود أقوى، ويُسخَّن إن كان وحده
+  expect(warmRows([row('w', 5), row('s', 21), row('e', 20)])).toEqual(['s']);
+  expect(warmRows([row('w', 5), row('e', 20)])).toEqual(['e', 'w']);
+});
+
+it('الورقة ترسل الصفوف الظاهرة غير «المقترح» للتسخين الخلفي، لا النسخ الإضافية', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onWarmRows = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onWarmRows });
+    const routes = Array.from({ length: 12 }, (_, i) => tor(`Show.S01E01.1080p.WEB.x264-G${i}\n👤 ${100 + i * 50} 💾 1.4 GB ⚙️ Nyaa`, { id: `t${i}`, quality: 1080, infoHash: String(i % 10).repeat(39) + String(Math.floor(i / 10)) }));
+    ui.update({ routes, settled: true, status: { text: '' } });
+    vi.advanceTimersByTime(401);
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+    const ids = onWarmRows.mock.calls[0][0];
+    const top = body.querySelector('.ss-row--top');
+    const shown = [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .ss-row')];
+    // جودة واحدة: أقوى خمسة. المرشحون للتسخين الخلفي من الظاهر فقط.
+    expect(shown.length).toBe(5);
+    expect(ids).toHaveLength(4);
+    expect(ids).not.toContain('t0');
+    expect(ids).not.toContain('t1');
+    expect(ids).not.toContain(routes.find((r) => top.textContent.includes(r.label.split('\n')[0].split('-').pop())).id);
+    // نفس القائمة في تحديث لاحق: لا إعادة
+    ui.update({ routes, settled: true, status: { text: '' } });
+    vi.advanceTimersByTime(1000);
+    expect(onWarmRows).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
+it('الفأرة على صف تورنت 120ms تسخّنه، والخروج يعيد «المقترح»، واللمس لا يسخّن', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body } = dom();
+    const onHover = vi.fn();
+    const ui = createServerSheet(body, { el, onPick: vi.fn(), onHover });
+    const a = tor('Show.S01E01.1080p.WEB.x264-AAA\n👤 900 💾 1.4 GB ⚙️ Nyaa', { id: 'a', quality: 1080, infoHash: 'a'.repeat(40) });
+    const b = tor('Show.S01E01.1080p.WEB.x264-BBB\n👤 40 💾 1.4 GB ⚙️ Nyaa', { id: 'b', quality: 1080, infoHash: 'b'.repeat(40) });
+    ui.update({ routes: [a, b], settled: true, status: { text: '' } });
+    const rowOf = (tag) => [...body.querySelectorAll('.ss-row')].find((x) => x.textContent.includes(tag));
+    const fire = (node, type, pointerType) => { const e = new body.ownerDocument.defaultView.Event(type); Object.defineProperty(e, 'pointerType', { value: pointerType }); node.dispatchEvent(e); };
+    fire(rowOf('BBB'), 'pointerenter', 'touch');
+    vi.advanceTimersByTime(500);
+    expect(onHover).not.toHaveBeenCalled();
+    fire(rowOf('BBB'), 'pointerenter', 'mouse');
+    vi.advanceTimersByTime(119);
+    expect(onHover).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+    expect(onHover.mock.calls.map((c) => c[0].id)).toEqual(['b']);
+    fire(rowOf('BBB'), 'pointerleave', 'mouse');
+    vi.advanceTimersByTime(801);
+    // «المقترح» (900 مشارك) يعود مسخَّنًا
+    expect(onHover.mock.calls.map((c) => c[0].id)).toEqual(['b', 'a']);
+  } finally { vi.useRealTimers(); }
+});
+
+it('ranks late stronger torrents after a touch gesture, independent of language and arrival order', () => {
+  vi.useFakeTimers();
+  try {
+    const { el, body, document } = dom();
+    const ui = createServerSheet(body, { el, onPick() {} });
+    const mk = (seeders, index) => tor(`Show.1080p.WEB-G${index}.mkv\n👤 ${seeders} 💾 2 GB`, {
+      id: 'late-' + index, seeders, quality: 1080, infoHash: index.toString(16).padStart(40, '0'),
+      variant: index < 2 ? 'DUB' : 'SUB',
+    });
+    const first = [mk(19, 0), mk(1, 1)], late = [mk(381, 2), mk(379, 3), mk(258, 4)];
+    const displayed = () => [...body.querySelectorAll('.ss-group--torrent > .an-srv-grid .an-srv-seeds')].map(x => Number(x.textContent));
+    ui.update({ routes: first });
+    const Event = document.defaultView.Event;
+    ui.scroll.dispatchEvent(new Event('touchstart'));
+    ui.update({ routes: [...first, ...late] });
+    expect(displayed()).toEqual([19, 1]);
+    ui.scroll.dispatchEvent(new Event('touchend'));
+    vi.advanceTimersByTime(300);
+    expect(displayed()).toEqual([381, 379, 258, 19, 1]);
+    ui.destroy();
+  } finally { vi.useRealTimers(); }
+});
+
+// تقرير الذهب يقيس من الضغطة الحقيقية: ساعة الحدث (timeOrigin + timeStamp)، لا لحظة فتح المصدر
+it('tapTime returns the event clock and rejects foreign or future stamps', async () => {
+  const { tapTime } = await import('./server-sheet.js');
+  const perf = { timeOrigin: 1_000_000 };
+  expect(tapTime({ timeStamp: 2_500 }, perf, 1_003_000)).toBe(1_002_500);
+  // ساعة حدث بعد الآن أو أقدم من دقيقة: الآن
+  expect(tapTime({ timeStamp: 9_000 }, perf, 1_003_000)).toBe(1_003_000);
+  expect(tapTime({ timeStamp: 1 }, perf, 1_100_000)).toBe(1_100_000);
+  expect(tapTime(null, perf, 42)).toBe(42);
+});
+
+// شعار القسم يمثل المحرك لا أول مصدر فيه (المالك: قسم CloudStream كان يعرض شعار AnimeRift)، وللتورنت عنوان وعلامة
+it('section marks come from the engine identity, never from the first source inside', async () => {
+  const { routeEngine } = await import('../lib/route-family.js');
+  const { body, el } = dom();
+  const rift = { id: 'rift', sourceId: CS3_RIFT, sourceName: 'AnimeRift', state: 'READY', server: 'vidmoly', quality: 1080, runtimeReady: true, probed: true };
+  const torrent = { id: 't', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', quality: 1080, runtimeReady: true, label: 'X S01E01 1080p 👤 92' };
+  const native = { id: 'n', sourceId: 'witanime', sourceName: 'WitAnime', state: 'READY', server: 'mp4upload', runtimeReady: true, probed: true };
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceName, sourceIcon: (r) => (r.id === 'rift' ? 'https://img.example/rift.png' : null) });
+  ui.update({ routes: [torrent, rift, native], settled: true, status: { text: '3' } });
+  const ico = (cls) => body.querySelector(`.${cls} > .an-srv-q > .ss-group-ico`);
+  expect(ico('ss-group--cloudstream').hidden).toBe(false);
+  expect(ico('ss-group--cloudstream').dataset.mark).toBe('cloudstream');
+  expect(ico('ss-group--cloudstream').style.backgroundImage || '').not.toContain('rift');
+  expect(ico('ss-group--torrent').dataset.mark).toBe('torrent');
+  expect(ico('ss-group--torrent').hidden).toBe(false);
+  // «مباشر» لمصدر مدمج بلا هوية محرك: بلا علامة، لا تصنيف مخترع
+  expect(ico('ss-group--direct:not(.ss-group--engine)').hidden).toBe(true);
+  // الهوية من صيغ المحرك نفسه: النقل أولًا، ثم CloudStream، ثم Stremio، ثم Aniyomi المثبتة
+  expect([torrent, rift, native, { sourceId: 'addon|https://debrid.example/manifest.json', type: 'http' }, { sourceId: 'user-animerco' }].map(routeEngine))
+    .toEqual(['torrent', 'cloudstream', null, 'stremio', 'aniyomi']);
+});
+
+it('the generic direct section takes an engine mark only when every row shares that engine', () => {
+  const { body, el } = dom();
+  const debrid = (id) => ({ id, sourceId: `addon|https://debrid.example/${id}`, sourceName: 'Comet', type: 'http', state: 'READY', server: 'https://cdn.example/v.mp4', runtimeReady: true, probed: true });
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceName });
+  ui.update({ routes: [debrid('a'), debrid('b')], settled: true, status: { text: '2' } });
+  const ico = () => body.querySelector('.ss-group--direct:not(.ss-group--engine) > .an-srv-q > .ss-group-ico');
+  expect(ico().dataset.mark).toBe('stremio');
+  ui.update({ routes: [debrid('a'), { id: 'n', sourceId: 'witanime', sourceName: 'WitAnime', state: 'READY', server: 'mp4upload', runtimeReady: true, probed: true }], settled: true, status: { text: '2' } });
+  expect(ico().hidden).toBe(true);
 });

@@ -304,6 +304,7 @@ data class UserExtension(
     val aliases: Map<String, String> = emptyMap(),
     /** Repository image metadata retained independently of runtime source preparation. */
     val iconUrl: String? = null,
+    val enabled: Boolean = true,
 ) {
     fun spec(): SourceSpec = SourceSpec(
         label = name, pkg = pkg, expectedLib = lib, apkUrl = apkUrl, sha256 = sha256, versionName = versionName,
@@ -329,7 +330,7 @@ data class UserExtension(
     /** يصير الإصدار [next] هو الحالي، ويبقى هذا آخر سليم قبله، وتُرحَّل معرّفات المصادر التي تغيّرت. */
     fun upgradedTo(next: UserExtension): UserExtension {
         val keepPrev = if (next.sha256.equals(sha256, ignoreCase = true)) previous else asVersion()
-        return next.copy(previous = keepPrev, aliases = aliases + sourceAliases(sources, next.sources), iconUrl = next.iconUrl ?: iconUrl)
+        return next.copy(previous = keepPrev, aliases = aliases + sourceAliases(sources, next.sources), iconUrl = next.iconUrl ?: iconUrl, enabled = enabled)
     }
 
     /** الرجوع لآخر سليم: يصير هو الحالي بمصادره، ومعرّفات الإصدار المتعطّل تُرحَّل إليه. */

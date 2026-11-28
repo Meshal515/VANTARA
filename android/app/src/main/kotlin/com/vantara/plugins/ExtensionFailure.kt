@@ -2,6 +2,7 @@ package com.vantara.plugins
 
 import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.interceptor.HostCoolingException
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
 import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
@@ -33,6 +34,10 @@ object ExtensionFailure {
             return if (it.noImageUrl) Verdict(Owner.EXTENSION, "PAGE_NO_IMAGE", "الإضافة لم تُرجع رابط صورة لهذه الصفحة")
             else Verdict(Owner.SITE, "SITE_NOT_IMAGE", "الموقع ردّ بصفحة بدل الصورة (حماية أو كثرة طلبات)؛ أعد المحاولة بعد لحظة")
         }
+        chain.filterIsInstance<CloudflareBypassException>().firstOrNull()?.let {
+            return if (it.interactive) Verdict(Owner.SITE, "SITE_VERIFICATION", "الموقع يطلب تحققًا (حماية Cloudflare)")
+            else Verdict(Owner.SITE, "SITE_NETWORK", "تعذّر الاتصال بالموقع")
+        }
         chain.firstNotNullOfOrNull { it as? HttpException }?.let { return http(it.code) }
         chain.firstNotNullOfOrNull { it.message?.let(HTTP_TEXT::find)?.groupValues?.get(1)?.toIntOrNull() }?.let { return http(it) }
         // رموز محرك التشغيل المعزول (CloudStream) تصل نصًا: لكل رمز معروف سببه ومالكه
@@ -54,11 +59,9 @@ object ExtensionFailure {
             val ours = t.stackTrace.firstOrNull()?.className.orEmpty().let { c -> c.startsWith("com.vantara.") || c.startsWith("dev.vantara.") }
             return Verdict(if (ours) Owner.VANTARA else Owner.EXTENSION, "REPORTED", it.take(240))
         }
-        val text = chain.joinToString(" ") { it.message.orEmpty() }
         // رمز داخلي من المحرك لا جدول له بعد: من عندنا، ولا يصل للمستخدم كما هو
         chain.firstOrNull { e -> e.message?.let(CODE::matches) == true && e.stackTrace.firstOrNull()?.className.orEmpty().let { it.startsWith("com.vantara.") || it.startsWith("dev.vantara.") } }
             ?.let { return Verdict(Owner.VANTARA, it.message!!, "تعذّر تنفيذ عملية الإضافة داخل VANTARA") }
-        if (CLOUDFLARE.containsMatchIn(text)) return Verdict(Owner.SITE, "SITE_VERIFICATION", "الموقع يطلب تحققًا (حماية Cloudflare)")
         if (chain.any { it is IOException }) return Verdict(Owner.SITE, "SITE_NETWORK", "انقطع الاتصال بالموقع أثناء الطلب")
         // كود الإضافة رمى أثناء قراءة صفحة الموقع: الموقع تغيّر أو في الإضافة خلل؛ ليس من المحرك
         if (chain.any { e -> PARSER.any { it.isInstance(e) } || e.javaClass.name.startsWith("kotlinx.serialization") || e.javaClass.name.startsWith("org.jsoup") })
@@ -121,7 +124,6 @@ object ExtensionFailure {
     )
     private val ARABIC = Regex("[\u0600-\u06FF]")
     private val HTTP_TEXT = Regex("""\bHTTP (?:error )?(\d{3})\b""")
-    private val CLOUDFLARE = Regex("cloudflare|cf[-_]chl|just a moment", RegexOption.IGNORE_CASE)
     private val PARSER = listOf(
         NullPointerException::class.java, IndexOutOfBoundsException::class.java, NoSuchElementException::class.java,
         NumberFormatException::class.java, ClassCastException::class.java, UninitializedPropertyAccessException::class.java,

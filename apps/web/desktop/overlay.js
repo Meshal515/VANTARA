@@ -1,4 +1,5 @@
 import { diagnosticsUi } from '../lib/diagnostics-ui.js';
+import { goldReport } from '../lib/deeptrace.js';
 import { syncGlass } from '../v35/glass.js';
 
 // Glass (خيار المظهر): نافذة الأدوات صفحة مستقلة، فتقرأ الاختيار نفسه وتتبعه إن تغيّر من النافذة الرئيسية.
@@ -58,6 +59,62 @@ export const clock = (ms) => {
 const badgeOf = (q) => (!q ? 'HD' : q >= 2000 ? '4K' : q >= 1000 ? 'FHD' : q >= 700 ? 'HD' : `${q}p`);
 
 /** يبني الطبقة داخل doc ويعيد {update(state), root}. send(message) يرسل الأوامر لـplayer.js. */
+/**
+ * نص تشخيص البدء في ويندوز (مثل لوحة أندرويد): من الضغط حتى أول صورة، وهل كان مُسخَّنًا، ومراحل المحرك
+ * والمشغّل بزمنها. `net` من player.js: { tapAt, openAt, stages, trace: [{ stage, ms, mode, waitMs }] }.
+ * مراحل المحرك تُقاس من اختيار المصدر في عملية الخدمات (ساعة واحدة)، وما قبله «قبل الضغط» (التسخين).
+ */
+// DeepTrace: ما يقوله المحرك عن Metadata وعن سبب كل انتظار، بأسماء مفهومة (المدد بالمللي ثانية من إضافة التورنت)
+const META_LABELS = [['peerKnownMs', 'أول مشارك معروف'], ['peerConnectedMs', 'أول اتصال'], ['trackerReplyMs', 'رد متتبع'], ['dhtReplyMs', 'رد DHT'], ['metadataMs', 'Metadata'], ['firstBlockMs', 'أول كتلة']];
+const WAIT_LABELS = [['noPeerKnownMs', 'لا مشارك معروف'], ['noPeerConnectedMs', 'لا مشارك متصل'], ['chokedMs', 'كل المشاركين يخنقون'], ['notRequestedMs', 'لم تُطلب الكتلة'], ['requestedMs', 'طُلبت ولم تصل'], ['diskWriteMs', 'كتابة القرص'], ['verifyMs', 'التحقق'], ['earlyGapMs', 'فجوة قبل الموضع'], ['pieceReadMs', 'قراءة القرص'], ['unsampledMs', 'لم يُقس'], ['unknownMs', 'غير معروف']];
+function detailText(e) {
+  const d = e.detail ?? {};
+  if (e.stage === 'engine-metadata') {
+    const marks = META_LABELS.filter(([k]) => Number.isFinite(d[k])).map(([k, label]) => `${label} ${d[k]}ms`);
+    const counts = [Number.isFinite(d.trackerReplies) ? `متتبع ${d.trackerReplies} رد/${d.trackerPeers ?? 0} مشارك` : null, Number.isFinite(d.dhtReplies) ? `DHT ${d.dhtReplies}/${d.dhtPeers ?? 0}` : null, d.trackerErrors ? `أخطاء متتبع ${d.trackerErrors}` : null];
+    return [...marks, ...counts].filter(Boolean).join('، ');
+  }
+  if (e.stage === 'range-wait') {
+    const parts = WAIT_LABELS.filter(([k]) => d[k] > 0).sort((a, b) => d[b[0]] - d[a[0]]).map(([k, label]) => `${label} ${d[k]}ms`);
+    return `طلب ${d.requestId} القطعة ${d.piece}: ${d.totalMs}ms = ${parts.join(' + ') || '—'}`;
+  }
+  return null;
+}
+
+export function diagnosticText(net = {}) {
+  const st = net.stages ?? {}, trace = net.trace ?? [];
+  const s = (ms) => `${(ms / 1000).toFixed(2)} ث`;
+  const tap = Number.isFinite(net.tapAt) && Number.isFinite(net.openAt) ? net.openAt - net.tapAt : null;
+  const fromTap = (k) => (st[k] != null ? s((tap ?? 0) + st[k]) : '—');
+  const anchor = trace.find((e) => e.stage === 'source-selected');
+  const mode = anchor?.mode === 'prewarmed' ? 'مُسخَّن (بدأ قبل الضغط)' : anchor ? 'بارد (بلا تسخين)' : 'غير معروف';
+  const app = net.app ?? {};
+  const build = trace.find((e) => e.stage === 'engine-build')?.detail;
+  const lines = [
+    'VANTARA ويندوز · تشخيص البدء',
+    // بصمة البناء: لا يُفترض أن آخر كود في الفرع هو المثبّت على الجهاز
+    `البناء: ${app.version ?? '—'} · ${app.channel ?? '—'} · ${app.build ?? '—'} · ${app.sourceSha ? app.sourceSha.slice(0, 12) : '—'}`,
+    build ? `المحرك المحمَّل: رقع libtorrent ${build.patched ? 'نعم' : 'لا'} (سقف التعليق ${build.stallCapMs}ms، التحوّط ${build.hedgeMs}ms) · تلميح القراءة ${build.readHints ? 'نعم' : 'لا'} · قراءة مبكرة ${build.earlyReadMb}MB · إعادة اتصال ${build.reconnectS} ث · قطع حرجة ${build.criticalPieces}` : 'المحرك المحمَّل: غير معروف (rqbit أو قبل التشغيل)',
+    `البدء: ${mode}`,
+    `من الضغط حتى بدء الخدمة: ${tap != null ? s(tap) : '—'}`,
+    `من الضغط حتى بدء المشغّل: ${fromTap('player-start')} · حتى جاهزية المشغّل (IPC): ${fromTap('player-ipc-ready')}`,
+    // ما يثبته كل سطر: أول إطار مفكوك = playback-restart من mpv مع أبعاد فيديو صالحة؛ تقدّم التشغيل = أول تقدّم لـtime-pos
+    // بعدها بلا إيقاف ولا تخزين. عرض الإطار على السطح لا يقيسه mpv عبر IPC هنا: يُقال «غير مقاسة» ولا يُقدَّر
+    `حتى أول إطار مفكوك: ${fromTap('ready')} · حتى تقدّم التشغيل: ${fromTap('playback-advancing')}`,
+    'أول صورة معروضة على الشاشة: غير مقاسة',
+  ];
+  if (anchor) {
+    lines.push('مراحل المحرك (من اختيار المصدر):');
+    for (const e of trace) {
+      const rel = e.ms - anchor.ms;
+      const extra = [e.mode && e.stage !== 'source-selected' ? e.mode : null, Number.isFinite(e.waitMs) ? `انتظار ${Math.round(e.waitMs)}ms` : null, detailText(e)].filter(Boolean).join(' · ');
+      lines.push(`  ${e.stage}  ${rel < 0 ? `قبل الضغط ${s(-rel)}` : `+${s(rel)}`}${extra ? `  (${extra})` : ''}`);
+    }
+  }
+  // تقرير الذهب أولًا (المسار الحرج والاختناق وسببه ومكانه وثقته)، ثم المراحل الخام كاملة للمراجعة
+  return [goldReport({ tapMs: tap, trace, app }), '', '[التفاصيل الخام]', ...lines].join('\n');
+}
+
 export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const el = (tag, cls, text) => { const n = doc.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
   const iconButton = (name, label, onClick, cls = '') => {
@@ -112,8 +169,9 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   const times = el('div', 'pp-times'), timeNow = el('span', null, '0:00'), timeTotal = el('span', null, '0:00');
   times.append(timeNow, timeTotal);
   const bar = el('div', 'pp-bar'); bar.setAttribute('role', 'slider'); bar.setAttribute('aria-label', 'التقدّم'); bar.tabIndex = 0; bar.dataset.control = 'seek';
-  const track = el('div', 'pp-track'), buffered = el('i', 'pp-buffered'), played = el('i', 'pp-played'), thumb = el('b', 'pp-thumb');
-  track.append(buffered, played);
+  // ثلاث طبقات: الجاهز على القرص (باهت)، ثم ما حمّله المشغّل في الذاكرة، ثم المشاهَد
+  const track = el('div', 'pp-track'), disk = el('i', 'pp-disk'), buffered = el('i', 'pp-buffered'), played = el('i', 'pp-played'), thumb = el('b', 'pp-thumb');
+  track.append(disk, buffered, played);
   const hoverTip = el('span', 'pp-hover'); hoverTip.hidden = true;
   // صورة مصغرة فوق المؤشر عند المرور أو السحب (كـCloudStream بطريقتنا): مربع يظهر بتلاشٍ وتكبير ناعم، والصورة من
   // المحرك لكل 10 ث (player.js ← services.previewFrame)، والوقت تحتها. بلا صورة بعد: الوقت وحده في المربع.
@@ -241,6 +299,7 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     const p = d ? Math.min(1, t / d) : 0;
     played.style.width = `${p * 100}%`; thumb.style.left = `${p * 100}%`;
     buffered.style.width = `${d && state.bufferedMs ? Math.min(1, state.bufferedMs / d) * 100 : 0}%`;
+    disk.style.width = `${d && state.diskMs ? Math.min(1, state.diskMs / d) * 100 : 0}%`;
     bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
   }
 
@@ -625,9 +684,11 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
   function paintNetwork(body) {
     const { n, st, torrent, prep, aheadS } = netFacts();
     body.replaceChildren();
-    body.append(metricRow(torrent ? 'تجهيز التورنت' : 'زمن البدء', prep != null ? `${prep} ms` : 'لم يُقس بعد', prep == null ? 'mute' : prep < 300 ? 'ok' : prep < 800 ? 'warn' : 'bad'));
+    const warmed = (n.trace ?? []).some((e) => e.stage === 'source-selected' && e.mode === 'prewarmed');
+    body.append(metricRow(torrent ? 'تجهيز التورنت' : 'زمن البدء', prep != null ? `${prep} ms` : warmed ? 'مُسخَّن قبل الضغط' : 'لم يُقس بعد', prep == null ? (warmed ? 'ok' : 'mute') : prep < 300 ? 'ok' : prep < 800 ? 'warn' : 'bad'));
     body.append(metricRow('السرعة الآن', mbps(n.inputBps)));
     body.append(metricRow('جاهز أمامك', aheadS != null ? `${aheadS} ثانية` : '—', aheadS == null ? 'mute' : aheadS >= 15 ? 'ok' : aheadS >= 5 ? 'warn' : 'bad'));
+    if (torrent && Number.isFinite(n.diskAheadMs)) { const m = Math.floor(n.diskAheadMs / 60000), s = Math.floor(n.diskAheadMs / 1000) % 60; body.append(metricRow('جاهز على القرص', m ? `${m} د ${s} ث` : `${s} ثانية`, 'soft')); }
     if (Number.isFinite(n.videoHeight)) body.append(metricRow('الفيديو', `${n.videoHeight}p${Number.isFinite(n.videoBps) && n.videoBps > 0 ? ` · ${(n.videoBps / 1e6).toFixed(1)} Mbps` : ''}`, 'soft'));
     if (torrent) {
       body.append(metricRow('مشاركون متصلون', Number.isFinite(n.peers) ? `${n.peers}${Number.isFinite(n.seeds) ? ` (زارعون ${n.seeds})` : ''}` : '—', n.peers > 0 ? 'ok' : 'bad'));
@@ -639,6 +700,13 @@ export function createOverlayView(doc, send, { timers = globalThis } = {}) {
     const at = (k) => (st[k] != null ? `+${secs(st[k])}` : '—');
     const line = [`تجهيز ${secs(st['player-start'])}`, torrent ? `المحرك ${at('engine-ready')}` : null, torrent ? `تحميل ${at('downloading')}` : null, `المشغّل ${at('player-start')}`, `إطار ${at('ready')}`].filter(Boolean).join(' · ') + ' ث';
     body.append(metricRow('تسلسل البدء', line, 'soft', true));
+    // تشخيص كامل كالـAPK: من الضغط، ومُسخَّن أو بارد، ومراحل المحرك بزمنها؛ يُنسخ ويُرسل
+    const text = diagnosticText(n);
+    body.append(metricRow('البدء', text.split('\n')[1].replace('البدء: ', ''), 'soft', true));
+    const copy = sheetRow('نسخ التشخيص', 'للإرسال: المراحل بزمنها من الضغط حتى أول صورة', { onClick: () => {
+      Promise.resolve(globalThis.navigator?.clipboard?.writeText(text)).then(() => { copy.querySelector('small')?.replaceChildren('نُسخ'); }, () => { copy.querySelector('small')?.replaceChildren('تعذّر النسخ'); });
+    } });
+    body.append(copy);
     if (state.serverCode) body.append(metricRow('السيرفر', state.serverCode, 'mute'));
     body.append(sheetRow('إظهار القياس فوق الفيديو', 'زمن الاستجابة · السرعة · الجاهز', { on: chipOn(), onClick: () => {
       setChip(!chipOn());

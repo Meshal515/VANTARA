@@ -27,9 +27,18 @@ export function parseAniZip(d) {
   return { imdb, episodes };
 }
 
-async function mapping(anilistId, { fetchImpl = globalThis.fetch, now = Date.now(), timeoutMs = 4000 } = {}) {
+// طلب واحد في الطريق لكل عمل: تجهيز فتح الورقة مسبقًا والضغطة نفسها ينتظران الطلب نفسه، لا طلبين
+const flights = new Map();
+function mapping(anilistId, opts = {}) {
   const id = String(anilistId);
-  if (memory.has(id)) return memory.get(id);
+  if (memory.has(id)) return Promise.resolve(memory.get(id));
+  if (flights.has(id)) return flights.get(id);
+  const job = fetchMapping(id, opts).finally(() => flights.delete(id));
+  flights.set(id, job);
+  return job;
+}
+
+async function fetchMapping(id, { fetchImpl = globalThis.fetch, now = Date.now(), timeoutMs = 4000 } = {}) {
   try {
     const raw = JSON.parse(globalThis.localStorage?.getItem(KEY + id) ?? 'null');
     if (raw && now - raw.at < TTL_MS) { memory.set(id, raw.data); return raw.data; }
@@ -78,4 +87,4 @@ export async function withImdbEpisode(identity, opts = {}) {
   return { ...identity, ...(first ? { season: first[0] } : {}), imdbEpisodes, externalIds: { ...identity.externalIds, imdb: m.imdb } };
 }
 
-export const _resetAnimeImdb = () => memory.clear();
+export const _resetAnimeImdb = () => { memory.clear(); flights.clear(); };

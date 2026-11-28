@@ -6,6 +6,7 @@ import { createReplayRecorder, sendReplayPrefix } from './torrent-replay-http.mj
 import { inspectMp4Index } from './mp4-bootstrap.mjs';
 import https from 'node:https';
 import net from 'node:net';
+import dgram from 'node:dgram';
 import dns from 'node:dns/promises';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -357,6 +358,18 @@ async function port() {
   const server=net.createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   const result=server.address().port;await new Promise(resolve=>server.close(resolve));return result;
 }
+/** هل المنفذ متاح لـUDP على كل الواجهات؟ (المحرك يستمع عليها لـuTP وDHT) */
+function udpFree(p) {
+  return new Promise(resolve=>{const s=dgram.createSocket('udp4');s.once('error',()=>{try{s.close();}catch{}resolve(false);});s.bind(p,'0.0.0.0',()=>s.close(()=>resolve(true)));});
+}
+/**
+ * منفذ المشاركين: حر لـTCP **ولـUDP معًا**. ويندوز يحجز نطاقات منافذ (Hyper-V/WSL) قد تشمل UDP دون TCP، فيفشل ربط uTP
+ * وDHT بصمت (WSAEACCES) والمحرك يعمل بنصف اتصالاته. (فشل Windows Debug 94: «sock_bind [uTP] forbidden by its access permissions».)
+ */
+export async function peerPort(pick=port,udp=udpFree,tries=20) {
+  for(let i=0;i<tries;i++){const p=await pick();if(await udp(p))return p;}
+  return pick();
+}
 function cleanEnv() {
   const env={...process.env};
   for (const key of Object.keys(env)) if (key.startsWith('RQBIT_') || ['RUST_LOG','LISTEN_FDS','LISTEN_PID','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'].includes(key)) delete env[key];
@@ -390,7 +403,24 @@ async function connectIPC(state, path) {
   throw new Error('لم يتصل المشغل بقناة التحكم');
 }
 
-export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null,browserFetch=null,sourceUserAgent=SOURCE_USER_AGENT}) {
+/**
+ * انتظار mpv قبل العرض: عند البدء ذاكرته فارغة فيدخل التخزين دائمًا (cache-pause-initial لم يكن يغيّر شيئًا)،
+ * وcache-pause-wait هو ما يحدد البدء. قياس (mpv 0.37، HTTP محدود، 1080p 5Mbps، ثلاث جولات): 3 ث ← 2.04/3.85 ث حتى
+ * الحركة عند 1.5/0.7MB/s؛ 0.5 ث ← 0.84/1.40 ث. نبدأ بنصف ثانية، وبعد أول توقف في المشاهدة نرفعها إلى 3 ث.
+ */
+export const START_CACHE_WAIT_SECONDS = 0.5;
+export const REBUFFER_CACHE_WAIT_SECONDS = 3;
+/**
+ * أدوار التسخين على ويندوز. «المقترح» والمرور يجلبان أول 8MB (الرأس ومرفقات MKV المعتادة وأول مشهد) وآخر 2MB
+ * (فهرس Cues، كـTAIL_INDEX_BYTES في الـAPK)؛ كانت 24MB+8MB: أبطأ اكتمالًا بثوانٍ وتنافس التشغيل إن ضُغط قبلها.
+ * الخلفي أول 2MB فقط، واثنان كحد.
+ */
+export const PREWARM_ROLES=Object.freeze({
+  top:Object.freeze({rank:3,limit:1,head:8*1024*1024,tail:2*1024*1024}),
+  hover:Object.freeze({rank:2,limit:1,head:8*1024*1024,tail:2*1024*1024}),
+  background:Object.freeze({rank:1,limit:2,head:2*1024*1024,tail:0}),
+});
+export function createDesktopServices({userData,binaries,onEvent=()=>{},platform=process.platform,videoHost=null,inputConf=null,firstFrameRecoveryMs=45000,firstFrameFailureMs=60000,windowTickMs=2000,windowLimits,holePuncher=null,dnsOverHttps=true,torrentMetadataStrategy='direct-index',torrentWarmup='container',replayCache=true,prewarmTtlMs=4*60*1000,torrentTestPeer=null,browserFetch=null,sourceUserAgent=SOURCE_USER_AGENT,warmTorrentMs=60000}) {
   if (typeof userData!=='string'||!(binaries?.rqbit||binaries?.libtorrent)||!binaries?.mpv) throw new Error('إعداد البرامج المرفقة غير صالح');
   let current=null,closed=false;
   /** مضيفات طلبت تحققًا: تُطلب من جلسة المتصفح المخفي حتى هذا الوقت. */
@@ -415,7 +445,97 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   // تعداد أقراص ويندوز عبر PowerShell يستغرق حتى 5 ث باردًا؛ يبدأ مع الخدمات لا عند الضغط على تشغيل،
   // ويُحدَّث في الخلفية بعد كل استعمال (قرص أُضيف أو أزيل). المساحة الحرة تُقرأ طازجة في كل تشغيل.
   let fixedRoots=platform==='win32'?windowsFixedRoots():null;
-  let prewarm=null;
+  // تسخين متعدد على المحرك الدائم: «المقترح» (top) ومرور الفأرة (hover) والصفوف الظاهرة (background).
+  // المرور لا يرمي «المقترح»، والخلفي أصغر وأقل عددًا. المفتاح: infoHash|fileIdx
+  const prewarms=new Map();
+  const isPrewarm=state=>{for(const p of prewarms.values())if(p.state===state)return true;return false;};
+  /**
+   * المحرك الدائم (مثل أندرويد وNuvio): عملية تورنت واحدة تعيش ما دام التطبيق مفتوحًا، لا عملية لكل تشغيل.
+   * كان كل تشغيل يشغّل محركًا جديدًا وينتظر جاهزيته ويحمّل DHT ويكلم المتتبعات من الصفر. كل جلسة تضيف
+   * تورنتها إليه (المحرك يعيد استعمال نفس البصمة)، وعدّاد مراجع لكل تورنت: حين لا يبقى له مستخدم يتوقف،
+   * ويُحذف بملفه بعد [warmTorrentMs] إلا إن عاد إليه أحد قبلها. انهيار المحرك يُفشل جلساته كما كان، والتشغيل
+   * التالي يبدأ محركًا جديدًا (rqbit احتياطًا كما هو).
+   */
+  let hub=null;
+  const hubAlive=h=>[...h.children].some(c=>c.exitCode==null&&c.signalCode==null);
+  async function ensureHub() {
+    // فحص صحة سريع قبل إعادة الاستعمال (طلب محلي): عملية انهارت مع آخر طلب قد لا يصل حدث خروجها بعد، فلا
+    // نعيد جلسة إلى محرك ميت. ننتظر خروجها قليلًا ليُسجَّل الانهيار (حجب libtorrent) ثم نبدأ غيره
+    if(hub&&!hub.stopped&&hub.ready){
+      const h=hub;
+      if(hubAlive(h)&&await localJSON(h.api,'/',{auth:h.auth,timeout:1500}).then(()=>true,()=>false)&&hub===h&&!h.stopped)return h;
+      await Promise.all([...h.children].map(c=>c.exitCode!=null||c.signalCode!=null?null:new Promise(done=>{const t=setTimeout(done,1500);c.once('exit',()=>{clearTimeout(t);done();});})));
+      hubDied(h,'أغلق البرنامج المرفق');
+    }
+    if(hub&&!hub.stopped&&hub.ready)return hub;
+    if(hub&&!hub.stopped&&hub.starting)return hub.starting;
+    const h={children:new Set(),controller:new AbortController(),stopped:false,ready:false,refs:new Map(),sessions:new Set()};
+    h.check=()=>{if(h.stopped||closed)throw cancelled();};
+    hub=h;
+    h.starting=(async()=>{
+      const roots=fixedRoots?await fixedRoots:undefined;if(fixedRoots)fixedRoots=windowsFixedRoots();
+      const chosen=await selectTorrentCacheRoot({userData,platform,...(roots?.length?{roots}:{})});h.check();
+      h.root=chosen.root;h.available=chosen.available;
+      h.cacheParent=await prepareTorrentCache(chosen.root,userData);h.check();
+      h.dir=join(h.cacheParent,secret());await mkdir(h.dir,{recursive:true});h.check();
+      h.auth=`vantara:${secret()}`;
+      const env=cleanEnv();env.RQBIT_HTTP_BASIC_AUTH_USERPASS=h.auth;
+      // جدول DHT المحفوظ (مثل dht.state في أندرويد). غير ويندوز (الاختبارات): داخل بيانات التطبيق لا في ~/.cache.
+      if(platform!=='win32')env.XDG_CACHE_HOME=join(userData,'engine-state');
+      h.kind=await launchEngine(h,h.dir,env,{auth:h.auth,signal:h.controller.signal},h.check,message=>hubDied(h,message));
+      h.ready=true;h.starting=null;
+      return h;
+    })();
+    try{return await h.starting;}
+    catch(error){if(hub===h)hub=null;await stopHub(h);throw error;}
+  }
+  function hubDied(h,message) {
+    if(h.stopped)return;
+    if(hub===h)hub=null;
+    for(const state of [...h.sessions])void fail(state,message);
+    void stopHub(h);
+  }
+  async function stopHub(h) {
+    if(!h||h.stopped&&h.stoppedTask)return h?.stoppedTask;
+    h.stopped=true;h.controller.abort();
+    for(const ref of h.refs.values())clearTimeout(ref.timer);
+    h.stoppedTask=(async()=>{
+      await Promise.all([...h.children].map(kill));
+      // مجلده وحده: المجلد الأب مشترك مع المحرك التالي (بعد انهيار)، ويُحذف عند إغلاق التطبيق فقط
+      if(h.dir)await rm(h.dir,{recursive:true,force:true}).catch(()=>{});
+    })();
+    return h.stoppedTask;
+  }
+  /**
+   * تورنت لا يُشاهَد الآن (تسخين انتهى، أو دفء بعد الإغلاق): «خامل متصل» في libtorrent، لا يُطلب شيء والمشاركون يبقون.
+   * pause كان يقطعهم، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time: متابعة بعد التسخين 53 ث في
+   * المحاكي مقابل 0.7–0.9 ث. rqbit (الرجوع) بلا idle: يبقى pause. يرجع true إن صار موقوفًا فعلًا.
+   */
+  async function idleTorrent(api,id,options){
+    try{await localJSON(api,`/torrents/${id}/idle`,options);return false;}
+    catch(error){if(options.signal?.aborted)throw error;await localJSON(api,`/torrents/${id}/pause`,options);return true;}
+  }
+  /** جلسة تستعمل تورنت المحرك: إن كان متوقفًا بانتظار الحذف يعود فورًا (التورنت الدافئ). */
+  function hubRetain(state,id) {
+    const h=state.hub;if(!h||!Number.isSafeInteger(id))return;
+    let ref=h.refs.get(id);
+    if(!ref){ref={n:0,timer:null,cooled:false};h.refs.set(id,ref);}
+    clearTimeout(ref.timer);ref.timer=null;ref.n++;
+    if(ref.cooled){ref.cooled=false;void localJSON(h.api,`/torrents/${id}/start`,{auth:h.auth,signal:h.controller.signal,body:'',timeout:5000}).catch(()=>{});}
+    state.heldTorrent=id;
+  }
+  /** آخر مستخدم ترك التورنت: يتوقف الآن (لا ينزّل لأحد)، ويُحذف بملفه بعد مهلة الدفء. */
+  function hubRelease(state) {
+    const h=state.hub,id=state.heldTorrent;state.heldTorrent=null;
+    if(!h||h.stopped||!Number.isSafeInteger(id))return;
+    const ref=h.refs.get(id);if(!ref)return;
+    ref.n=Math.max(0,ref.n-1);if(ref.n>0)return;
+    const options={auth:h.auth,signal:h.controller.signal,body:'',timeout:5000};
+    const drop=()=>{if(h.refs.get(id)!==ref||ref.n>0)return;h.refs.delete(id);void localJSON(h.api,`/torrents/${id}/delete`,{...options,timeout:15000}).catch(()=>{});};
+    if(!(warmTorrentMs>0))return drop();
+    ref.cooled=true;void idleTorrent(h.api,id,options).catch(()=>{});
+    ref.timer=setTimeout(drop,warmTorrentMs);ref.timer.unref?.();
+  }
   const startup=Promise.all(['torrent-cache','subtitle-cache'].map(name=>rm(join(userData,name),{recursive:true,force:true})))
     .then(()=>null,()=>new Error('تعذر تنظيف ملفات التورنت المتروكة؛ أغلق المحركات القديمة ثم حاول مجددًا'));
   const publish = event => { try { onEvent(event); } catch {} };
@@ -424,7 +544,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return {position:state.progress.position??0,duration:state.progress.duration??0,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true};
   }
   function emitPlaybackState(state) {if(state.ready){const value=playbackState(state);state.budget?.update(value);emit(state,{type:'playback/state',...value});}}
-  function assertSession(state) { if (state.stopped||(current!==state&&prewarm?.state!==state)||closed) throw cancelled(); }
+  function assertSession(state) { if (state.stopped||(current!==state&&!isPrewarm(state))||closed) throw cancelled(); }
   async function cleanup(state) {
     if (state.cleanup) return state.cleanup;
     state.trace?.stop();state.stopped=true;state.budget?.dispose();state.resolveReady?.(false);state.resolveCommands?.(false);state.controller.abort();clearInterval(state.statsTimer);clearInterval(state.windowTimer);clearTimeout(state.firstFrameWatchdog);
@@ -435,11 +555,13 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       await state.engineTask?.catch(()=>{});
       await state.bootstrapTask?.catch(()=>{});
       await Promise.all([...state.children].map(kill));
+      // المحرك الدائم ليس للجلسة: تترك تورنتها (يبقى دافئًا ثم يُحذف) ولا تمس مجلده المشترك
+      if(state.hub){hubRelease(state);state.hub.sessions.delete(state);}
       await Promise.all([...state.cacheRecorders??[]].map(recorder=>recorder.finish()));
       await state.videoSurface?.close();
       if(state.ipc&&platform!=='win32')await rm(state.ipc,{force:true}).catch(()=>{});
-      if(state.cacheDir)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
-      if(state.cacheParent)await rm(state.cacheParent,{recursive:true,force:true}).catch(()=>{});
+      if(state.cacheDir&&!state.hub)await rm(state.cacheDir,{recursive:true,force:true}).catch(()=>{});
+      if(state.cacheParent&&!state.hub)await rm(state.cacheParent,{recursive:true,force:true}).catch(()=>{});
       await state.subtitleQueue;
       if(state.subtitleDir)await rm(state.subtitleDir,{recursive:true,force:true}).catch(()=>{});
       states.delete(state);
@@ -447,7 +569,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return state.cleanup;
   }
   async function fail(state,message) {
-    if(prewarm?.state===state){void dropPrewarm();return;}
+    if(isPrewarm(state)){void dropPrewarm(state);return;}
     if(state.stopped||current!==state)return;
     state.failure=message;emit(state,{type:'playback/error',message});await cleanup(state);if(current===state)current=null;
   }
@@ -528,7 +650,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(!reader)return;reader.cursor=cursor;
         const mode=reader.source??'torrent';
         state.trace.once('http-first-byte',{bytes:size,waitMs:performance.now()-reader.at,mode});
-        if(!reader.firstByte){reader.firstByte=true;const waitMs=performance.now()-reader.at;state.rangeWaitMs=(state.rangeWaitMs??0)+waitMs;state.trace.record('range-first-byte',{requestId:reader.requestId,cursor,waitMs,mode});}
+        if(!reader.firstByte){reader.firstByte=true;const waitMs=performance.now()-reader.at;state.rangeWaitMs=(state.rangeWaitMs??0)+waitMs;state.trace.record('range-first-byte',{requestId:reader.requestId,cursor,waitMs,mode});if(mode==='torrent'&&waitMs>=50)void traceRangeWait(state,reader.requestId);}
         if(mode==='cache')state.cacheBytesRead=(state.cacheBytesRead??0)+size;
         else state.trace.once('first-useful-piece',{requestedPiece:Math.floor(((state.win?.fileOffset??0)+cursor-size)/(state.win?.pieceLength||1))});
         if(state.latestDemand===reader){state.demandFlowAt=Date.now();if(state.win)state.win.readPos=cursor;}
@@ -554,6 +676,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(torrent){
           if(replay?.sent)requestHeaders.Range=`bytes=${start}-${replay.range.end}`;
           requestHeaders.Authorization=`Basic ${Buffer.from(state.auth).toString('base64')}`;
+          // DeepTrace: المحرك يسجّل انتظار هذا الطلب برقمه (vantara-torrent: x-vantara-request)
+          requestHeaders['x-vantara-request']=String(reader.requestId);
           // rqbit يرد 500 «invalid state: initializing» حتى يفتح تخزين الملف (ثوانٍ بعد الإضافة، خاصة في حزم المواسم).
           // نعيد الطلب بدل تمرير نص الخطأ إلى mpv، فهو يقرأه كفيديو ويفشل فورًا.
           const notReadyUntil=performance.now()+30000;
@@ -623,26 +747,24 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   async function engine(state,candidate) {
     state.trace.record('engine-start');
     emit(state,{type:'playback/stage',stage:'engine-start'});
-    // An owned replay descriptor already identifies the previous usable volume.
-    // Check its current headroom first; avoid a PowerShell drive enumeration on
-    // every replay or app restart. A removed/full volume still uses normal selection.
-    let chosen;
-    if(state.replayEntry){
-      try{const root=state.replayEntry.descriptor.root,available=await cacheFreeBytes(root);if(available>=512n*1024n*1024n)chosen={root,available};}catch{}
-    }
-    if(!chosen){const roots=fixedRoots?await fixedRoots:undefined;if(fixedRoots)fixedRoots=windowsFixedRoots();chosen=await selectTorrentCacheRoot({userData,platform,...(roots?.length?{roots}:{})});}assertSession(state);
-    state.cacheParent=await prepareTorrentCache(chosen.root,userData);assertSession(state);
-    const dir=join(state.cacheParent,secret());state.cacheDir=dir;await mkdir(dir,{recursive:true});assertSession(state);
+    const warm=Boolean(hub?.ready&&!hub.stopped);
+    const h=await ensureHub();assertSession(state);
+    state.hub=h;h.sessions.add(state);
+    state.api=h.api;state.auth=h.auth;state.cacheDir=h.dir;state.engineKind=h.kind;state.engineReady=true;
+    const chosen={root:h.root,available:h.available};
     emit(state,{type:'playback/stage',stage:'cache-selected',volume:chosen.root,availableBytes:Number(chosen.available)});
-    state.auth=`vantara:${secret()}`;
-    const env=cleanEnv();env.RQBIT_HTTP_BASIC_AUTH_USERPASS=state.auth;
-    // جدول DHT المحفوظ (مثل dht.state في أندرويد): rqbit يحفظه كل 60 ث ويحمّله عند البدء، فلا يبدأ
-    // كل تشغيل ببحث بارد من عقد الإقلاع. ويندوز: %LOCALAPPDATA%\rqbit\dht\cache\dht.json (مسار rqbit الثابت).
-    // غير ويندوز (الاختبارات): داخل بيانات التطبيق لا في ~/.cache.
-    if(platform!=='win32')env.XDG_CACHE_HOME=join(userData,'engine-state');
     const options={auth:state.auth,signal:state.controller.signal};
-    await launchEngine(state,dir,env,options);
-    state.trace.record('engine-ready');
+    // من بدأ المحرك يرى انتقاله للاحتياط في مراحله وتشخيصه
+    if(!warm&&h.fallbackFrom){state.trace.record('engine-fallback');emit(state,{type:'playback/stage',stage:'engine-fallback',from:h.fallbackFrom,to:h.kind});}
+    // المحرك الدائم كان جاهزًا (لا تشغيل عملية ولا تحميل DHT): يظهر في التشخيص «cache» لا «cold»
+    state.trace.record('engine-ready',{mode:warm?'cache':'cold'});
+    // DeepTrace: ما بُني معه المحرك المحمَّل فعلًا (لا ما في المستودع)، مرة لكل محرك. rqbit بلا build: لا شيء
+    if(h.kind==='libtorrent'){
+      h.buildInfo??=localJSON(h.api,'/',{auth:h.auth,timeout:1500}).then(r=>r?.build??null,()=>null);
+      const b=await h.buildInfo;assertSession(state);
+      if(b)state.trace.record('engine-build',{patched:b.patched?1:0,readHints:b.read_hints?1:0,stallCapMs:b.stall_cap_ms,hedgeMs:b.hedge_ms,earlyReadMb:b.early_read_mb,reconnectS:b.reconnect_s,criticalPieces:b.critical_pieces});
+    }
+    emit(state,{type:'playback/stage',stage:'engine-ready',engine:h.kind});
 
     emit(state,{type:'playback/stage',stage:'metadata'});
     state.trace.record('magnet-metadata-start');
@@ -666,7 +788,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.trace.record('file-selected',{fileIdx:index,fileBytes:Number(metadata.details.files[index]?.length)});
     emit(state,{type:'playback/stage',stage:'file-selected',fileIdx:index,bytes:metadata.details.files[index]?.length});
     let storage;
-    try { storage=await fs.statfs(dir,{bigint:true}); }
+    try { storage=await fs.statfs(state.cacheDir,{bigint:true}); }
     catch { throw new Error('تعذر التحقق من المساحة المتاحة لملف التورنت؛ اختر مصدرًا آخر'); }
     assertSession(state);
     validateTorrentStorage(metadata.details.files[index],storage.bavail*storage.bsize);
@@ -679,6 +801,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     // التحقق من المساحة والهوية يسبق بدء التنزيل. هذه أول عملية ذات أثر جانبي
     // ولا نكررها تلقائيًا كي لا يُضاف التورنت مرتين بعد فقدان الرد.
     if(!added)added=await addTorrent(state,options,'');assertSession(state);
+    traceMetadata(state,added);
     if(!Number.isSafeInteger(added.id)||added.id<0)throw new Error('لم يسجل المحرك ملف التورنت');
     adopt(state,added);
     if(state.replayStore){
@@ -697,33 +820,48 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         const snapshot=stats.live?.snapshot,range=state.latestDemand;
         state.trace.record('torrent-sample',{knownPeers:snapshot?.peer_stats?.seen,connectedPeers:peers,speedBytes:Number.isFinite(speed)?speed*1024*1024:undefined,checkedBytes:snapshot?.downloaded_and_checked_bytes,checkedPieces:snapshot?.downloaded_and_checked_pieces,requestedPiece:range?Math.floor((state.win.fileOffset+range.cursor)/(state.win.pieceLength||1)):undefined,cursor:range?.cursor,cacheBytesRead:state.cacheBytesRead??0});
         if(peers>0)state.trace.once('peer-connected');
+        // الخيار B: تحقق قطعة سُلّم منها قبل التحقق فشل. المحرك صار موثقًا فقط لهذا التورنت، وما سُلّم قبل الفشل لا
+        // يُسترجع: يعاد تحميل mpv من الموضع نفسه ببيانات موثقة (كما PlayerActivity.recoverVerified في أندرويد)
+        const earlyFailures=Number(stats.vantara?.early_failures);
+        if(Number.isFinite(earlyFailures)&&earlyFailures>(state.earlyFailures??0)){state.earlyFailures=earlyFailures;void reloadVerified(state);}
         emit(state,{type:'playback/progress',...state.progress,...(Number.isFinite(speed)?{downloadSpeed:speed*1024*1024}:{}),...(Number.isFinite(peers)?{peers}:{}),...(Number.isFinite(seeds)?{seeds}:{})});
       }catch{}finally{state.statsPending=false;}
     },1000);
     state.windowTimer=setInterval(()=>{void windowTick(state);},windowTickMs);
     return state.streamUrl;
   }
+  /** إعادة تحميل mpv عند الموضع الحالي وحالته (موقوف/يعمل) بعد فشل تحقق قطعة قُرئت مبكرًا. */
+  async function reloadVerified(state){
+    if(state.stopped||current!==state||!state.streamUrl)return;
+    let seconds=null;
+    try{seconds=await ipcCommand(state,['get_property','time-pos']);}catch{}
+    if(state.stopped||current!==state)return;
+    const at=Number.isFinite(seconds)&&seconds>=0?seconds:0;
+    state.trace.record('early-failure-reload',{position:Math.round(at*1000)});
+    emit(state,{type:'playback/retrying',message:'قطعة لم يكتمل تحققها: نعيد التشغيل من بيانات موثقة'});
+    void ipcCommand(state,['loadfile',state.streamUrl,'replace',-1,`start=${at},pause=${state.mediaPaused?'yes':'no'}`]).catch(()=>{});
+  }
   /**
    * يشغّل محرك التورنت وينتظر واجهته: libtorrent أولًا ثم rqbit احتياطًا (engineOrder). لكل محرك
    * محاولتان كما كان rqbit: بجدول DHT المحفوظ ثم بدونه وبمنافذ جديدة. محرك لا يجيب خلال مهلته
    * يُنهى ويُجرَّب التالي؛ الانتقال يظهر في مراحل التشغيل (engine-fallback) ولا يكسر التجربة.
    */
-  async function launchEngine(state,dir,env,options) {
+  async function launchEngine(state,dir,env,options,check=()=>assertSession(state),onDied=message=>void fail(state,message)) {
     const order=engineOrder({binaries,libtorrentBlockedUntil});
     if(!order.length)throw new Error('لا يوجد محرك تورنت مرفق');
     let lastError=null;
     for(const kind of order){
       for(const dhtPersistence of kind==='rqbit'?[true,false]:[true]) {
-        const apiPort=await port();let listenPort=await port();
-        while(listenPort===apiPort)listenPort=await port();
-        assertSession(state);
+        const apiPort=await port();let listenPort=await peerPort();
+        while(listenPort===apiPort)listenPort=await peerPort();
+        check();
         state.api=`http://127.0.0.1:${apiPort}`;
         let exited=false;
         const args=kind==='libtorrent'
           ?libtorrentArgs({apiPort,listenPort,dir,stateDir:join(userData,'engine-state','libtorrent'),testPeer:torrentTestPeer})
           :engineArgs({apiPort,listenPort,dir,dhtPersistence});
         const processChild=child(state,kind==='libtorrent'?binaries.libtorrent:binaries.rqbit,args,env,message=>{
-          if(state.engineReady&&state.engineKind===kind)void fail(state,message);
+          if(state.engineReady&&state.engineKind===kind)onDied(message);
           else exited=true;
         });
         // الانهيار بعد الجاهزية يُرصد من خروج العملية نفسها: طلب HTTP المقطوع قد يُنهي الجلسة قبل وصول حدث
@@ -732,7 +870,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         if(kind==='libtorrent')processChild.once('exit',(code,signal)=>{if(state.engineKind==='libtorrent'&&signal==null&&code!==0)libtorrentBlockedUntil=Date.now()+10*60*1000;});
         const deadline=Date.now()+(kind==='libtorrent'?10000:15000);
         while(!exited){
-          assertSession(state);
+          check();
           try{
             const info=await localJSON(state.api,'/',{...options,timeout:1000});
             if(exited)break;
@@ -750,9 +888,10 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
         // لم يجهز: أنهِ هذه العملية تحديدًا قبل تجربة غيرها (لا محركان على القرص نفسه)
         state.children.delete(processChild);
         await kill(processChild);
-        assertSession(state);
+        check();
       }
       if(kind==='libtorrent'&&order.includes('rqbit')){
+        state.fallbackFrom='libtorrent';
         state.trace?.record('engine-fallback',{from:'libtorrent',to:'rqbit'});
         emit(state,{type:'playback/stage',stage:'engine-fallback',from:'libtorrent',to:'rqbit'});
       }
@@ -764,6 +903,29 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
    * يتصل فورًا بمن أعطوه البيانات قبل ثوانٍ بدل بحث DHT/متتبّعات جديد. رفض 400 مع المشاركين يعاد مرة
    * واحدة بدونهم: خطأ صيغة الاستعلام يُرفض قبل تسجيل أي تورنت، وإن سُجّل فـrqbit يرد بنفس الرقم.
    */
+  // DeepTrace: أسماء علامات المحرك وأسباب الانتظار إلى حقول سجل البدء الرقمية (startup-trace يرفض غيرها)
+  const META_MARKS={"metadata": "metadataMs", "peer-known": "peerKnownMs", "peer-connected": "peerConnectedMs", "tracker-announce": "trackerAnnounceMs", "tracker-reply": "trackerReplyMs", "dht-reply": "dhtReplyMs", "tracker-error": "trackerErrorMs", "first-block": "firstBlockMs"};
+  const WAIT_REASONS={"no-peer-known": "noPeerKnownMs", "no-peer-connected": "noPeerConnectedMs", "piece-not-requested": "notRequestedMs", "block-not-requested": "notRequestedMs", "all-peers-choking": "chokedMs", "block-requested": "requestedMs", "disk-write": "diskWriteMs", "piece-verify": "verifyMs", "early-gap": "earlyGapMs", "piece-read": "pieceReadMs", "unsampled": "unsampledMs", "unknown": "unknownMs"};
+  /** كيف وصلت Metadata (من رد الإضافة نفسه، بلا طلب إضافي): متى عُرف أول مشارك واتصل ورد المتتبع وDHT. */
+  function traceMetadata(state,reply){
+    const tl=reply?.vantara?.timeline;if(!tl||typeof tl!=='object')return;
+    const fields={adds:tl.adds,trackerReplies:tl.tracker_replies,trackerPeers:tl.tracker_peers,trackerErrors:tl.tracker_errors,dhtReplies:tl.dht_replies,dhtPeers:tl.dht_peers};
+    for(const [mark,key] of Object.entries(META_MARKS))if(Number.isFinite(tl.marks?.[mark]))fields[key]=tl.marks[mark];
+    state.trace.record('engine-metadata',{...fields,mode:tl.adds>1?'reused':'cold'});
+  }
+  /** على ماذا انتظر طلب HTTP (من المحرك بحالة libtorrent، خارج المسار الحرج): مجموع كل انتظاراته مقسومًا على أسبابها. */
+  async function traceRangeWait(state,requestId){
+    if(state.engineKind!=='libtorrent'||!Number.isSafeInteger(state.torrentId))return;
+    try{
+      const diag=await localJSON(state.api,`/torrents/${state.torrentId}/diag`,{auth:state.auth,signal:state.controller.signal,timeout:3000});
+      const mine=(Array.isArray(diag?.waits)?diag.waits:[]).filter(w=>w?.request===requestId);
+      if(!mine.length||state.stopped)return;
+      const fields={requestId,waits:mine.length,piece:mine[0].piece,totalMs:0};
+      for(const w of mine){fields.totalMs+=Number(w.total_ms)||0;for(const [reason,ms] of Object.entries(w.by_reason??{})){const key=WAIT_REASONS[reason];if(key&&Number.isFinite(ms))fields[key]=(fields[key]??0)+ms;}}
+      for(const k of Object.keys(fields))if(typeof fields[k]==='number')fields[k]=Math.round(fields[k]);
+      state.trace.record('range-wait',fields);
+    }catch{}
+  }
   async function addTorrent(state,options,extra) {
     const w=state.win,base=`/torrents?only_files=${w.index}${extra}`;
     const request=peers=>localJSON(state.api,peers.length?`${base}&initial_peers=${encodeURIComponent(peers.join(','))}`:base,{...options,body:w.magnet,timeout:120000});
@@ -818,6 +980,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   function adopt(state,added) {
     const w=state.win;
     state.torrentId=added.id;
+    if(state.heldTorrent!==added.id){hubRelease(state);hubRetain(state,added.id);}
     state.streamUrl=`${state.api}/torrents/${added.id}/stream/${w.index}`;
     const folder=added.details?.output_folder??added.output_folder;
     const file=added.details?.files?.[w.index];
@@ -836,6 +999,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const options={auth:state.auth,signal:state.controller.signal};
     state.rebuilding=(async()=>{
       emit(state,{type:'playback/retrying',message:'رجعت لجزء حُذف من الكاش لتوفير المساحة؛ نعيد تنزيله من هنا'});
+      // الحذف هنا مقصود (إعادة البناء من موضع القراءة): لا يبقى له مرجع دافئ
+      if(state.hub&&Number.isSafeInteger(state.heldTorrent)){const ref=state.hub.refs.get(state.heldTorrent);if(ref){clearTimeout(ref.timer);state.hub.refs.delete(state.heldTorrent);}state.heldTorrent=null;}
       await localJSON(state.api,`/torrents/${state.torrentId}/delete`,{...options,body:'',timeout:15000}).catch(()=>{});
       assertSession(state);
       const added=await addTorrent(state,options,'&overwrite=true');
@@ -905,7 +1070,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     const freeMemory=freemem();
     const aheadMiB=freeMemory<2*1024**3?128:freeMemory<6*1024**3?256:512;
     const behindMiB=freeMemory<2*1024**3?32:freeMemory<6*1024**3?64:128;
-    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=yes','--cache=yes','--cache-on-disk=no','--cache-pause-initial=yes','--cache-pause-wait=3','--cache-secs=60',`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
+    const args=['--no-config','--idle=yes','--terminal=no','--force-window=yes','--keep-open=yes','--cache=yes','--cache-on-disk=no',`--cache-pause-wait=${START_CACHE_WAIT_SECONDS}`,`--demuxer-max-bytes=${aheadMiB}MiB`,`--demuxer-max-back-bytes=${behindMiB}MiB`,'--hwdec=auto-safe','--input-default-bindings=yes','--sub-auto=no','--slang=ar,ara,arabic,en,eng',`--input-ipc-server=${state.ipc}`,`--title=${String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)}`,`--start=${position/1000}`,`--pause=${pause?'yes':'no'}`];
     if(state.videoSurface)args.push(`--wid=${state.videoSurface.windowId}`,'--osc=no','--input-cursor=no');
     if(state.videoSurface&&inputConf)args.push(`--input-conf=${inputConf}`);
     emit(state,{type:'playback/stage',stage:'player-start',embedded:!!state.videoSurface});
@@ -965,15 +1130,24 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(event.name==='eof-reached'&&typeof event.data==='boolean'&&state.ready&&state.ended!==event.data){state.ended=event.data;emit(state,{type:'playback/ended',ended:event.data,...state.progress});}
           const metric={'demuxer-cache-duration':'aheadMs','cache-speed':'inputBps','video-bitrate':'videoBps'}[event.name];
           if(metric&&Number.isFinite(event.data)&&event.data>=0)state.progress[metric]=metric==='aheadMs'?Math.round(event.data*1000):Math.round(event.data);
-          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
+          if(['time-pos','duration'].includes(event.name)&&Number.isFinite(event.data)&&event.data>=0){state.progress[event.name==='time-pos'?'position':'duration']=Math.round(event.data*1000);if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused&&!state.advancing&&state.progress.position>state.firstPosition){state.advancing=true;state.trace.once('playback-advancing',{position:state.progress.position});emit(state,{type:'playback/stage',stage:'playback-advancing'});}
+            if(event.name==='time-pos'&&state.ready&&!state.mediaBuffering&&!state.mediaPaused){state.stableSince??=performance.now();if(performance.now()-state.stableSince>=3000&&state.progress.position>=state.firstPosition+1000)state.trace.once('stable-playback',{position:state.progress.position});}emit(state,{type:'playback/progress',...state.progress,paused:state.mediaPaused===true,buffering:state.mediaBuffering===true});emitPlaybackState(state);}
           if(event.name==='pause'&&typeof event.data==='boolean'){state.mediaPaused=event.data;state.stableSince=null;if(state.ready)emit(state,{type:'playback/pause',paused:event.data});emitPlaybackState(state);}
-          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);}
+          if(event.name==='paused-for-cache'&&typeof event.data==='boolean'){state.mediaBuffering=event.data;state.stableSince=null;emitPlaybackState(state);
+            // DeepTrace: قبل أول إطار، mpv متوقف ينتظر بيانات (لا الفك): بداية كل انتظار ونهايته بمدته
+            if(!state.ready){if(event.data&&state.cacheWaitAt==null){state.cacheWaitAt=performance.now();state.trace.record('player-cache-wait-start');}
+              else if(!event.data&&state.cacheWaitAt!=null){state.trace.record('player-cache-wait-end',{waitMs:performance.now()-state.cacheWaitAt});state.cacheWaitAt=null;}}
+            // أول توقف للتخزين بعد بدء العرض: الشبكة أبطأ مما بدأنا به، فالاستئناف ينتظر ثلاث ثوانٍ (لا تقطيع متكرر)
+            if(event.data&&state.ready&&!state.rebufferWait){state.rebufferWait=true;void ipcCommand(state,['set_property','cache-pause-wait',REBUFFER_CACHE_WAIT_SECONDS]).catch(()=>{});}}
 
         }
       }
     });
     await Promise.all(['time-pos','duration','video-out-params','track-list','pause','paused-for-cache','demuxer-cache-duration','cache-speed','video-bitrate','eof-reached'].map((name,i)=>ipcCommand(state,['observe_property',i+1,name])));assertSession(state);
-    emit(state,{type:'playback/stage',stage:'first-frame'});
+    // جاهزية IPC (المراقبة مسجلة) لا أول إطار: كان اسمها «first-frame» فعرضتها اللوحة «أول صورة» قبل أي فك (عينة المالك
+    // 0.4.90: 0.15 ث وأول إطار مفكوك 10.30 ث). أول إطار مفكوك = playback/ready (playback-restart وأبعاد الفيديو)
+    state.trace.once('player-ipc-ready');
+    emit(state,{type:'playback/stage',stage:'player-ipc-ready'});
     await ipcCommand(state,['loadfile',url]);assertSession(state);
     state.resolveCommands(true);
     // تمنع بقاء شاشة سوداء إلى الأبد عندما لا يُنتج المصدر إطارًا.
@@ -1006,36 +1180,44 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
   /**
    * تجهيز مسبق مثل التطبيقات السريعة: ما إن تعرف صفحة العمل أفضل تورنت حتى يبدأ المحرك ويجلب البيانات
    * ويتصل بالشركاء وينزّل أول الملف وآخره (فهرس الحاوية)، ثم يتوقف عن التنزيل. عند الضغط على تشغيل
-   * يتبنّى startPlayback نفس الجلسة فيقرأ mpv أول الإطارات من القرص. تجهيز واحد فقط في كل وقت،
-   * ويُحذف (مع ملفاته) بعد مهلة أو عند تجهيز عمل آخر أو تشغيل مصدر مختلف.
+   * يتبنّى startPlayback نفس الجلسة فيقرأ mpv أول الإطارات من القرص. عدة تجهيزات بأدوار ([PREWARM_ROLES])،
+   * وكل واحد يُترك بعد مهلة أو حين يحل محله مثله أو عند بدء التشغيل.
    */
-  async function prewarmTorrent({candidate}={}) {
+  async function prewarmTorrent({candidate,role='top'}={}) {
     if(closed)return {prewarmed:false};
     candidate=validateCandidate(candidate);
-    if(!candidate.infoHash)return {prewarmed:false};
+    const spec=PREWARM_ROLES[role];
+    if(!candidate.infoHash||!spec)return {prewarmed:false};
     const key=`${candidate.infoHash}|${candidate.fileIdx??''}`;
-    if(prewarm?.key===key)return {prewarmed:true};
+    const have=prewarms.get(key);
+    // نفس التورنت بدور مثله أو أعلى: يبقى كما هو (المرور على «المقترح» لا يعيد تسخينه)
+    if(have&&have.state.stopped)prewarms.delete(key);
+    else if(have&&have.spec.rank>=spec.rank)return {prewarmed:true};
     // لا ننافس تورنتًا يُشاهَد الآن على عرض النطاق
     if(current&&!current.stopped&&current.win)return {prewarmed:false};
-    await dropPrewarm();
+    if(have)await dropPrewarm(have.state);
+    // كل دور له حد: «مقترح» واحد (الجديد يحل محل القديم)، ومرور واحد، وخلفيان
+    const same=[...prewarms.values()].filter(p=>p.role===role);
+    if(role==='background'&&same.length>=spec.limit)return {prewarmed:false};
+    for(const p of same.slice(0,Math.max(0,same.length-spec.limit+1)))await dropPrewarm(p.state);
     if(closed)return {prewarmed:false};
     const state={session:null,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false,prewarming:true};
     // لا نسخة إعادة تشغيل للتجهيز: الحساب غير معروف بعد، ونسخة الإعادة خاصة بكل حساب
     state.cacheRecorders=new Set();state.torrentReaders=new Map();state.replayStore=null;
     state.rangeSequence=0;state.trace=createStartupTrace(event=>emit(state,event));
-    prewarm={key,state};states.add(state);
-    state.prewarmTimer=setTimeout(()=>{if(prewarm?.state===state)void dropPrewarm();},prewarmTtlMs);
+    prewarms.set(key,{key,state,role,spec});states.add(state);
+    state.prewarmTimer=setTimeout(()=>{if(isPrewarm(state))void dropPrewarm(state);},prewarmTtlMs);
     state.engineTask=(async()=>{
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       return engine(state,candidate);
     })();
-    state.engineTask.then(()=>prewarmEdges(state),()=>{if(prewarm?.state===state)void dropPrewarm();});
+    state.engineTask.then(()=>prewarmEdges(state,spec),()=>{if(isPrewarm(state))void dropPrewarm(state);});
     return {prewarmed:true};
   }
-  /** يقرأ أول الملف وآخره عبر rqbit (فيعطيهما أولوية القارئ) ثم يوقف التنزيل إن لم يُتبنَّ التجهيز بعد. */
-  async function prewarmEdges(state) {
+  /** يقرأ أول الملف وآخره عبر المحرك (فيعطيهما أولوية القارئ) ثم يوقف التنزيل إن لم يُتبنَّ التجهيز بعد. */
+  async function prewarmEdges(state,spec=PREWARM_ROLES.top) {
     const w=state.win,size=w?.fileLength;if(!(size>0)||!state.streamUrl)return;
-    const head=Math.min(size,24*1024*1024),tail=Math.min(8*1024*1024,Math.max(0,size-head));
+    const head=Math.min(size,spec.head),tail=Math.min(spec.tail,Math.max(0,size-head));
     const ranges=[`bytes=0-${head-1}`,...(tail?[`bytes=${size-tail}-${size-1}`]:[])];
     const read=range=>new Promise(resolve=>{
       const attempt=()=>{
@@ -1044,6 +1226,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
           if(res.statusCode>=500){res.resume();return setTimeout(attempt,250);}
           res.on('data',()=>{});res.once('end',()=>resolve(res.statusCode<300));res.once('error',()=>resolve(false));
         });
+        // تُلغى عند تبنّي التشغيل (takePrewarm): قراءة الأطراف الجارية كانت تنافس طلب mpv الأول على المشاركين والسرعة
+        (state.edgeRequests??=new Set()).add(req);req.once('close',()=>state.edgeRequests?.delete(req));
         req.on('error',()=>resolve(false));req.setTimeout(90000,()=>req.destroy());
       };
       attempt();
@@ -1052,17 +1236,23 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     state.trace.record('prewarm-edges',{bytes:head+tail,complete:results.every(Boolean)});
     if(!state.prewarming||state.stopped||!w)return;
     // التشغيل ينتظر هذا الوعد قبل أن يقرر الاستئناف، فلا يبقى التورنت موقوفًا بعد تبنّيه
-    state.prewarmPause=localJSON(state.api,`/torrents/${state.torrentId}/pause`,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(()=>{w.paused=true;},()=>{});
+    state.prewarmPause=idleTorrent(state.api,state.torrentId,{auth:state.auth,signal:state.controller.signal,body:'',timeout:5000}).then(paused=>{w.paused=paused;},()=>{});
   }
   function takePrewarm(candidate) {
-    const p=prewarm;
-    if(!p||p.key!==`${candidate.infoHash}|${candidate.fileIdx??''}`||p.state.stopped)return null;
-    prewarm=null;clearTimeout(p.state.prewarmTimer);p.state.prewarming=false;
+    const key=`${candidate.infoHash}|${candidate.fileIdx??''}`,p=prewarms.get(key);
+    if(!p||p.state.stopped)return null;
+    prewarms.delete(key);clearTimeout(p.state.prewarmTimer);p.state.prewarming=false;
+    // تسخين بدأ قبل الضغط بلحظة (المرور بالفأرة): أطرافه لم تكتمل. التشغيل يطلب ما يحتاجه بنفسه، فلا ينافسه تسخين.
+    // عينات المالك (Debug 80): «مُسخَّن قبل الضغط» وأول صورة +14.3 و+18.1 ث، مقابل 0.1–1.25 ث حين اكتمل التسخين قبله
+    for(const req of p.state.edgeRequests??[])req.destroy();
+    p.state.edgeRequests?.clear();
     return p.state;
   }
-  async function dropPrewarm() {
-    const p=prewarm;if(!p)return;prewarm=null;
-    clearTimeout(p.state.prewarmTimer);await cleanup(p.state);
+  async function dropPrewarm(state) {
+    for(const [key,p] of prewarms)if(p.state===state){prewarms.delete(key);clearTimeout(state.prewarmTimer);await cleanup(state);}
+  }
+  async function dropPrewarms() {
+    await Promise.all([...prewarms.values()].map(p=>dropPrewarm(p.state)));
   }
   async function startPlayback({session,candidate,title,position=0,pause=false,ownerId='guest'}={}) {
     if(closed)throw new Error('أغلقت الخدمات');
@@ -1070,7 +1260,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     if(typeof ownerId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(ownerId))throw new Error('هوية حساب غير صالحة');
     candidate=validateCandidate(candidate);
     const adopted=takePrewarm(candidate);
-    if(!adopted&&prewarm)void dropPrewarm();
+    // ما بقي من التسخين ينافس التشغيل على المشاركين والسرعة: يُترك (المحرك الدائم يبقيه دافئًا 60 ث)
+    void dropPrewarms();
     const old=current,state=adopted??{session,controller:new AbortController(),children:new Set(),pending:new Map(),requestId:0,progress:{},stopped:false};
     state.session=session;
     state.subtitleTracks=[];state.subtitleFiles=new Map();state.subtitleJobs=new Map();state.subtitleQueue=Promise.resolve();state.subtitleCatalog=new Map();state.subtitleSequence=0;state.subtitleAutoTried=new Set();state.subtitleAuto=null;
@@ -1089,6 +1280,8 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
       const startupError=await startup;if(startupError)throw startupError;assertSession(state);
       if(old){publish({type:'playback/closed',session:old.session,...old.progress});await cleanup(old);}assertSession(state);
       emit(state,{type:'playback/preparing',title:String(title??'VANTARA').replace(/[\x00-\x1f\x7f]/g,' ').slice(0,300)});
+      // لوحة المشغّل تفتح مع preparing: ما سُجّل قبله (التسخين كله، واختيار المصدر) كان يضيع فيظهر «البدء: غير معروف»
+      for(const event of state.trace?.snapshot()??[])emit(state,event);
       let url;
       if(adopted){
         // التورنت جُهّز في الخلفية من صفحة العمل: المحرك والبيانات وأول الملف وفهرسه على القرص.
@@ -1317,7 +1510,7 @@ export function createDesktopServices({userData,binaries,onEvent=()=>{},platform
     return src?{available:true,positionMs:ms,src}:{available:false,positionMs:ms};
   }
   async function inspectPlayback({session}={}){const s=current;if(!s||s.session!==session||s.stopped)throw new Error('جلسة تشغيل قديمة');const [video,subtitleDelay]=await Promise.all([ipcCommand(s,['get_property','video-out-params']),ipcCommand(s,['get_property','sub-delay'])]);return {video,subtitleDelay,diagnostics:s.trace.snapshot(),frameEvidence:{decoded:s.ready===true,rendered:'unmeasured'}};}
-  async function close(){closed=true;await dropPrewarm();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
+  async function close(){closed=true;await dropPrewarms();for(const c of resourceControllers)c.abort();await startup;await Promise.all([...states].map(cleanup));const last=hub;hub=null;await stopHub(last);if(last?.cacheParent)await rm(last.cacheParent,{recursive:true,force:true}).catch(()=>{});await Promise.all([...replayCaches.values()].map(cache=>cache.close()));current=null;}
   /** مضيف اجتاز صفحة التحقق الظاهرة: طلباته من جلسة المتصفح (فيها كوكي التحقق) كما بعد الحل المخفي. */
   function trustBrowserHost(host){
     const name=String(host??'').toLowerCase();

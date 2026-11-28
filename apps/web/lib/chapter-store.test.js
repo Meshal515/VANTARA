@@ -38,6 +38,22 @@ describe('chapter caches survive canonical manga regrouping', () => {
   });
 });
 
+it('indexes provider editions saved before upgrading the chapter database', async () => {
+  const source = edition('ar.addon#123', [1, 2]);
+  const providerRef = 'ext:manga|provider:addon:123|s|p';
+  await new Promise((resolve, reject) => {
+    const request = indexedDB.open('vantara-chapters', 2);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore('works').put({ editions: [source] }, providerRef);
+      request.result.createObjectStore('kv');
+    };
+    request.onsuccess = () => { request.result.close(); resolve(); };
+  });
+  expect((await store.readWork('ext:title', { sourceTitle: 'title' })).localSourceEditions).toEqual([source]);
+  expect((await store.readWork(providerRef)).editions).toEqual([source]);
+});
+
 it('CST1: pruning keeps the newest 200 works and never loads every stored work at once', async () => {
   const { IDBFactory } = await import('fake-indexeddb');
   vi.stubGlobal('indexedDB', new IDBFactory());

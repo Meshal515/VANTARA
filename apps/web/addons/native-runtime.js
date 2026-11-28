@@ -72,17 +72,14 @@ export function getNativeAddonRuntime() {
   ]);
   /** مصادر الأنمي والمانجا كما يراها المحركان الآن (المشحونة + ما ثبّته المستخدم). */
   async function collect() {
-    const out = [];
-    if (plugins.AnimeEngine) {
-      const anime = await plugins.AnimeEngine.sources().catch(() => ({ sources: [] }));
-      out.push(...anime.sources.filter((s) => s.enabled).map((s) => ({ ...s, label: s.name, content: s.content ?? "anime", version: s.version ?? 1, ...(String(s.id).startsWith("user-") ? { user: true } : {}) })));
-    }
-    if (plugins.ExtensionEngine) {
-      const manga = await plugins.ExtensionEngine.sources().catch(() => ({ sources: [] }));
-      // إضافات التكملة المشحونة مخفية؛ ما ثبّته المستخدم يظهر بأي لغة كان
-      out.push(...manga.sources.filter((s) => !s.filler || s.user).map((s) => ({ ...s, content: "manga", domain: s.domain ?? null, version: s.version ?? 1 })));
-    }
-    return out;
+    const [anime, manga] = await Promise.all([
+      plugins.AnimeEngine?.sources().catch(() => null),
+      plugins.ExtensionEngine?.sources().catch(() => null),
+    ]);
+    return [
+      ...(anime?.sources ?? []).filter((s) => s.enabled).map((s) => ({ ...s, label: s.name, content: s.content ?? "anime", version: s.version ?? 1, ...(String(s.id).startsWith("user-") ? { user: true } : {}) })),
+      ...(manga?.sources ?? []).filter((s) => s.enabled !== false && (!s.filler || s.user)).map((s) => ({ ...s, content: "manga", domain: s.domain ?? null, version: s.version ?? 1 })),
+    ];
   }
   async function reload() {
     await ready;
@@ -146,9 +143,14 @@ export function getNativeAddonRuntime() {
   });
   runtime.nativeCapabilities = () => ({ ...features });
   const setProfile = runtime.registry.setProfile.bind(runtime.registry);
+  let profileRequest;
   runtime.registry.setProfile = id => {
     setProfile(id);
-    profileReady = profileReady.catch(() => {}).then(async () => (await runtimeRepositories)?.setProfile(id));
+    if (profileRequest?.id === id) return profileRequest.ready;
+    const ready = profileReady.catch(() => {}).then(async () => (await runtimeRepositories)?.setProfile(id));
+    profileRequest = {id, ready};
+    profileReady = ready;
+    ready.catch(() => { if (profileRequest?.ready === ready) profileRequest = null; });
     // Callers predating the new family may not await; suppress an unhandled rejection,
     // but retain the rejecting barrier so list/reload cannot expose another profile.
     profileReady.catch(() => {});

@@ -52,6 +52,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -107,8 +108,19 @@ static const std::vector<std::string> PUBLIC_TRACKERS = {
     "http://tracker.opentrackr.org:1337/announce", "https://tracker.gbitt.info:443/announce",
 };
 static constexpr int MAX_ANNOUNCE = 48;
+static constexpr int BLOCK = 16 * 1024;  // كتلة libtorrent
+// الخيار B: سقف ما يُسلَّم قبل التحقق لكل طلب (كما TurboRead.MAX_BYTES_PER_OPEN في أندرويد). VANTARA_LT_EARLY_MB=0 يعطّله
+static int64_t EARLY_BYTES = 32LL * 1024 * 1024;
+static int RECONNECT_S = 2;  // min_reconnect_time الفعلي (يُكتب حين تُضبط الجلسة)
 // قابلتان للتجربة فقط بمتغيرات بيئة (VANTARA_LT_WINDOW/AHEAD)؛ الافتراضي كالـAPK بلا تغيير
 static int WINDOW = 12;                    // TorrentPolicy.window count
+// libtorrent مخصص (tools/libtorrent-patches عبر منفذ vcpkg): قطعتان فقط بموعد، فـlibtorrent يرفع كل قطعة بموعد إلى
+// الأولوية 7 ويقسم السرعة عليها. المتغير H في stall-bench: أول قطعة بوسيط 4.3 ث بدل 8.8. مع المكتبة الأصلية النافذة كلها.
+#ifdef VANTARA_PATCHED_LIBTORRENT
+static int CRITICAL = 2;
+#else
+static int CRITICAL = 0;  // 0 = كل النافذة
+#endif
 static int AHEAD_PIECES = 64;
 // قراءة القطع المكتملة التالية من القرص قبل أن يطلبها القارئ (الـAPK: state.readAhead لقطعة واحدة). 0 = السلوك الحالي
 // بلا قراءة مسبقة؛ تجربة قياس فقط عبر VANTARA_LT_READAHEAD حتى تثبت النتائج المتكررة.
@@ -202,7 +214,8 @@ static lt::ip_filter publicNetworkFilter() {
 }
 
 // ───────────────────────────── حالة التورنت ─────────────────────────────
-struct Reader { int64_t piece = -1; clk::time_point at; };
+// last: آخر قطعة في مدى الطلب (Range)؛ ما ينتظره القارئ لاحقًا لا يتعداها
+struct Reader { int64_t piece = -1; clk::time_point at; int64_t last = -1; int file = -1; clk::time_point opened; };
 
 struct Torrent {
     int id = -1;
@@ -216,6 +229,7 @@ struct Torrent {
     std::map<uint64_t, Reader> readers;
     std::set<int> deadlined;
     int windowStart = -1;
+    bool focused = false;        // تركيز البدء: القطع ذات الموعد وحدها حتى تكتمل المنتظرة (TorrentPolicy.focusStart)
     int waitingPiece = -1;
     clk::time_point waitingSince;
     std::map<int, std::shared_ptr<std::vector<char>>> pieceCache;  // read_piece (حتى 6 قطع)
@@ -234,7 +248,91 @@ struct Torrent {
     std::set<int> directPending;  // قطع في طابور القراءة المسبقة المباشرة (خيط مستقل)
     int directHits = 0, directMisses = 0, directAhead = 0;
     int errorRecoveries = 0;
+    // الخيار B (كما TurboRead في أندرويد): كتل القطع غير المتحقق منها كما أعلن libtorrent كتابتها على القرص
+    // (block_finished_alert بعد نجاح الكتابة)، تُمحى عند تحقق القطعة أو فشله. [early]: قطع سُلّم منها قبل التحقق
+    // ولم يُحسم تحققها بعد؛ فشل تحقق إحداها يجعل التورنت موثقًا فقط ([verifiedOnly]) ويزيد [trust] فيعيد التطبيق
+    // تحميل mpv من الموضع نفسه ببيانات موثقة (ما سُلّم قبل الفشل لا يُسترجع: التعافي إعادة تحميل).
+    std::map<int, std::vector<bool>> written;
+    std::set<int> early;
+    bool verifiedOnly = false;
+    int trust = 0;
+    int earlyFailures = 0;
+    int64_t earlyBytes = 0;
+    // DeepTrace: خط زمني من الإضافة (مللي ثانية، ساعة رتيبة) لكل علامة أول مرة، وعدّادات الاكتشاف، و«مُعاد» إن جاء
+    // الطلب لتورنت موجود (تسخين سابق أو دفء بعد الإغلاق)
+    clk::time_point addedAt = clk::now();
+    std::map<std::string, int64_t> marks;
+    int trackerAnnounces = 0, trackerReplies = 0, trackerPeers = 0, trackerErrors = 0, dhtReplies = 0, dhtPeers = 0;
+    int adds = 0;
+    // كل انتظار لقطعة/كتلة فوق 50ms مقسومًا على أسبابه بحالة libtorrent الفعلية (عيّنة كل 200ms)، آخر 48
+    // المدد بالميكروثانية: المقاطع تقسم الفترة كلها فمجموعها = المدة بالضبط (التقريب لكل مقطع كان يفرّق بينهما)
+    struct WaitRecord { uint64_t request = 0; int piece = -1; int block = -1; bool early = false; int64_t startMs = 0, totalUs = 0; std::map<std::string, int64_t> byReasonUs; };
+    std::deque<WaitRecord> waits;
 };
+
+/** ما ينتظره قارئ الآن، من libtorrent نفسه (لا تخمين): يُستدعى والقفل محرَّر (استدعاءات متزامنة مع خيط الشبكة). */
+// مللي ثانية بثلاث منازل بالضبط من الميكروثانية الصحيحة. لا double عبر ostream: دقته الافتراضية 6 أرقام معنوية، فانتظار
+// 12763.876ms كان يُكتب 12763.8 وأسبابه (أصغر منه) بمنازلها كاملة، فلا يساوي مجموعها المجموع (Windows Debug 92).
+static std::string msExact(int64_t us) {
+    if (us < 0) us = 0;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%lld.%03lld", static_cast<long long>(us / 1000), static_cast<long long>(us % 1000));
+    return buf;
+}
+
+static std::string waitReason(lt::torrent_handle const& h, int piece, int block) {
+    try {
+        if (h.have_piece(lt::piece_index_t(piece))) return "piece-read";            // متحققة: بانتظار القراءة من القرص
+        lt::torrent_status const st = h.status({});
+        if (st.num_peers == 0) return st.list_peers == 0 ? "no-peer-known" : "no-peer-connected";
+        std::vector<lt::partial_piece_info> queue;
+        h.get_download_queue(queue);
+        std::string reason = "piece-not-requested";
+        for (auto const& q : queue) {
+            if (int(static_cast<std::int32_t>(q.piece_index)) != piece) continue;
+            int b = block;
+            if (b < 0) { for (int i = 0; i < q.blocks_in_piece; ++i) if (q.blocks[i].state != lt::block_info::finished) { b = i; break; } }
+            if (b < 0) return "piece-verify";                                        // كل الكتل مكتوبة: التحقق
+            b = std::min(b, q.blocks_in_piece - 1);
+            switch (q.blocks[b].state) {
+                case lt::block_info::requested: return "block-requested";            // طُلبت من مشارك ولم تصل
+                case lt::block_info::writing: return "disk-write";
+                case lt::block_info::finished: return block >= 0 ? "early-gap" : "piece-verify";
+                default: reason = "block-not-requested";
+            }
+        }
+        // لم تُطلب: هل كل المتصلين يخنقوننا؟
+        std::vector<lt::peer_info> peers;
+        h.get_peer_info(peers);
+        bool unchoked = false;
+        for (auto const& p : peers) if (!bool(p.flags & lt::peer_info::remote_choked)) { unchoked = true; break; }
+        return unchoked ? reason : "all-peers-choking";
+    } catch (...) { return "unknown"; }
+}
+
+/**
+ * DeepTrace: ما بُني معه هذا الملف التنفيذي فعلًا (لا ما في المستودع): رقع libtorrent (ثابتة الربط، فالمترجَم هو المحمَّل)
+ * وقيمها الفعلية الآن (متغيرات البيئة التي تقرؤها الرقع)، والقراءة المبكرة، وإعادة الاتصال، والقطع الحرجة.
+ */
+static std::string buildJson() {
+#ifdef VANTARA_PATCHED_LIBTORRENT
+    bool const patched = true;
+#else
+    bool const patched = false;
+#endif
+#ifdef VANTARA_LT_READ_HINTS
+    bool const hints = true;
+#else
+    bool const hints = false;
+#endif
+    auto env = [](char const* n) { char const* v = std::getenv(n); return v ? std::max(0, std::atoi(v)) : 0; };
+    std::ostringstream o;
+    o << "{\"patched\":" << (patched ? "true" : "false") << ",\"read_hints\":" << (hints ? "true" : "false")
+      << ",\"stall_cap_ms\":" << (patched ? env("VANTARA_LT_STALL_CAP_MS") : 0) << ",\"hedge_ms\":" << (patched ? env("VANTARA_LT_HEDGE_MS") : 0)
+      << ",\"early_read_mb\":" << (policy::EARLY_BYTES >> 20) << ",\"reconnect_s\":" << policy::RECONNECT_S << ",\"critical_pieces\":" << policy::CRITICAL
+      << ",\"idle\":true}";
+    return o.str();
+}
 
 static void applyOverrides(lt::settings_pack& s, std::string const& raw) {
     std::stringstream in(raw);
@@ -278,16 +376,28 @@ public:
         s.set_bool(lt::settings_pack::close_redundant_connections, false);
         s.set_int(lt::settings_pack::connection_speed, 200);
         s.set_int(lt::settings_pack::torrent_connect_boost, 100);
-        s.set_int(lt::settings_pack::peer_connect_timeout, 15);
+        // 3 ث (كان 15): مشارك ميت من DHT أو متتبع قديم يحجز مكانه حتى المهلة. stall-bench بثلاثين ميتًا وحد اتصالات
+        // 24: أول قطعة 16 ث بمهلة 15 و4.0 ث بمهلة 3. شبكة الكمبيوتر سلكية أو Wi-Fi (الجوال يبقي 15 على بيانات الجوال)
+        s.set_int(lt::settings_pack::peer_connect_timeout, 3);
         s.set_int(lt::settings_pack::handshake_timeout, 15);
         s.set_int(lt::settings_pack::tracker_receive_timeout, 6);
         s.set_int(lt::settings_pack::tracker_completion_timeout, 15);
         s.set_int(lt::settings_pack::request_timeout, 4);
+        // 2 ث (الافتراضي 60): إيقاف ثم استئناف (الدفء بعد الإغلاق، أو نافذة القرص) لا يعيد الاتصال بالمشاركين أنفسهم قبلها،
+        // والمتتبع يعيد المشاركين أنفسهم. قياس: متابعة بعد إيقاف 8 ث 53–56 ث بـ60، و1.0–1.1 ث بـ2. المشارك الذي فشل يتضاعف
+        // انتظاره مع عدّاد فشله ثم يُسقط (max_failcount)، فلا إغراق بالمحاولات
+        policy::RECONNECT_S = std::getenv("VANTARA_LT_RECONNECT_S") ? std::max(1, std::atoi(std::getenv("VANTARA_LT_RECONNECT_S"))) : 2;
+        s.set_int(lt::settings_pack::min_reconnect_time, policy::RECONNECT_S);
         s.set_int(lt::settings_pack::piece_timeout, 8);
         s.set_int(lt::settings_pack::max_out_request_queue, 250);
         s.set_int(lt::settings_pack::request_queue_time, 1);
         s.set_int(lt::settings_pack::whole_pieces_threshold, 0);
         s.set_bool(lt::settings_pack::piece_extent_affinity, false);
+#ifdef VANTARA_PATCHED_LIBTORRENT
+        // دورة 100ms تعيد طلب الكتل الحرجة أسرع، والأولوية تُحترم من أول طلب (المتغير H)
+        s.set_int(lt::settings_pack::tick_interval, 100);
+        s.set_int(lt::settings_pack::initial_picker_threshold, 0);
+#endif
         // TCP فقط كما Stremio وAPK: uTP ضاعف زمن الوصول في 8 مقارنات من 8 على أسراب حقيقية
         s.set_bool(lt::settings_pack::enable_outgoing_utp, false);
         s.set_bool(lt::settings_pack::enable_incoming_utp, false);
@@ -298,7 +408,7 @@ public:
         if (allowPrivate_) { s.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true); s.set_bool(lt::settings_pack::enable_dht, false); s.set_bool(lt::settings_pack::enable_upnp, false); s.set_bool(lt::settings_pack::enable_natpmp, false); }
         s.set_str(lt::settings_pack::listen_interfaces, (allowPrivate_ ? "127.0.0.1:" : "0.0.0.0:") + std::to_string(listenPort) + (allowPrivate_ ? "" : ",[::]:" + std::to_string(listenPort)));
         s.set_str(lt::settings_pack::user_agent, std::string("VANTARA/") + VERSION + " libtorrent/" + lt::version());
-        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
+        s.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage | lt::alert_category::piece_progress | lt::alert_category::block_progress | lt::alert_category::tracker | (std::getenv("VANTARA_TORRENT_LOG") ? lt::alert_category::peer | lt::alert_category::connect : lt::alert_category_t{}));
         // تجارب القياس فقط: VANTARA_LT_SETTINGS="اسم=قيمة,..." بأسماء settings_pack نفسها، فوق إعدادات الـAPK.
         // بلا المتغير لا يتغير شيء. كل إعداد يُطبع على stderr حتى يُعرف ما قيس.
         if (const char* raw = std::getenv("VANTARA_LT_SETTINGS")) applyOverrides(s, raw);
@@ -395,6 +505,7 @@ public:
             t->id = nextId_++;
             byHash_[hash] = t; byId_[t->id] = t;
         }
+        { std::lock_guard<std::mutex> lock(m_); ++t->adds; }
         for (auto const& peer : initialPeers) connectPeer(t->h, peer);
         // اختبار فقط: باذر محلي معروف (يُقبل حصرًا مع --allow-private-peers)
         if (allowPrivate_ && !testPeer_.empty()) connectPeer(t->h, testPeer_);
@@ -407,7 +518,14 @@ public:
             std::lock_guard<std::mutex> lock(m_);
             selectFile(*t, *ti, onlyFile);
         }
-        return {200, describe(*t, *ti, listOnly)};
+        std::string body = describe(*t, *ti, listOnly);
+        markPeers(t);
+        {
+            // DeepTrace: كيف وصلت Metadata (أو أنها كانت موجودة: adds > 1 = تورنت مُعاد)، بلا عناوين ولا بصمة
+            std::lock_guard<std::mutex> lock(m_);
+            if (!body.empty() && body.back() == '}') { body.pop_back(); body += ",\"vantara\":{\"timeline\":" + timelineJsonLocked(*t) + "}}"; }
+        }
+        return {200, body};
     }
 
     Result stats(int id) {
@@ -420,7 +538,13 @@ public:
           << ",\"live\":{\"download_speed\":{\"mbps\":" << (st.download_payload_rate / 1048576.0) << "},\"upload_speed\":{\"mbps\":" << (st.upload_payload_rate / 1048576.0)
           << "},\"snapshot\":{\"downloaded_and_checked_bytes\":" << st.total_done << ",\"downloaded_and_checked_pieces\":" << st.num_pieces
           << ",\"peer_stats\":{\"live\":" << st.num_peers << ",\"seen\":" << (st.list_peers) << ",\"seeds\":" << st.num_seeds << "}}}"
-          << ",\"waiting_piece\":" << t->waitingPiece << "}";
+          << ",\"waiting_piece\":" << t->waitingPiece;
+        {
+            // الخيار B: فشل تحقق قطعة سُلّم منها مبكرًا ⇒ التطبيق يعيد تحميل mpv من الموضع (services.mjs)
+            std::lock_guard<std::mutex> lock(m_);
+            o << ",\"vantara\":{\"early_failures\":" << t->earlyFailures << ",\"early_bytes\":" << t->earlyBytes << ",\"verified_only\":" << (t->verifiedOnly ? "true" : "false") << "}";
+        }
+        o << "}";
         return {200, o.str()};
     }
 
@@ -434,9 +558,9 @@ public:
         t->h.get_peer_info(peers);
         int unchokedUs = 0, sending = 0, onWaiting = 0;
         std::vector<int> waitSpeeds;
-        int waiting, windowStart; int64_t waitedMs = -1;
+        int waiting, windowStart; int64_t waitedMs = -1; std::set<int> deadlined;
         size_t readsInFlight; int64_t readLast, readMax; double readAvg; int readCount, directHits, directMisses, directAhead;
-        { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart;
+        { std::lock_guard<std::mutex> lock(m_); waiting = t->waitingPiece; windowStart = t->windowStart; deadlined = t->deadlined;
           readsInFlight = t->reading.size(); readLast = t->readLastMs; readMax = t->readMaxMs; readAvg = t->readAvgMs; readCount = t->readCount; directHits = t->directHits; directMisses = t->directMisses; directAhead = t->directAhead;
           if (waiting >= 0) waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t->waitingSince).count(); }
         for (auto const& p : peers) {
@@ -452,11 +576,60 @@ public:
         o << "{\"rate_bps\":" << st.download_payload_rate << ",\"total_rate_bps\":" << st.download_rate << ",\"peers\":" << st.num_peers
           << ",\"seeds\":" << st.num_seeds << ",\"unchoked_us\":" << unchokedUs << ",\"sending\":" << sending << ",\"list_peers\":" << st.list_peers
           << ",\"pieces\":" << st.num_pieces << ",\"partial\":" << queue.size() << ",\"window_start\":" << windowStart << ",\"window\":" << policy::WINDOW
+          << ",\"deadlines\":[" << [&] { std::string d; for (int p : deadlined) d += (d.empty() ? "" : ",") + std::to_string(p); return d; }() << "]"
           << ",\"waiting\":{\"piece\":" << waiting << ",\"ms\":" << waitedMs << ",\"blocks\":" << wBlocks << ",\"finished\":" << wFinished
           << ",\"writing\":" << wWriting << ",\"requested\":" << wRequested << ",\"peers\":" << onWaiting << ",\"speeds\":[";
         for (size_t i = 0; i < waitSpeeds.size(); ++i) o << (i ? "," : "") << waitSpeeds[i];
         o << "]},\"reads\":{\"in_flight\":" << readsInFlight << ",\"last_ms\":" << readLast << ",\"avg_ms\":" << int64_t(readAvg)
-          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << ",\"direct_ahead\":" << directAhead << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_ << "}";
+          << ",\"max_ms\":" << readMax << ",\"count\":" << readCount << ",\"readahead\":" << policy::READAHEAD << ",\"direct\":" << (policy::DIRECT_READ ? 1 : 0) << ",\"direct_hits\":" << directHits << ",\"direct_misses\":" << directMisses << ",\"direct_ahead\":" << directAhead << "},\"disk_io\":\"" << policy::DISK_IO << "\",\"swaps\":" << swaps_
+          << ",\"redundant_bytes\":" << st.total_redundant_bytes << ",\"failed_bytes\":" << st.total_failed_bytes << ",\"peer_states\":[";
+        // حالة كل مشارك: هل نحن مهتمون، وهل خنقنا، وهل هو مهتم، وطول طابورينا عنده (تعليق ويندوز 82–85: طلبات توقفت والمشارك متصل)
+        for (size_t i = 0; i < peers.size() && i < 8; ++i) {
+            auto const& pi = peers[i];
+            o << (i ? "," : "") << "{\"interesting\":" << (bool(pi.flags & lt::peer_info::interesting) ? 1 : 0)
+              << ",\"choked_us\":" << (bool(pi.flags & lt::peer_info::remote_choked) ? 1 : 0)
+              << ",\"snubbed\":" << (bool(pi.flags & lt::peer_info::snubbed) ? 1 : 0)
+              << ",\"seed\":" << (bool(pi.flags & lt::peer_info::seed) ? 1 : 0)
+              << ",\"dq\":" << pi.download_queue_length << ",\"req_timeout\":" << pi.request_timeout
+              << ",\"target\":" << pi.target_dl_queue_length << ",\"down\":" << pi.down_speed
+              << ",\"piece\":" << int(static_cast<std::int32_t>(pi.downloading_piece_index)) << "}";
+        }
+        o << "],\"state\":" << int(st.state) << ",\"paused\":" << (bool(st.flags & lt::torrent_flags::paused) ? 1 : 0)
+          << ",\"finished\":" << (st.is_finished ? 1 : 0);
+        {
+            std::lock_guard<std::mutex> lock(m_);
+            size_t blocks = 0, stale = 0;
+            for (auto const& [p, bits] : t->written) {
+                for (bool b : bits) blocks += b ? 1 : 0;
+                // قطعة تحققت وبقيت في السجل = تتبع خاطئ (يجب أن تُمحى عند piece_finished)
+                if (t->h.have_piece(lt::piece_index_t(p))) ++stale;
+            }
+            o << ",\"early\":{\"written_pieces\":" << t->written.size() << ",\"written_blocks\":" << blocks << ",\"stale\":" << stale << ",\"pending\":" << t->early.size()
+              << ",\"bytes\":" << t->earlyBytes << ",\"failures\":" << t->earlyFailures << ",\"trust\":" << t->trust << ",\"verified_only\":" << (t->verifiedOnly ? 1 : 0) << "}";
+            o << ",\"timeline\":" << timelineJsonLocked(*t) << ",\"waits\":" << waitsJsonLocked(*t);
+        }
+        o << ",\"readers\":[";
+        // كل قارئ مفتوح: قطعته، ومنذ متى، وهل نُزّلت، وهل قراءتها من القرص جارية، وأولويتها وموعدها (أين يعلق إن علق)
+        {
+            std::vector<std::pair<uint64_t, Reader>> readers;
+            std::set<int> reading, deadlined;
+            { std::lock_guard<std::mutex> lock(m_); readers.assign(t->readers.begin(), t->readers.end()); reading = t->reading; deadlined = t->deadlined; }
+            auto const info = t->h.torrent_file();
+            int const total = info ? info->num_pieces() : 0;
+            bool first = true;
+            for (auto const& [rid, r] : readers) {
+                int const piece = int(r.piece);
+                bool const valid = piece >= 0 && piece < total;
+                o << (first ? "" : ",") << "{\"id\":" << rid << ",\"piece\":" << piece
+                  << ",\"ms\":" << std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - r.at).count()
+                  << ",\"have\":" << (valid && t->h.have_piece(lt::piece_index_t(piece)) ? 1 : 0)
+                  << ",\"reading\":" << (reading.count(piece) ? 1 : 0)
+                  << ",\"prio\":" << (valid ? int(static_cast<std::uint8_t>(t->h.piece_priority(lt::piece_index_t(piece)))) : -1)
+                  << ",\"deadline\":" << (deadlined.count(piece) ? 1 : 0) << "}";
+                first = false;
+            }
+        }
+        o << "]}";
         return {200, o.str()};
     }
 
@@ -476,7 +649,32 @@ public:
         auto t = find(id);
         if (!t) return {404, R"({"error":"not found"})"};
         if (what == "pause") { t->h.pause(); t->paused = true; }
-        else if (what == "start") { t->h.resume(); t->paused = false; }
+        else if (what == "idle") {
+            // التسخين انتهى ولم يُضغط تشغيل بعد: لا يُطلب شيء والمشاركون يبقون متصلين (كما أندرويد أثناء مهلة التسخين).
+            // pause كان يقطعهم، وlibtorrent لا يعيد الاتصال بالمشارك نفسه قبل min_reconnect_time: متابعة بعد التسخين 53 ث
+            std::vector<lt::download_priority_t> none(size_t(t->h.torrent_file() ? t->h.torrent_file()->num_pieces() : 0), lt::dont_download);
+            t->h.clear_piece_deadlines();
+            if (!none.empty()) t->h.prioritize_pieces(none);
+            std::lock_guard<std::mutex> lock(m_);
+            t->deadlined.clear(); t->windowStart = -1; t->focused = false;
+        }
+        else if (what == "test-hash-fail") {
+            // للاختبار فقط (--allow-private-peers): فشل تحقق كما يصل من libtorrent لأول قطعة سُلّم منها مبكرًا
+            if (!allowPrivate_) return {404, R"({"error":"not found"})"};
+            int piece = -1;
+            { std::lock_guard<std::mutex> lock(m_); if (!t->early.empty()) piece = *t->early.begin(); }
+            if (piece < 0) return {409, R"({"error":"no early piece"})"};
+            pieceSettled(t->h, piece, true);
+            cv_.notify_all();
+            return {200, "{\"piece\":" + std::to_string(piece) + "}"};
+        }
+        else if (what == "start") {
+            // الإيقاف يقطع كل المشاركين؛ الاستئناف وحده يبدأ بالقلة المعروفة ولا يسأل المتتبعات وDHT حتى موعدها
+            // (عيّنة المالك: زارعون قليلون ثم كثروا فجأة، وأول صورة +20 ث مع تورنت دافئ). إعلان فوري كالإضافة الأولى
+            const bool was = t->paused;
+            t->h.resume(); t->paused = false;
+            if (was) { t->h.force_reannounce(); t->h.force_dht_announce(); }
+        }
         else if (what == "delete" || what == "forget") {
             {
                 std::lock_guard<std::mutex> lock(m_);
@@ -497,21 +695,55 @@ public:
     // ── البث: Range فوق قطع متحقق منها فقط ──
     // يعيد false إن انقطع الاتصال أو أُزيل التورنت.
     template <class Send>
-    bool stream(std::shared_ptr<Torrent> const& t, int fileIndex, int64_t from, int64_t to, uint64_t readerId, Send&& send) {
+    bool stream(std::shared_ptr<Torrent> const& t, int fileIndex, int64_t from, int64_t to, uint64_t readerId, Send&& send, uint64_t request = 0) {
         auto ti = t->h.torrent_file();
         if (!ti) return false;
         auto const& files = ltc::files(*ti);
         int64_t const offset = files.file_offset(lt::file_index_t(fileIndex));
         int const pieceLength = ti->piece_length();
         int64_t pos = from;
+        // الخيار B (كما TurboRead في أندرويد): أول القطع المختلفة لهذا الطلب حتى policy::EARLY_BYTES تُسلَّم من كتلها
+        // المكتوبة قبل تحقق القطعة (فهرس MKV 6.5KB كان ينتظر قطعة 16MB: 7.2 ث). التحقق يستمر؛ فشله يجعل التورنت موثقًا
+        // فقط ويزيد trust، فيعيد التطبيق تحميل mpv من الموضع ببيانات موثقة. ما بعدها موثق دائمًا.
+        int64_t earlyLeft = policy::EARLY_BYTES;
+        int const firstLimit = int(std::clamp<int64_t>((policy::EARLY_BYTES + pieceLength - 1) / pieceLength, 2, 64));
+        std::set<int> firstPieces;
+        int hintPiece = -1, hintBlock = -1;
         while (pos <= to) {
             if (stopping_) return false;
             int64_t const absolute = offset + pos;
             int const piece = int(absolute / pieceLength);
             int const inPiece = int(absolute % pieceLength);
-            reposition(t, *ti, fileIndex, piece, readerId);
-            std::shared_ptr<std::vector<char>> data = waitPiece(t, piece);
+            int const rangeLast = int((offset + to) / pieceLength);
+            reposition(t, *ti, fileIndex, piece, readerId, false, rangeLast);
+#ifdef VANTARA_LT_READ_HINTS
+            // 0004: كتل القطعة من موضع القراءة لا من أولها (فهرس MKV في آخر القطعة الأخيرة)، كل 4 كتل أو قطعة جديدة
+            if (piece != hintPiece || inPiece / policy::BLOCK < hintBlock || inPiece / policy::BLOCK - hintBlock >= 4) {
+                hintPiece = piece; hintBlock = inPiece / policy::BLOCK;
+                try { t->h.vantara_set_read_hint(int(readerId & 0x7fffffff), lt::piece_index_t(piece), inPiece); } catch (...) {}
+            }
+#else
+            (void)hintPiece; (void)hintBlock;
+#endif
+            if (earlyLeft > 0 && (firstPieces.count(piece) || int(firstPieces.size()) < firstLimit)) {
+                firstPieces.insert(piece);
+                int64_t const pieceSize = ti->piece_size(lt::piece_index_t(piece));
+                int64_t const want = std::min<int64_t>({to - pos + 1, pieceSize - inPiece, earlyLeft, 1 << 20});
+                int64_t const span = waitEarly(t, piece, inPiece, want, request ? request : readerId);
+                if (span > 0) {
+                    std::vector<char> buf(static_cast<std::size_t>(span));
+                    if (readSpan(t->h, piece, inPiece, buf)) {
+                        { std::lock_guard<std::mutex> lock(m_); t->earlyBytes += span; }
+                        if (!send(buf.data(), buf.size())) return false;
+                        pos += span; earlyLeft -= span;
+                        continue;
+                    }
+                    earlyLeft = 0;  // القرص لم يعطِ ما أعلن libtorrent كتابته: هذا الطلب موثق فقط من الآن
+                } else if (span < 0) return false;
+            }
+            std::shared_ptr<std::vector<char>> data = waitPiece(t, piece, request ? request : readerId);
             if (!data) return false;
+            reposition(t, *ti, fileIndex, piece, readerId, true, rangeLast);
             int64_t const take = std::min<int64_t>({int64_t(data->size()) - inPiece, to - pos + 1});
             if (take <= 0) return false;
             if (!send(data->data() + inPiece, size_t(take))) return false;
@@ -521,8 +753,20 @@ public:
     }
 
     void dropReader(std::shared_ptr<Torrent> const& t, uint64_t readerId) {
-        std::lock_guard<std::mutex> lock(m_);
-        t->readers.erase(readerId);
+        uint64_t primary = 0; Reader next;
+        {
+            std::lock_guard<std::mutex> lock(m_);
+            t->readers.erase(readerId);
+#ifdef VANTARA_LT_READ_HINTS
+            try { t->h.vantara_clear_read_hint(int(readerId & 0x7fffffff)); } catch (...) {}
+#endif
+            clk::time_point latest{};
+            for (auto const& [id, r] : t->readers) if (r.opened >= latest) { latest = r.opened; primary = id; next = r; }
+        }
+        // ما كان القارئ المغلق ينتظره لا يبقى بموعد: القارئ الباقي لا يعيد الترتيب وهو في حلقة الانتظار (قارئ رأس mpv
+        // المغلق أبقى قطعته الأولى 16MB بموعد خلف موضع المتابعة)
+        if (!primary || next.file < 0) return;
+        if (auto ti = t->h.torrent_file()) reposition(t, *ti, next.file, int(next.piece), primary, false, int(next.last), true);
     }
 
     uint64_t newReader() { return ++readerSeq_; }
@@ -548,8 +792,10 @@ private:
         std::unique_lock<std::mutex> lock(m_);
         while (!t->h.torrent_file()) {
             if (stopping_ || !byId_.count(t->id)) return false;
+            lock.unlock(); markPeers(t); lock.lock();
             if (cv_.wait_until(lock, std::min(deadline, clk::now() + 200ms)) == std::cv_status::timeout && clk::now() >= deadline) return !!t->h.torrent_file();
         }
+        markLocked(*t, "metadata");
         return true;
     }
 
@@ -651,43 +897,176 @@ private:
 
     // TorrentEngine.prioritize: نافذة 12 قطعة بمواعيد متدرجة + الطرفان المعلّقان + ما بعدها بأولوية عادية،
     // وما قبل موضع القراءة لا يُطلب (رجوع/قفز لا يهدر السرعة على ما خلف المشاهدة).
-    void reposition(std::shared_ptr<Torrent> const& t, lt::torrent_info const& ti, int fileIndex, int piece, uint64_t readerId) {
+    // تركيز البدء (كـTorrentPolicy.focusStart في الـAPK): عند أول نافذة أو قفزة والقطعة المنتظرة ناقصة، تُطلب القطع ذات
+    // الموعد والطرفان فقط. فتح النافذة وما بعدها دفعة واحدة يملأ طابور كل مشارك بكتل لا ينتظرها المشغّل، فكتل القطعة
+    // المنتظرة العالقة عند مشارك بطيء لا تُنقذ إلا خلفها. محاكي السرب (40 مشاركًا، 1MB): أول قطعة 3.9 ← 1.8 ث بعد
+    // تسخين قصير. [widen]: القطعة المنتظرة وصلت، فتُفتح النافذة كاملة.
+    void reposition(std::shared_ptr<Torrent> const& t, lt::torrent_info const& ti, int fileIndex, int piece, uint64_t readerId, bool widen = false, int rangeLast = -1, bool force = false) {
         std::lock_guard<std::mutex> lock(m_);
-        t->readers[readerId] = Reader{piece, clk::now()};
-        // القارئ الأحدث يقود النافذة (mpv يفتح قارئًا جديدًا عند القفز)
+        // وقت الفتح لا آخر نشاط: mpv/ffmpeg يفتح قارئًا جديدًا عند كل قفز، وقارئ الرأس القديم يبقى يقرأ مسبقًا لذاكرة المقبس
+        // فكان آخر نشاط يجعله «الأحدث» ويسرق النافذة من قارئ المتابعة المنتظر (diag: الرأس 7 والموضع 6)
+        auto const known = t->readers.find(readerId);
+        t->readers[readerId] = Reader{piece, clk::now(), rangeLast, fileIndex, known != t->readers.end() ? known->second.opened : clk::now()};
+        // القارئ الأحدث فتحًا يقود النافذة
         uint64_t primary = readerId;
         clk::time_point latest{};
-        for (auto const& [id, r] : t->readers) if (r.at >= latest) { latest = r.at; primary = id; }
+        for (auto const& [id, r] : t->readers) if (r.opened >= latest) { latest = r.opened; primary = id; }
         if (primary != readerId) return;
-        if (piece == t->windowStart) return;
+        if (!force && (widen ? (!t->focused || piece != t->windowStart) : piece == t->windowStart)) return;
+        int const prevStart = t->windowStart;
+        bool const firstOpen = prevStart < 0;
+        bool const jump = prevStart < 0 || piece < prevStart || piece >= prevStart + std::max(policy::CRITICAL, 1);
+        bool const focus = policy::CRITICAL > 0 && !t->h.have_piece(lt::piece_index_t(piece)) && (jump || (t->focused && piece == prevStart));
         t->windowStart = piece;
+        t->focused = focus;
         auto const& files = ltc::files(ti);
         int64_t const offset = files.file_offset(lt::file_index_t(fileIndex));
         int64_t const size = files.file_size(lt::file_index_t(fileIndex));
         int const first = int(offset / ti.piece_length());
         int const last = int((offset + size - 1) / ti.piece_length());
         std::vector<int> window;
-        for (int p = piece; p <= std::min(last, piece + policy::WINDOW - 1); ++p) window.push_back(p);
+        for (int p = piece; p <= std::min(last, piece + (focus ? policy::CRITICAL : policy::WINDOW) - 1); ++p) window.push_back(p);
         std::vector<int> pending;
-        for (int p : edgePieces(ti, fileIndex)) if (std::find(window.begin(), window.end(), p) == window.end() && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
-        auto const wanted = policy::deadlines(window, pending);
+        auto const wantedAlready = [&](int p) {
+            return std::find(window.begin(), window.end(), p) != window.end() || std::find(pending.begin(), pending.end(), p) != pending.end();
+        };
+        // قطعة ينتظرها قارئ آخر الآن (التسخين يقرأ الرأس والذيل معًا): نافذة الأحدث وحده كانت تجعلها «لا تُنزَّل»،
+        // وwaitPiece لا يعيد الأولويات، فيعلق ذلك القارئ حتى مهلته (90 ث في prewarmEdges)
+        // وقارئ بين قطعتين (يرسل قطعة نزّلها، وsend يحجبه المستقبِل) موضعه المسجّل قطعة منزّلة: ما ينتظره بعدها هو أول قطعة
+        // ناقصة من موضعه حتى آخر مداه. بلاها تصير «لا تُنزَّل» في وضع التركيز، فإن اكتمل المطلوب كله أعلن libtorrent الانتهاء
+        // وقطع الباذر (كلاهما يرفع فقط)، ثم انتظر هذا القارئ بلا مشارك (البناءان 85 و86: القطعة 4 لمدة 120 ث؛ اختبار
+        // «paused between pieces»). وحماية قطعة واحدة لا تكفي: تُنزَّل فيصير المطلوب كله منزّلًا والقارئ لم يعد بعد، فبقية مداه
+        // كلها بأدنى أولوية (لا «لا تُنزَّل») والتالية بموعد. حالة القطع باستدعاء واحد، لا have_piece لكل قطعة.
+        lt::typed_bitfield<lt::piece_index_t> have;
+        std::vector<std::pair<int, int>> others;
+        for (auto const& [id, r] : t->readers) {
+            if (id == readerId || r.piece < first || r.piece > last) continue;
+            if (have.empty()) have = t->h.status(lt::torrent_handle::query_pieces).pieces;
+            int const end = int(std::min<int64_t>(last, r.last >= 0 ? r.last : last));
+            int next = int(r.piece);
+            while (next <= end && next < have.size() && have.get_bit(lt::piece_index_t(next))) ++next;
+            if (next > end) continue;
+            others.emplace_back(next, end);
+            if (!wantedAlready(next)) pending.push_back(next);
+        }
+        // الطرفان بموعد في أول فتح فقط: المشغّل يقرأ الرأس ثم الفهرس في الذيل قبل أول إطار. بعده لا ينتظرهما إلا قارئ مفتوح
+        // عليهما (others أعلاه). بموعد دائم كانا يملآن طابور كل مشارك (قطع 16MB: حتى 48MB)، وlibtorrent لا يلغي طلبات
+        // قطعة ذات موعد ولا يطلب للحرجة من مشارك طابوره فوق 2 ث: متابعة 16MB انتظرت موضعها 4.7 ث بعد أول بايت
+        if (firstOpen) for (int p : edgePieces(ti, fileIndex)) if (!wantedAlready(p) && !t->h.have_piece(lt::piece_index_t(p))) pending.push_back(p);
+        std::vector<int> const critical = policy::CRITICAL > 0 && int(window.size()) > policy::CRITICAL
+            ? std::vector<int>(window.begin(), window.begin() + policy::CRITICAL) : window;
+        auto const wanted = policy::deadlines(critical, pending);
         std::set<int> keep;
         for (auto const& w : wanted) keep.insert(w.first);
-        // الفرق فقط: مسح كل المواعيد يلغي طلبات جارية عند المشاركين
+        // الفرق فقط: مسح كل المواعيد يشغّل cancel_non_critical في libtorrent، وما طُلب صار في الأنبوب (ذاكرة TCP) فلا يعود
+        // بالإلغاء، بل تُحرَّر كتله في المنتقي فتُطلب مرتين (قياس: ذيل 16MB 0.6–0.8 ← 1.1–1.5 ث بالإلغاء). العلاج ألا تُطلب
+        // كتل لا ينتظرها أحد من الأساس (الطرفان والقارئ المغلق أعلاه)، لا إلغاؤها بعد الطلب
         for (int p : t->deadlined) if (!keep.count(p)) t->h.reset_piece_deadline(lt::piece_index_t(p));
         std::vector<lt::download_priority_t> prio(size_t(ti.num_pieces()), lt::dont_download);
         int const aheadEnd = std::min(last, piece + std::max(policy::AHEAD_PIECES, policy::WINDOW));
-        for (int p = piece; p <= last; ++p) prio[size_t(p)] = p <= aheadEnd ? lt::download_priority_t(4) : lt::low_priority;
-        for (int p : edgePieces(ti, fileIndex)) if (p >= first) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
+        if (!focus) for (int p = piece; p <= last; ++p) prio[size_t(p)] = p <= aheadEnd ? lt::download_priority_t(4) : lt::low_priority;
+        for (auto const& [from, to] : others) for (int p = from; p <= to; ++p) prio[size_t(p)] = std::max(prio[size_t(p)], lt::low_priority);
+        // بعد أول فتح: الطرفان للفتح القادم (إعادة تحميل mpv) بأولوية عادية أثناء التشغيل، ولا يزاحمان قطعة منتظرة
+        for (int p : edgePieces(ti, fileIndex)) if (p >= first)
+            prio[size_t(p)] = std::max(prio[size_t(p)], firstOpen ? lt::download_priority_t(6) : focus ? lt::dont_download : lt::download_priority_t(4));
+        for (int p : window) prio[size_t(p)] = std::max(prio[size_t(p)], lt::download_priority_t(6));
+        // الخيار B: قطعة سُلّم منها قبل التحقق ثم تجاوزها القارئ تكتمل ليُتحقق منها (خلف الموضع كانت «لا تُنزَّل»، فما سُلّم
+        // منها قد لا يُتحقق أبدًا). في التركيز تنتظر حتى تصل القطعة المنتظرة، فلا تزاحمها
+        if (!focus) for (int p : t->early) if (p >= first && p <= last) prio[size_t(p)] = std::max(prio[size_t(p)], lt::low_priority);
         for (auto const& [p, deadline] : wanted) prio[size_t(p)] = deadline == 0 ? lt::top_priority : lt::download_priority_t(6);
         t->h.prioritize_pieces(prio);
+        // لا يُعاد موعد قطعة أبقاها الفرق: set_piece_deadline يرفع أولويتها إلى 7 دائمًا، فرأس قارئ قديم يصير بأولوية موضع
+        // القفز في المنتقي العادي أيضًا (قياس 16MB: إعادتها عند القفز 0.78 ← 1.35 ث من البداية، و4.0 ← 6.1 ث متابعة)
         for (auto const& [p, deadline] : wanted) if (deadline == 0 || !t->deadlined.count(p)) t->h.set_piece_deadline(lt::piece_index_t(p), deadline);
         t->deadlined = keep;
     }
 
-    std::shared_ptr<std::vector<char>> waitPiece(std::shared_ptr<Torrent> const& t, int piece) {
+    /** انتظار واحد لقطعة/كتلة يُقسَم على أسبابه (DeepTrace): الزمن منذ العيّنة السابقة يُحسب لسببها، ثم يُعاد السؤال. */
+    struct WaitTrace {
+        uint64_t request = 0; int piece = -1; int block = -1; bool early = false;
+        clk::time_point start = clk::now(), last = clk::now(); std::string reason = "start"; std::map<std::string, int64_t> ms; bool sampled = false;
+    };
+    void sampleWait(std::shared_ptr<Torrent> const& t, WaitTrace& w, std::unique_lock<std::mutex>& lock) {
+        auto const now = clk::now();
+        if (w.sampled && now - w.last < 200ms) return;
+        w.ms[w.reason] += std::chrono::duration_cast<std::chrono::microseconds>(now - w.last).count();
+        w.last = now; w.sampled = true;
+        lock.unlock();
+        std::string const reason = waitReason(t->h, w.piece, w.block);
+        lock.lock();
+        w.reason = reason;
+    }
+    void endWaitLocked(Torrent& t, WaitTrace& w) {
+        auto const now = clk::now();
+        if (now - w.start < 50ms) return;
+        w.ms[w.reason] += std::chrono::duration_cast<std::chrono::microseconds>(now - w.last).count();
+        // قبل أول عيّنة (أقل من 200ms) لا سبب مقاس: يبقى «لم يُقس» صراحة لا يُنسب لسبب
+        if (auto it = w.ms.find("start"); it != w.ms.end()) { w.ms["unsampled"] += it->second; w.ms.erase(it); }
+        Torrent::WaitRecord r;
+        r.request = w.request; r.piece = w.piece; r.block = w.block; r.early = w.early; r.byReasonUs = w.ms;
+        for (auto const& [k, v] : w.ms) r.totalUs += v;
+        r.startMs = std::chrono::duration_cast<std::chrono::milliseconds>(w.start - t.addedAt).count();
+        t.waits.push_back(std::move(r));
+        while (t.waits.size() > 48) t.waits.pop_front();
+    }
+
+    /**
+     * الخيار B: كم بايتًا متصلًا من [inPiece] (حتى [want]) كُتبت كتله ولم تتحقق القطعة بعد. 0 = اقرأ الموثق (تحققت القطعة،
+     * أو التورنت موثق فقط)، -1 = أُزيل التورنت أو توقف الخادم. يسجّل القطعة «مبكرة» قبل القراءة من القرص (فشل يصل بين
+     * التسجيل والقراءة يُكشف ولا يمر).
+     */
+    int64_t waitEarly(std::shared_ptr<Torrent> const& t, int piece, int inPiece, int64_t want, uint64_t request = 0) {
+        std::unique_lock<std::mutex> lock(m_);
+        WaitTrace w; w.request = request; w.piece = piece; w.block = inPiece / policy::BLOCK; w.early = true;
+        struct Done { Engine* e; Torrent& t; WaitTrace& w; ~Done() { e->endWaitLocked(t, w); } } done{this, *t, w};
+        for (;;) {
+            if (stopping_ || !byId_.count(t->id)) return -1;
+            if (t->verifiedOnly || t->pieceCache.count(piece) || t->h.have_piece(lt::piece_index_t(piece))) return 0;
+            if (auto it = t->written.find(piece); it != t->written.end()) {
+                auto const& bits = it->second;
+                int64_t const size = int64_t(bits.size()) * policy::BLOCK;
+                int64_t end = inPiece;
+                while (end < inPiece + want && size_t(end / policy::BLOCK) < bits.size() && bits[size_t(end / policy::BLOCK)])
+                    end = std::min<int64_t>((end / policy::BLOCK + 1) * policy::BLOCK, size);
+                int64_t const span = std::min<int64_t>(end, inPiece + want) - inPiece;
+                if (span > 0) {
+                    t->early.insert(piece);
+                    if (t->waitingPiece == piece) t->waitingPiece = -1;
+                    return span;
+                }
+            }
+            if (t->waitingPiece != piece) { t->waitingPiece = piece; t->waitingSince = clk::now(); }
+            sampleWait(t, w, lock);
+            cv_.wait_for(lock, 100ms);
+        }
+    }
+
+    /** [out].size() بايت من [piece] عند [inPiece] كما كُتبت على القرص (قد تعبر ملفات الحزمة)؛ false إن لم يعطها القرص. */
+    bool readSpan(lt::torrent_handle const& h, int piece, int inPiece, std::vector<char>& out) {
+        try {
+            auto const ti = h.torrent_file();
+            if (!ti) return false;
+            auto const& layout = ltc::files(*ti);
+            int64_t off = 0;
+            for (auto const& sl : ti->map_block(lt::piece_index_t(piece), inPiece, int(out.size()))) {
+                if (!layout.pad_file_at(sl.file_index)) {
+                    std::ifstream in(fs::u8path(layout.file_path(sl.file_index, dir_)), std::ios::binary);
+                    if (!in) return false;
+                    in.seekg(std::streamoff(sl.offset));
+                    in.read(out.data() + off, std::streamsize(sl.size));
+                    if (in.gcount() != std::streamsize(sl.size)) return false;
+                }
+                off += sl.size;
+            }
+            return off == int64_t(out.size());
+        } catch (...) { return false; }
+    }
+
+    std::shared_ptr<std::vector<char>> waitPiece(std::shared_ptr<Torrent> const& t, int piece, uint64_t request = 0) {
         std::unique_lock<std::mutex> lock(m_);
         bool waited = false;
+        WaitTrace w; w.request = request; w.piece = piece;
+        struct Done { Engine* e; Torrent& t; WaitTrace& w; ~Done() { e->endWaitLocked(t, w); } } done{this, *t, w};
         for (;;) {
             if (stopping_ || !byId_.count(t->id)) return nullptr;
             auto cached = t->pieceCache.find(piece);
@@ -734,6 +1113,7 @@ private:
                 t->waitingPiece = piece; t->waitingSince = clk::now();
             }
             waited = true;
+            sampleWait(t, w, lock);
             cv_.wait_for(lock, policy::DIRECT_READ && t->directRetry.count(piece) && !t->directFailed.count(piece) ? 150ms : 250ms);
         }
     }
@@ -813,6 +1193,84 @@ private:
         while (t.cacheOrder.size() > size_t(std::max(6, policy::READAHEAD + 2))) { t.pieceCache.erase(t.cacheOrder.front()); t.cacheOrder.pop_front(); }
     }
 
+    // الخيار B: كتلة كُتبت على القرص (true إن كانت لقطعة يتتبعها البث، فيستيقظ من ينتظر)
+    bool blockWritten(lt::torrent_handle const& handle, int piece, int block) {
+        std::lock_guard<std::mutex> lock(m_);
+        for (auto& [id, t] : byId_) {
+            if (t->h != handle) continue;
+            auto const info = t->h.torrent_file();
+            if (!info || piece < 0 || piece >= info->num_pieces() || block < 0) return false;
+            int const blocks = (info->piece_size(lt::piece_index_t(piece)) + policy::BLOCK - 1) / policy::BLOCK;
+            if (block >= blocks) return false;
+            // كتلة مكررة (إنقاذ الكتل البطيئة) تُكتب بعد تحقق قطعتها: لا تعيد فتح سجل قطعة متحققة (اختبار stale)
+            if (t->h.have_piece(lt::piece_index_t(piece))) return false;
+            auto& bits = t->written[piece];
+            if (bits.empty()) bits.assign(size_t(blocks), false);
+            bits[size_t(block)] = true;
+            return true;
+        }
+        return false;
+    }
+    // تحقق القطعة أو فشله يحسم كتلها؛ فشل قطعة سُلّم منها قبل التحقق = التورنت موثق فقط وجيل الثقة يزيد
+    /** علامة أول مرة (ومعها تعديل العدّادات) لتورنت مقبضه [handle]، من خيط التنبيهات. */
+    void markHandle(lt::torrent_handle const& handle, char const* name, std::function<void(Torrent&)> count = {}) {
+        std::lock_guard<std::mutex> lock(m_);
+        for (auto& [id, t] : byId_) {
+            if (t->h != handle) continue;
+            markLocked(*t, name);
+            if (count) count(*t);
+            return;
+        }
+    }
+    static void markLocked(Torrent& t, std::string const& name) {
+        if (!t.marks.count(name)) t.marks[name] = std::chrono::duration_cast<std::chrono::milliseconds>(clk::now() - t.addedAt).count();
+    }
+    /** المشاركون المعروفون والمتصلون أول مرة (من حالة التورنت، بلا قفل). */
+    void markPeers(std::shared_ptr<Torrent> const& t) {
+        try {
+            lt::torrent_status const st = t->h.status({});
+            std::lock_guard<std::mutex> lock(m_);
+            if (st.list_peers > 0) markLocked(*t, "peer-known");
+            if (st.num_peers > 0) markLocked(*t, "peer-connected");
+        } catch (...) {}
+    }
+    std::string timelineJsonLocked(Torrent const& t) const {
+        std::ostringstream o;
+        o << "{\"marks\":{";
+        bool first = true;
+        for (auto const& [k, v] : t.marks) { o << (first ? "" : ",") << '"' << k << "\":" << v; first = false; }
+        o << "},\"adds\":" << t.adds << ",\"tracker_announces\":" << t.trackerAnnounces << ",\"tracker_replies\":" << t.trackerReplies
+          << ",\"tracker_peers\":" << t.trackerPeers << ",\"tracker_errors\":" << t.trackerErrors << ",\"dht_replies\":" << t.dhtReplies
+          << ",\"dht_peers\":" << t.dhtPeers << "}";
+        return o.str();
+    }
+    std::string waitsJsonLocked(Torrent const& t) const {
+        std::ostringstream o;
+        o << '[';
+        bool first = true;
+        for (auto const& w : t.waits) {
+            o << (first ? "" : ",") << "{\"request\":" << w.request << ",\"piece\":" << w.piece << ",\"block\":" << w.block << ",\"early\":" << (w.early ? "true" : "false")
+              << ",\"start_ms\":" << w.startMs << ",\"total_ms\":" << msExact(w.totalUs) << ",\"by_reason\":{";
+            bool f2 = true;
+            for (auto const& [k, v] : w.byReasonUs) { o << (f2 ? "" : ",") << '"' << k << "\":" << msExact(v); f2 = false; }
+            o << "}}";
+            first = false;
+        }
+        o << ']';
+        return o.str();
+    }
+
+    void pieceSettled(lt::torrent_handle const& handle, int piece, bool failed) {
+        std::lock_guard<std::mutex> lock(m_);
+        for (auto& [id, t] : byId_) {
+            if (t->h != handle) continue;
+            t->written.erase(piece);
+            bool const wasEarly = t->early.erase(piece) > 0;
+            if (failed) { ++t->trust; if (wasEarly) { ++t->earlyFailures; t->verifiedOnly = true; } }
+            return;
+        }
+    }
+
     void storePiece(lt::read_piece_alert const* a) {
         std::lock_guard<std::mutex> lock(m_);
         for (auto& [id, t] : byId_) {
@@ -883,7 +1341,15 @@ private:
             bool notify = false;
             for (lt::alert* a : alerts) {
                 if (auto* r = lt::alert_cast<lt::read_piece_alert>(a)) { storePiece(r); notify = true; }
-                else if (lt::alert_cast<lt::piece_finished_alert>(a) || lt::alert_cast<lt::metadata_received_alert>(a) || lt::alert_cast<lt::torrent_removed_alert>(a) || lt::alert_cast<lt::hash_failed_alert>(a)) notify = true;
+                else if (auto* b = lt::alert_cast<lt::block_finished_alert>(a)) { markHandle(b->handle, "first-block"); if (blockWritten(b->handle, int(static_cast<std::int32_t>(b->piece_index)), b->block_index)) notify = true; continue; }
+                else if (auto* tr = lt::alert_cast<lt::tracker_reply_alert>(a)) { markHandle(tr->handle, "tracker-reply", [&](Torrent& t) { ++t.trackerReplies; t.trackerPeers += tr->num_peers; }); continue; }
+                else if (auto* dr = lt::alert_cast<lt::dht_reply_alert>(a)) { markHandle(dr->handle, "dht-reply", [&](Torrent& t) { ++t.dhtReplies; t.dhtPeers += dr->num_peers; }); continue; }
+                else if (auto* ta = lt::alert_cast<lt::tracker_announce_alert>(a)) { markHandle(ta->handle, "tracker-announce", [&](Torrent& t) { ++t.trackerAnnounces; }); continue; }
+                else if (auto* te = lt::alert_cast<lt::tracker_error_alert>(a)) { markHandle(te->handle, "tracker-error", [&](Torrent& t) { ++t.trackerErrors; }); continue; }
+                else if (auto* f = lt::alert_cast<lt::piece_finished_alert>(a)) { markHandle(f->handle, "first-piece"); pieceSettled(f->handle, int(static_cast<std::int32_t>(f->piece_index)), false); notify = true; continue; }
+                else if (auto* h = lt::alert_cast<lt::hash_failed_alert>(a)) { pieceSettled(h->handle, int(static_cast<std::int32_t>(h->piece_index)), true); notify = true; continue; }
+                else if (auto* mr = lt::alert_cast<lt::metadata_received_alert>(a)) { markHandle(mr->handle, "metadata"); notify = true; }
+                else if (lt::alert_cast<lt::piece_finished_alert>(a) || lt::alert_cast<lt::torrent_removed_alert>(a) || lt::alert_cast<lt::hash_failed_alert>(a)) notify = true;
                 else if (auto* e = lt::alert_cast<lt::torrent_error_alert>(a)) { std::cerr << "torrent error: " << e->message() << '\n'; notify = true; }
                 if (debug_ && (lt::alert_cast<lt::peer_error_alert>(a) || lt::alert_cast<lt::peer_disconnected_alert>(a) || lt::alert_cast<lt::peer_connect_alert>(a) || lt::alert_cast<lt::listen_failed_alert>(a) || lt::alert_cast<lt::listen_succeeded_alert>(a)))
                     std::cerr << "[vantara-torrent] " << a->message() << '\n';
@@ -986,7 +1452,7 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
     int timeoutMs = 15000;
     if (req.headers.count("x-req-timeout-ms")) { try { timeoutMs = std::clamp(std::stoi(req.headers["x-req-timeout-ms"]), 1000, 600000); } catch (...) {} }
     auto parts = split(req.path, '/');  // "", "torrents", id, action, file
-    if (req.path == "/") return respond(sock, {200, std::string("{\"server\":\"vantara-torrent\",\"engine\":\"libtorrent\",\"version\":\"") + VERSION + "\",\"libtorrent\":\"" + lt::version() + "\"}"});
+    if (req.path == "/") return respond(sock, {200, std::string("{\"server\":\"vantara-torrent\",\"engine\":\"libtorrent\",\"version\":\"") + VERSION + "\",\"libtorrent\":\"" + lt::version() + "\",\"build\":" + buildJson() + "}"});
     if (req.method == "POST" && req.path == "/torrents") {
         std::string magnet = req.body;
         while (!magnet.empty() && (magnet.back() == '\n' || magnet.back() == '\r' || magnet.back() == ' ')) magnet.pop_back();
@@ -1037,11 +1503,14 @@ static void serve(Engine& engine, std::string const& expectedAuth, tcp::socket s
             asio::write(sock, asio::buffer(o.str()), ec);
             if (ec || req.method == "HEAD") return;
             uint64_t const reader = engine.newReader();
+            // DeepTrace: رقم الطلب كما يعدّه سطح المكتب (rangeSequence) فيربط انتظاره هنا بطلبه هناك
+            uint64_t label = 0;
+            if (auto lb = req.headers.find("x-vantara-request"); lb != req.headers.end()) { try { label = std::stoull(lb->second); } catch (...) {} }
             engine.stream(t, fileIndex, from, to, reader, [&](char const* data, size_t n) {
                 boost::system::error_code e;
                 asio::write(sock, asio::buffer(data, n), e);
                 return !e;
-            });
+            }, label);
             engine.dropReader(t, reader);
             return;
         }
@@ -1120,6 +1589,21 @@ static int seedMode(std::string const& file, int port, int pieceSize) {
 int main(int argc, char** argv) {
     // تجارب القياس فقط: حجم نافذة القراءة وما بعدها؛ بلا المتغيرين تبقى قيم الـAPK (12 و64)
     if (const char* w = std::getenv("VANTARA_LT_WINDOW")) policy::WINDOW = std::max(1, std::atoi(w));
+    if (const char* e = std::getenv("VANTARA_LT_EARLY_MB")) policy::EARLY_BYTES = std::max(0LL, std::atoll(e)) * 1024 * 1024;
+    if (const char* c = std::getenv("VANTARA_LT_CRITICAL")) policy::CRITICAL = std::max(0, std::atoi(c));
+#ifdef VANTARA_PATCHED_LIBTORRENT
+    // ضبط التعديلين قبل أول جلسة (libtorrent يقرؤه مرة واحدة)؛ متغير بيئة موجود يغلب للمقارنة
+    auto defaultEnv = [](char const* name, char const* value) {
+        if (std::getenv(name)) return;
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        setenv(name, value, 0);
+#endif
+    };
+    defaultEnv("VANTARA_LT_STALL_CAP_MS", "1000");
+    defaultEnv("VANTARA_LT_HEDGE_MS", "750");
+#endif
     if (const char* a = std::getenv("VANTARA_LT_AHEAD")) policy::AHEAD_PIECES = std::max(1, std::atoi(a));
     if (const char* r = std::getenv("VANTARA_LT_READAHEAD")) policy::READAHEAD = std::clamp(std::atoi(r), 0, 16);
     if (const char* d = std::getenv("VANTARA_LT_DISK")) policy::DISK_IO = d;

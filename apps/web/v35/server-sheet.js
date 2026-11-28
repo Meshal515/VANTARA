@@ -13,10 +13,12 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  * من يفتحها (الأنمي/السينما) يمرّر السيرفرات وحالتها ويقرّر ماذا يحدث عند اللمس.
  */
 import { parseRelease, swarmTier } from '../addons/release-info.js';
-import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
+import { isCloudStreamRoute, isTorrentRoute, ROUTE_ENGINES, routeEngine } from '../lib/route-family.js';
+import { engineMark } from '../lib/engine-marks.js';
 import { glyph } from './icons.js';
+import { flingHoldRisk } from './collapse-hero.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
-import { isChecking, isUnavailable, isValid, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
+import { isChecking, isUnavailable, isValid, measuredSeeds, pieceScore, scoreRoute, validity, VALIDITY_AR } from '../lib/route-validity.js';
 
 /** https أو صورة PNG مضمّنة صغيرة فقط: لا مخطط آخر يصل إلى CSS. */
 const safeIconUrl = (value) => {
@@ -81,7 +83,8 @@ const QUALITY_PREF = { 1080: 5, 2160: 4, 1440: 4, 720: 3, 480: 1 };
 export function describe(r, ctx = {}) {
   const torrent = isTorrentRoute(r);
   // وصف التورنت (البذور والحجم والموقع) من وسمه، لأي تورنت: إضافة Stremio أو إضافة Aniyomi (Torrentio Anime)
-  const info = (isAddonRoute(r) || torrent) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
+  let info = (isAddonRoute(r) || torrent) && r.label ? parseRelease(r.sourceName ?? r.server ?? '', r.label) : null;
+  if (torrent && Number.isFinite(r.seeders)) info = { ...info, seeders: r.seeders };
   const q = bucket(r.quality ?? info?.quality);
   const name = torrent
     ? (info?.provider || r.sourceName || ctx.sourceName?.(r) || 'إضافة')
@@ -120,8 +123,47 @@ export function rank(r, d) {
   return scoreRoute(r, d).score;
 }
 
+/**
+ * ترتيب التسخين الخلفي (قرار المالك 26 نوفمبر): السرب 16 درجة، ثم حجم القطعة 12، ثم العربي 2.
+ * السرب المقاس إن وصل المحرك إليه وإلا المعلن؛ حجم القطعة المجهول وسط (6).
+ */
+export function warmScore(d, measured) {
+  const seeds = measuredSeeds({ ...d, measured }) ?? d.info?.seeders;
+  const swarm = Number.isFinite(seeds) ? 16 * Math.min(1, Math.log10(1 + Math.max(0, seeds)) / 3) : 0;
+  const piece = 12 * (pieceScore(measured?.pieceLength) ?? 0.5);
+  const arabic = d.langs?.some((l) => l.ar) || d.info?.arabic ? 2 : 0;
+  return swarm + piece + arabic;
+}
+
+/** أقل سرب يُسخَّن إن وُجد أعلى منه بين الظاهر؛ إن لم يوجد يُسخَّن الموجود. */
+export const WARM_MIN_SEEDS = 20;
+
+/**
+ * الصفوف الظاهرة غير «المقترح» مرتبة للتسخين الخلفي: `rows` = [{ r, d, m }]. يرجع المعرّفات.
+ * ما سربه 20 فأقل يُترك إن وُجد أقوى منه، ويُسخَّن إن لم يوجد غيره.
+ */
+export function warmRows(rows) {
+  const seedsOf = (x) => measuredSeeds({ ...x.d, measured: x.m }) ?? x.d.info?.seeders ?? 0;
+  const strong = rows.filter((x) => seedsOf(x) > WARM_MIN_SEEDS);
+  return (strong.length ? strong : rows)
+    .map((x) => ({ id: x.r.id, s: warmScore(x.d, x.m) }))
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.id);
+}
+
 /** آخر صف تورنت لُمس: يُنسب إليه زمن بدء المشغّل الأصلي حين يصل (playstat). */
 let lastPick = null;
+/** زمن الحدث بساعة Date.now (timeStamp نسبي لبداية الصفحة)، أو الآن إن لم يُعرف. */
+export function tapTime(e, perf = globalThis.performance, now = Date.now()) {
+  const origin = perf?.timeOrigin;
+  const stamp = e?.timeStamp;
+  if (Number.isFinite(origin) && Number.isFinite(stamp) && stamp > 0) {
+    const at = Math.round(origin + stamp);
+    // ساعة الحدث من مصدر آخر (بعض WebView تعطيه من الإقلاع): لا يُقبل ما يتجاوز الآن أو أقدم من دقيقة
+    if (at <= now && now - at < 60_000) return at;
+  }
+  return now;
+}
 /**
  * زمن البدء الحقيقي من المشغّل الأصلي (`playstat` بمرحلة server): أول إطار، أو تعذّر/انقطاع.
  * يُنسب لصفات آخر تورنت لُمس في العشر دقائق الأخيرة فقط.
@@ -134,18 +176,11 @@ export function learnStart(e) {
   lastPick = null;
 }
 
-/** ترتيب صفوف التورنت: الأصح سربًا ثم الأعلى جودة ثم العربية ثم المشاركون. */
-function torrentOrder(a, b) {
-  const t = (d) => ({ strong: 4, fair: 3, weak: 1, dead: 0 }[d.tier] ?? 2) - (d.info?.source === 'CAM' ? 9 : 0);
-  return t(b.d) - t(a.d) || (b.d.q ?? 0) - (a.d.q ?? 0) || Number(Boolean(b.d.info?.arabic)) - Number(Boolean(a.d.info?.arabic)) || (b.d.info?.seeders ?? 0) - (a.d.info?.seeders ?? 0);
-}
-
-const METER = { dead: 0, weak: 1, fair: 2, strong: 3 };
-const meterBars = (d) => {
-  const s = d.info?.seeders;
-  if (!Number.isFinite(s)) return -1;
-  return s >= 100 ? 4 : METER[d.tier] ?? 0;
-};
+/**
+ * عدد الزارعين بأيقونة أشخاص ولون السرب (أخضر قوي، برتقالي متوسط، أحمر ضعيف). كانت أعمدة تشبه إشارة الشبكة فقرأها
+ * مستخدم «Ping بالميلي ثانية» واختار سيرفرًا بلا مشاركين. الرقم كما أعلنه المصدر، فالصفر لا يعني موت التورنت قطعًا.
+ */
+const SEEDS_HINT = 'عدد الزارعين (Seeders) كما أعلنه المصدر';
 const compact = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
 
 
@@ -177,11 +212,11 @@ function detailLines(r, d) {
     ['المصدر', [i.source, i.site].filter(Boolean).join(' · ')],
     ['الترميز', [i.codec, ...(d.hdr ?? [])].filter(Boolean).join(' · ')],
     ['الصوت', i.audio],
-    ['المشاركون', Number.isFinite(i.seeders) ? `${i.seeders.toLocaleString('en')} · ${SWARM_AR[d.tier] ?? ''}` : null],
+    ['الزارعون (Seeders)', Number.isFinite(i.seeders) ? `${i.seeders.toLocaleString('en')} · ${SWARM_AR[d.tier] ?? ''}` : null],
   ].filter(([, v]) => v);
 }
 
-const SWARM_AR = { strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'سرب ضعيف', dead: 'بلا مشاركين' };
+const SWARM_AR = { strong: 'سرب قوي', fair: 'سرب متوسط', weak: 'سرب ضعيف', dead: 'لم يعلن المصدر زارعين' };
 
 /** لماذا هذا هو المقترح، بكلمات قليلة: يُقال تحت زر «شغّل الأفضل». */
 export function bestReason(r, d) {
@@ -210,7 +245,7 @@ export function factDate(v) {
 /**
  * يبني الورقة داخل `body` ويعيد {update, best, status, body, scroll}.
  *
- * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onRetry(), onUnavailable(r),
+ * o: { el, title, kicker, media, onBack, onPick(r), onBest(), onTop(r), onWarmRows(ids), onHover(r), onRetry(), onUnavailable(r),
  *      selectable(r), pending(r), dead(r), sourceName(r), prefer, directLang, extraFoot[] }
  * media: { title, logo, backdrop, backdropFallback, backdropPosition, code ('S01E02'),
  *          label ('الموسم 1 · الحلقة 2'), episodeTitle, description, rating: {value, label},
@@ -223,6 +258,24 @@ export function factDate(v) {
  */
 /** لمسة على صف بعد تحرّك القائمة بأقل من هذا تُهمل (لا تشغيل بالخطأ). */
 const TAP_GUARD_MS = 450;
+/** الظاهر من كل قسم (المالك، 27 نوفمبر): 10، وما بعده «عرض N من النسخ/الروابط الإضافية». */
+export const VISIBLE = 10;
+/** حتى خمسة تورنتات من كل جودة، وعشرة إجمالًا في القائمة الأساسية. */
+export const PER_QUALITY = 5;
+const BOLT = '<svg class="icon ss-bolt" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M13.4 2.2 4.6 13.3a.7.7 0 0 0 .55 1.13h5.6l-1.1 7.2c-.1.66.74 1.02 1.15.5l8.8-11.1a.7.7 0 0 0-.55-1.13h-5.6l1.1-7.2c.1-.66-.74-1.02-1.15-.5Z"/></svg>';
+
+/** الجودة أولًا، ثم عدد الزارعين المعلن، مع سقف لكل مجموعة وللقائمة كاملة. */
+export function torrentPlan(items, { quality, seeds }) {
+  const byQuality = new Map();
+  for (const route of items) {
+    const q = quality(route) ?? 0;
+    if (!byQuality.has(q)) byQuality.set(q, []);
+    byQuality.get(q).push(route);
+  }
+  return [...byQuality].sort(([a], [b]) => b - a)
+    .flatMap(([, routes]) => routes.sort((a, b) => seeds(b) - seeds(a)).slice(0, PER_QUALITY))
+    .slice(0, VISIBLE);
+}
 
 export function createServerSheet(body, o) {
   let destroyed = false;
@@ -391,11 +444,16 @@ export function createServerSheet(body, o) {
   const toolsHead = el('div', 'ss-tools-head');
   // لا عنوان «المصادر»: المرشّحات أول ما تحت الحلقة، وسطر الحالة يظهر وقت التجهيز فقط
   const status = el('div', 'an-srv-status');
+  const statusSpinner = el('i', 'ss-spin'), statusText = el('span');
+  status.append(statusText);
   toolsHead.append(status);
   const filters = el('div', 'an-pick-filters');
   tools.append(toolsHead, filters);
   const list = el('div', 'an-srv-list');
-  src.append(tools, list);
+  // حجز ارتفاع القائمة (holdHeight): عنصر بعدها لا أصل للصفوف، فتغيّره لا يوقف تثبيت التمرير في المتصفح
+  const hold = el('div', 'ss-hold');
+  hold.setAttribute('aria-hidden', 'true');
+  src.append(tools, list, hold);
 
   const scroll = el('div', 'an-pick-scroll');
   scroll.append(info, src);
@@ -410,13 +468,19 @@ export function createServerSheet(body, o) {
 
   // Debug actions live below source content; header geometry belongs to navigation/friends.
   const diagnostics = el('div', 'ss-diagnostics');
+  // مسجّل القفزات (يظهر مع التشخيص فقط): سطر يُنسخ، يُملأ أدناه
+  const jumpLine = el('button', 'ss-jumps');
+  jumpLine.type = 'button';
+  jumpLine.hidden = true;
   const paintDiagnostics = () => {
+    const shown = o.jumpProbe ?? diagnosticsUi.visible();
     diagnostics.replaceChildren();
-    diagnostics.hidden = !diagnosticsUi.visible();
-    if (diagnosticsUi.visible()) {
+    diagnostics.hidden = !shown;
+    if (shown) {
       const action = o.diagnosticAction?.();
       if (action) diagnostics.append(action);
-      else diagnostics.hidden = true;
+      diagnostics.append(jumpLine);
+      diagnostics.hidden = !action && jumpLine.hidden;
     }
   };
   scroll.append(diagnostics);
@@ -426,6 +490,7 @@ export function createServerSheet(body, o) {
   // ── الانكماش مع التمرير (الهاتف فقط): تحويل وشفافية لا غير، عبر متغيّرين ──
   const mq = (q) => (typeof matchMedia === 'function' ? matchMedia(q) : null);
   const wide = mq('(min-width: 900px)');
+  const scrollSurface = () => wide?.matches ? src : scroll;
   const placeActions = () => {
     if (wide?.matches) foot.append(best, ...(o.extraFoot ?? []));
     else {
@@ -479,30 +544,52 @@ export function createServerSheet(body, o) {
   // الصورة والشعار يتحركان بخط CSS مربوط بتمرير الورقة نفسها (كانت الكتابة بعد حدث scroll
   // متأخرة إطارًا فتهتز). WebView 153–156 يحبس الانزلاق بعد رفع الإصبع ما دامت حركة مربوطة
   // بالتمرير، فأثناء الانزلاق تُوقف حركة CSS وتعمل المتغيرات التي يكتبها collapse بنفس القيم.
+  // نفس قواعد collapse-hero.js (CLAUDE.md): في WebView وحده (flingHoldRisk)، والحكم بحركة الإصبع نفسها، والتسلّم عند حد
+  // الإطار التالي لا في حدث الرفع. كانت هذه النسخة تتسلّم في touchend وموضع التمرير فيه متأخر عن الشاشة بآخر حركة للإصبع،
+  // فتُكتب قيمة أقدم مما يرسمه CSS وترتد الصورة بقدرها مع كل رفعة؛ وتحكم بالحركة من حدث scroll وحده، والزحلقة السريعة
+  // يصل تمريرها بعد الرفع فتفوت التسليم فيُحبس الانزلاق ثم يُلقى دفعة واحدة (crbug 572898003).
   let handed = false;
   let moved = false;
+  let touching = false;
+  let startY = 0;
   let settleTimer = null;
+  let takeover = null;
+  const holdRisk = flingHoldRisk();
   const handBack = () => {
     clearTimeout(settleTimer);
     if (!handed) return;
     handed = false;
     body.classList.remove('ss-handed');
   };
-  listen(scroll, 'touchstart', () => { moved = false; handBack(); }, { passive: true });
+  listen(scroll, 'touchstart', (e) => {
+    if (takeover != null) globalThis.cancelAnimationFrame?.(takeover);
+    takeover = null;
+    touching = true;
+    moved = false;
+    startY = e?.touches?.[0]?.clientY ?? 0;
+    handBack();
+  }, { passive: true });
   listen(scroll, 'scroll', () => {
-    moved = true;
+    if (touching) moved = true;
     if (handed) {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(handBack, 180);
     }
   }, { passive: true });
-  const fling = () => {
-    if (!moved) return;
-    handed = true;
-    collapse();
-    body.classList.add('ss-handed');
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(handBack, 180);
+  const fling = (e) => {
+    touching = false;
+    const endY = e?.changedTouches?.[0]?.clientY;
+    if (endY != null && Math.abs(endY - startY) > 6) moved = true;
+    if (!holdRisk || !moved || typeof requestAnimationFrame !== 'function') return;
+    takeover = requestAnimationFrame(() => {
+      takeover = null;
+      if (destroyed || touching) return;
+      handed = true;
+      collapse();
+      body.classList.add('ss-handed');
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(handBack, 180);
+    });
   };
   listen(scroll, 'touchend', fling, { passive: true });
   listen(scroll, 'touchcancel', fling, { passive: true });
@@ -511,50 +598,98 @@ export function createServerSheet(body, o) {
   listen(body, 'click', () => closeDrops());
 
   const filter = { q: 'all', v: null, a: 'all' };
+  // اختيار المستخدم نفسه (UX13): إن اختفى خياره مؤقتًا (سيرفره الوحيد مات أو لم يصل بعد) تُعرض الكل، ثم يعود
+  // اختياره حين يظهر خيار بالقيمة نفسها. لا يُمسح بصمت.
+  const wanted = { q: 'all', v: null, a: 'all' };
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
-  const pick = (r) => {
+  // tapAt: ضغطة المستخدم الحقيقية (ساعة الحدث لا لحظة فتح المصدر): تقرير الذهب يقيس منها ما قبل المشغّل
+  const pick = (r, e) => {
     if (destroyed) return;
     picked = r.id;
     const d = view(r);
     lastPick = d.torrent ? { features: startFeatures(d), at: Date.now() } : null;
-    return o.onPick(r);
+    return o.onPick(r, { tapAt: tapTime(e) });
   };
   const rows = new Map();
   const views = new Map();
   const placed = new Map();
-  const folded = new Map();
-  const sectionAt = new Map();
   let placedSeq = 0;
   let lastFilterKey = '';
   const view = (r) => {
     // الوصف يتغيّر بتغيّر الحالة لا بغيرها: يُحسب مرة لكل نسخة من السيرفر
-    const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}`;
+    const key = `${r.sourceId}|${r.sourceName ?? ''}|${r.label ?? ''}|${r.quality}|${r.variant}|${r.server}|${r.state}|${r.probed}|${r.runtimeReady}|${r.seeders}`;
     const hit = views.get(r.id);
     if (hit?.key === key) return hit.d;
     const d = describe(r, { sourceName: o.sourceName, prefer: o.prefer, directLang: o.directLang });
     views.set(r.id, { key, d });
     return d;
   };
+  // حقائق المحرك للمُسخَّن (حجم القطعة والسرب المقاس) تدخل درجة «المقترح» ومكان الصف الجديد فقط؛
+  // الصف الظاهر لا يتحرك بها
+  let measured = {};
+  const scoreOf = (r) => {
+    const m = measured[r.id];
+    return rank(r, m ? { ...view(r), measured: m } : view(r));
+  };
 
-  const section = (cls, title, sub) => {
+  const section = (cls, title, sub, noun) => {
     const s = el('section', `an-srv-group ${cls}`);
     const h = el('h4', 'an-srv-q');
+    const ico = el('i', 'ss-group-ico');
+    ico.setAttribute('aria-hidden', 'true');
+    ico.hidden = true;
     const t = el('b', null, title);
     const count = el('span', 'ss-count');
-    h.append(t, count);
+    h.append(ico, t, count);
     if (sub) h.append(el('span', 'ss-sub', sub));
     const grid = el('div', 'an-srv-grid');
-    const more = el('details', 'cn-srv-dead an-srv-more');
-    const summary = el('summary');
-    const moreGrid = el('div', 'an-srv-grid');
-    more.append(summary, moreGrid);
-    s.append(h, grid, more);
-    return { s, count, grid, more, summary, moreGrid };
+    // «عرض N»: زر بارتفاع ثابت (كان details يتغير محتواه وهو مفتوح مع كل سيرفر يصل فتكبر الورقة وتصغر)
+    const more = btn('ss-more-btn');
+    more.hidden = true;
+    more.setAttribute('aria-expanded', 'false');
+    const moreGrid = el('div', 'ss-more-grid');
+    moreGrid.hidden = true;
+    s.append(h, grid, more, moreGrid);
+    const g = { s, ico, count, grid, more, moreGrid, noun, open: false, shown: [] };
+    more.onclick = (e) => { e.stopPropagation(); g.open = !g.open; update(last, { immediate: true }); };
+    return g;
   };
   // نفس أسماء أقسام مشغّل الجوال (تصميم واحد للمنصتين، قرار المالك 15 نوفمبر)
-  const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع');
-  const torrent = section('ss-group--torrent', 'تورنت', 'جودة أعلى · يبدأ أبطأ');
+  const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع', 'الروابط الإضافية');
+  const torrent = section('ss-group--torrent ss-group--engine', 'تورنت', 'جودة أعلى · يبدأ أبطأ', 'النسخ الإضافية');
+  torrent.engine = 'torrent';
+  // كل محرك له قسم خاص (ROUTE_ENGINES.own) غير التورنت: قسم بعنوانه وعلامته، بترتيب الجدول بعد «مباشر» (CloudStream أولها)
+  const engineSections = new Map(ROUTE_ENGINES.filter((e) => e.own && e.id !== 'torrent').map((e) => {
+    const g = section(`ss-group--direct ss-group--engine ss-group--${e.id}`, e.title, null, 'الروابط الإضافية');
+    g.engine = e.id;
+    return [e.id, g];
+  }));
+  const allSections = () => [torrent, direct, ...engineSections.values()];
+  let queued = null, gesture = false, interactionUntil = 0, interactionTimer = null, adjustedTop = null, anchorEvent = null;
+  const settle = () => {
+    clearTimeout(interactionTimer);
+    if (gesture || !queued || destroyed) return;
+    const remaining = interactionUntil - Date.now();
+    if (remaining > 0) { interactionTimer = setTimeout(settle, remaining); return; }
+    const model = queued;
+    queued = null;
+    update(model);
+  };
+  const moving = () => { interactionUntil = Date.now() + 180; settle(); };
+  for (const surface of [scroll, src]) {
+    listen(surface, 'touchstart', () => { gesture = true; }, { passive: true });
+    const endGesture = () => { gesture = false; moving(); };
+    listen(surface, 'touchend', endGesture, { passive: true });
+    listen(surface, 'touchcancel', endGesture, { passive: true });
+    listen(surface, 'wheel', moving, { passive: true });
+    listen(surface, 'scroll', (event) => {
+      if (surface !== scrollSurface()) return;
+      if (adjustedTop != null && Math.abs(surface.scrollTop - adjustedTop) < 1) { adjustedTop = null; anchorEvent = event; return; }
+      adjustedTop = null;
+      moving();
+    }, { passive: true });
+  }
   const fold = (cls) => {
     const d = el('details', `cn-srv-dead ${cls}`);
     const summary = el('summary');
@@ -576,12 +711,37 @@ export function createServerSheet(body, o) {
 
   // لحظة تحرّك فيها صف موجود: لمسة بعدها مباشرة كانت تشغّل سيرفرًا غير الذي قصده الإصبع
   let shiftedAt = 0;
+  // احجز قاع المحتوى خلال تغيير البنية كي لا يقص المتصفح موضع التمرير قبل تثبيت الصف المرئي.
+  let heldKey = '';
+  function render(model, { preserve = true } = {}) {
+    const surface = scrollSurface(), y = surface.scrollTop || 0;
+    const anchors = preserve && y > 0 ? visibleRows(surface) : [];
+    const reserve = preserve && y > 0 && lastFilterKeyNow() === heldKey;
+    if (reserve) hold.style.height = `${surface.scrollHeight}px`;
+    else hold.style.height = '';
+    paint(model);
+    const sameFilter = heldKey === lastFilterKeyNow();
+    heldKey = lastFilterKeyNow();
+    const anchor = sameFilter && anchors.find(({ b }) => list.contains(b) && !b.closest('[hidden],details:not([open])'));
+    const shift = anchor ? anchor.b.getBoundingClientRect().top - surface.getBoundingClientRect().top - anchor.top : 0;
+    const target = Math.max(0, (surface.scrollTop || 0) + shift);
+    if (reserve) {
+      const natural = surface.scrollHeight - hold.offsetHeight;
+      hold.style.height = sameFilter ? `${Math.max(0, Math.ceil(target + surface.clientHeight - natural))}px` : '';
+    }
+    if (anchor && Math.abs(shift) >= 1) {
+      adjustedTop = Math.min(surface.scrollHeight - surface.clientHeight, target);
+      surface.scrollTop = adjustedTop;
+    }
+  }
+  const lastFilterKeyNow = () => `${filter.q}|${filter.v}|${filter.a}`;
   const reconcile = (parent, nodes) => {
     const before = new Map([...parent.children].map((node, i) => [node, i]));
+    const keep = new Set(nodes);
+    for (const node of before.keys()) if (!keep.has(node)) node.remove();
     nodes.forEach((node, i) => {
       if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
     });
-    while (parent.children.length > nodes.length) parent.lastElementChild.remove();
     if (nodes.some((node, i) => before.has(node) && before.get(node) !== i)) shiftedAt = Date.now();
   };
 
@@ -605,6 +765,56 @@ export function createServerSheet(body, o) {
   }
 
   let topId = null;
+  // onTop: «المقترح» تورنت ثبت 400ms (لا مع كل تحديث للصفوف): المحرك يسخّنه قبل غيره. مرة لكل مقترح.
+  // المؤقت يُعدّ من ظهور المقترح لا من آخر تحديث: الورقة تُحدَّث مع كل حدث من المحرك (أسرع من 400ms ما دامت
+  // المصادر تتوالى)، وكان كل update يلغيه ويعيده، فلا يبدأ التسخين حتى تهدأ الورقة. كذلك الصفوف الخلفية.
+  let topTimer = 0, warmedTop = null, topPending = null;
+  // الصفوف الظاهرة غير «المقترح»: تسخين خلفي بترتيب warmRows، بعد أن تثبت 400ms، وحين تتغير فقط
+  let rowsTimer = null, rowsKey = '', rowsPending = null;
+  // الفأرة على صف تورنت 120ms: يُسخَّن هو (الضغط غالبًا بعد نصف ثانية)، والخروج من الصفوف يعيد «المقترح».
+  // الفأرة وحدها (pointerType mouse): اللمس لا يمر فوق الصفوف، وتطبيق الجوال يبقى كما هو
+  let hoverTimer = null, hovered = null;
+  const routeById = (id) => (last?.routes ?? []).find((x) => x.id === id) ?? null;
+  const hoverRow = (id) => {
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      if (destroyed || !o.onHover) return;
+      const cur = routeById(id);
+      if (!cur || !view(cur).torrent || !isSelectable(cur) || hovered === id) return;
+      hovered = id; o.onHover(cur);
+    }, 120);
+  };
+  const leaveRows = () => {
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      if (destroyed || !o.onHover || hovered == null) return;
+      hovered = null;
+      const top = topId != null ? routeById(topId) : null;
+      if (top && view(top).torrent) o.onHover(top);
+    }, 800);
+  };
+  const announceRows = (ids) => {
+    if (!o.onWarmRows) return;
+    const key = ids.join('|');
+    if (key === rowsPending) return;
+    clearTimeout(rowsTimer);
+    rowsPending = key === rowsKey ? null : key;
+    if (rowsPending == null) return;
+    rowsTimer = setTimeout(() => { rowsPending = null; if (destroyed) return; rowsKey = key; o.onWarmRows(ids); }, 400);
+  };
+  const announceTop = (top) => {
+    const id = o.onTop && top && view(top).torrent && top.id !== warmedTop ? top.id : null;
+    if (id === topPending) return;
+    clearTimeout(topTimer);
+    topPending = id;
+    if (id == null) return;
+    topTimer = setTimeout(() => {
+      topPending = null;
+      if (destroyed || topId !== id) return;
+      warmedTop = id;
+      o.onTop(routeById(id) ?? top);
+    }, 400);
+  };
   function row(r) {
     const d = view(r);
     const pending = isPending(r);
@@ -614,23 +824,58 @@ export function createServerSheet(body, o) {
     if (!b) {
       b = el('button');
       b.type = 'button';
-      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small dir="ltr"></small></span><span class="ss-main"><span class="ss-line"><i class="ss-ico" aria-hidden="true"></i><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
+      b.dataset.routeId = r.id;
+      b.innerHTML = '<span class="ss-q"><b dir="ltr"></b><small class="ss-kind" aria-hidden="true"></small></span><span class="ss-main"><span class="ss-line"><i class="ss-ico" aria-hidden="true"></i><b class="ss-name" dir="auto"></b><span class="ss-host" dir="auto"></span><span class="ss-tag">مقترح</span></span><span class="ss-meta"></span></span><span class="ss-end"></span>';
       rows.set(r.id, b);
+      const id = r.id;
+      b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') hoverRow(id); });
+      b.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') leaveRows(); });
     }
-    const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
+    const id = r.id;
     const top = r.id === topId;
+    const starting = Boolean(last.busy && picked === r.id);
+    const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
+    // CLAUDE.md: الإضاءة بإشارة المحرك أن بيانات أول إطار على القرص (ready)، لا بمؤقت ولا بالمشاركين ولا بالبيانات
+    const warm = Boolean(d.torrent && measured[r.id]?.ready === true);
+    // يسخن الآن: في المحرك (له حقائق) ولم تصل إشارة الجاهزية بعد. البنفسجي له وحده (المالك، 27 نوفمبر)
+    const warming = Boolean(d.torrent && measured[r.id]?.ready === false);
+    // الصف لا يُعاد بناؤه إن لم يتغير ما يُرسم منه (كان كل update يعيد DOM كل صف، ومنها مئات المطوية في «نسخ إضافية»:
+    // خُمس كلفة التحديث). البصمة: وصف السيرفر (مفتاح view نفسه) وحالته وما يغيّر سطره وطرفه. اللمس يُربط دائمًا بالحالة الحالية
+    const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}|${warm}|${warming}`;
+    b.onclick = (e) => {
+      if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
+      const target = routeById(id);
+      if (!target) return;
+      return isSelectable(target) || isTryable(target) ? pick(target, e) : o.onUnavailable?.(target);
+    };
+    if (b.dataset.sig === sig) return b;
+    b.dataset.sig = sig;
+    const stateCls = pending ? 'resolving' : selectable ? 'ready' : String(r.state ?? 'unavailable').toLowerCase();
     const open = b.classList.contains('ss-row--open');
-    b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}`;
+    b.className = `an-srv ss-row${open ? ' ss-row--open' : ''} ss-row--${d.torrent ? 'torrent' : 'direct'} an-srv--${stateCls}${d.tier ? ` an-srv--swarm-${d.tier}` : ''}${d.prefer ? ' an-srv--prefer' : ''}${d.q === 2160 ? ' ss-row--uhd' : ''}${top ? ' ss-row--top' : ''}${warm ? ' ss-row--warm' : ''}${warming ? ' ss-row--warming' : ''}`;
     b.disabled = pending && !isTryable(r);
     const qb = b.querySelector('.ss-q');
-    qb.firstElementChild.textContent = d.q == null ? 'HD' : qualityLabel(d.q);
+    // جودة غير معروفة (HLS متكيّف أو مصدر لم يعلنها) لا تُكتب «HD»: هذا ادعاء لم يتحقق، والوصف المقروء «تلقائي»
+    qb.firstElementChild.textContent = qualityLabel(d.q);
+    qb.classList.toggle('ss-q--auto', d.q == null);
     // HDR/DV وبقية المواصفات في التفاصيل تحت السهم؛ تحت الجودة رمز نوعه فقط: ⚡ مباشر، مغناطيس تورنت
-    qb.lastElementChild.textContent = '';
-    qb.lastElementChild.innerHTML = glyph(d.torrent ? 'magnet' : 'bolt', { size: 12 });
-    qb.lastElementChild.setAttribute('aria-hidden', 'true');
+    const wasWarm = b.dataset.warm === '1';
+    b.dataset.warm = warm ? '1' : '';
+    const kind = qb.lastElementChild;
+    if (!kind.firstElementChild || kind.dataset.kind !== String(d.torrent)) {
+      kind.dataset.kind = String(d.torrent);
+      kind.innerHTML = d.torrent
+        ? `${glyph('magnet', { size: 12 })}<span class="ss-bolt-slot"></span>`
+        : glyph('bolt', { size: 12 });
+    }
+    const boltSlot = kind.querySelector('.ss-bolt-slot');
+    if (boltSlot && Boolean(boltSlot.firstElementChild) !== (warm || warming)) boltSlot.innerHTML = warm || warming ? BOLT : '';
+    if (warm && !wasWarm && !still?.matches) boltSlot?.firstElementChild?.animate?.(
+      [{ transform: 'scale(.9)', opacity: .55 }, { transform: 'scale(1.2)', opacity: 1, offset: .32 }, { transform: 'scale(1)', opacity: 1 }],
+      { duration: 240, easing: 'ease-out' },
+    );
     b.querySelector('.ss-name').textContent = d.name;
     // صورة المصدر (إضافته: CloudStream أو Aniyomi) بجانب اسمه، في خانة محجوزة من البداية فلا يتحرك الاسم حين تصل
-    const icon = d.torrent ? null : safeIconUrl(o.sourceIcon?.(r));
     const ico = b.querySelector('.ss-ico');
     if (ico.dataset.src !== (icon ?? '')) {
       ico.dataset.src = icon ?? '';
@@ -642,9 +887,15 @@ export function createServerSheet(body, o) {
     host.textContent = d.torrent ? '' : d.host ?? '';
     host.hidden = d.torrent || !d.host;
     b.querySelector('.ss-tag').hidden = !top;
-    b.querySelector('.ss-meta').replaceChildren(...metaChips(r, d, pending).map(chipNode));
+    const chips = metaChips(r, d, pending);
+    const size = d.torrent && chips.find((chip) => chip.cls === 'spec');
+    const meta = b.querySelector('.ss-meta');
+    if (size) {
+      const labels = el('span', 'ss-meta-labels');
+      labels.append(...chips.filter((chip) => chip !== size).map(chipNode));
+      meta.replaceChildren(labels, chipNode(size));
+    } else meta.replaceChildren(...chips.map(chipNode));
     const end = b.querySelector('.ss-end');
-    const starting = Boolean(last.busy && picked === r.id);
     b.classList.toggle('ss-row--busy', starting);
     if (starting) end.innerHTML = '<i class="ss-spin"></i><small>يبدأ…</small>';
     else if (pending) end.innerHTML = `<i class="ss-spin"></i><small>${VALIDITY_AR.CHECKING}</small>`;
@@ -656,11 +907,9 @@ export function createServerSheet(body, o) {
       end.replaceChildren(small);
     }
     else if (d.torrent) {
-      const bars = meterBars(d);
-      const meter = Array.from({ length: 4 }, (_, i) => `<i${i < bars ? ' class="on"' : ''}></i>`).join('');
-      end.innerHTML = bars < 0
+      end.innerHTML = !Number.isFinite(d.info?.seeders)
         ? '<small>غير معلن</small>'
-        : `<span class="ss-meter ss-meter--${d.tier}" aria-hidden="true">${meter}</span><b class="an-srv-seeds" dir="ltr">${compact(d.info.seeders)}</b>`;
+        : `<span class="ss-seeds ss-seeds--${d.tier}" dir="ltr" title="${SEEDS_HINT}">${glyph('users', { size: 14 })}<b class="an-srv-seeds">${compact(d.info.seeders)}</b></span>`;
     } else end.innerHTML = `<small class="ss-ok">${VALIDITY_AR.VALID}</small><span class="ss-play">${glyph('play', { size: 13, filled: true })}</span>`;
     // سهم صغير يفتح التفاصيل تحت الصف؛ لمسه لا يشغّل
     const lines = d.torrent && !pending && !gone ? detailLines(r, d) : [];
@@ -695,13 +944,9 @@ export function createServerSheet(body, o) {
       box?.remove();
       b.classList.remove('ss-row--open');
     }
-    const why = [top ? 'مقترح' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} مشارك` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
+    const why = [top ? 'مقترح' : null, warm ? 'جاهز للتشغيل الفوري' : warming ? 'جارٍ التسخين' : null, d.name, d.host, qualityLabel(d.q), ...d.langs.map((l) => l.t), d.torrent && Number.isFinite(d.info?.seeders) ? `${d.info.seeders} زارع` : null, pending ? VALIDITY_AR.CHECKING : gone ? VALIDITY_AR.UNAVAILABLE : VALIDITY_AR.VALID].filter(Boolean).join('، ');
     b.setAttribute('aria-label', why);
     b.title = d.info?.filename ?? r.label ?? '';
-    b.onclick = () => {
-      if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
-      return selectable || isTryable(r) ? pick(r) : o.onUnavailable?.(r);
-    };
     return b;
   }
 
@@ -816,7 +1061,7 @@ export function createServerSheet(body, o) {
   const langTabs = [['SUB', 'مترجم'], ['DUB', 'مدبلج']].map(([key, text]) => {
     const b = btn('ss-tab');
     b.textContent = text;
-    b.onclick = () => { filter.v = filter.v === key ? null : key; update(last); };
+    b.onclick = () => { filter.v = wanted.v = filter.v === key ? null : key; update(last, { immediate: true }); };
     lang.append(b);
     return [key, b];
   });
@@ -824,18 +1069,18 @@ export function createServerSheet(body, o) {
   function paintFilters(routes) {
     const live = routes.filter((r) => !isDead(r));
     const qs = [...new Set(live.map((r) => view(r).q).filter((x) => x != null))].sort((a, b) => b - a);
-    if (filter.q !== 'all' && !qs.includes(filter.q)) filter.q = 'all';
+    filter.q = wanted.q !== 'all' && qs.includes(wanted.q) ? wanted.q : 'all';
     const dub = live.some((r) => r.variant === 'DUB');
     const sub = live.some((r) => r.variant !== 'DUB');
-    if (!(dub && sub)) filter.v = null;
+    filter.v = dub && sub ? wanted.v : null;
     const names = [...new Set(live.map((r) => view(r).name))];
-    if (filter.a !== 'all' && !names.includes(filter.a)) filter.a = 'all';
+    filter.a = wanted.a !== 'all' && names.includes(wanted.a) ? wanted.a : 'all';
     quality.set([['all', 'كل الجودات'], ...qs.map((x) => [x, qualityLabel(x)])], filter.q,
       filter.q === 'all' ? (qs.length === 1 ? qualityLabel(qs[0]) : 'كل الجودات') : qualityLabel(filter.q),
-      (k) => { filter.q = k; update(last); });
+      (k) => { filter.q = wanted.q = k; update(last, { immediate: true }); });
     source.set([['all', 'كل المصادر'], ...names.map((n) => [n, n])], filter.a,
       filter.a === 'all' ? (names.length === 1 ? names[0] : 'كل المصادر') : filter.a,
-      (k) => { filter.a = k; update(last); });
+      (k) => { filter.a = wanted.a = k; update(last, { immediate: true }); });
     lang.hidden = !(dub && sub);
     for (const [key, b] of langTabs) {
       b.classList.toggle('on', filter.v === key);
@@ -853,99 +1098,240 @@ export function createServerSheet(body, o) {
   // التورنت الواحد صف واحد: Torrentio نفسه يصل من إضافة Stremio ومن إضافتي Aniyomi (Torrentio وTorrentio Anime)،
   // فكان الإصدار نفسه يظهر ثلاث مرات ويتضاعف «غير متاح». الهوية: اسم الملف والحجم. الصف الظاهر يبقى (لا قفزة)
   // ما لم يمت وتصل نسخة صالحة منه.
+  // UX14: البصمة (infoHash) هي هوية التورنت الدقيقة: نفس البصمة صف واحد ولو اختلف اسم الملف، وبصمتان معروفتان
+  // مختلفتان صفّان ولو تطابق الاسم والحجم. إن غابت البصمة عند أحدهما يبقى الاسم والحجم (Aniyomi قد لا يعطيها).
+  // مشتق من الوصف وحده (اسم الملف والحجم)، فيُحفظ معه: يتغير بتغيّره فقط
   const torrentKey = (r) => {
     const d = view(r);
+    const hit = views.get(r.id);
+    if (hit && hit.d === d && 'tk' in hit) return hit.tk;
     const file = d.torrent ? d.info?.filename : null;
-    return file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
+    const tk = file ? `${String(file).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}|${d.info?.size ?? ''}` : null;
+    if (hit && hit.d === d) hit.tk = tk;
+    return tk;
+  };
+  const hashOf = (r) => {
+    if (!view(r).torrent) return null;
+    const direct = typeof r.infoHash === 'string' && /^[a-f\d]{40}$/i.test(r.infoHash) ? r.infoHash : null;
+    const magnet = direct ? null : String(r.magnet ?? r.url ?? '').match(/btih:([a-f\d]{40})/i)?.[1];
+    const hash = (direct ?? magnet)?.toLowerCase();
+    return hash ? `${hash}|${r.fileIdx ?? ''}` : null;
   };
   const seedersOf = (r) => Number(view(r).info?.seeders) || 0;
+  // كلفة التحديث (قياس 27 نوفمبر، معالج بسرعة الجوال): 161ms لكل update بـ171 سيرفرًا، نصفها هنا: كل سيرفر يقارَن بكل
+  // عضو في كل مجموعة سابقة (sameTorrent تعيد التعبيرات النمطية في كل مقارنة). المجموعة تحفظ بصماتها ومفاتيحها، فالشرط
+  // نفسه بالضبط (sameTorrent وقيد البصمتين) يصير بحثًا في مجموعة، والبصمة والمفتاح يُحسبان مرة لكل سيرفر
   const oneTorrent = (routes) => {
-    const best = new Map();
+    const groups = [];
     for (const r of routes) {
-      const key = torrentKey(r);
-      if (!key) continue;
-      const cur = best.get(key);
-      const take = !cur
-        || (placed.has(cur.id) ? isDead(cur) && isSelectable(r)
-          : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
-          : true);
-      if (take) best.set(key, r);
+      if (!view(r).torrent) continue;
+      const h = hashOf(r), k = torrentKey(r);
+      if (!h && !k) continue;
+      // sameTorrent(m, r): بصمتان معروفتان تتطابقان، وإلا المفتاح (اسم الملف والحجم). ولا تجمع المجموعة بصمتين معروفتين
+      // مختلفتين، ولو ربط بينهما مسار بلا بصمة
+      const g = groups.find((x) => (h ? x.hashes.has(h) || (k != null && x.bareKeys.has(k)) : k != null && x.keys.has(k))
+        && (!h || x.hashes.size === 0 || (x.hashes.size === 1 && x.hashes.has(h))));
+      const join = (x) => { if (h) x.hashes.add(h); else if (k != null) x.bareKeys.add(k); if (k != null) x.keys.add(k); };
+      if (!g) { const x = { best: r, members: [r], hashes: new Set(), bareKeys: new Set(), keys: new Set() }; join(x); groups.push(x); continue; }
+      g.members.push(r);
+      join(g);
+      const cur = g.best;
+      const take = placed.has(cur.id) ? isDead(cur) && isSelectable(r)
+        : !placed.has(r.id) ? (isSelectable(r) && !isSelectable(cur)) || (isSelectable(r) === isSelectable(cur) && seedersOf(r) > seedersOf(cur))
+        : true;
+      if (take) g.best = r;
     }
-    return routes.filter((r) => { const key = torrentKey(r); return !key || best.get(key) === r; });
+    const hidden = new Set(groups.flatMap((g) => g.members.filter((m) => m !== g.best)));
+    return routes.filter((r) => !hidden.has(r));
   };
-  function update(model) {
+  // ── مسجّل القفزات (التشخيص ظاهر فقط؛ لا كلفة بدونه) ──
+  // المالك (27 نوفمبر): «يوم انزل تطلعني لفوق» على الجهاز، ولا تتكرر في Playwright بلمس حقيقي ووكيل WebView وحقائق كل ثانية.
+  // يُسجَّل كل تحرك لما على الشاشة بلا إصبع: بعد تحديث (صف ظاهر تغيّر موضعه، وأي قسم تغيّر ارتفاعه) أو في التمرير (نزل موضعه
+  // والإصبع يسحب للأسفل أو انزلاقه). السطر في أسفل الورقة يُنسخ كما هو للمحادثة
+  const jumps = [];
+  let fingerY = null, fingerDir = '', fingerAt = 0, lastY = 0;
+  const probing = () => o.jumpProbe ?? diagnosticsUi.visible();
+  const nameOf = (n) => n.querySelector?.('summary, .ss-group-title, h3')?.textContent?.trim().slice(0, 32) || String(n.className || n.tagName).split(' ')[0];
+  // كل الصفوف الظاهرة بمواضعها: بعد التحديث يُقارن أول صف بقي منها (الصف الأول قد يكون هو ما أُزيل)
+  const visibleRows = (surface) => {
+    const viewport = surface.getBoundingClientRect?.();
+    if (!viewport) return [];
+    const visible = [];
+    for (const b of list.querySelectorAll('.ss-row')) {
+      const bounds = b.getBoundingClientRect();
+      if (bounds.height && bounds.bottom > viewport.top && bounds.top < viewport.bottom) {
+        visible.push({ b, top: bounds.top - viewport.top, key: b.dataset.routeId });
+        if (visible.length === 6) break;
+      }
+    }
+    return visible;
+  };
+  const noteJump = (j) => {
+    jumps.push({ ...j, at: Math.round(globalThis.performance?.now?.() ?? Date.now()) });
+    if (jumps.length > 12) jumps.shift();
+    const lastJ = jumps.at(-1);
+    jumpLine.hidden = false;
+    jumpLine.textContent = `قفزات الورقة: ${jumps.length} · آخرها ${lastJ.dy}px (${lastJ.kind === 'update' ? 'بعد تحديث' : 'في التمرير'}) · اضغط للنسخ`;
+    paintDiagnostics();
+  };
+  jumpLine.onclick = (e) => {
+    e.stopPropagation();
+    const text = 'قفزات ورقة السيرفرات (VANTARA)\n' + jumps.map((j) => JSON.stringify(j)).join('\n');
+    globalThis.navigator?.clipboard?.writeText?.(text).then(() => { jumpLine.textContent = 'نُسخت القفزات'; }, () => {});
+  };
+  listen(scroll, 'touchstart', (e) => { fingerY = e?.touches?.[0]?.clientY ?? null; }, { passive: true });
+  listen(scroll, 'touchmove', (e) => {
+    const y = e?.touches?.[0]?.clientY;
+    if (y == null) return;
+    // الإصبع يصعد = المحتوى ينزل (تمرير للأسفل)
+    if (fingerY != null && Math.abs(y - fingerY) > 1) { fingerDir = y < fingerY ? 'down' : 'up'; fingerAt = Date.now(); }
+    fingerY = y;
+  }, { passive: true });
+  listen(scroll, 'scroll', (event) => {
+    const y = scroll.scrollTop || 0;
+    if (event !== anchorEvent && probing() && y < lastY - 24 && fingerDir === 'down' && Date.now() - fingerAt < 1200) {
+      noteJump({ kind: 'scroll', dy: Math.round(y - lastY), scrollTop: [Math.round(lastY), Math.round(y)], max: Math.round((scroll.scrollHeight || 0) - (scroll.clientHeight || 0)), handed });
+    }
+    lastY = y;
+  }, { passive: true });
+
+  let hasPainted = false;
+  function update(model, { immediate = false } = {}) {
     if (destroyed) return;
     last = model;
+    if (hasPainted && !immediate && (gesture || Date.now() < interactionUntil)) {
+      // Results still arrive. Retain the DOM order and refresh attached, fixed-height rows
+      // until the latest snapshot can be laid out after the gesture.
+      queued = model;
+      measured = model.facts ?? {};
+      const present = new Map((model.routes ?? []).map((r) => [r.id, r]));
+      for (const node of list.querySelectorAll('.ss-row')) {
+        const route = present.get(node.dataset.routeId);
+        if (!route) node.onclick = null;
+        else if (!node.classList.contains('ss-row--open') && !node.closest('details:not([open]),[hidden]')) row(route);
+      }
+      settle();
+      return;
+    }
+    hasPainted = true;
+    queued = null;
+    const surface = scrollSurface();
+    if (!probing()) return render(model, { preserve: !immediate });
+    const seen = visibleRows(surface);
+    const heights = new Map([...list.children].map((n) => [n, n.offsetHeight]));
+    const y0 = surface.scrollTop || 0, max0 = (surface.scrollHeight || 0) - (surface.clientHeight || 0);
+    render(model, { preserve: !immediate });
+    const a = seen.find((x) => x.b.isConnected);
+    if (!a) return;
+    const viewport = surface.getBoundingClientRect();
+    const dy = Math.round(a.b.getBoundingClientRect().top - viewport.top - a.top);
+    if (Math.abs(dy) < 8) return;
+    const nodes = [...new Set([...heights.keys(), ...list.children])];
+    const changed = nodes.map((n) => [nameOf(n), heights.get(n) ?? 0, n.isConnected ? n.offsetHeight : 0]).filter(([, x, z]) => x !== z);
+    noteJump({ kind: 'update', dy, row: a.key, gone: seen.indexOf(a), scrollTop: [Math.round(y0), Math.round(surface.scrollTop || 0)], max: [Math.round(max0), Math.round((surface.scrollHeight || 0) - (surface.clientHeight || 0))], changed, routes: model.routes?.length ?? 0 });
+  }
+
+  function paint(model) {
+    last = model;
+    measured = model.facts ?? {};
     const routes = oneTorrent(model.routes ?? []);
     paintFilters(routes);
     const shown = routes.filter(passes);
     const ready = shown.filter(isSelectable);
     const anyReady = routes.some(isSelectable);
-    const scored = ready.map((r) => ({ r, s: rank(r, view(r)) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
-    const top = scored[0]?.r ?? null;
+    const scored = ready.map((r) => ({ r, s: scoreOf(r) })).filter((x) => Number.isFinite(x.s)).sort((a, b) => b.s - a.s);
+    let top = scored[0]?.r ?? null;
+    // المالك: المقترح أسرع ما يبدأ وأثبته؛ إن كان تورنت فهو الأكبر سربًا من التورنتات الصالحة (المقاس إن وصل المحرك إليه)،
+    // لا تورنت ضعيف تقدّمته أوزان أخرى. المباشر العربي السريع يبقى مقترحًا حيث يتقدّم (الأنمي)
+    if (top && view(top).torrent) {
+      const swarm = (r) => measuredSeeds({ ...view(r), measured: measured[r.id] }) ?? seedersOf(r);
+      // من الظاهرة (خطة التورنت: الجودة أولًا) لا من كل التورنت: 720p بسرب أكبر ليس المقترح فوق 4K و1080p، ولا يُقترح مطويّ
+      const strong = torrentPlan(ready.filter((r) => view(r).torrent && view(r).tier !== 'dead' && view(r).info?.source !== 'CAM'), { quality: (r) => view(r).q, seeds: seedersOf });
+      // المتقاربة سربًا (ضمن 15% من الأكبر) تفاضلها الدرجة (حجم القطعة المقاس، العربية): القطعة الأصغر تبدأ أسرع
+      // والثبات: فوق 20 GB (حد «حجم معقول» في lib/route-validity.js) يحتاج سرعة عالية طوال المشاهدة، فلا يُقترح ما دام
+      // بين الظاهرة ما هو أخف (ريمكس 61 GB بـ412 زارعًا يبدأ سريعًا ثم يتقطع)
+      const light = strong.filter((r) => !(view(r).info?.size > 20 * 1024 ** 3));
+      const pool = light.length ? light : strong;
+      const most = Math.max(0, ...pool.map(swarm));
+      const near = pool.filter((r) => swarm(r) >= most * 0.85);
+      top = near.sort((a, b) => scoreOf(b) - scoreOf(a) || swarm(b) - swarm(a))[0] ?? top;
+    }
     topId = top?.id ?? null;
+    announceTop(top);
 
     // سطر الحالة: «55 جاهزة من 77 · البقية تصل»
     const st = model.status ?? {};
-    status.replaceChildren();
-    if (st.spin) status.append(el('i', 'ss-spin'));
-    status.append(el('span', null, st.text ?? ''));
+    if (st.spin && !statusSpinner.parentNode) status.prepend(statusSpinner);
+    else if (!st.spin && statusSpinner.parentNode) statusSpinner.remove();
+    if (statusText.textContent !== (st.text ?? '')) statusText.textContent = st.text ?? '';
     status.classList.toggle('ss-status--warn', Boolean(model.error || model.missing));
     // الملاحظة تقول الحال حين لا جاهز ولا انتظار: لا سطر يكرّرها
     const empty = !top && Boolean(model.settled || model.missing || model.error || model.noSources);
     status.hidden = empty;
 
-    // ترتيب ثابت (طلب المالك): صف ظهر لا يتحرك من مكانه ولا يختفي؛ تتغير حالته فقط (يُفحص ← صالح/تعذّر).
-    // الجديد يُضاف تحت الموجود، وما وصل في الدفعة نفسها يُرتّب بالأفضلية. «شغّل الأفضل» و«مقترح» يدلّان
-    // على الأفضل دون نقل الصفوف تحت الإصبع. والقسم الذي ظهر أولًا يبقى أولًا (التورنت يسبق عادةً).
-    // تغيير المرشّح بيد المستخدم يعيد توزيع الظاهر/الإضافي مرة؛ وصول السيرفرات لا يعيده
+    // رتّب أحدث دفعة بعد استقرار التمرير. اختيار المرشّح إجراء صريح يُرسم فورًا.
     const filterKey = `${filter.q}|${filter.v}|${filter.a}`;
-    if (filterKey !== lastFilterKey) { lastFilterKey = filterKey; folded.clear(); }
+    const refilter = filterKey !== lastFilterKey;
+    if (refilter) { lastFilterKey = filterKey; for (const g of allSections()) g.shown = []; }
     const gone = shown.filter((r) => !isPending(r) && !isSelectable(r));
-    // المكان الظاهر للسيرفر الصالح وحده (طلب المالك 15 نوفمبر): السيرفرات قيد الفحص تصل أولًا مع التسليم التدريجي
-    // وأغلبها يتعذّر، فكانت تحجز الأماكن الظاهرة وتدفع الصالح إلى «نسخ إضافية». ما لم يصلح بعد ينتظر في «قيد الفحص»،
-    // والصالح يُضاف تحت الموجود (لا قفزة). صف ظهر يبقى بمكانه وإن تعذّر بعدها.
-    const live = shown.filter((r) => isSelectable(r) || (placed.has(r.id) && folded.get(r.id) !== false))
-    const waiting = shown.filter((r) => isPending(r) && !placed.has(r.id))
-    const fresh = live.filter((r) => !placed.has(r.id))
-      .map((r) => ({ r, d: view(r), s: isSelectable(r) ? rank(r, view(r)) : -1e9 }))
-      .sort((a, b) => b.s - a.s || (a.d.torrent && b.d.torrent ? torrentOrder(a, b) : 0));
-    for (const { r } of fresh) placed.set(r.id, ++placedSeq);
-    const bySeq = (a, b) => placed.get(a.id) - placed.get(b.id);
-    const directLive = live.filter((r) => !view(r).torrent).sort(bySeq);
-    const torrentLive = live.filter((r) => view(r).torrent).sort(bySeq);
-
-    const fill = (g, items, cap, weak) => {
-      const main = [];
-      const extra = [];
-      // مكان الصف (ظاهر أو «نسخ إضافية») يُقرَّر مرة حين يظهر، فلا ينتقل بين الاثنين بعدها.
-      // كل سيرفر مباشر صالح يظهر (طلب المالك 15 نوفمبر): كان الظاهر 12 فقط، فيصل سيرفر CloudStream الصالح بعدها مطويًّا
-      // في «نسخ إضافية» ولا يراه أحد. التورنت وحده يبقى بستة إصدارات ظاهرة (عشرات الإصدارات للحلقة نفسها) والضعيف مطويّ.
-      for (const r of items) {
-        let shownHere = folded.get(r.id);
-        if (shownHere == null) {
-          shownHere = !(weak?.(r) || main.length >= cap) || r.id === topId;
-          folded.set(r.id, shownHere);
-        }
-        (shownHere ? main : extra).push(row(r));
+    for (const r of shown) if (!placed.has(r.id)) placed.set(r.id, ++placedSeq);
+    const shownBefore = new Set(allSections().flatMap((g) => g.shown));
+    // ما يُعرض في قسمه: الصالح، وما ظهر قبلًا ثم تعذّر (يبقى في مكانه بحالته)
+    const live = shown.filter((r) => isSelectable(r) || shownBefore.has(r.id));
+    const waiting = shown.filter((r) => isPending(r) && !shownBefore.has(r.id));
+    const byId = new Map(live.map((r) => [r.id, r]));
+    const quality = (r) => view(r).q;
+    const weakTorrent = (r) => { const d = view(r); return d.tier === 'dead' || d.info?.source === 'CAM'; };
+    const directOrder = (a, b) => {
+      const qa = quality(a) ?? 600, qb = quality(b) ?? 600;
+      const ar = (r) => Number(Boolean(view(r).langs?.some((l) => l.ar)));
+      return qb - qa || ar(b) - ar(a) || scoreOf(b) - scoreOf(a) || placed.get(a.id) - placed.get(b.id);
+    };
+    const paintSection = (g, items, plan, order) => {
+      const ids = plan.slice(0, VISIBLE).map((r) => r.id);
+      // An expired transport is demoted immediately when a valid replacement exists.
+      // A temporarily failed direct option can retain an otherwise empty place.
+      if (g !== torrent) for (const id of g.shown) {
+        if (ids.length >= VISIBLE) break;
+        if (byId.has(id) && !ids.includes(id)) ids.push(id);
       }
-      reconcile(g.grid, main);
-      reconcile(g.moreGrid, extra);
-      g.more.hidden = !extra.length;
-      g.summary.textContent = `نسخ إضافية (${extra.length})`;
+      g.shown = ids;
+      const visible = ids.map((id) => byId.get(id));
+      const visibleIds = new Set(ids);
+      const rest = items.filter((r) => !visibleIds.has(r.id)).sort(order);
+      reconcile(g.grid, visible.map(row));
+      g.more.hidden = !rest.length;
+      if (!rest.length) g.open = false;
+      g.more.textContent = g.open ? `إخفاء ${g.noun}` : `عرض ${rest.length} من ${g.noun}`;
+      g.more.setAttribute('aria-expanded', String(g.open));
+      g.moreGrid.hidden = !g.open;
+      // المطويّة لا تُبنى صفوفها حتى تُفتح (كانت مئات الصفوف تُحدَّث مع كل سيرفر يصل)
+      reconcile(g.moreGrid, g.open ? rest.map(row) : []);
       g.count.textContent = String(items.length);
       g.s.hidden = !items.length;
+      // شعار القسم يمثل المحرك لا أول مصدر فيه (كان قسم CloudStream يأخذ شعار AnimeRift). «مباشر» بلا محرك واحد
+      // معروف لكل صفوفه يبقى بلا علامة: لا تصنيف بلا دليل
+      const engines = new Set(items.map(routeEngine));
+      const mark = g.engine ?? (engines.size === 1 && !engines.has(null) ? [...engines][0] : null);
+      const svg = mark ? engineMark(mark, { size: '100%', stroke: 2.1 }) : '';
+      if (g.ico.dataset.mark !== (mark ?? '')) { g.ico.dataset.mark = mark ?? ''; g.ico.innerHTML = svg; }
+      g.ico.hidden = !svg;
     };
-    fill(direct, directLive, Infinity);
-    fill(torrent, torrentLive, 6, (r) => {
-      const d = view(r);
-      return d.tier === 'dead' || d.info?.source === 'CAM';
-    });
-    // قسمان يظهران في الوصول نفسه: ما فيه سيرفر صالح أولًا (المباشر عند التساوي)
-    const newGroups = [[direct, directLive], [torrent, torrentLive]].filter(([g, items]) => items.length && !sectionAt.has(g))
-      .sort((a, b) => Number(b[1].some(isSelectable)) - Number(a[1].some(isSelectable)));
-    for (const [g] of newGroups) sectionAt.set(g, ++placedSeq);
-    const groups = [direct, torrent].filter((g) => sectionAt.has(g) && !g.s.hidden).sort((a, b) => sectionAt.get(a) - sectionAt.get(b));
+    const torrentLive = live.filter((r) => view(r).torrent);
+    // القسم من هوية المحرك: التورنت بنقله، والمحركات ذات القسم الخاص بمعرّفها، والباقي «مباشر»
+    const engineOf = (r) => { const e = routeEngine(r); return engineSections.has(e) ? e : null; };
+    const directLive = live.filter((r) => !view(r).torrent && !engineOf(r));
+    const torrentOrder = (a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seedersOf(b) - seedersOf(a) || placed.get(a.id) - placed.get(b.id);
+    paintSection(torrent, torrentLive, torrentPlan(torrentLive.filter((r) => isSelectable(r) && !weakTorrent(r)), { quality, seeds: seedersOf }), torrentOrder);
+    paintSection(direct, directLive, directLive.filter(isSelectable).sort(directOrder), directOrder);
+    for (const [id, g] of engineSections) {
+      const items = live.filter((r) => !view(r).torrent && engineOf(r) === id);
+      paintSection(g, items, items.filter(isSelectable).sort(directOrder), directOrder);
+    }
+    announceRows(warmRows(torrentLive
+      .filter((r) => r.id !== topId && torrent.shown.includes(r.id) && isSelectable(r))
+      .map((r) => ({ r, d: view(r), m: measured[r.id] }))));
+    const groups = allSections().filter((g) => !g.s.hidden);
     // ما تعذّر قبل أن يظهر أصلًا: مطويّ في الأسفل
     const neverShown = gone.filter((r) => !live.includes(r));
     reconcile(wait.grid, waiting.map(row));
@@ -994,9 +1380,9 @@ export function createServerSheet(body, o) {
         small.append(el('bdi', null, part));
       });
     }
-    best.onclick = () => {
-      if (best.disabled || !top) return;
-      pick(top);
+    best.onclick = (e) => {
+      const target = top && routeById(top.id);
+      if (!best.disabled && target && isSelectable(target)) pick(target, e);
     };
   }
 
@@ -1004,6 +1390,10 @@ export function createServerSheet(body, o) {
     if (destroyed) return;
     destroyed = true;
     clearTimeout(settleTimer);
+    clearTimeout(interactionTimer);
+    clearTimeout(topTimer);
+    clearTimeout(rowsTimer);
+    clearTimeout(hoverTimer);
     for (const id of frames) globalThis.cancelAnimationFrame?.(id);
     frames.clear();
     for (const unsubscribe of subscriptions) unsubscribe();

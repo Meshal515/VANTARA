@@ -41,4 +41,15 @@ class PlaybackSeekBudgetTest {
         assertEquals(90_000L, PlaybackBudgets.startupMs(torrent))
         assertEquals(15_000L, PlaybackBudgets.startupMs("https://video.example/movie.mp4"))
     }
+
+    @Test fun aTorrentSavedBelowFiveSecondsStartsFromTheBeginningLikeTheUiSays() {
+        // Reacher: «انتظار عند 0:01» من محاولة سابقة، فطُلب فهرس MKV من آخر الملف (12.6 ث) بدل أول صورة من الرأس
+        assertEquals(0L, PlaybackStart.torrent(1_000, shared = false))
+        assertEquals(0L, PlaybackStart.torrent(4_999, shared = false))
+        assertEquals(5_000L, PlaybackStart.torrent(5_000, shared = false))
+        assertEquals(148_000L, PlaybackStart.torrent(148_000, shared = false))
+        assertEquals(0L, PlaybackStart.torrent(-5, shared = false))
+        // الغرفة والمقطع على موضعهما بالضبط
+        assertEquals(1_000L, PlaybackStart.torrent(1_000, shared = true))
+    }
 }

@@ -227,8 +227,8 @@ class CinemaFastPathTest {
         val c = cand("torrent", "torrent", 2160).copy(url = "vantara-torrent://ticket/file")
         p.allowRuntimeCandidate(c.id)
         p.report(ready("torrent", c))
-        assertEquals(c, p.best()?.copy(preparationMs = null))
-        assertEquals(c, p.session.next()?.copy(preparationMs = null))
+        assertEquals(c, p.best()?.copy(preparationMs = null, firstCandidateMs = null))
+        assertEquals(c, p.session.next()?.copy(preparationMs = null, firstCandidateMs = null))
         assertNull(p.routeOf(c.id)?.probed)
         val route = requireNotNull(p.routeOf(c.id))
         val wire = Json.encodeToJsonElement(com.vantara.anime.stream.Route.serializer(), route).jsonObject

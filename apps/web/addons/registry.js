@@ -53,6 +53,10 @@ export function createAddonRegistry({
   let sessions = 0,
     profileKey = "local";
   const pins = new Map();
+  // ترتيب المستخدم لإضافاته (مدير الإضافات): لكل حساب قائمة مفاتيح؛ ما لم يُرتَّب يأتي بعدها بترتيب تثبيته
+  const orders = new Map();
+  const rank = (key) => { const o = orders.get(profileKey); if (!o) return -1; const i = o.indexOf(key); if (i >= 0) return i; for (const old of entries.get(key)?.formerKeys ?? []) { const j = o.indexOf(old); if (j >= 0) return j; } return -1; };
+  const byRank = (a, b) => { const x = rank(a.key), y = rank(b.key); return x < 0 && y < 0 ? 0 : x < 0 ? 1 : y < 0 ? -1 : x - y; };
   const pinned = (key) => {
     const current = pins.get(JSON.stringify([profileKey, key]));
     if (current !== undefined) return current;
@@ -81,6 +85,10 @@ export function createAddonRegistry({
         typeof pair[1] === "boolean"
       )
         pins.set(...pair);
+    const savedOrder = await store.get("state", "addons.order.v1").catch(() => null);
+    for (const pair of (Array.isArray(savedOrder?.value) ? savedOrder.value : []).slice(-200))
+      if (Array.isArray(pair) && typeof pair[0] === "string" && Array.isArray(pair[1]))
+        orders.set(pair[0], pair[1].filter((k) => typeof k === "string").slice(0, 2000));
     const savedHealth = await store
       .get("state", "addons.health.v1")
       .catch(() => null);
@@ -92,7 +100,7 @@ export function createAddonRegistry({
       if (!slot?.manifestRaw || typeof slot.url !== "string") return null;
       assertBoundedData(slot.manifestRaw);
       if (slot.sha256 && (await printOf(slot.manifestRaw)) !== slot.sha256) return null;
-      const checked = validateManifest(slot.manifestRaw, { origin: publicUrl(slot.url).origin });
+      const checked = validateManifest(slot.manifestRaw, { origin: publicUrl(slot.url).origin, manifestUrl: slot.url });
       return checked.errors.length ? null : checked.manifest;
     };
     for (const row of (Array.isArray(saved?.value) ? saved.value : []).slice(0, MAX_INSTALLED * 2)) {
@@ -191,7 +199,7 @@ export function createAddonRegistry({
       })),
       ...entries.values().map(view),
     ]
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned))
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || byRank(a, b))
       .filter(
         (a) =>
           (!filter.content || a.contentTypes?.includes(filter.content)) &&
@@ -202,7 +210,7 @@ export function createAddonRegistry({
     // Public preview objects are editable DOM data, never installation authority.
     assertBoundedData(raw);
     const privateRaw = structuredClone(raw);
-    const checked = validateManifest(privateRaw, { origin: new URL(url).origin });
+    const checked = validateManifest(privateRaw, { origin: new URL(url).origin, manifestUrl: url });
     if (checked.errors.length)
       throw new Error(`بيانات الإضافة غير متوافقة (${checked.errors.join(", ")})`);
     const preview = { manifest: structuredClone(checked.manifest), compatibility: structuredClone(checked.compatibility) };
@@ -239,7 +247,7 @@ export function createAddonRegistry({
     return mutate(async () => {
       const hidden = previews.get(preview);
       if (!hidden) throw new Error("عاين الإضافة أولًا");
-      const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin });
+      const checked = validateManifest(hidden.raw, { origin: new URL(hidden.url).origin, manifestUrl: hidden.url });
       if (checked.errors.length) throw new Error("بيانات الإضافة غير متوافقة");
       const m = checked.manifest, target = entries.get(m.key), before = replaceKey ? row(replaceKey) : target;
       if (replaceKey && before.manifest.id !== m.id) throw new Error("هوية الإضافة مختلفة عن الإعداد المراد استبداله");
@@ -299,7 +307,7 @@ export function createAddonRegistry({
       }
       cancelled();
       assertBoundedData(raw);
-      const checked = validateManifest(raw, { origin: publicUrl(before.url).origin });
+      const checked = validateManifest(raw, { origin: publicUrl(before.url).origin, manifestUrl: before.url });
       if (checked.errors.length) throw new Error("بيانات إعادة التثبيت غير متوافقة؛ احتُفظ بالإضافة السابقة");
       const manifest = checked.manifest;
       if (manifest.key !== key || manifest.protocol !== before.manifest.protocol)
@@ -355,6 +363,18 @@ export function createAddonRegistry({
       } catch (e) { if (before === undefined) pins.delete(pinKey); else pins.set(pinKey, before); throw e; }
     });
   }
+  /** يحفظ ترتيب المستخدم لإضافاته لهذا الحساب؛ يحدد ترتيب `list()` (ومنه ترتيب المصادر) بعد المفضّلة. */
+  function order(keys) {
+    if (!Array.isArray(keys) || keys.some((k) => typeof k !== "string")) return Promise.reject(new Error("ترتيب غير صالح"));
+    const next = [...new Set(keys)].slice(0, 2000);
+    return mutate(async () => {
+      const before = orders.get(profileKey);
+      orders.set(profileKey, next);
+      try {
+        if ((await store.set("state", "addons.order.v1", [...orders])) === false) throw new Error("تعذر حفظ الترتيب");
+      } catch (e) { if (before === undefined) orders.delete(profileKey); else orders.set(profileKey, before); throw e; }
+    });
+  }
   function enable(key, value) {
     return mutate(async () => {
       const r = row(key), before = r.enabled;
@@ -396,7 +416,7 @@ export function createAddonRegistry({
       key = resolveKey(key);
       const r = row(key);
       if (sessions || !r.staged) return false;
-      const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin });
+      const checked = validateManifest(r.staged.manifestRaw, { origin: publicUrl(r.staged.url).origin, manifestUrl: r.staged.url });
       if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة الجديدة غير متوافقة");
       if (r.staged.sha256 && (await printOf(r.staged.manifestRaw)) !== r.staged.sha256)
@@ -419,7 +439,7 @@ export function createAddonRegistry({
       const r = row(key);
       if (sessions || !r.previous) throw new Error("لا توجد نسخة سابقة قابلة للرجوع الآن");
       const prev = r.previous;
-      const checked = validateManifest(prev.manifestRaw, { origin: publicUrl(prev.url).origin });
+      const checked = validateManifest(prev.manifestRaw, { origin: publicUrl(prev.url).origin, manifestUrl: prev.url });
       if (checked.errors.length || checked.manifest.key !== key)
         throw new Error("النسخة السابقة غير متوافقة");
       if (prev.sha256 && (await printOf(prev.manifestRaw)) !== prev.sha256)
@@ -473,6 +493,7 @@ export function createAddonRegistry({
     runtimeName,
     flushHealth,
     pin,
+    order,
     setProfile(key) {
       profileKey = String(key ?? "local").slice(0, 160);
     },

@@ -6,6 +6,7 @@ import { installFirstPartyTransport } from './first-party.js';
 import { startDesktopUpdateWatch } from './update-check.js';
 import { installDesktopPlayer } from './player.js';
 import { desktopChallenges } from './source-fetcher.js';
+import { FORMER_BUILTIN_SOURCES } from '../lib/source-entitlement.js';
 
 const message = error => String(error?.message ?? error ?? 'تعذر إكمال الطلب').replace(/(?:https?:\/\/|stremio:\/\/)[^\s]+/gi, '[رابط الخدمة]');
 function element(document, tag, text, cls) {
@@ -65,6 +66,33 @@ export function createDesktopVerification(bridge, challenges = desktopChallenges
   });
 }
 
+/**
+ * «صفر مصادر مدمجة» في ويندوز (نظير LegacySourceIds.kt): حزمة مدمجة سابقًا (مصدر ويب بمعرّف `pkg`) ثُبّتت إضافة Mihon
+ * (`pkg#id`) ⇒ مصدرها بلغة الويب نفسها (العربي افتراضًا) يظهر بالمعرّف القديم `pkg` ويختفي مصدر الويب، فالمكتبة والتقدّم
+ * والتنزيلات تبقى بلا إعادة كتابة. `map`: المعرّف القديم ← الحقيقي.
+ */
+export function bridgeLegacySources(web = [], mine = []) {
+  // المعرّف القديم ولغته من الجدول (التعريفات أُزيلت من الحزمة)، ومن تعريف ويب باقٍ على جهاز قديم إن وُجد
+  const webById = new Map([...FORMER_BUILTIN_SOURCES.map((s) => [s.id, s]), ...web.map((s) => [String(s?.id ?? ''), s])]);
+  const byPkg = new Map();
+  for (const s of mine) { const pkg = String(s?.pkg ?? String(s?.id ?? '').split('#')[0]); if (!byPkg.has(pkg)) byPkg.set(pkg, []); byPkg.get(pkg).push(s); }
+  const map = new Map();
+  const chosen = new Set();
+  for (const [pkg, list] of byPkg) {
+    const def = webById.get(pkg);
+    if (!def) continue;
+    const lang = String(def.lang ?? 'ar').toLowerCase();
+    const pick = list.find((s) => String(s.lang ?? '').toLowerCase() === lang) ?? list.find((s) => String(s.lang ?? '').toLowerCase() === 'ar') ?? list[0];
+    map.set(pkg, String(pick.id));
+    chosen.add(pick);
+  }
+  const list = [
+    ...web.filter((s) => !map.has(String(s?.id ?? ''))),
+    ...mine.map((s) => (chosen.has(s) ? { ...s, id: String(s.pkg ?? String(s.id).split('#')[0]), nativeId: String(s.id) } : s)),
+  ];
+  return { list, map };
+}
+
 export function installDesktopBridges(g = globalThis) {
   if (!isDesktop(g)) return null;
   if (g.VantaraDesktopBridges) return g.VantaraDesktopBridges;
@@ -78,11 +106,17 @@ export function installDesktopBridges(g = globalThis) {
   // ويندوز اليوم يشغّل إضافات Mihon بمحرك Suwayomi المحلي (apps/desktop/suwayomi-engine.cjs) حين يعلنه التطبيق
   // (`VantaraDesktop.mangaEngine`): المستودعات والتثبيت عبره، ومصادره `pkg#id` (معرّفات الـAPK نفسها) تُوجَّه إليه.
   const WEB_METHODS=['sources','prepare','popular','latest','catalogue','search','genre','series','chapters','pages','image','cover','sites','addSite','removeSite','clearImageCache'];
-  const REPO_METHODS=['repos','addRepo','removeRepo','repoIndex','installExtension','uninstallExtension','updateState','rollbackExtension','engineState'];
+  const REPO_METHODS=['repos','addRepo','removeRepo','repoIndex','installExtension','uninstallExtension','enableExtension','updateState','rollbackExtension','engineState'];
   const native=typeof g.VantaraDesktop?.mangaEngine==='function'?(method,args)=>g.VantaraDesktop.mangaEngine({method,args}):null;
   const MANGA_METHODS=new Set([...WEB_METHODS,...(native?REPO_METHODS:[])]);
   const engineSource=id=>/^[A-Za-z][\w]*(?:\.[\w]+)+#-?\d{1,20}$/.test(String(id??''));
   const engineMedia=url=>/^vantara-engine:\/\/suwayomi\//.test(String(url??''));
+  let legacy=new Map(),legacyAt=0;
+  const legacyMap=async()=>{
+    if(Date.now()-legacyAt<30_000)return legacy;
+    try{const [web,mine]=await Promise.all([webCall('sources',{}).catch(()=>({sources:[]})),native('sources',{})]);legacy=bridgeLegacySources(web?.sources??[],mine?.sources??[]).map;legacyAt=Date.now();}catch{/* يبقى الأخير */}
+    return legacy;
+  };
   const webCall=async(method,args)=>{
     const runtime=getRuntime();await runtime.ready;await runtime.addons.ready;
     if(['image','cover'].includes(method)){
@@ -100,10 +134,18 @@ export function installDesktopBridges(g = globalThis) {
   const ExtensionEngine=new Proxy({}, {has(_,method){return MANGA_METHODS.has(method);},get(_,method){if(method==='then'||!MANGA_METHODS.has(method))return undefined;return async (args={})=>{
     if(native&&REPO_METHODS.includes(method))return native(method,args);
     if(native&&method==='sources'){
-      // مصادر الويب ومصادر المحرك معًا؛ تعذّر أحدهما لا يُخفي الآخر
+      // مصادر الويب ومصادر المحرك معًا؛ تعذّر أحدهما لا يُخفي الآخر. حزمة مدمجة سابقًا ثُبّتت إضافةً تأخذ معرّفها القديم
+      // ويختفي محرك الويب لها («صفر مصادر مدمجة»، bridgeLegacySources)
       const [web,mine]=await Promise.allSettled([webCall('sources',args),native('sources',args)]);
       if(web.status==='rejected'&&mine.status==='rejected')throw web.reason;
-      return {sources:[...(web.value?.sources??[]),...(mine.value?.sources??[])],stateRecovered:mine.value?.stateRecovered===true};
+      const bridged=bridgeLegacySources(web.value?.sources??[],mine.value?.sources??[]);
+      legacy=bridged.map;legacyAt=Date.now();
+      return {sources:bridged.list,stateRecovered:mine.value?.stateRecovered===true};
+    }
+    // معرّف قديم لحزمة صارت إضافة: إلى المحرك بمعرّفها الحقيقي
+    if(native&&args?.sourceId!=null&&!engineSource(args.sourceId)){
+      const real=(await legacyMap()).get(String(args.sourceId));
+      if(real)return native(method,{...args,sourceId:real});
     }
     if(native&&method==='image'&&engineMedia(args.page?.imageUrl))return native('image',args);
     if(native&&method==='cover'&&engineMedia(args.url))return {path:args.url};
@@ -130,6 +172,7 @@ export function installDesktopBridges(g = globalThis) {
   };
   engine.addListener('playerError', error => show(`تعذر التشغيل: ${message(error)}`, true));
   engine.addListener('desktopNotice',event=>show(message(event.message),true));
+  let engineSlow = 0;
   g.VantaraDesktop.onEvent(event => {
     if (event.type === 'playback/preparing') { activeSession = event.session; ready = false; show('يبدأ المحرك ويجهّز بيانات الفيديو…'); }
     if (event.session === activeSession) {
@@ -149,8 +192,9 @@ export function installDesktopBridges(g = globalThis) {
       const mb = n => Math.round((Number(n) || 0) / 1048576);
       if (event.stage === 'download') show(event.total ? `يجهّز محرك إضافات المانجا لأول مرة… ${mb(event.received)} من ${mb(event.total)}MB` : 'يجهّز محرك إضافات المانجا لأول مرة…');
       else if (event.stage === 'extract') show('يفك محرك إضافات المانجا…');
-      else if (event.stage === 'installed' || event.stage === 'starting') show('يشغّل محرك إضافات المانجا…');
-      else if (event.stage === 'running' && status) status.hidden = true;
+      // التشغيل المعتاد عند كل فتح للتطبيق يتم بهدوء (بلاغ المالك 27 نوفمبر): الرسالة فقط إن طال فعلًا (>4ث)
+      else if (event.stage === 'installed' || event.stage === 'starting') { clearTimeout(engineSlow); engineSlow = setTimeout(() => show('يشغّل محرك إضافات المانجا…'), 4000); }
+      else if (event.stage === 'running') { clearTimeout(engineSlow); if (status) status.hidden = true; }
     }
     if (event.type === 'manga-extensions/changed') g.document?.dispatchEvent?.(new CustomEvent('vantara:addons-changed'));
     // إضافة Mihon طلب موقعها تحققًا بيد إنسان (جسر Cloudflare في المحرك): «تحتاج تحقق» وزر «تحقق» كالمصادر المدمجة

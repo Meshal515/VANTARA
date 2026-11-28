@@ -33,9 +33,12 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
   // تجهيز مسبق: أفضل تورنت في الجلسة يبدأ تنزيل أوله وفهرسه في الخلفية قبل الضغط على تشغيل،
   // فيبدأ العرض من القرص (services.prewarmTorrent). مهلة قصيرة حتى يستقر ترتيب المرشحين.
   const schedulePrewarm = s => {
-    if (!bridge?.prewarmTorrent || s.playing) return;
-    clearTimeout(s.prewarmTimer);
+    // الورقة أعلنت «المقترح» (warm): هو ما يُسخَّن، لا أول ترتيب المحرك هنا (كان يختلف عنه فيُرمى التسخين)
+    if (!bridge?.prewarmTorrent || s.playing || s.sheetTop) return;
+    // مؤقت جارٍ يختار الأفضل لحظة انطلاقه: إعادة عدّه مع كل مرشح يصل كانت تؤجله ما دامت المرشحات تتوالى
+    if (s.prewarmTimer) return;
     s.prewarmTimer = setTimeout(() => {
+      s.prewarmTimer = null;
       if (!current(s) || s.playing) return;
       const c = choices(s)[0];
       if (!c?.infoHash) return;
@@ -289,6 +292,34 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       const c = choices(s).find(c => c.code === prefer) ?? choices(s)[0];
       return { candidate: c?.id ?? null, route: c?.route ?? null, code: c?.code ?? null };
     },
+    /**
+     * «المقترح» في ورقة السيرفرات تورنت: يُسخَّن هو (دور top)، ومرور الفأرة على صف آخر يسخّنه بدور hover فلا يرمي
+     * «المقترح» (services.prewarmTorrent يحمل عدة تسخينات على المحرك الدائم). بعده لا يسخّن ترتيب المحرك هنا شيئًا آخر.
+     */
+    warm({ session, route, hover = false }) {
+      const s = sessions.get(session);
+      if (!s || s.closed || s.playing || !bridge?.prewarmTorrent) return { warming: false };
+      const c = choices(s, route)[0];
+      if (!c?.infoHash) return { warming: false };
+      if (hover) { void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'hover' })).catch(() => {}); return { warming: true }; }
+      s.sheetTop = true; clearTimeout(s.prewarmTimer); s.prewarmTimer = null;
+      const key = `${c.infoHash}|${c.fileIdx ?? ''}`;
+      if (s.prewarmKey !== key) { s.prewarmKey = key; void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'top' })).catch(() => {}); }
+      return { warming: true };
+    },
+    /** الصفوف الظاهرة غير «المقترح» (بترتيب الورقة): تسخين خلفي صغير، والخدمة تحده باثنين. */
+    warmBackground({ session, routes = [], stop = false }) {
+      const s = sessions.get(session);
+      if (stop || !s || s.closed || s.playing || !bridge?.prewarmTorrent) return { warming: 0 };
+      let warming = 0;
+      for (const route of (Array.isArray(routes) ? routes : []).slice(0, 2)) {
+        const c = choices(s, route)[0];
+        if (!c?.infoHash) continue;
+        warming++;
+        void Promise.resolve(bridge.prewarmTorrent({ candidate: c, role: 'background' })).catch(() => {});
+      }
+      return { warming };
+    },
     async pick({ session, route }) { return { candidate: choices(sessionOf(session), route)[0]?.id ?? null }; },
     async playerState({session}) {
       const s=sessionOf(session);
@@ -363,6 +394,7 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       }});
       return true;
     },
+    playRequestedAt({session}){return sessions.get(session)?.playRequestedAt??null;},
     setVideoOffset({session,ms}) {
       const s=sessionOf(session);
       if(!s.together)throw new Error('توقيت الفيديو متاح فقط أثناء المشاهدة مع الأصدقاء');
@@ -375,6 +407,8 @@ export function createDesktopEngine({ bridge = globalThis.VantaraDesktop, getRun
       if (!c || s.routes.get(c.route)?.state !== 'READY') throw new Error('المرشح غير متاح؛ اختر السيرفر من جديد');
       const previousOffset=s.context?.episode===(args.episode??s.episode)?s.together?.getVideoOffset()??0:0;
       s.playArgs={...args};
+      // لحظة طلب التشغيل (الضغط في الورقة): تشخيص البدء يقيس منها لا من فتح الخدمة
+      s.playRequestedAt=Date.now();
       s.subtitleController?.abort(); s.subtitleController = new AbortController();
       const generation = s.playGeneration = (s.playGeneration ?? 0) + 1;
       s.context = { animeId: args.animeId, episode: args.episode ?? s.episode, code: c.code };
