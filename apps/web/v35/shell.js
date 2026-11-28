@@ -255,11 +255,13 @@ export function mountV35(deps, { page = 'home' } = {}) {
   void diagnosticsUi.initialize();
   const { sync } = deps;
   const sharedLatest = createSourceLatest(sync);
-  let collectorMode = null, collectorBusy = false;
+  let collectorMode = null, collectorBusy = false, collectorUpdatedAt = 0;
+  let latestMigrationReady = false, latestDebugStore = null;
   // Only confirmed server state is displayed; no local-only switch masquerading as a stopped Worker.
   function applyCollectorPolicy(data) {
     if (!setLegacyUpdateMode(data?.mode)) return false;
     collectorMode = data.mode;
+    collectorUpdatedAt = Number(data.updatedAt) || 0;
     setSharedLatest(legacyUpdatesAllowed('manga') ? sharedLatest : null);
     return true;
   }
@@ -277,10 +279,11 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // جاهزية الحساب وبعد أول رسم؛ قراءة فقط من الخادم، ونقطة استئناف بعد كل صفحة، والمكتمل لا يُعاد.
   void Promise.resolve(sync.ready).catch(() => {}).then(() => setTimeout(() => {
     let store; try { store = openLatestStore({ account: sync.user?.userId ?? 'local' }); } catch { return; }
+    latestDebugStore = store;
     const send = (path) => sync.translation(path);
     let done = false;
     connectLocalTimeline({ store, ready: () => done, mirror: (section) => mirrorServer({ store, send, section }) });
-    void migrateLatest({ store, send }).then((st) => { done = st.done === true; }).catch(() => { /* تكمل في التشغيل التالي من حيث وقفت */ });
+    void migrateLatest({ store, send }).then((st) => { done = st.done === true; latestMigrationReady = done; }).catch(() => { /* تكمل في التشغيل التالي من حيث وقفت */ });
     // المحرك المحلي: والتطبيق مفتوح فقط، بعد اكتمال الهجرة، دورة ثم راحة 30 دقيقة (المرحلة 5)
     startLatestRunner({ store, ready: () => done, send: (path, opts) => sync.translation(path, opts) });
   }, 4000));
@@ -6963,7 +6966,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const labels = { hybrid: 'هجين مخفّض', 'manga-local': 'مانجا محلية', exclusive: 'محلي حصري' };
       const changeMode = async mode => {
         if (collectorBusy || collectorMode === mode) return;
-        if (!globalThis.confirm?.('هذا الإعداد يغيّر مجمّعات الخادم المشترك لجميع الحسابات. السجل والمزامنة والخيطان يبقون. متابعة؟')) return;
+        if (mode !== 'hybrid' && !latestMigrationReady) { toast('لم تكتمل هجرة آخر التحديثات على هذا الجهاز؛ لا توقف المجمّعات الآن'); return; }
         collectorBusy = true;
         try {
           const result = await sync.adminCall('collector-policy', { mode });
@@ -6972,11 +6975,41 @@ export function mountV35(deps, { page = 'home' } = {}) {
         } catch { toast('تعذّر الاتصال بالخادم'); }
         finally { collectorBusy = false; if (onSettings()) renderSettings(); }
       };
+      const confirmMode = mode => openSheet(body => {
+        body.append(el('h3', null, '94% انخفاض — ' + labels[mode]), el('p', null, 'هذا يغيّر مجمّعات الخادم المشترك لجميع الحسابات. السجل التاريخي والخيطان والمزامنة يبقون. في الوضع الحصري قد تنقص تغطية الأنمي والسينما.'));
+        const actions = el('div', 'sheet-actions');
+        const no = el('button', 'btn btn-secondary', 'إلغاء'); no.type = 'button'; no.onclick = closeSheet;
+        const yes = el('button', 'btn btn-primary', 'تأكيد'); yes.type = 'button';
+        yes.onclick = async () => { yes.disabled = true; closeSheet(); await changeMode(mode); };
+        actions.append(no, yes); body.append(actions);
+      });
+      const showCollectorEvidence = () => openSheet(body => {
+        body.append(el('h3', null, 'تشخيص 94% انخفاض'));
+        const results = el('div'); results.append(el('p', 'work-meta', 'جارٍ قراءة الحالة…')); body.append(results);
+        void (async () => {
+          const confirmed = await loadCollectorPolicy();
+          const [health, local] = await Promise.all([
+            sync.translation('/health?collectors=1').catch(() => null),
+            latestDebugStore?.stats().catch(() => null) ?? Promise.resolve(null)
+          ]);
+          results.replaceChildren(el('p', 'work-meta', 'وضع الخادم: ' + (confirmed ? labels[collectorMode] : 'غير مؤكد')),
+            el('p', 'work-meta', 'آخر تغيير: ' + (collectorUpdatedAt ? new Date(collectorUpdatedAt).toLocaleString('ar-SA') : 'غير مسجل')),
+            el('p', 'work-meta', 'هجرة الجهاز: ' + (latestMigrationReady ? 'مكتملة' : 'لم تكتمل')),
+            el('p', 'work-meta', 'عدد أحداث المخزن المحلي (يشمل التاريخ المستعاد): ' + (local?.events ?? 'غير متاح')));
+          const rows = health?.status === 200 && Array.isArray(health.body?.collectors) ? health.body.collectors : null;
+          if (!rows) { results.append(el('p', 'work-meta', 'حالة تنفيذ المجمّعات غير متاحة')); return; }
+          for (const row of rows) {
+            const line = el('div', 'setting'); const t = el('div');
+            t.append(el('strong', null, String(row.source)), el('small', null, 'آخر محاولة: ' + (row.last_attempt_at ? new Date(row.last_attempt_at).toLocaleString('ar-SA') : 'لا توجد') + ' · آخر نجاح: ' + (row.last_success_at ? new Date(row.last_success_at).toLocaleString('ar-SA') : 'لا يوجد')));
+            line.append(t, el('span', 'value', row.failing ? 'آخر محاولة فشلت' : 'لا خطأ مسجل')); results.append(line);
+          }
+        })().catch(() => { results.replaceChildren(el('p', 'work-meta', 'تعذّر قراءة التشخيص')); });
+      });
       group('94% انخفاض', [
-        row('activity', 'حالة المجمّعات', 'تأكيد من الخادم المشترك', { value: labels[collectorMode] ?? 'غير مؤكدة', run: async () => { if (!await loadCollectorPolicy()) toast('الخادم لا يدعم السياسة أو غير متصل'); if (onSettings()) renderSettings(); } }),
-        row('refresh', 'هجين مخفّض', 'المانجا القديمة + الأنمي 30د، المسلسلات 120د، الأفلام 360د', { run: () => void changeMode('hybrid') }),
-        row('book', 'مانجا محلية', 'إطفاء مجمّعات المانجا، والإبقاء على البيانات العالمية', { run: () => void changeMode('manga-local') }),
-        row('shield', 'محلي حصري', 'إيقاف جميع مجمّعات المحتوى القديمة؛ الخيطان والمزامنة يعملان', { run: () => void changeMode('exclusive') }),
+        row('activity', 'حالة المجمّعات', 'حالة الخادم وآخر محاولة لكل مجمّع', { value: labels[collectorMode] ?? 'غير مؤكدة', run: showCollectorEvidence }),
+        row('refresh', 'هجين مخفّض', 'المانجا القديمة + الأنمي 30د، المسلسلات 120د، الأفلام 360د', { run: () => confirmMode('hybrid') }),
+        row('activity', 'مانجا محلية', 'إطفاء مجمّعات المانجا، والإبقاء على البيانات العالمية', { run: () => confirmMode('manga-local') }),
+        row('shield', 'محلي حصري', 'إيقاف جميع مجمّعات المحتوى القديمة؛ الخيطان والمزامنة يعملان', { run: () => confirmMode('exclusive') }),
       ], { note: '94.1% انخفاض نظري في دورات المصادر العالمية فقط، وليس قياسًا لاستهلاك الحساب. الوضع الحصري قد يخفض تغطية الأنمي والسينما. لا يحذف التاريخ. يلزم تحديث الخادم.' });
     }
 
