@@ -5,6 +5,7 @@ import { MANGA_SITES, readSite, siteReport } from './manga-sites.ts';
 import { adultGenre } from '../../../apps/web/lib/adult-filter.js';
 import { teamxChapterLink } from '../../../apps/web/lib/chapter-access.js';
 import type { Env } from './types.ts';
+import { collectorPolicy, plannedCollectors } from './collector-policy.ts';
 
 const TEAMX = 'https://olympustaff.com';
 const TEAMX_SOURCE = 'eu.kanade.tachiyomi.extension.ar.teamx';
@@ -303,9 +304,9 @@ async function mangaSites(env: Env, now: number, fetchImpl: Fetcher, cursor: num
 
 export async function collectTimelines(env: Env, { now = Date.now(), fetchImpl = fetch, scheduled = false }: { now?: number; fetchImpl?: Fetcher; scheduled?: boolean } = {}) {
   const jobs = [['teamx', teamx], ['mangadex-ar', mangaDex], ['manga-sites', mangaSites], ['anilist', anime], ['cinemeta-series', cinema], ['cinemeta-movies', movies]] as const;
-  // دقائق متناوبة تحت حدّ D1 المجاني (50 استعلامًا للتشغيل): مواقع المانجا وحدها دقيقةً بعد دقيقة
-  const slots = [['teamx', 'mangadex-ar'], ['manga-sites'], ['anilist', 'cinemeta-series', 'cinemeta-movies'], ['manga-sites']];
-  const selected = scheduled ? jobs.filter(([source]) => slots[Math.floor(now / 60_000) % slots.length]!.includes(source)) : jobs;
+  const policy = await collectorPolicy(env);
+  const planned = plannedCollectors(policy.mode, now, scheduled);
+  const selected = jobs.filter(([source]) => planned.includes(source));
   await Promise.all(selected.map(async ([source, run]) => {
     const claim = await env.DB.prepare(`INSERT INTO collector_state (source, lease_until, last_attempt_at) VALUES (?, ?, ?)
       ON CONFLICT(source) DO UPDATE SET lease_until = excluded.lease_until, last_attempt_at = excluded.last_attempt_at
