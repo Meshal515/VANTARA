@@ -51,6 +51,9 @@ describe('owner admin panel', () => {
     expect((await call('/v1/updates/observe', { works: [] }, friend)).status).toBe(409);
     expect((await call('/v1/latest/signals', undefined, friend, 'GET')).status).toBe(200);
     expect((await call('/v1/latest/backup', undefined, friend, 'GET')).status).toBe(200);
+    expect((await call('/v1/admin/collector-policy', {mode:'manga-local'}, owner)).status).toBe(200);
+    expect((await call('/v1/updates/observe', { works: [{section:'manga'}] }, friend)).status).toBe(409);
+    expect((await call('/v1/source-latest/claim', {sourceId:'test'}, friend)).status).toBe(409);
     expect((await call('/v1/admin/collector-policy', {mode:'hybrid'}, owner)).status).toBe(200);
   });
 
