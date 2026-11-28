@@ -16,6 +16,7 @@ import {
 } from '@vantara/domain';
 import legacyWorker from './index.ts';
 import { collectTimelines } from './collectors.ts';
+import { collectorPolicy } from './collector-policy.ts';
 import { togetherRoute } from './together.ts';
 export { TogetherRoom } from './together.ts';
 import { bearerFrom, mintToken } from './session.ts';
@@ -617,6 +618,16 @@ export default {
       const lifecycle = (await lifecycleOf(env, claims.userId))?.lifecycle;
       if (lifecycle === 'DELETED' || lifecycle === undefined) {
         return json({ error: 'account_deleted', state: lifecycle ?? null }, { status: 410 }, cors);
+      }
+
+      if (path === '/v1/latest/collector-policy' && request.method === 'GET') {
+        return json(await collectorPolicy(env), {}, cors);
+      }
+      // Exclusive test blocks the obsolete ingestion path even for older clients.
+      // Keep historical GETs, account maintenance and both latest threads intact.
+      if (request.method === 'POST' && (path === '/v1/updates/observe' || path.startsWith('/v1/source-latest'))) {
+        const { mode } = await collectorPolicy(env);
+        if (mode === 'exclusive') return json({ error: 'legacy_collectors_disabled' }, { status: 409 }, cors);
       }
 
       // لوحة المالك: الشارة تُفحص في القاعدة لكل عملية (admin.ts)
