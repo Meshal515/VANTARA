@@ -73,10 +73,12 @@ class VerificationActivity : Activity() {
             if (completed || !resumed) return
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
-            continueButton?.isEnabled = pageReady && (runtimeProfile == null || clearance != null)
+            continueButton?.isEnabled = true
             // لا إغلاق قبل صفحة الموقع نفسها: كان ظهور cf_clearance وحده يغلق النافذة والصفحة ما زالت تُحوَّل، فتضيع
             // كوكيز يكتبها الموقع بعد التحويل. القديم حُذف قبل التحميل، فأي cf_clearance هنا جديد من هذا التحقق
-            if (clearance != null && pageReady) {
+            // كما في Stable 224 (المرجع العامل): cf_clearance جديد يكفي. «صفحة بلا تحدٍّ» تخطئ: Cloudflare يضع سكربت
+            // challenge-platform في صفحات المواقع العادية أيضًا، فكان الشرط لا يتحقق والنافذة لا تُغلق أبدًا
+            if (clearance != null && (clearance != initialClearance || pageReady)) {
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
             else main.postDelayed(this, 500)
@@ -145,10 +147,11 @@ class VerificationActivity : Activity() {
         // الكوكي الصالح يُرسَل وإن لم يتغير؛ والمضيف يعيد طلب المصدر ويتحقق منه، فإن بقي التحدي طُلب من جديد.
         continueButton = Button(this).apply {
             text = "متابعة إلى المصدر"
-            isEnabled = false
+            isEnabled = true
             setOnClickListener {
                 val value = clearanceNow(current.origin)
-                if (pageReady && (runtimeProfile == null || value != null)) complete("verified", null, value)
+                // كما في 224: الزر يعمل دائمًا؛ كوكي موجود أو صفحة مفتوحة = تم، والحكم لإعادة طلب المصدر بعدها
+                if (value != null || pageReady) complete("verified", null, value) else complete("cancelled", "user_cancelled")
             }
         }
         container.addView(continueButton)
@@ -224,7 +227,7 @@ class VerificationActivity : Activity() {
                         landed = target.origin
                         pageReady = false
                         pageRevision++
-                        continueButton?.isEnabled = false
+
                     }
                 }
                 override fun onPageFinished(view: WebView, url: String?) {

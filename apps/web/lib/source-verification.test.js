@@ -204,12 +204,13 @@ it('treats a replay rejection flagged by the source as an unfinished verificatio
   verification.close();
 });
 
-describe('verified means the site accepted the original request (native confirm)',()=>{
-  it('a native verified result without a replay is a confirmed success, not «open the source to confirm»',async()=>{
+describe('native verified result and real refusals',()=>{
+  it('a native verified result without a replay is success without a fake site confirmation',async()=>{
     const f=fixture(),c=createSourceVerification(f);await c.ready;
     c.require({host:'hijala.com',state:'required'});
     const out=await c.begin('hijala.com');
-    expect(out).toMatchObject({ok:true,confirmed:true});
+    expect(out).toMatchObject({ok:true});
+    expect(out.confirmed).toBeUndefined();
     expect(c.list()).toHaveLength(0);c.close();
   });
   it('a site that still challenges after the import keeps the request pending with its real reason',async()=>{

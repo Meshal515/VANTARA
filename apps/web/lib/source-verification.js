@@ -95,8 +95,8 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
         const resume = retry ?? (!privateRuntime ? item.retry : null);
         if (!resume) {
           pending.delete(host);
-          // «verified» من المحرك يعني أن الموقع قبل الطلب المرفوض نفسه بعد نقل الجلسة (VerificationPlugin.confirm)
-          return privateRuntime ? result : {ok:true,confirmed:true,...result};
+          // كما في 224: اكتمل التحقق ونُقلت الجلسة؛ قبول الموقع يُعرف حين يُعاد طلب المصدر، لا يُدّعى هنا
+          return privateRuntime ? result : {ok:true,...result};
         }
         job.replaying = true;
         let retried;

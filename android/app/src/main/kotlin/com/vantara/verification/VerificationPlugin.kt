@@ -13,9 +13,6 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
-import com.vantara.plugins.ensureEngineInjekt
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 
 @CapacitorPlugin(name = "Verification")
 class VerificationPlugin : Plugin() {
@@ -23,8 +20,6 @@ class VerificationPlugin : Plugin() {
     private var foreground = false
     private var active: VerificationPending? = null
     private val retained = linkedMapOf<String, Pair<String, JSObject>>()
-    /** فحص قبول الموقع: طلب شبكة، فخارج الخيط الرئيسي وخيط Capacitor. */
-    private val acceptance = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "vantara-verification-accept").apply { isDaemon = true } }
 
     private val reportChallenge: (okhttp3.HttpUrl, String) -> Unit = { url, userAgent ->
         VerificationCoordinator.require(url, userAgent)
@@ -113,9 +108,7 @@ class VerificationPlugin : Plugin() {
         val value = if (verified) data?.getStringExtra("clearance")?.let { VerificationPolicy.clearance("cf_clearance=$it") } else null
         val target = data?.getStringExtra("cookieOrigin")?.let(VerificationPolicy::endpoint)
             ?.takeIf { endpoint -> VerificationPolicy.endpoint(item.origin)?.let { VerificationPolicy.sameSite(it, endpoint) } == true }
-        val pairs = if (verified && target != null)
-            VerificationPolicy.cookiePairs(data?.getStringExtra("cookies")).filter { it.first != "cf_clearance" }
-        else emptyList()
+        val pairs = if (verified) VerificationPolicy.cookiePairs(data?.getStringExtra("cookies")).filter { it.first != "cf_clearance" } else emptyList()
         fun finish(state: String, reason: String?) {
             VerificationCoordinator.finish(item.host, item.token, state, reason)
             call?.resolve(json(item, state, reason))
@@ -124,20 +117,18 @@ class VerificationPlugin : Plugin() {
             finish(if (state == "cancelled" || !matches) "cancelled" else "failed", if (matches) data?.getStringExtra("reason") else "interrupted")
             return@post
         }
-        // لا «تم» بلا جلسة: لا نطاق من الموقع نفسه، أو تحدي Cloudflare بلا cf_clearance، أو لا كوكي أصلًا (كان يُعلن
-        // verified هنا ولا يُنقل شيء، فيُرفض الطلب التالي ويعود «يحتاج تحققًا»)
-        if (target == null) return@post finish("failed", "cookie_scope_mismatch")
-        if (item.kind == "cloudflare" && value == null) return@post finish("failed", "no_clearance")
-        if (value == null && pairs.isEmpty()) return@post finish("failed", "no_session_cookie")
+        // كما في Stable 224 (المرجع العامل عند المالك): صفحة فتحت بلا كوكي تنقله = تم، والحكم لإعادة طلب المصدر بعدها
+        // (still_challenged في source-verification.js). بوابات no_clearance وcookie_scope_mismatch وفحص القبول المسبق
+        // كانت ترفض تحققًا ناجحًا، فلا يكتمل أبدًا
+        if (value == null && pairs.isEmpty()) return@post finish("verified", null)
         val jar = try { CookieManager.getInstance() } catch (_: RuntimeException) { return@post finish("failed", "cookie_store_unavailable") }
-        val request = VerificationPolicy.endpoint(item.url) ?: return@post finish("failed", "invalid_endpoint")
-        val writes = VerificationPolicy.sessionImport(request.host, target.host, value, pairs, VerificationPolicy.registrableOf(request.host))
-        // بالترتيب، كل كتابة بعد رد سابقتها: حذف القديم قبل كتابة الجديد. كل كتابة مطلوبة: رفض واحدة فشل للنقل كله
-        // (كان قبول كوكي واحد يكفي لإعلان النجاح)
+        // مضيف الطلب المرفوض نفسه كما في 224، ومعه المضيف الذي انتهت إليه الصفحة إن كان من الموقع نفسه
+        val request = VerificationPolicy.endpoint(item.origin) ?: return@post finish("failed", "invalid_endpoint")
+        val writes = VerificationPolicy.sessionImport(request.host, target?.host ?: request.host, value, pairs, null)
         fun write(i: Int) {
             if (i == writes.size) {
                 try { jar.flush() } catch (_: RuntimeException) {}
-                return confirm(item, call)
+                return finish("verified", null)
             }
             val w = writes[i]
             try {
@@ -148,29 +139,4 @@ class VerificationPlugin : Plugin() {
         }
         write(0)
     } }
-
-    /**
-     * الحكم الأخير من الموقع لا من الصفحة: الرابط الذي رُفض يُطلب مرة من عميل المحرك (مخزنه وتوجيهه والـUser-Agent نفسه).
-     * قبِل → تم. رفض بتحدٍّ → «الموقع لم يقبل التحقق» ويبقى الطلب قائمًا بتوكن جديد. تعذّر الوصول → لا يُعلن نجاح.
-     */
-    private fun confirm(item: VerificationPending, call: PluginCall?) {
-        fun finish(state: String, reason: String?) {
-            VerificationCoordinator.finish(item.host, item.token, state, reason)
-            call?.resolve(json(item, state, reason))
-        }
-        acceptance.execute {
-            val verdict = try {
-                ensureEngineInjekt(context.applicationContext as android.app.Application)
-                val engine = Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client
-                VerificationAcceptance.check(VerificationAcceptance.client(engine), item.url, item.userAgent)
-            } catch (_: Exception) { VerificationAcceptance.Verdict.UNREACHABLE }
-            main.post {
-                when (verdict) {
-                    VerificationAcceptance.Verdict.ACCEPTED -> finish("verified", null)
-                    VerificationAcceptance.Verdict.CHALLENGED -> finish("failed", "still_challenged")
-                    VerificationAcceptance.Verdict.UNREACHABLE -> finish("failed", "unconfirmed")
-                }
-            }
-        }
-    }
 }
