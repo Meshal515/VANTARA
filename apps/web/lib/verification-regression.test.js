@@ -25,3 +25,22 @@ it('the window completes on a new cf_clearance and the plugin does not reject a 
   const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   for (const gate of ['no_clearance', 'cookie_scope_mismatch', 'no_session_cookie', 'confirm(item, call)']) expect(plugin).not.toContain(gate);
 });
+
+/**
+ * انحدار Debug 3513: «تم» فورًا بلا صفحة Cloudflare. حذف cf_clearance القديم قبل التحميل ثم تصفير المرجع
+ * (initialClearance = null) جعل الكوكي القديم، حين لم يُحذف فعلًا، «جديدًا» من أول فحص. وقراءة مضيف الهبوط أولًا قارنت
+ * كوكي مضيف بمرجع مضيف آخر. المرجع 224: لا حذف ولا تصفير، ومضيف الطلب أولًا.
+ */
+it('the old clearance is the reference, read from the request host first (Stable 224)', () => {
+  const code = kotlin('com/vantara/verification/VerificationActivity.kt').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  expect(code).not.toMatch(/initialClearance\s*=\s*null/);
+  expect(code).not.toMatch(/cf_clearance=;/);
+  expect(code).toMatch(/initialClearance\s*=\s*VerificationPolicy\.clearance\(selectedCookies\?\.getCookie\(current\.origin\s*\+\s*"\/"\)\)/);
+  expect(code).toMatch(/fun clearanceNow\(origin: String\): String\? =\s*VerificationPolicy\.clearance\(selectedCookies\?\.getCookie\("\$origin\/"\)\)\s*\?: landed/);
+});
+
+it('one rejected side cookie does not fail a completed check (Stable 224)', () => {
+  const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt');
+  expect(plugin).not.toMatch(/else finish\("failed", "cookie_rejected"\) \}/);
+  expect(plugin).toMatch(/if \(ok\) finish\("verified", null\) else finish\("failed", "cookie_rejected"\)/);
+});

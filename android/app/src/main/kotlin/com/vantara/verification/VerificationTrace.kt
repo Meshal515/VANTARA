@@ -30,3 +30,34 @@ internal class VerificationTrace(private val clock: () -> Long, private val capa
         for (entry in entries) appendLine(entry)
     }
 }
+
+/**
+ * Debug وحده: آخر انهيار غير ملتقط في أي عملية للتطبيق (الرئيسية أو :verification)، ليُنسخ من زر «نسخ تشخيص التحقق».
+ * بلاغ المالك (Debug 3513): «يستمر في التوقف» بعد التحقق، ولا سجل انهيار في التطبيق. الروابط وقيم cf_clearance تُحذف.
+ */
+object DebugCrashLog {
+    private const val NAME = "debug-last-crash.txt"
+    @Volatile private var installed = false
+
+    @JvmStatic @Synchronized fun install(context: android.content.Context) {
+        if (installed) return
+        installed = true
+        val file = java.io.File(context.applicationContext.filesDir, NAME)
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val trace = java.io.StringWriter().also { error.printStackTrace(java.io.PrintWriter(it)) }.toString()
+                val process = if (android.os.Build.VERSION.SDK_INT >= 28) android.app.Application.getProcessName() else "?"
+                file.writeText("process=$process thread=${thread.name} at=${System.currentTimeMillis()}\n${scrub(trace).take(16_000)}")
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
+    fun read(context: android.content.Context): String? =
+        runCatching { java.io.File(context.applicationContext.filesDir, NAME).takeIf { it.isFile }?.readText() }.getOrNull()
+
+    internal fun scrub(text: String): String = text
+        .replace(Regex("https?://[^\\s\"']+"), "<url>")
+        .replace(Regex("cf_clearance=[^;\\s\"']+"), "cf_clearance=<value>")
+}

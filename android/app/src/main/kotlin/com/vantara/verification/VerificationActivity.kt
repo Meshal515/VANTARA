@@ -65,7 +65,10 @@ class VerificationActivity : Activity() {
     @Volatile private var pageReady = false
     private fun cookieOrigin(origin: String): String = landed ?: origin
     private fun clearanceNow(origin: String): String? =
-        VerificationPolicy.clearance(selectedCookies?.getCookie("${cookieOrigin(origin)}/"))
+        // كما في 224: مضيف الطلب أولًا (منه يُقرأ المرجع initialClearance)، ثم مضيف الهبوط. قراءة الهبوط أولًا كانت تقارن
+        // كوكي مضيف بمرجع مضيف آخر، فيبدو القديم جديدًا
+        VerificationPolicy.clearance(selectedCookies?.getCookie("$origin/"))
+            ?: landed?.takeIf { it != origin }?.let { VerificationPolicy.clearance(selectedCookies?.getCookie("$it/")) }
     private var deadline = 0L
     private val timeout = Runnable { complete("failed", "timeout") }
     private val poll = object : Runnable {
@@ -74,8 +77,6 @@ class VerificationActivity : Activity() {
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
             continueButton?.isEnabled = true
-            // لا إغلاق قبل صفحة الموقع نفسها: كان ظهور cf_clearance وحده يغلق النافذة والصفحة ما زالت تُحوَّل، فتضيع
-            // كوكيز يكتبها الموقع بعد التحويل. القديم حُذف قبل التحميل، فأي cf_clearance هنا جديد من هذا التحقق
             // كما في Stable 224 (المرجع العامل): cf_clearance جديد يكفي. «صفحة بلا تحدٍّ» تخطئ: Cloudflare يضع سكربت
             // challenge-platform في صفحات المواقع العادية أيضًا، فكان الشرط لا يتحقق والنافذة لا تُغلق أبدًا
             if (clearance != null && (clearance != initialClearance || pageReady)) {
@@ -87,6 +88,7 @@ class VerificationActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (BuildConfig.DEBUG) DebugCrashLog.install(this)
         mark(if (savedInstanceState == null) Event.ACTIVITY_CREATE else Event.ACTIVITY_RECREATED)
         endpoint = VerificationPolicy.endpoint(intent.getStringExtra("url").orEmpty())
         token = intent.getStringExtra("token").orEmpty()
@@ -158,7 +160,7 @@ class VerificationActivity : Activity() {
         if (trace != null) container.addView(Button(this).apply {
             text = "نسخ تشخيص التحقق (Debug)"
             setOnClickListener {
-                val report = trace.report()
+                val report = trace.report() + (DebugCrashLog.read(this@VerificationActivity)?.let { "\nLast crash (debug):\n$it" } ?: "")
                 getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Verification diagnostics", report))
                 Toast.makeText(this@VerificationActivity, "نُسخ التشخيص", Toast.LENGTH_SHORT).show()
             }
@@ -274,22 +276,11 @@ class VerificationActivity : Activity() {
             }
             val root = (findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as LinearLayout)
             root.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            // كما يفعل Mihon قبل كل حل (CloudflareInterceptor: remove(url, ["cf_clearance"], 0)): cf_clearance القديم يُحذف
-            // قبل التحميل، فيُطلب التحدي من جديد ويُعرف الجديد بلا لبس (كوكيان بالاسم نفسه كانا يجعلان القراءة null)
-            // كوكي المضيف وحده، وكوكي جذر الموقع (Domain=.site) الذي يكتبه Cloudflare عادة
-            val stale = listOf("cf_clearance=; Path=/; Max-Age=0") +
-                listOfNotNull(VerificationPolicy.registrableOf(current.host)?.let { "cf_clearance=; Domain=.$it; Path=/; Max-Age=0" })
-            var left = stale.size
-            fun load() {
-                if (completed || browser !== view) return
-                initialClearance = null
-                mark(Event.APP_LOAD_URL)
-                view.loadUrl(intent.getStringExtra("url")!!)
-                if (resumed) main.post(poll)
-            }
-            val jar = selectedCookies
-            if (jar == null) load()
-            else for (header in stale) jar.setCookie("${current.origin}/", header) { main.post { if (--left == 0) load() } }
+            // كما في Stable 224 (المرجع العامل): لا حذف لـcf_clearance القديم ولا تصفير للمرجع قبل التحميل. الحذف لم يكن يصيب
+            // الكوكي الفعلي دائمًا، والتصفير جعل القديم «جديدًا» فأُغلقت النافذة فورًا بـ«تم» بلا صفحة Cloudflare (Debug 3513)
+            mark(Event.APP_LOAD_URL)
+            view.loadUrl(intent.getStringExtra("url")!!)
+            if (resumed) main.post(poll)
         } catch (_: RuntimeException) { complete("failed", "webview_unavailable") }
     }
 

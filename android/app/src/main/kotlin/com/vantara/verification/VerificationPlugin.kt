@@ -125,17 +125,19 @@ class VerificationPlugin : Plugin() {
         // مضيف الطلب المرفوض نفسه كما في 224، ومعه المضيف الذي انتهت إليه الصفحة إن كان من الموقع نفسه
         val request = VerificationPolicy.endpoint(item.origin) ?: return@post finish("failed", "invalid_endpoint")
         val writes = VerificationPolicy.sessionImport(request.host, target?.host ?: request.host, value, pairs, null)
+        // كما في 224: يكفي أن يُقبل كوكي واحد؛ رفض كوكي جانبي لا يُفشل تحققًا نجح
+        var ok = false
         fun write(i: Int) {
             if (i == writes.size) {
                 try { jar.flush() } catch (_: RuntimeException) {}
-                return finish("verified", null)
+                return if (ok) finish("verified", null) else finish("failed", "cookie_rejected")
             }
             val w = writes[i]
             try {
                 jar.setCookie(w.url, w.header) { accepted ->
-                    main.post { if (accepted || w.remove) write(i + 1) else finish("failed", "cookie_rejected") }
+                    main.post { if (accepted == true && !w.remove) ok = true; write(i + 1) }
                 }
-            } catch (_: RuntimeException) { finish("failed", "cookie_store_unavailable") }
+            } catch (_: RuntimeException) { if (ok) finish("verified", null) else finish("failed", "cookie_store_unavailable") }
         }
         write(0)
     } }

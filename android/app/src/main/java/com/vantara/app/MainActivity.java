@@ -18,6 +18,8 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // التسجيل قبل super: الجسر يبني قائمة الإضافات داخل onCreate، وما
         // يُسجَّل بعده لا تراه صفحة الويب.
+        // Debug وحده: آخر انهيار يُحفظ محليًا ويُنسخ من «نسخ تشخيص التحقق» (لا سجل انهيار غيره)
+        if (BuildConfig.DEBUG) com.vantara.verification.DebugCrashLog.install(this);
         registerPlugin(ExtensionEnginePlugin.class);
         registerPlugin(SystemUiPlugin.class);
         registerPlugin(com.vantara.plugins.AccountBackupPlugin.class);
