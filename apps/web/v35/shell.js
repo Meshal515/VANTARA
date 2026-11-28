@@ -8161,7 +8161,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   // كان لا يعمل إلا في سكون رئيسية المانجا ويتوقف بمجرد مغادرتها (حتى بفتح «آخر
   // التحديثات» نفسها) ومرة كل 20 دقيقة، فلا يكتمل. المسح الآن تفاضلي رخيص: يعمل
   // ما دام التطبيق ظاهرًا خارج القارئ، كل 10 دقائق، وعند فتح «آخر التحديثات».
-  const sweepable = () => !document.hidden && root.isConnected;
+  const sweepable = () => legacyUpdatesAllowed('manga') && !document.hidden && root.isConnected;
   let sweptAt = 0;
   let sweeping = null;
   function sweepLatest({ minGap = 10 * 60_000 } = {}) {
