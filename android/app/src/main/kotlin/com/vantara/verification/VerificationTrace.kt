@@ -23,6 +23,11 @@ internal class VerificationTrace(private val clock: () -> Long, private val capa
         entries.addLast("+${(clock() - started).coerceAtLeast(0)}ms ${event.name}" +
             (code?.let { " code=$it" } ?: ""))
     }
+    /** حقيقة بلا قيم (أعلام وأسماء كوكيز وأعداد فقط)، للحظة الإغلاق. */
+    @Synchronized fun note(text: String) {
+        if (entries.size >= capacity) entries.removeFirst()
+        entries.addLast("+${(clock() - started).coerceAtLeast(0)}ms NOTE ${DebugCrashLog.scrub(text).take(400)}")
+    }
     @Synchronized fun report(): String = buildString {
         appendLine("VANTARA verification lifecycle (debug)")
         for ((event, count) in counts) appendLine("${event.name}=$count")
@@ -60,4 +65,28 @@ object DebugCrashLog {
     internal fun scrub(text: String): String = text
         .replace(Regex("https?://[^\\s\"']+"), "<url>")
         .replace(Regex("cf_clearance=[^;\\s\"']+"), "cf_clearance=<value>")
+}
+
+/**
+ * Debug وحده: سجل آخر محاولة تحقق كاملًا، من لحظة الإغلاق في نافذة التحقق ثم ما جرى في مخزن المحرك وطلب فحص واحد منه.
+ * النافذة تُغلق قبل أن يُنسخ تشخيصها، فكان سبب الإغلاق وما بعده غائبين (بلاغ المالك، Debug 3520). بلا قيم كوكيز.
+ */
+object DebugVerificationLog {
+    private const val NAME = "debug-last-verification.txt"
+    private fun file(context: android.content.Context) = java.io.File(context.applicationContext.filesDir, NAME)
+    @JvmStatic @Synchronized fun start(context: android.content.Context, text: String) {
+        runCatching { file(context).writeText(DebugCrashLog.scrub(text).take(24_000) + "\n") }
+    }
+    @JvmStatic @Synchronized fun append(context: android.content.Context, text: String) {
+        runCatching { file(context).takeIf { it.length() < 48_000 }?.appendText(DebugCrashLog.scrub(text).take(4_000) + "\n") }
+    }
+    fun read(context: android.content.Context): String? = runCatching { file(context).takeIf { it.isFile }?.readText() }.getOrNull()
+
+    /** أسماء الكوكيز وعدد cf_clearance في ترويسة CookieManager، وهل أول cf_clearance فيها هو [expected]. بلا قيم. */
+    fun describe(header: String?, expected: String?): String {
+        val pairs = header.orEmpty().split(';').map(String::trim).filter { '=' in it }
+        val clearances = pairs.filter { it.substringBefore('=') == "cf_clearance" }.map { it.substringAfter('=') }
+        return "names=[${pairs.joinToString(",") { it.substringBefore('=') }.take(300)}] cf_clearance=${clearances.size}" +
+            (if (expected != null) " firstIsNew=${clearances.firstOrNull() == expected} newPresent=${expected in clearances}" else "")
+    }
 }

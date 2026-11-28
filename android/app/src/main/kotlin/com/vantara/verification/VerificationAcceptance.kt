@@ -39,6 +39,18 @@ object VerificationAcceptance {
         interceptors().removeAll { it is CloudflareInterceptor || it is BrowserVerificationInterceptor }
     }.callTimeout(20, TimeUnit.SECONDS).build()
 
+    /** Debug: الحكم مع رمز الرد وترويسة cf-mitigated وعدد cf_clearance المرسلة فعلًا، بلا قيم ولا جسم. */
+    fun probe(client: OkHttpClient, url: String, userAgent: String): String = try {
+        // من الشبكة لا من ذاكرة المحرك المؤقتة: الحكم على الجلسة المنقولة الآن
+        client.newCall(Request.Builder().url(url).header("User-Agent", userAgent).cacheControl(okhttp3.CacheControl.FORCE_NETWORK).get().build()).execute().use { r ->
+            val head = runCatching { r.peekBody(64 * 1024).string() }.getOrNull()
+            val sent = r.request.headers("Cookie").joinToString("; ").split(';').count { it.trim().startsWith("cf_clearance=") }
+            val sentNet = r.networkResponse?.request?.headers("Cookie")?.joinToString("; ")?.split(';')?.count { it.trim().startsWith("cf_clearance=") }
+            "${verdictOf(r.code, r.header("Server"), r.header("cf-mitigated"), head)} code=${r.code} mitigated=${r.header("cf-mitigated") ?: "-"} " +
+                "server=${r.header("Server") ?: "-"} cfClearanceSent=${sentNet ?: sent} protocol=${r.protocol}"
+        }
+    } catch (e: IOException) { "UNREACHABLE ${e.javaClass.simpleName}" } catch (e: IllegalArgumentException) { "UNREACHABLE ${e.javaClass.simpleName}" }
+
     /** لا يُنادى من الخيط الرئيسي ولا من خيط Capacitor. */
     fun check(client: OkHttpClient, url: String, userAgent: String): Verdict = try {
         client.newCall(Request.Builder().url(url).header("User-Agent", userAgent).get().build()).execute().use { r ->

@@ -160,7 +160,9 @@ class VerificationActivity : Activity() {
         if (trace != null) container.addView(Button(this).apply {
             text = "نسخ تشخيص التحقق (Debug)"
             setOnClickListener {
-                val report = trace.report() + (DebugCrashLog.read(this@VerificationActivity)?.let { "\nLast crash (debug):\n$it" } ?: "")
+                val report = trace.report() +
+                    (DebugVerificationLog.read(this@VerificationActivity)?.let { "\nPrevious attempt (debug):\n$it" } ?: "") +
+                    (DebugCrashLog.read(this@VerificationActivity)?.let { "\nLast crash (debug):\n$it" } ?: "")
                 getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Verification diagnostics", report))
                 Toast.makeText(this@VerificationActivity, "نُسخ التشخيص", Toast.LENGTH_SHORT).show()
             }
@@ -291,6 +293,14 @@ class VerificationActivity : Activity() {
             "cancelled" -> Event.COMPLETE_CANCELLED
             else -> Event.COMPLETE_FAILED
         })
+        if (trace != null) {
+            val e = endpoint
+            val now = e?.let { runCatching { clearanceNow(it.origin) }.getOrNull() }
+            trace.note("close state=$state reason=${reason ?: "-"} clearance=${now != null} new=${now != null && now != initialClearance} " +
+                "hadInitial=${initialClearance != null} pageReady=$pageReady landedOther=${landed != null && landed != e?.origin} " +
+                "request{${DebugVerificationLog.describe(e?.let { runCatching { selectedCookies?.getCookie(it.origin + "/") }.getOrNull() }, null)}} " +
+                "landed{${landed?.takeIf { it != e?.origin }?.let { DebugVerificationLog.describe(runCatching { selectedCookies?.getCookie("$it/") }.getOrNull(), null) } ?: "-"}}")
+        }
         if (state == "verified") selectedCookies?.flush()
         completed = true
         main.removeCallbacks(timeout); main.removeCallbacks(poll)
@@ -306,6 +316,7 @@ class VerificationActivity : Activity() {
                 .joinToString("; ").take(65536).takeIf { it.isNotEmpty() }?.let { result.putExtra("cookies", it) }
         }
         setResult(if (state == "verified") RESULT_OK else RESULT_CANCELED, result)
+        if (trace != null) DebugVerificationLog.start(this, "== Window ==\n" + trace.report())
         releaseBrowser()
         releaseTunnel()
         finish()

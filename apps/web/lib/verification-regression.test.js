@@ -58,3 +58,19 @@ it('the engine jar loses every old cf_clearance scope before the new one is writ
   expect(plugin.indexOf('val stale')).toBeLessThan(plugin.indexOf('fun write('));
   expect(plugin).not.toMatch(/if \(value == null && pairs\.isEmpty\(\)\) return@post finish/);
 });
+
+/**
+ * بلاغ المالك (Debug 3520): التشخيص يُنسخ والنافذة مفتوحة، فلا يظهر سبب الإغلاق ولا ما جرى للجلسة في المحرك.
+ * Debug وحده يحفظ لحظة الإغلاق ومخزن المحرك بعد النقل وطلب فحص واحد منه، بلا قيم كوكيز، ولا يغيّر السلوك.
+ */
+it('debug evidence covers the close, the engine jar and one engine probe, without cookie values', () => {
+  const activity = kotlin('com/vantara/verification/VerificationActivity.kt');
+  expect(activity).toMatch(/trace\.note\("close state=\$state/);
+  expect(activity).toMatch(/if \(trace != null\) DebugVerificationLog\.start\(/);
+  const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt');
+  expect(plugin).toMatch(/if \(com\.vantara\.app\.BuildConfig\.DEBUG\) debugEngineEvidence\(/);
+  const trace = kotlin('com/vantara/verification/VerificationTrace.kt');
+  // الوصف أسماء وأعداد وأعلام فقط
+  expect(trace).toMatch(/names=\[\$\{pairs\.joinToString\(","\) \{ it\.substringBefore\('='\) \}/);
+  expect(trace).not.toMatch(/append\([^)]*clearances\.first\(\)\)/);
+});

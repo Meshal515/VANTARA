@@ -13,6 +13,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import uy.kohesive.injekt.api.get
 
 @CapacitorPlugin(name = "Verification")
 class VerificationPlugin : Plugin() {
@@ -94,6 +95,23 @@ class VerificationPlugin : Plugin() {
         }
     } }
 
+    /**
+     * Debug وحده، بعد الاستيراد ولا يؤخر النتيجة: ما في مخزن المحرك (أسماء وعدد cf_clearance وهل الأول هو الجديد)،
+     * ثم طلب GET واحد من عميل المحرك نفسه بلا معترضَي التحقق لرابط الطلب المرفوض: هل يقبله الموقع بالجلسة المنقولة؟
+     */
+    private fun debugEngineEvidence(item: VerificationPending, hosts: List<String>, value: String?, jar: CookieManager) {
+        val app = context.applicationContext as android.app.Application
+        for (h in hosts) DebugVerificationLog.append(app, "== Engine jar $h == ${DebugVerificationLog.describe(runCatching { jar.getCookie("https://$h/") }.getOrNull(), value)} imported=${value != null}")
+        Thread {
+            val line = try {
+                com.vantara.plugins.ensureEngineInjekt(app)
+                val engine = uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client
+                VerificationAcceptance.probe(VerificationAcceptance.client(engine), item.url, item.userAgent)
+            } catch (t: Throwable) { "probe error ${t.javaClass.simpleName}" }
+            DebugVerificationLog.append(app, "== Engine probe == $line")
+        }.apply { isDaemon = true; name = "verification-debug-probe" }.start()
+    }
+
     @ActivityCallback private fun verified(call: PluginCall?, result: ActivityResult) { main.post {
         val item = active ?: VerificationCoordinator.pending().firstOrNull { it.state == "active" }
         active = null
@@ -137,6 +155,7 @@ class VerificationPlugin : Plugin() {
         fun write(i: Int) {
             if (i == writes.size) {
                 try { jar.flush() } catch (_: RuntimeException) {}
+                if (com.vantara.app.BuildConfig.DEBUG) debugEngineEvidence(item, listOf(request.host, landed).distinct(), value, jar)
                 // صفحة فتحت بلا كوكي تنقله = تم كما في 224 (القديم حُذف فقط)
                 return if (ok || (value == null && pairs.isEmpty())) finish("verified", null) else finish("failed", "cookie_rejected")
             }
