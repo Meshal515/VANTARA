@@ -16,6 +16,8 @@ import { createLatestEngine } from './latest-engine.js';
 import { friendFresh, pullSignals, pushThreads, recordLocalEvents, restoreBackup } from './latest-threads.js';
 
 export const REST_MS = 30 * 60_000;
+export const SIGNALS_MS = 5 * 60_000;
+const PUSH_DEBOUNCE_MS = 2_000;
 
 export function latestIdentity(p, item) {
   if (p.section !== 'manga') return null;
@@ -36,13 +38,30 @@ export async function installedProviders({ plugins = globalThis.Capacitor?.Plugi
 }
 
 /** يبدأ الحلقة ويرجع دالة إيقاف. `ready()` = اكتملت الهجرة. */
-export function startLatestRunner({ store, ready, send = null, doc = globalThis.document, restMs = REST_MS, firstDelayMs = 60_000, providers = installedProviders, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function startLatestRunner({ store, ready, send = null, doc = globalThis.document, restMs = REST_MS, firstDelayMs = 60_000, providers = installedProviders, setTimer = setTimeout, clearTimer = clearTimeout, signalsMs = SIGNALS_MS }) {
   let current = [];
+  let stopped = false;
   const engine = createLatestEngine({
     store, providers: async () => current, identify: async (p, i) => latestIdentity(p, i), allow: latestAllowed,
     // الخيط الثاني: إشارة صديق حديثة تُغني عن طلب الفصول؛ وما يكشفه هذا الجهاز يُحفظ للنسخة ويُنشر إشارةً
-    skipWork: (p, work) => friendFresh(store, p.key, work), onEvents: (events) => recordLocalEvents(store, events),
+    // ما يُكشف يُرفع بعد ثانيتين (أحداث متقاربة طلب واحد)، لا بعد الدورة كلها
+    skipWork: (p, work) => friendFresh(store, p.key, work), onEvents: async (events) => { await recordLocalEvents(store, events); kick(); },
   });
+  // الخيطان بالأحداث لا بالدورة: الرفع بعد كل كشف (مجمّعًا)، وإشارات الأصحاب عند فتح التطبيق وكل 5 دقائق وهو ظاهر
+  // (كانت مرة كل 30 دقيقة). طلب واحد صغير، لا تكرار والطابور محفوظ محليًا
+  let pushTimer = null, pushing = null, signalsTimer = null;
+  const kick = (ms = PUSH_DEBOUNCE_MS) => {
+    if (!send || stopped) return;
+    clearTimer(pushTimer);
+    pushTimer = setTimer(() => { pushTimer = null; pushing = (pushing ?? Promise.resolve()).then(() => pushThreads(store, send)).catch(() => {}).finally(() => { pushing = null; }); }, ms);
+  };
+  const pullNow = async () => {
+    if (!send || stopped || !ready() || !visible()) return;
+    try { await pullSignals(store, send, { allow: (section, key, title) => latestAllowed({ section, key }, { title, ref: { title } }) }); } catch { /* المرة التالية */ }
+  };
+  const signalsLoop = () => { clearTimer(signalsTimer); if (send && !stopped) signalsTimer = setTimer(async () => { await pullNow(); signalsLoop(); }, signalsMs); };
+  const onVisible = () => { if (visible()) { void pullNow(); kick(0); } };
+  doc?.addEventListener?.('visibilitychange', onVisible);
   /** الخيطان حول الدورة: الاستعادة مرة، والإشارات قبلها، والرفع بعدها. فشلهما لا يوقف الكشف. */
   async function threadsBefore() {
     if (!send) return;
@@ -52,7 +71,7 @@ export function startLatestRunner({ store, ready, send = null, doc = globalThis.
       await pullSignals(store, send, { allow: (section, key, title) => latestAllowed({ section, key }, { title, ref: { title } }) });
     } catch { /* المحاولة في الدورة التالية */ }
   }
-  let timer = null, stopped = false;
+  let timer = null;
   const visible = () => !doc || doc.visibilityState !== 'hidden';
   const schedule = (ms) => { clearTimer(timer); if (!stopped) timer = setTimer(tick, ms); };
   async function tick() {
@@ -62,10 +81,13 @@ export function startLatestRunner({ store, ready, send = null, doc = globalThis.
       current = await providers();
       await threadsBefore();
       await engine.runCycle();
-      if (send) await pushThreads(store, send).catch(() => {});
+      if (send) kick(0);
     } catch { /* دورة فاشلة لا توقف التي بعدها */ }
     schedule(restMs);
   }
+  signalsLoop();
+  // ما بقي في الطابور من جلسة سابقة يُرفع مع الإقلاع لا بعد أول دورة
+  kick(5_000);
   schedule(firstDelayMs);
-  return { stop() { stopped = true; clearTimer(timer); }, runNow: () => engine.runCycle() };
+  return { stop() { stopped = true; clearTimer(timer); clearTimer(pushTimer); clearTimer(signalsTimer); doc?.removeEventListener?.('visibilitychange', onVisible); }, runNow: () => engine.runCycle(), flush: () => kick(0) };
 }

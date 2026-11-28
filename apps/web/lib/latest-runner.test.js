@@ -23,3 +23,19 @@ describe('تشغيل المحرك: والتطبيق مفتوح فقط، وبعد
     expect(latestAllowed({ section: 'manga', key: 'unknown.src' }, { title: 'x', ref: { title: 'x' } })).toBe(false);
   });
 });
+
+describe('الخيطان بالأحداث لا بالدورة', () => {
+  const timers = () => { const q = []; return { q, setTimer: (fn, ms) => { q.push({ fn, ms }); return q.length; }, clearTimer: () => {} }; };
+  const store = { getSnapshot: async () => null, putSnapshots: async () => {}, getMeta: async () => null, setMeta: async () => {} };
+  it('ما يُكشف يُرفع بعد ثانيتين مجمّعًا، والإشارات تُسحب عند الظهور', async () => {
+    const t = timers(); const doc = { visibilityState: 'visible', handlers: {}, addEventListener(n, f) { this.handlers[n] = f; }, removeEventListener() {} };
+    const send = vi.fn(async () => ({ status: 200, body: { signals: [], next: 0 } }));
+    const r = startLatestRunner({ store, ready: () => true, doc, providers: vi.fn(async () => []), send, ...t, firstDelayMs: 5 });
+    // مؤقت الرفع عند الإقلاع (5 ث) ومؤقت الإشارات (5 د) قبل مؤقت الدورة
+    expect(t.q.map((x) => x.ms)).toEqual(expect.arrayContaining([5 * 60_000, 5_000]));
+    doc.handlers.visibilitychange();
+    await new Promise((res) => setTimeout(res, 0));
+    expect(send.mock.calls.some(([p]) => String(p).startsWith('/v1/latest/signals'))).toBe(true);
+    r.stop();
+  });
+});

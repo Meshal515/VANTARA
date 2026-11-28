@@ -60,7 +60,7 @@ VANTARA كان يخزّن نفس المعنى في مخزنين:
 | `ops.reports` | POSTGRES | — | `vantara_reports` + مرفقاتها وإجراءاتها |
 | `ops.content_policy` | POSTGRES | — | `vantara_content_policy`, `vantara_deleted_works`, `vantara_merge_snapshots`, `vantara_audit_log` |
 | `ops.sources` | POSTGRES | — | `vantara_source_verdicts` |
-| `updates.timeline` | DEVICE | D1 | `latest_backups` (D1، نسخة حساب صغيرة بلا روابط، تُستعاد في تثبيت جديد) |
+| `updates.timeline` | DEVICE | D1 | `latest_backups` + `latest_backup_events` (D1، حدث لكل صف بلا روابط، تُدمج الأجهزة بالمعرّف ولا تستبدل، يُرفع الجديد فقط، تُستعاد في تثبيت جديد) |
 | `updates.signals` | D1 | — | `latest_signals` (ترحيل مؤقت 30 يومًا لإشارات الأصحاب، بلا هوية المرسل) |
 | `device.downloads` | DEVICE | — | — |
 

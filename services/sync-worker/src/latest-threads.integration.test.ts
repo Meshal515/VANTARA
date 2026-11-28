@@ -20,11 +20,20 @@ const sig = (n: number, src = 'pkg.ar.src') => ({ eventId: `ext:w|c:${n}`, work:
 describe('نسخة الحساب', () => {
   it('لصاحبها وحده، وتُستعاد كما حُفظت', async () => {
     const { env } = testEnv();
-    expect((await call(env, A, '/v1/latest/backup')).body).toEqual({ payload: null, updatedAt: null });
-    const payload = { v: 1, events: [{ id: 'ext:w|c:5', work: 'ext:w', number: 5 }], marks: [{ work: 'ext:w', number: 5 }] };
-    expect((await call(env, A, '/v1/latest/backup', 'POST', { payload })).status).toBe(200);
-    expect((await call(env, A, '/v1/latest/backup')).body.payload).toEqual(payload);
+    expect((await call(env, A, '/v1/latest/backup')).body).toEqual({ payload: null, updatedAt: null, next: null });
+    const events = [{ id: 'ext:w|c:5', work: 'ext:w', number: 5, at: 5 }];
+    expect((await call(env, A, '/v1/latest/backup/events', 'POST', { events })).status).toBe(200);
+    expect((await call(env, A, '/v1/latest/backup')).body.payload.events).toEqual(events);
     expect((await call(env, B, '/v1/latest/backup')).body.payload).toBeNull();
+  });
+  it('جهازان للحساب نفسه: يُدمجان بالمعرّف ولا يمحو أحدهما الآخر، والرفع القديم يُدمج لا يستبدل', async () => {
+    const { env } = testEnv();
+    await call(env, A, '/v1/latest/backup/events', 'POST', { events: [{ id: 'a1', at: 1 }, { id: 'a2', at: 2 }] });
+    await call(env, A, '/v1/latest/backup/events', 'POST', { events: [{ id: 'b1', at: 3 }] });
+    // جهاز بإصدار سابق يرفع نسخته كاملة: كانت تستبدل ما سبق
+    await call(env, A, '/v1/latest/backup', 'POST', { payload: { v: 1, events: [{ id: 'old1', at: 4 }] } });
+    const ids = (await call(env, A, '/v1/latest/backup')).body.payload.events.map((e: { id: string }) => e.id).sort();
+    expect(ids).toEqual(['a1', 'a2', 'b1', 'old1']);
   });
   it('يرفض الكبير والروابط ولا يكتب شيئًا', async () => {
     const { env } = testEnv();

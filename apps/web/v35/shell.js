@@ -1994,7 +1994,10 @@ export function mountV35(deps, { page = 'home' } = {}) {
             } }
             : { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
         });
-        setReadCta(null);
+        setStoredCta(work, { verify: blocked.length ? async () => {
+          for (const host of blocked) { const out = await sourceVerification.begin(host); if (!out?.ok && out?.error) toast(out.error); }
+          if (state.current?.id === work.id) void openWork(work);
+        } : null });
       }
     } catch {
       if (state.current?.id !== work.id) return;
@@ -2005,7 +2008,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
         text: 'المصادر لم تردّ الآن.',
         action: { label: 'أعد المحاولة', icon: 'refresh', run: () => void openWork(work) },
       });
-      setReadCta(null);
+      setStoredCta(work);
     }
   }
   /** صفحة عمل المانجا من الجهاز: لا بحث ولا مصادر؛ الفصول المحمّلة بأرقامها الأصلية. */
@@ -2872,6 +2875,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
     const label = q('readCtaLabel');
     const sub = q('readCtaSub');
     if (!btn) return;
+    state.storedResume = null;
     btn.disabled = !next;
     // أثناء الجلب (next === undefined) سطر الفصل يحجز مكانه بهيكل ظاهر بعرضه، فيبقى الاسم والسطر متوسطين في الزر
     // ولا يتحرك الاسم حين يصل الفصل. كانت مسافة غير مرئية فيبدو الاسم مرفوعًا عن الوسط (VI2). بلا فصل: السطر يُطوى
@@ -3039,6 +3043,37 @@ export function mountV35(deps, { page = 'home' } = {}) {
     return continueChapter(rows, ordered, (row, chapter) => sameChapterKey(row.chapter_key, chapterKeyOf(row.series_ref, chapter)));
   }
 
+  /**
+   * آخر فصل وصلت له من تقدمك المحفوظ وحده (التقدم وعلامات القراءة في مرآة حسابك)، بلا حاجة للمصدر. المكتبة والتقدم
+   * ملكك: مصدر محجوب أو معطّل أو محذوف لا يخفيهما (بلاغ المالك: «الفصل صفر» وكل المصادر «تحتاج تحققًا»).
+   */
+  function lastReadChapter(ref) {
+    const userId = sync.user?.userId;
+    const refs = refsOf(ref);
+    let best = null;
+    for (const table of ['progress', 'chapter_marks']) {
+      for (const r of sync.rows(table, (x) => x.user_id === userId && refs.includes(x.series_ref) && (table === 'progress' || Number(x.read) === 1))) {
+        const n = Number(/#n:(-?\d+(?:\.\d+)?)$/.exec(String(r.chapter_key ?? ''))?.[1]);
+        if (Number.isFinite(n) && n >= 0 && (best === null || n > best.number || (n === best.number && Number(r.updated_at) > best.at))) best = { number: n, at: Number(r.updated_at) || 0, page: Number(r.page) || 0 };
+      }
+    }
+    return best;
+  }
+  /**
+   * لا فصول الآن (المصادر محجوبة أو غير متاحة): زر «تابع» يبقى بآخر فصل من تقدمك، ولمسه يقول لماذا لا يُفتح ويعرض
+   * التحقق أو إعادة المحاولة. لا «لا فصول متاحة» وتقدّمك محفوظ.
+   */
+  function setStoredCta(w, { verify = null } = {}) {
+    const last = lastReadChapter(String(w.id));
+    if (!last) { setReadCta(null); state.storedResume = null; return; }
+    setReadCta(null);
+    const btn = q('readCta'), label = q('readCtaLabel'), sub = q('readCtaSub');
+    if (!btn) return;
+    btn.disabled = false;
+    label.textContent = 'تابع القراءة';
+    sub.textContent = `الفصل ${last.number} · المصدر غير متاح الآن`;
+    state.storedResume = { ref: String(w.id), number: last.number, verify };
+  }
   /** آخر مرة قرأت فيها هذا العمل (آخر تقدم محفوظ). */
   function lastReadAt(ref) {
     const userId = sync.user?.userId;
@@ -3441,7 +3476,12 @@ export function mountV35(deps, { page = 'home' } = {}) {
     renderChapters(state.current);
   }
   function readNow() {
-    if (state.current && state.nextRow) openChapter(state.current, state.nextRow);
+    if (state.current && state.nextRow) return openChapter(state.current, state.nextRow);
+    const stored = state.storedResume;
+    if (!state.current || !stored || stored.ref !== String(state.current.id)) return;
+    const w = state.current;
+    if (stored.verify) { toast(`الفصل ${stored.number} محفوظ في تقدمك، ومصدره يطلب تحققًا قبل فتحه`); void stored.verify(); }
+    else { toast(`الفصل ${stored.number} محفوظ في تقدمك، لكن مصادره لا ترد الآن. نعيد المحاولة`); void openWork(w); }
   }
   function openChapter(w, row, { inviteTogether = false } = {}) {
     // المصدر المختار يقرأ فصوله هو؛ الذكي يمرّ على الأفضل لكل فصل

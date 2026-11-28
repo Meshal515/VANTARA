@@ -209,7 +209,7 @@ export const DATA_OWNERSHIP: readonly DataDomainSpec[] = [
     key: 'updates.timeline',
     owner: 'DEVICE',
     mirrors: ['D1'],
-    tables: { D1: ['latest_backups'] },
+    tables: { D1: ['latest_backups', 'latest_backup_events'] },
     retired: {},
     why: 'آخر التحديثات المحلي (خطة 27 نوفمبر): الجهاز يكشف من إضافاته ويقرر ويحفظ (SQLite/IndexedDB). D1 يحمل نسخة حساب صغيرة بلا روابط لما كشفه الجهاز نفسه، تُستعاد في تثبيت جديد فقط ولا تُقرأ كحقيقة.',
   },

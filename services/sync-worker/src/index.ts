@@ -14,7 +14,7 @@ import { handleTranslateTextBatch } from './translation-batch.ts';
 import { handleSourceReportGet, handleSourceReportPost } from './source-reports.ts';
 import { handleCinemaOverviews, type CinemaEnv } from './cinema.ts';
 import { handleUpdatesList, handleUpdatesObserve, handleUpdatesTwins, type CreatedUnit, type UpdatesEnv } from './updates.ts';
-import { handleBackupGet, handleBackupPut, handleSignalsGet, handleSignalsPost } from './latest-threads.ts';
+import { handleBackupGet, handleBackupPut, handleBackupEventsPost, handleSignalsGet, handleSignalsPost } from './latest-threads.ts';
 import { handleTranslateCached, handleTranslateGlossary, handleTranslateLearn, handleTranslateUsage, handleTranslatePage, handleTranslateText, translationAllowed, type TranslationEnv } from './translate.ts';
 import {
   SYNC_PROTOCOL,
@@ -3424,7 +3424,8 @@ export default {
       // نفس العمل بأسماء متقاربة في مصادر مختلفة (بدليل أعلى فصل): أسماء بديلة للفهرس
       else if (path === '/v1/updates/twins' && request.method === 'GET') response = await handleUpdatesTwins(env as UpdatesEnv, now);
       // آخر التحديثات المحلي: الخيطان الرفيعان (نسخة الحساب لصاحبه، وإشارات الأصحاب بلا هوية المرسل)
-      else if (path === '/v1/latest/backup' && request.method === 'GET') response = await handleBackupGet(env, userId);
+      else if (path === '/v1/latest/backup' && request.method === 'GET') response = await handleBackupGet(env, userId, url);
+      else if (path === '/v1/latest/backup/events' && request.method === 'POST') response = await handleBackupEventsPost(request, env, userId, now);
       else if (path === '/v1/latest/backup' && request.method === 'POST') response = await handleBackupPut(request, env, userId, now);
       else if (path === '/v1/latest/signals' && request.method === 'POST') response = await handleSignalsPost(request, env, userId, now);
       else if (path === '/v1/latest/signals' && request.method === 'GET') response = await handleSignalsGet(url, env, userId);
