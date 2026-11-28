@@ -14,6 +14,7 @@
 import { commitAtNextRevision } from './index.ts';
 import { DELETE_GRACE_MS, DELETE_NETWORK_ALLOWANCE_MS, lifecycleOf } from './accounts.ts';
 import type { Env } from './types.ts';
+import { collectorPolicy, isCollectorMode, setCollectorPolicy } from './collector-policy.ts';
 
 const KEY_TTL_MS = 24 * 3_600_000;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -81,6 +82,14 @@ async function target(env: Env, body: Record<string, unknown> | null, ownerId: s
 export async function adminRoute(path: string, request: Request, env: Env, now: number, ownerId: string): Promise<Response | null> {
   if (!path.startsWith('/v1/admin/')) return null;
   if (!(await isOwner(env, ownerId))) return reply({ error: 'owner_only' }, 403);
+
+  if (path === '/v1/admin/collector-policy') {
+    if (request.method === 'GET') return reply(await collectorPolicy(env));
+    if (request.method !== 'POST') return reply({ error: 'method' }, 405);
+    const body = await request.json().catch(() => null) as { mode?: unknown } | null;
+    if (!isCollectorMode(body?.mode)) return reply({ error: 'invalid_mode' }, 400);
+    return reply(await setCollectorPolicy(env, body.mode, now));
+  }
 
   if (path === '/v1/admin/accounts' && request.method === 'GET') {
     const { results } = await env.DB.prepare(
