@@ -533,6 +533,7 @@ for (const path of [
   "tools/repository-safety.test.mjs",
   "apps/web/v35/addons-hub.js",
   "apps/web/lib/engine-marks.js",
+  "apps/web/lib/verification-regression.test.js",
   "apps/web/lib/latest-threads.js",
   "apps/web/lib/latest-threads.test.js",
   "apps/web/lib/latest-runner.js",

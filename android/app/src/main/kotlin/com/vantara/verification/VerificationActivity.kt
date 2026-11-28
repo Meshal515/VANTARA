@@ -190,8 +190,9 @@ class VerificationActivity : Activity() {
                 intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { userAgentString = it }
             }
             selectedCookies?.apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, false) }
-            // Sec-CH-UA مطابق للـUser-Agent المرسل، كما في المحلّل الصامت (وإلا يعلن «Android WebView» بجانب UA آخر)
-            intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { dev.vantara.spike.alignUserAgentMetadata(view, it) }
+            // لا تغيير لعلامة Sec-CH-UA في الصفحة الظاهرة (انحدار Stable 226، المرجع Stable 224): كانت تعلن «Google Chrome»
+            // وبقية بصمة WebView (‎wv وواجهاته) تقول غير ذلك، فيرى Turnstile بصمة متناقضة ويعيد المربع بلا نهاية. المحلّل
+            // الصامت وحده يطابقها كما كان قبل 224
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
