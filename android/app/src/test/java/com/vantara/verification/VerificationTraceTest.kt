@@ -2,6 +2,7 @@ package com.vantara.verification
 
 import com.vantara.verification.VerificationTrace.Event
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
@@ -34,5 +35,10 @@ class VerificationTraceTest {
         assertTrue(report.contains("APP_LOAD_URL=1"))
         assertFalse(report.contains("+0ms APP_LOAD_URL"))
         assertTrue(report.contains("+2ms BLOCKED_RESOURCE_DNS"))
+    }
+    @Test fun describeNamesCountsAndFlagsOnlyNeverValues() {
+        val text = DebugVerificationLog.describe("a=1; cf_clearance=SECRETVALUE; b=2", "SECRETVALUE")
+        assertEquals("names=[a,cf_clearance,b] clearances=1 firstIsNew=true newPresent=true", text)
+        assertFalse(text.contains("SECRETVALUE"))
     }
 }

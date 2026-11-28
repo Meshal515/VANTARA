@@ -67,16 +67,11 @@ class VerificationActivity : Activity() {
     private var continueButton: Button? = null
     /** Same-site host the challenge moved to (e.g. www → ww3); its host-only cf_clearance counts too. */
     private var landed: String? = null
-    /**
-     * الصفحة نفسها فتحت بلا تحدٍّ (لا نموذج Cloudflare ولا «Just a moment»). النجاح كان يُعرف بكوكي **جديد** فقط،
-     * فإن كان عند المتصفح المعزول cf_clearance صالح من تحقق سابق فتح الموقع مباشرة وبقي المستخدم عالقًا فيه
-     * (يضغط رجوع = إلغاء = يُطلب التحقق من جديد). الآن الكوكي الصالح مع صفحة بلا تحدٍّ نجاح.
-     */
+    /** Readiness belongs to the current page revision, not to the cookie alone. */
     @Volatile private var pageReady = false
     private fun cookieOrigin(origin: String): String = landed ?: origin
     private fun clearanceNow(origin: String): String? =
-        // كما في 224: مضيف الطلب أولًا (منه يُقرأ المرجع initialClearance)، ثم مضيف الهبوط. قراءة الهبوط أولًا كانت تقارن
-        // كوكي مضيف بمرجع مضيف آخر، فيبدو القديم جديدًا
+        // Prefer the original request host; the initial snapshot is read from it.
         VerificationPolicy.clearance(selectedCookies?.getCookie("$origin/"))
             ?: landed?.takeIf { it != origin }?.let { VerificationPolicy.clearance(selectedCookies?.getCookie("$it/")) }
     private var deadline = 0L
@@ -86,7 +81,6 @@ class VerificationActivity : Activity() {
             if (completed || !resumed) return
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
-            continueButton?.isEnabled = pageReady
             // A cookie alone is not evidence that the visible check completed.
             // Source acceptance is still determined by the original request, not this UI.
             if (clearance != null && pageReady) {
@@ -155,8 +149,7 @@ class VerificationActivity : Activity() {
             text = "أكمل التحقق في صفحة المصدر. ستعود تلقائيًا عند نجاحه."
             setTextColor(Color.DKGRAY); setPadding(dp(16), dp(4), dp(16), dp(8))
         })
-        // لكل الإضافات (كان لـCloudStream وحدها): بعد أن يفتح الموقع، المستخدم يرجع بنفسه ولا يبقى عالقًا.
-        // الكوكي الصالح يُرسَل وإن لم يتغير؛ والمضيف يعيد طلب المصدر ويتحقق منه، فإن بقي التحدي طُلب من جديد.
+        // Manual continuation is available only for a ready page.
         continueButton = Button(this).apply {
             text = "متابعة إلى المصدر"
             isEnabled = false
@@ -205,9 +198,7 @@ class VerificationActivity : Activity() {
                 intent.getStringExtra("userAgent")?.takeIf { it.isNotBlank() && it.length <= 1024 }?.let { userAgentString = it }
             }
             selectedCookies?.apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, false) }
-            // لا تغيير لعلامة Sec-CH-UA في الصفحة الظاهرة (انحدار Stable 226، المرجع Stable 224): كانت تعلن «Google Chrome»
-            // وبقية بصمة WebView (‎wv وواجهاته) تقول غير ذلك، فيرى Turnstile بصمة متناقضة ويعيد المربع بلا نهاية. المحلّل
-            // الصامت وحده يطابقها كما كان قبل 224
+            // Keep the visible WebView's native client hints unchanged.
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     if (!request.isForMainFrame) return false
@@ -240,7 +231,6 @@ class VerificationActivity : Activity() {
                         pageReady = false
                         continueButton?.isEnabled = false
                         pageRevision++
-
                     }
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
@@ -288,8 +278,7 @@ class VerificationActivity : Activity() {
             }
             val root = (findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as LinearLayout)
             root.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            // كما في Stable 224 (المرجع العامل): لا حذف لـcf_clearance القديم ولا تصفير للمرجع قبل التحميل. الحذف لم يكن يصيب
-            // الكوكي الفعلي دائمًا، والتصفير جعل القديم «جديدًا» فأُغلقت النافذة فورًا بـ«تم» بلا صفحة Cloudflare (Debug 3513)
+            // Preserve the initial cookie snapshot for diagnostics.
             mark(Event.APP_LOAD_URL)
             view.loadUrl(intent.getStringExtra("url")!!)
             if (resumed) main.post(poll)
