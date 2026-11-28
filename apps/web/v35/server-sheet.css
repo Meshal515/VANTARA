@@ -754,6 +754,14 @@
   background: var(--surface-1) center / cover no-repeat;
 }
 .v35 .ss-group-ico[hidden] { display: none; }
+/* علامة المحرك أو المجموعة (lib/engine-marks.js) بالمقاس نفسه 18px: تورنت وCloudStream وما يُضاف للجدول */
+.v35 .ss-group-ico:has(> svg) {
+  display: grid;
+  place-items: center;
+  padding: 3px;
+  color: var(--text-2);
+}
+.v35 .ss-group-ico > svg { display: block; }
 /* تبقى علامة المغناطيس في مكانها. للبرق خانة ثابتة يديرها عرض حالة المحرك. */
 .v35 .ss-q .ss-kind {
   position: relative;
@@ -1499,7 +1507,9 @@
   .v35 .an-srv-q {
     display: none;
   }
-  .v35 .ss-group--cloudstream > .an-srv-q { display: flex; }
+  /* في الجوال: عنوان كل قسم له محرك (تورنت وCloudStream وغيرهما) بعلامته وعدده، و«مباشر» العام بلا عنوان كما كان */
+  .v35 .ss-group--engine > .an-srv-q { display: flex; }
+  .v35 .ss-group--engine > .an-srv-q .ss-sub { display: none; }
   .v35 .an-srv-group + .an-srv-group {
     margin-top: 10px;
   }

@@ -725,3 +725,36 @@ it('tapTime returns the event clock and rejects foreign or future stamps', async
   expect(tapTime({ timeStamp: 1 }, perf, 1_100_000)).toBe(1_100_000);
   expect(tapTime(null, perf, 42)).toBe(42);
 });
+
+// شعار القسم يمثل المحرك لا أول مصدر فيه (المالك: قسم CloudStream كان يعرض شعار AnimeRift)، وللتورنت عنوان وعلامة
+it('section marks come from the engine identity, never from the first source inside', async () => {
+  const { routeEngine } = await import('../lib/route-family.js');
+  const { body, el } = dom();
+  const rift = { id: 'rift', sourceId: CS3_RIFT, sourceName: 'AnimeRift', state: 'READY', server: 'vidmoly', quality: 1080, runtimeReady: true, probed: true };
+  const torrent = { id: 't', sourceId: TORR, sourceName: 'Torrentio', state: 'READY', quality: 1080, runtimeReady: true, label: 'X S01E01 1080p 👤 92' };
+  const native = { id: 'n', sourceId: 'witanime', sourceName: 'WitAnime', state: 'READY', server: 'mp4upload', runtimeReady: true, probed: true };
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceName, sourceIcon: (r) => (r.id === 'rift' ? 'https://img.example/rift.png' : null) });
+  ui.update({ routes: [torrent, rift, native], settled: true, status: { text: '3' } });
+  const ico = (cls) => body.querySelector(`.${cls} > .an-srv-q > .ss-group-ico`);
+  expect(ico('ss-group--cloudstream').hidden).toBe(false);
+  expect(ico('ss-group--cloudstream').dataset.mark).toBe('cloudstream');
+  expect(ico('ss-group--cloudstream').style.backgroundImage || '').not.toContain('rift');
+  expect(ico('ss-group--torrent').dataset.mark).toBe('torrent');
+  expect(ico('ss-group--torrent').hidden).toBe(false);
+  // «مباشر» لمصدر مدمج بلا هوية محرك: بلا علامة، لا تصنيف مخترع
+  expect(ico('ss-group--direct:not(.ss-group--engine)').hidden).toBe(true);
+  // الهوية من صيغ المحرك نفسه: النقل أولًا، ثم CloudStream، ثم Stremio، ثم Aniyomi المثبتة
+  expect([torrent, rift, native, { sourceId: 'addon|https://debrid.example/manifest.json', type: 'http' }, { sourceId: 'user-animerco' }].map(routeEngine))
+    .toEqual(['torrent', 'cloudstream', null, 'stremio', 'aniyomi']);
+});
+
+it('the generic direct section takes an engine mark only when every row shares that engine', () => {
+  const { body, el } = dom();
+  const debrid = (id) => ({ id, sourceId: `addon|https://debrid.example/${id}`, sourceName: 'Comet', type: 'http', state: 'READY', server: 'https://cdn.example/v.mp4', runtimeReady: true, probed: true });
+  const ui = createServerSheet(body, { el, onPick() {}, sourceName: (r) => r.sourceName });
+  ui.update({ routes: [debrid('a'), debrid('b')], settled: true, status: { text: '2' } });
+  const ico = () => body.querySelector('.ss-group--direct:not(.ss-group--engine) > .an-srv-q > .ss-group-ico');
+  expect(ico().dataset.mark).toBe('stremio');
+  ui.update({ routes: [debrid('a'), { id: 'n', sourceId: 'witanime', sourceName: 'WitAnime', state: 'READY', server: 'mp4upload', runtimeReady: true, probed: true }], settled: true, status: { text: '2' } });
+  expect(ico().hidden).toBe(true);
+});

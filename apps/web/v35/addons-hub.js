@@ -7,6 +7,7 @@
  * - تحديات الحماية: طابور التحقق نفسه (`verification`)، والبدء بضغطة المستخدم فقط.
  * الترتيب بالسحب في التصور لا محرك له (المحركات لا تحفظ ترتيبًا) فلم يُنقل؛ المفضّلة حقيقية وتُحفظ.
  */
+import { ENGINE_MARKS } from '../lib/engine-marks.js';
 import { configureLink } from './addons-view.js';
 import { afterMotion } from './page-motion.js';
 import { pulseView } from '../addons/source-pulse.js';
@@ -52,12 +53,8 @@ export const P = {
   file: '<path d="M13.5 3.75H7.25a2 2 0 0 0-2 2v12.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2V9z"/><path d="M13.5 3.75V9h5.25M12 12.5v5M9.5 15l2.5 2.5 2.5-2.5"/>',
 };
 // علامات المزوّدات: رسم فانتارا الخاص، شبكة 32، عنصر مصمت واحد لكل علامة (لا شعارات تطبيقات)
-const MARK = {
-  stremio: '<rect x="4" y="5" width="24" height="22" rx="5" stroke="currentColor" stroke-width="2.5"/><path d="m13 11 8 5-8 5z" fill="currentColor" stroke="none"/>',
-  mihon: '<path fill="currentColor" stroke="none" d="M3 6c5-1 9 0 12 3v18c-3-3-7-4-12-3zm26 0c-5-1-9 0-12 3v18c3-3 7-4 12-3z"/><path d="M7 11h4M7 15h4M21 11h4M21 15h4" stroke="var(--surface-2)" stroke-width="1.6"/>',
-  cloudstream: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M9 26a7 7 0 0 1-1-14 9 9 0 0 1 17 2 6 6 0 0 1-1 12zm5-12v9l7-4.5z"/>',
-  aniyomi: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M7 8 4 3l2-1 6 7h8l6-7 2 1-3 5a6 6 0 0 1 5 6v9a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6v-9a6 6 0 0 1 5-6zm4 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-10 7 5 4 5-4z"/>',
-};
+// العلامات من مصدر واحد مع ورقة السيرفرات (lib/engine-marks.js)
+const MARK = ENGINE_MARKS;
 const PROV = {
   stremio: { name: 'Stremio' },
   mihon: { name: 'Mihon' },

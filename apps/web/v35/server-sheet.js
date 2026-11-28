@@ -13,7 +13,8 @@ import { diagnosticsUi } from '../lib/diagnostics-ui.js';
  * من يفتحها (الأنمي/السينما) يمرّر السيرفرات وحالتها ويقرّر ماذا يحدث عند اللمس.
  */
 import { parseRelease, swarmTier } from '../addons/release-info.js';
-import { isCloudStreamRoute, isTorrentRoute } from '../lib/route-family.js';
+import { isCloudStreamRoute, isTorrentRoute, ROUTE_ENGINES, routeEngine } from '../lib/route-family.js';
+import { engineMark } from '../lib/engine-marks.js';
 import { glyph } from './icons.js';
 import { flingHoldRisk } from './collapse-hero.js';
 import { rememberStart, startFeatures } from '../lib/start-memory.js';
@@ -656,8 +657,15 @@ export function createServerSheet(body, o) {
   };
   // نفس أسماء أقسام مشغّل الجوال (تصميم واحد للمنصتين، قرار المالك 15 نوفمبر)
   const direct = section('ss-group--direct', 'مباشر', 'يبدأ أسرع', 'الروابط الإضافية');
-  const torrent = section('ss-group--torrent', 'تورنت', 'جودة أعلى · يبدأ أبطأ', 'النسخ الإضافية');
-  const cloudstream = section('ss-group--direct ss-group--cloudstream', 'CloudStream', null, 'الروابط الإضافية');
+  const torrent = section('ss-group--torrent ss-group--engine', 'تورنت', 'جودة أعلى · يبدأ أبطأ', 'النسخ الإضافية');
+  torrent.engine = 'torrent';
+  // كل محرك له قسم خاص (ROUTE_ENGINES.own) غير التورنت: قسم بعنوانه وعلامته، بترتيب الجدول بعد «مباشر» (CloudStream أولها)
+  const engineSections = new Map(ROUTE_ENGINES.filter((e) => e.own && e.id !== 'torrent').map((e) => {
+    const g = section(`ss-group--direct ss-group--engine ss-group--${e.id}`, e.title, null, 'الروابط الإضافية');
+    g.engine = e.id;
+    return [e.id, g];
+  }));
+  const allSections = () => [torrent, direct, ...engineSections.values()];
   let queued = null, gesture = false, interactionUntil = 0, interactionTimer = null, adjustedTop = null, anchorEvent = null;
   const settle = () => {
     clearTimeout(interactionTimer);
@@ -1264,10 +1272,10 @@ export function createServerSheet(body, o) {
     // رتّب أحدث دفعة بعد استقرار التمرير. اختيار المرشّح إجراء صريح يُرسم فورًا.
     const filterKey = `${filter.q}|${filter.v}|${filter.a}`;
     const refilter = filterKey !== lastFilterKey;
-    if (refilter) { lastFilterKey = filterKey; torrent.shown = []; direct.shown = []; cloudstream.shown = []; }
+    if (refilter) { lastFilterKey = filterKey; for (const g of allSections()) g.shown = []; }
     const gone = shown.filter((r) => !isPending(r) && !isSelectable(r));
     for (const r of shown) if (!placed.has(r.id)) placed.set(r.id, ++placedSeq);
-    const shownBefore = new Set([...torrent.shown, ...direct.shown, ...cloudstream.shown]);
+    const shownBefore = new Set(allSections().flatMap((g) => g.shown));
     // ما يُعرض في قسمه: الصالح، وما ظهر قبلًا ثم تعذّر (يبقى في مكانه بحالته)
     const live = shown.filter((r) => isSelectable(r) || shownBefore.has(r.id));
     const waiting = shown.filter((r) => isPending(r) && !shownBefore.has(r.id));
@@ -1301,22 +1309,29 @@ export function createServerSheet(body, o) {
       reconcile(g.moreGrid, g.open ? rest.map(row) : []);
       g.count.textContent = String(items.length);
       g.s.hidden = !items.length;
-      const icons = [...new Set(items.map((r) => safeIconUrl(o.sourceIcon?.(r))).filter(Boolean))];
-      const icon = icons[0] ?? null;
-      if (g.ico.dataset.src !== (icon ?? '')) { g.ico.dataset.src = icon ?? ''; g.ico.style.backgroundImage = icon ? `url("${icon.replace(/["\\\n]/g, '')}")` : ''; }
-      g.ico.hidden = !icon;
+      // شعار القسم يمثل المحرك لا أول مصدر فيه (كان قسم CloudStream يأخذ شعار AnimeRift). «مباشر» بلا محرك واحد
+      // معروف لكل صفوفه يبقى بلا علامة: لا تصنيف بلا دليل
+      const engines = new Set(items.map(routeEngine));
+      const mark = g.engine ?? (engines.size === 1 && !engines.has(null) ? [...engines][0] : null);
+      const svg = mark ? engineMark(mark, { size: '100%', stroke: 2.1 }) : '';
+      if (g.ico.dataset.mark !== (mark ?? '')) { g.ico.dataset.mark = mark ?? ''; g.ico.innerHTML = svg; }
+      g.ico.hidden = !svg;
     };
     const torrentLive = live.filter((r) => view(r).torrent);
-    const directLive = live.filter((r) => !view(r).torrent && !isCloudStreamRoute(r));
-    const cloudstreamLive = live.filter((r) => isCloudStreamRoute(r));
+    // القسم من هوية المحرك: التورنت بنقله، والمحركات ذات القسم الخاص بمعرّفها، والباقي «مباشر»
+    const engineOf = (r) => { const e = routeEngine(r); return engineSections.has(e) ? e : null; };
+    const directLive = live.filter((r) => !view(r).torrent && !engineOf(r));
     const torrentOrder = (a, b) => (quality(b) ?? 0) - (quality(a) ?? 0) || seedersOf(b) - seedersOf(a) || placed.get(a.id) - placed.get(b.id);
     paintSection(torrent, torrentLive, torrentPlan(torrentLive.filter((r) => isSelectable(r) && !weakTorrent(r)), { quality, seeds: seedersOf }), torrentOrder);
     paintSection(direct, directLive, directLive.filter(isSelectable).sort(directOrder), directOrder);
-    paintSection(cloudstream, cloudstreamLive, cloudstreamLive.filter(isSelectable).sort(directOrder), directOrder);
+    for (const [id, g] of engineSections) {
+      const items = live.filter((r) => !view(r).torrent && engineOf(r) === id);
+      paintSection(g, items, items.filter(isSelectable).sort(directOrder), directOrder);
+    }
     announceRows(warmRows(torrentLive
       .filter((r) => r.id !== topId && torrent.shown.includes(r.id) && isSelectable(r))
       .map((r) => ({ r, d: view(r), m: measured[r.id] }))));
-    const groups = [torrent, direct, cloudstream].filter((g) => !g.s.hidden);
+    const groups = allSections().filter((g) => !g.s.hidden);
     // ما تعذّر قبل أن يظهر أصلًا: مطويّ في الأسفل
     const neverShown = gone.filter((r) => !live.includes(r));
     reconcile(wait.grid, waiting.map(row));
