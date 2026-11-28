@@ -67,10 +67,7 @@ object DebugCrashLog {
         .replace(Regex("cf_clearance=[^;\\s\"']+"), "cf_clearance=<value>")
 }
 
-/**
- * Debug وحده: سجل آخر محاولة تحقق كاملًا، من لحظة الإغلاق في نافذة التحقق ثم ما جرى في مخزن المحرك وطلب فحص واحد منه.
- * النافذة تُغلق قبل أن يُنسخ تشخيصها، فكان سبب الإغلاق وما بعده غائبين (بلاغ المالك، Debug 3520). بلا قيم كوكيز.
- */
+/** Debug-only passive record of the last window close and engine cookie import. No cookie values or network probes. */
 object DebugVerificationLog {
     private const val NAME = "debug-last-verification.txt"
     private fun file(context: android.content.Context) = java.io.File(context.applicationContext.filesDir, NAME)

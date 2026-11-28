@@ -95,7 +95,7 @@ class VerificationPlugin : Plugin() {
     } }
 
     /** Passive Debug evidence only. Never send a second source request from this callback. */
-    private fun debugEngineEvidence(item: VerificationPending, hosts: List<String>, value: String?, jar: CookieManager) {
+    private fun debugEngineEvidence(hosts: List<String>, value: String?, jar: CookieManager) {
         val app = context.applicationContext as android.app.Application
         for (h in hosts) DebugVerificationLog.append(app, "== Engine jar $h == ${DebugVerificationLog.describe(runCatching { jar.getCookie("https://$h/") }.getOrNull(), value)} imported=${value != null}")
     }
@@ -123,9 +123,6 @@ class VerificationPlugin : Plugin() {
             finish(if (state == "cancelled" || !matches) "cancelled" else "failed", if (matches) data?.getStringExtra("reason") else "interrupted")
             return@post
         }
-        // كما في Stable 224 (المرجع العامل عند المالك): صفحة فتحت بلا كوكي تنقله = تم، والحكم لإعادة طلب المصدر بعدها
-        // (still_challenged في source-verification.js). بوابات no_clearance وcookie_scope_mismatch وفحص القبول المسبق
-        // كانت ترفض تحققًا ناجحًا، فلا يكتمل أبدًا
         // A missing replacement is not permission to discard a previously stored session.
         if (item.kind == "cloudflare" && value == null) return@post finish("failed", "unconfirmed")
         if (value == null && pairs.isEmpty()) return@post finish("verified", null)
@@ -133,9 +130,7 @@ class VerificationPlugin : Plugin() {
         // مضيف الطلب المرفوض نفسه كما في 224، ومعه المضيف الذي انتهت إليه الصفحة إن كان من الموقع نفسه
         val request = VerificationPolicy.endpoint(item.origin) ?: return@post finish("failed", "invalid_endpoint")
         val landed = target?.host ?: request.host
-        // cf_clearance القديم يُحذف من مخزن المحرك بكل نطاقاته قبل كتابة الجديد (كما يحذفه Mihon قبل كل حل): نسخ Debug
-        // سابقة كتبته على جذر الموقع (Domain=.site) سبعة أيام، والمحلّل الصامت قد يتركه هناك، فكان يُرسل مع الجديد
-        // بالاسم نفسه والقديم أولًا، فيرفض الموقع تحققًا نجح للتو («الموقع لم يقبل التحقق بعد»)
+        // Remove stale host/domain copies only when a replacement exists.
         val stale = if (value == null) emptyList() else listOf(request.host, landed).distinct().flatMap { host ->
             listOfNotNull("cf_clearance=; Path=/; Max-Age=0", VerificationPolicy.registrableOf(host)?.let { "cf_clearance=; Domain=.$it; Path=/; Max-Age=0" })
                 .map { VerificationPolicy.CookieWrite("https://$host/", it, remove = true) }
@@ -147,7 +142,7 @@ class VerificationPlugin : Plugin() {
         fun write(i: Int) {
             if (i == writes.size) {
                 try { jar.flush() } catch (_: RuntimeException) {}
-                if (com.vantara.app.BuildConfig.DEBUG) debugEngineEvidence(item, listOf(request.host, landed).distinct(), value, jar)
+                if (com.vantara.app.BuildConfig.DEBUG) debugEngineEvidence(listOf(request.host, landed).distinct(), value, jar)
                 val imported = if (value != null) clearanceWritten else ok
                 return if (imported) finish("verified", null) else finish("failed", "cookie_rejected")
             }
