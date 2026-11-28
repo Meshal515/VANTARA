@@ -120,17 +120,25 @@ class VerificationPlugin : Plugin() {
         // كما في Stable 224 (المرجع العامل عند المالك): صفحة فتحت بلا كوكي تنقله = تم، والحكم لإعادة طلب المصدر بعدها
         // (still_challenged في source-verification.js). بوابات no_clearance وcookie_scope_mismatch وفحص القبول المسبق
         // كانت ترفض تحققًا ناجحًا، فلا يكتمل أبدًا
-        if (value == null && pairs.isEmpty()) return@post finish("verified", null)
         val jar = try { CookieManager.getInstance() } catch (_: RuntimeException) { return@post finish("failed", "cookie_store_unavailable") }
         // مضيف الطلب المرفوض نفسه كما في 224، ومعه المضيف الذي انتهت إليه الصفحة إن كان من الموقع نفسه
         val request = VerificationPolicy.endpoint(item.origin) ?: return@post finish("failed", "invalid_endpoint")
-        val writes = VerificationPolicy.sessionImport(request.host, target?.host ?: request.host, value, pairs, null)
+        val landed = target?.host ?: request.host
+        // cf_clearance القديم يُحذف من مخزن المحرك بكل نطاقاته قبل كتابة الجديد (كما يحذفه Mihon قبل كل حل): نسخ Debug
+        // سابقة كتبته على جذر الموقع (Domain=.site) سبعة أيام، والمحلّل الصامت قد يتركه هناك، فكان يُرسل مع الجديد
+        // بالاسم نفسه والقديم أولًا، فيرفض الموقع تحققًا نجح للتو («الموقع لم يقبل التحقق بعد»)
+        val stale = listOf(request.host, landed).distinct().flatMap { host ->
+            listOfNotNull("cf_clearance=; Path=/; Max-Age=0", VerificationPolicy.registrableOf(host)?.let { "cf_clearance=; Domain=.$it; Path=/; Max-Age=0" })
+                .map { VerificationPolicy.CookieWrite("https://$host/", it, remove = true) }
+        }.distinctBy { it.header + it.url }
+        val writes = stale + VerificationPolicy.sessionImport(request.host, landed, value, pairs, null)
         // كما في 224: يكفي أن يُقبل كوكي واحد؛ رفض كوكي جانبي لا يُفشل تحققًا نجح
         var ok = false
         fun write(i: Int) {
             if (i == writes.size) {
                 try { jar.flush() } catch (_: RuntimeException) {}
-                return if (ok) finish("verified", null) else finish("failed", "cookie_rejected")
+                // صفحة فتحت بلا كوكي تنقله = تم كما في 224 (القديم حُذف فقط)
+                return if (ok || (value == null && pairs.isEmpty())) finish("verified", null) else finish("failed", "cookie_rejected")
             }
             val w = writes[i]
             try {

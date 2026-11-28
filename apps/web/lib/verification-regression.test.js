@@ -42,5 +42,19 @@ it('the old clearance is the reference, read from the request host first (Stable
 it('one rejected side cookie does not fail a completed check (Stable 224)', () => {
   const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt');
   expect(plugin).not.toMatch(/else finish\("failed", "cookie_rejected"\) \}/);
-  expect(plugin).toMatch(/if \(ok\) finish\("verified", null\) else finish\("failed", "cookie_rejected"\)/);
+  expect(plugin).toMatch(/if \(ok \|\| \(value == null && pairs\.isEmpty\(\)\)\) finish\("verified", null\) else finish\("failed", "cookie_rejected"\)/);
+});
+
+/**
+ * «الموقع لم يقبل التحقق بعد» بعد تحقق نجح (Debug 3518): نسخ Debug سابقة كتبت cf_clearance على جذر الموقع
+ * (Domain=.site) سبعة أيام، والاستيراد الحالي لا يحذفه، فيرسل المحرك الكوكيين بالاسم نفسه والقديم أولًا.
+ */
+it('the engine jar loses every old cf_clearance scope before the new one is written', () => {
+  const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  expect(plugin).toMatch(/"cf_clearance=; Domain=\.\$it; Path=\/; Max-Age=0"/);
+  expect(plugin).toMatch(/"cf_clearance=; Path=\/; Max-Age=0"/);
+  expect(plugin).toMatch(/val writes = stale \+ VerificationPolicy\.sessionImport\(/);
+  // الحذف يسبق كل كتابة ولا ينتظر وجود كوكي جديد
+  expect(plugin.indexOf('val stale')).toBeLessThan(plugin.indexOf('fun write('));
+  expect(plugin).not.toMatch(/if \(value == null && pairs\.isEmpty\(\)\) return@post finish/);
 });
