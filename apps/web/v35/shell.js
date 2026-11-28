@@ -84,7 +84,7 @@ import { imageLoadingNode, imageFallbackNode } from './image-loading.js';
 import { copyableText, editableText } from './text-actions.js';
 import { recentStore } from '../lib/recent-searches.js';
 import { createSourceLatest } from './source-latest.js';
-import { connectLocalTimeline, connectUpdates, observeMangaChapters } from '../lib/update-engine.js';
+import { connectLocalTimeline, connectUpdates, observeMangaChapters, legacyUpdatesAllowed, setLegacyUpdateMode } from '../lib/update-engine.js';
 import { openLatestStore } from '../lib/latest-store.js';
 import { migrateLatest, mirrorServer } from '../lib/latest-migrate.js';
 import { startLatestRunner } from '../lib/latest-runner.js';
@@ -254,7 +254,22 @@ export function promptSourceWorkType(work, addon, { el, openSheet, closeSheet, s
 export function mountV35(deps, { page = 'home' } = {}) {
   void diagnosticsUi.initialize();
   const { sync } = deps;
-  setSharedLatest(createSourceLatest(sync));
+  const sharedLatest = createSourceLatest(sync);
+  let collectorMode = null, collectorBusy = false;
+  // Only confirmed server state is displayed; no local-only switch masquerading as a stopped Worker.
+  function applyCollectorPolicy(data) {
+    if (!setLegacyUpdateMode(data?.mode)) return false;
+    collectorMode = data.mode;
+    setSharedLatest(legacyUpdatesAllowed('manga') ? sharedLatest : null);
+    return true;
+  }
+  setSharedLatest(sharedLatest);
+  const loadCollectorPolicy = async () => {
+    const result = await sync.translation('/v1/latest/collector-policy').catch(() => null);
+    if (result?.status === 200) return applyCollectorPolicy(result.body);
+    return false;
+  };
+  void Promise.resolve(sync.ready).then(loadCollectorPolicy).catch(() => {});
   // Update Engine: كل فصل يراه أي مسار يُبلَّغ، والخادم يقرّر ما الجديد
   connectUpdates((path, opts) => sync.translation(path, opts));
   connectSourceReports((path, opts) => sync.translation(path, opts));
@@ -5539,7 +5554,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
       const addons = await getAddonRuntime(); await addons.ready; await addons.registry.setProfile(profile);
       if(run!==addonViewGeneration || currentPage()!=='utility')return;
       // معاينة كل مصدر: آخر أعماله من لقطة «آخر التحديثات» المشتركة (بلا طلب جديد على المصدر)
-      const shots = sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map());
+      const shots = legacyUpdatesAllowed('manga') ? sync.latestSnapshots().then((d) => new Map((d?.sources ?? []).map((r) => [r.sourceId, r.value]))).catch(() => new Map()) : Promise.resolve(new Map());
       const latestOf = async (addon) => {
         if (!addon.bundled || !addon.sourceId) return [];
         // معاينة مصدر مانجا: المختلط لا تُعرض أعماله أبدًا، ولا عمل للكبار من أي مصدر (قرار المالك، 22 نوفمبر)
@@ -6944,6 +6959,27 @@ export function mountV35(deps, { page = 'home' } = {}) {
       }),
     ]);
 
+    if (on('advanced') && diagnosticsUi.available() && iAmOwner()) {
+      const labels = { hybrid: 'هجين مخفّض', 'manga-local': 'مانجا محلية', exclusive: 'محلي حصري' };
+      const changeMode = async mode => {
+        if (collectorBusy || collectorMode === mode) return;
+        if (!globalThis.confirm?.('هذا الإعداد يغيّر مجمّعات الخادم المشترك لجميع الحسابات. السجل والمزامنة والخيطان يبقون. متابعة؟')) return;
+        collectorBusy = true;
+        try {
+          const result = await sync.adminCall('collector-policy', { mode });
+          if (!result?.ok || !applyCollectorPolicy(result.data)) { toast('تعذّر تأكيد وضع الخادم؛ لم يُعرض كتغيير ناجح'); return; }
+          toast('تم تأكيد وضع الخادم: ' + labels[collectorMode]);
+        } catch { toast('تعذّر الاتصال بالخادم'); }
+        finally { collectorBusy = false; if (onSettings()) renderSettings(); }
+      };
+      group('94% انخفاض', [
+        row('activity', 'حالة المجمّعات', 'تأكيد من الخادم المشترك', { value: labels[collectorMode] ?? 'غير مؤكدة', run: async () => { if (!await loadCollectorPolicy()) toast('الخادم لا يدعم السياسة أو غير متصل'); if (onSettings()) renderSettings(); } }),
+        row('refresh', 'هجين مخفّض', 'المانجا القديمة + الأنمي 30د، المسلسلات 120د، الأفلام 360د', { run: () => void changeMode('hybrid') }),
+        row('book', 'مانجا محلية', 'إطفاء مجمّعات المانجا، والإبقاء على البيانات العالمية', { run: () => void changeMode('manga-local') }),
+        row('shield', 'محلي حصري', 'إيقاف جميع مجمّعات المحتوى القديمة؛ الخيطان والمزامنة يعملان', { run: () => void changeMode('exclusive') }),
+      ], { note: '94.1% انخفاض نظري في دورات المصادر العالمية فقط، وليس قياسًا لاستهلاك الحساب. الوضع الحصري قد يخفض تغطية الأنمي والسينما. لا يحذف التاريخ. يلزم تحديث الخادم.' });
+    }
+
     // ويندوز: قناة Debug/Stable مستقلة؛ الفحص والتنزيل يدويان بالكامل (desktop/update-check.js)
     const desktopUpdates = globalThis.VantaraDesktopUpdates?.installed ? globalThis.VantaraDesktopUpdates : null;
     if (!pane) group('عن التطبيق', [
@@ -8129,7 +8165,7 @@ export function mountV35(deps, { page = 'home' } = {}) {
   let sweptAt = 0;
   let sweeping = null;
   function sweepLatest({ minGap = 10 * 60_000 } = {}) {
-    if (sweeping || !available() || Date.now() - sweptAt < minGap || !sweepable()) return sweeping;
+    if (!legacyUpdatesAllowed('manga') || sweeping || !available() || Date.now() - sweptAt < minGap || !sweepable()) return sweeping;
     sweptAt = Date.now();
     sweeping = scanLatestChapterUpdates({ shouldContinue: sweepable }).catch(() => {}).finally(() => {
       sweeping = null;
