@@ -86,7 +86,7 @@ object DebugVerificationLog {
     fun describe(header: String?, expected: String?): String {
         val pairs = header.orEmpty().split(';').map(String::trim).filter { '=' in it }
         val clearances = pairs.filter { it.substringBefore('=') == "cf_clearance" }.map { it.substringAfter('=') }
-        return "names=[${pairs.joinToString(",") { it.substringBefore('=') }.take(300)}] cf_clearance=${clearances.size}" +
+        return "names=[${pairs.joinToString(",") { it.substringBefore('=') }.take(300)}] clearances=${clearances.size}" +
             (if (expected != null) " firstIsNew=${clearances.firstOrNull() == expected} newPresent=${expected in clearances}" else "")
     }
 }

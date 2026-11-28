@@ -51,6 +51,37 @@ object VerificationAcceptance {
         }
     } catch (e: IOException) { "UNREACHABLE ${e.javaClass.simpleName}" } catch (e: IllegalArgumentException) { "UNREACHABLE ${e.javaClass.simpleName}" }
 
+    /**
+     * Debug (تجربة توافق Mihon): هوية المتصفح بشكل Mihon الافتراضي (NetworkPreferences.defaultUserAgent): Chrome المختصر
+     * «Android 10; K» ورقم Chrome الرئيسي فقط، بالرقم الرئيسي لـWebView الجهاز نفسه. هويتنا الحالية مشتقة من WebView
+     * (طراز الجهاز وBuild/ ورقم Chrome كاملًا بلا «wv»)، ولا يرسلها Chrome حقيقي.
+     */
+    fun mihonUserAgent(base: String): String {
+        val major = Regex("Chrome/(\\d+)").find(base)?.groupValues?.get(1) ?: "149"
+        return "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$major.0.0.0 Mobile Safari/537.36"
+    }
+
+    /** Debug: عميل عارٍ كعميل Mihon الافتراضي: DNS النظام، بلا معترضات VANTARA، بلا كوكيز (زائر جديد كأول طلب في Mihon). */
+    fun bareClient(): OkHttpClient = OkHttpClient.Builder().cookieJar(okhttp3.CookieJar.NO_COOKIES)
+        .callTimeout(20, TimeUnit.SECONDS).build()
+
+    /** Debug: عميل المحرك (DNS ومعترضات VANTARA) بلا معترضَي التحقق وبلا كوكيز: الطريق نفسه بلا جلسة. */
+    fun engineNoCookies(engine: OkHttpClient): OkHttpClient = client(engine).newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
+
+    /**
+     * Debug: مصفوفة 2×2 (الطريق: محركنا/عارٍ كـMihon) × (الهوية: هويتنا/هوية Mihon)، بلا كوكيز، أربعة طلبات GET مرة واحدة
+     * بعد كل تحقق. لا تجاوز ولا إعادة عند الرفض: الرفض نفسه هو النتيجة. تجيب: ما الذي يجعل Cloudflare يتحدّانا ويُدخل Mihon؟
+     */
+    fun matrix(engine: OkHttpClient, url: String, ourUserAgent: String): List<String> {
+        val mihon = mihonUserAgent(ourUserAgent)
+        return listOf(
+            "engine+ourUA" to { probe(engineNoCookies(engine), url, ourUserAgent) },
+            "engine+mihonUA" to { probe(engineNoCookies(engine), url, mihon) },
+            "bare+ourUA" to { probe(bareClient(), url, ourUserAgent) },
+            "bare+mihonUA" to { probe(bareClient(), url, mihon) },
+        ).map { (name, run) -> "$name: ${runCatching(run).getOrElse { "error ${it.javaClass.simpleName}" }}" }
+    }
+
     /** لا يُنادى من الخيط الرئيسي ولا من خيط Capacitor. */
     fun check(client: OkHttpClient, url: String, userAgent: String): Verdict = try {
         client.newCall(Request.Builder().url(url).header("User-Agent", userAgent).get().build()).execute().use { r ->

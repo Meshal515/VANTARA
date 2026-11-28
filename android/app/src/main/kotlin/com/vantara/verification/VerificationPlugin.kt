@@ -109,6 +109,12 @@ class VerificationPlugin : Plugin() {
                 VerificationAcceptance.probe(VerificationAcceptance.client(engine), item.url, item.userAgent)
             } catch (t: Throwable) { "probe error ${t.javaClass.simpleName}" }
             DebugVerificationLog.append(app, "== Engine probe == $line")
+            // تجربة توافق Mihon (Debug): ما الذي يجعل الموقع يتحدّى محركنا ويُدخل Mihon بلا تحقق؟
+            val matrix = try {
+                val engine = uy.kohesive.injekt.Injekt.get<eu.kanade.tachiyomi.network.NetworkHelper>().client
+                VerificationAcceptance.matrix(engine, item.url, item.userAgent)
+            } catch (t: Throwable) { listOf("matrix error ${t.javaClass.simpleName}") }
+            DebugVerificationLog.append(app, "== Mihon parity matrix (no cookies) ==\n" + matrix.joinToString("\n"))
         }.apply { isDaemon = true; name = "verification-debug-probe" }.start()
     }
 
