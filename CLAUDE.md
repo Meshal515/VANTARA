@@ -113,3 +113,10 @@ VANTARA تطبيق ترفيهي للمانجا والأنمي والأفلام �
 - [دليل التطوير والاختبارات](docs/DEVELOPMENT.md)
 - [سياسة الأمان](SECURITY.md)
 - [قواعد المساهمة](CONTRIBUTING.md)
+
+
+## CI / Stable publication policy (owner decision 2026-11-28)
+
+- Fast CI: every push/PR scans new commits since the trusted full audit, rejects tracked secrets, scans current production source, and runs repository safety, lint, build, typecheck, tests and APK/release metadata checks. Full live backend/translation suites run when shared dependencies or relevant/unknown paths change; do not weaken the conservative path allowlist without evidence.
+- Deep CI: full history scan and all suites daily at 03:00 Saudi time (00:00 UTC), and manually as required. This workflow must never trigger a Stable release or deploy. A failed/cancelled latest Deep CI blocks the next main CI/Stable publication until a successful deep audit. A scanner error is failure, never success. Never print matched credential values.
+- Preserve Stable signing, package/version and bundle validation. Never bypass the official release gate; do not cancel an already-running release to apply CI policy. Changes to the policy require explicit owner approval and evidence.

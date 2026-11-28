@@ -9,13 +9,79 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  plan:
+    name: Audit baseline and affected systems
+    runs-on: ubuntu-latest
+    outputs:
+      audit_base: ${{ steps.scope.outputs.audit_base }}
+      backend: ${{ steps.scope.outputs.backend }}
+      translation: ${{ steps.scope.outputs.translation }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve trusted audit and test baselines
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Stable 224's main SHA passed the previous full-history CI.
+          fallback=ccb5799f168a243b7701eaa5b1ac7eb74cc717ca
+          git cat-file -e "$fallback^{commit}"
+          audit="$fallback"
+          if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deep-ci.yml/runs?branch=main&status=completed&per_page=1" > /tmp/deep.json; then
+            result=$(jq -r '.workflow_runs[0].conclusion // "none"' /tmp/deep.json)
+            if [ "$result" = success ]; then
+              audit=$(jq -er '.workflow_runs[0].head_sha' /tmp/deep.json)
+            elif [ "$result" != none ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+              echo "Latest Deep CI concluded $result; Stable publication blocked until a successful full audit."
+              exit 1
+            fi
+          elif [ "$GITHUB_REF" = refs/heads/main ]; then
+            echo 'Cannot establish Deep CI status on main; fail closed.'
+            exit 1
+          fi
+          git cat-file -e "$audit^{commit}"
+          git merge-base --is-ancestor "$audit" HEAD || audit="$fallback"
+          git merge-base --is-ancestor "$audit" HEAD
+          echo "audit_base=$audit" >> "$GITHUB_OUTPUT"
+          # Compare against a successful main run, not just the preceding push:
+          # a failed earlier change must not be skipped by a later unrelated push.
+          baseline="$fallback"
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=30" > /tmp/ci-runs.json
+          while read -r sha; do
+            if [ "$sha" != "$(git rev-parse HEAD)" ] && git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+              baseline="$sha"
+              break
+            fi
+          done < <(jq -r '.workflow_runs[].head_sha' /tmp/ci-runs.json)
+          git diff --no-renames --name-only "$baseline" HEAD > /tmp/changed
+          backend=false
+          translation=false
+          # Conservative allowlist: anything outside isolated client/docs paths
+          # runs full live backend and translation tests, including shared contracts,
+          # lockfiles, tools, CI, and unrecognized/new directories.
+          while IFS= read -r path; do
+            case "$path" in
+              docs/*|*.md|android/*|apps/web/*|apps/desktop/*|extensions/*|spike/*) ;;
+              *) backend=true; translation=true ;;
+            esac
+          done < /tmp/changed
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "translation=$translation" >> "$GITHUB_OUTPUT"
+          echo "Audit baseline: $audit; test baseline: $baseline; backend=$backend; translation=$translation"
+
   node:
+    needs: plan
     name: Node backend
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -33,31 +99,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Scan public Git history for credential signatures
+      - name: Scan new Git commits since audited baseline for credential signatures
         shell: bash
+        env:
+          AUDITED_BASE: ${{ needs.plan.outputs.audit_base }}
         run: |
           set -euo pipefail
           pattern='-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+'
-          commits="$(git rev-list --all)"
-          if [ -n "$commits" ]; then
+          git rev-list HEAD --not "$AUDITED_BASE" > /tmp/credential-commits
+          mapfile -t commits < /tmp/credential-commits
+          echo "Scanning ${#commits[@]} commits"
+          for ((i=0; i<${#commits[@]}; i+=64)); do
             set +e
-            git grep -nI -E -e "$pattern" $commits > /tmp/history-credential-scan 2>&1
-            scan_status=$?
+            git grep -lI -E -e "$pattern" "${commits[@]:i:64}" > /tmp/history-credential-scan 2>/tmp/history-credential-error
+            status=$?
             set -e
-            case "$scan_status" in
-              0)
-                cat /tmp/history-credential-scan
-                echo 'Credential-like material found in public Git history.'
-                exit 1
-                ;;
+            case "$status" in
+              0) cat /tmp/history-credential-scan; echo 'Credential-like material found (paths only).'; exit 1 ;;
               1) ;;
-              *)
-                cat /tmp/history-credential-scan
-                echo "Credential history scan itself failed with status $scan_status."
-                exit "$scan_status"
-                ;;
+              *) echo "Credential scan failed with status $status"; exit "$status" ;;
             esac
-          fi
+          done
 
       - name: Reject tracked secret files
         shell: bash
@@ -78,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          git grep -nI -E -e '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+' -- \
+          git grep -lI -E -e '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+' -- \
             ':!*.test.*' ':!**/tests/**' ':!.env.example' > /tmp/source-credential-scan 2>&1
           scan_status=$?
           set -e
@@ -120,6 +182,7 @@ jobs:
         run: node --check services/sync-worker/verify.mjs
 
       - name: Clean database bootstrap + backup/restore
+        if: needs.plan.outputs.backend == 'true'
         run: sh infra/test-db-bootstrap.sh
 
       - name: Install dependencies
@@ -138,6 +201,7 @@ jobs:
         run: pnpm test
 
       - name: Start live Postgres and Uchiyomi
+        if: needs.plan.outputs.backend == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -160,12 +224,14 @@ jobs:
           curl -fsS http://127.0.0.1:8080/livez >/dev/null
 
       - name: Create temporary Uchiyomi admin
+        if: needs.plan.outputs.backend == 'true'
         shell: bash
         run: |
           set -euo pipefail
           curl -fsS -X POST http://127.0.0.1:8080/api/setup             -H 'Content-Type: application/json'             --data '{"username":"mansour","password":"ci-only-password-1234567890123456","displayName":"CI Admin"}'
 
       - name: Probe Uchiyomi token self-revocation
+        if: needs.plan.outputs.backend == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -188,11 +254,13 @@ jobs:
           test "$after_status" = '401'
 
       - name: Apply VANTARA Postgres migrations
+        if: needs.plan.outputs.backend == 'true'
         env:
           DATABASE_URL: postgres://vantara:vantara-ci-password@127.0.0.1:5433/vantara
         run: pnpm --filter @vantara/db migrate
 
       - name: Smoke boot actual API server
+        if: needs.plan.outputs.backend == 'true'
         shell: bash
         env:
           NODE_ENV: test
@@ -224,6 +292,7 @@ jobs:
           done
 
       - name: Exercise live dependency restarts
+        if: needs.plan.outputs.backend == 'true'
         shell: bash
         env:
           NODE_ENV: test
@@ -273,6 +342,7 @@ jobs:
           wait_ready
 
       - name: Run live API integration
+        if: needs.plan.outputs.backend == 'true'
         env:
           DATABASE_URL: postgres://vantara:vantara-ci-password@127.0.0.1:5433/vantara
           UCHIYOMI_URL: http://127.0.0.1:8080
@@ -282,11 +352,13 @@ jobs:
         run: pnpm --filter @vantara/api test
 
       - name: Stop live integration services
-        if: always()
+        if: always() && needs.plan.outputs.backend == 'true'
         shell: bash
         run: docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml down -v --remove-orphans
 
   translation-worker:
+    needs: plan
+    if: needs.plan.outputs.translation == 'true'
     name: Translation worker
     runs-on: ubuntu-latest
     timeout-minutes: 40
