@@ -37,7 +37,10 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val waitingBlocks: Pair<Int, Int>?,
         /** عناصر MKV العليا قبل أول Cluster كما مرّت بالقارئ، وما أُعطي أصفارًا بلا تنزيل. */
         val mkvHead: String? = null, val mkvSkipped: Long = 0L,
-        /** التسخين قبل الضغط: متى اكتملت بياناته (elapsedRealtime، 0 = لم يُسخَّن) وكم قطعة طلب. */
+        /**
+         * التسخين قبل الضغط: متى **جُدول** (elapsedRealtime، 0 = لم يُسخَّن) وكم قطعة **استهدف** — لا متى اكتمل.
+         * الجاهزية الفعلية في [warmReadyAt]: أول رؤية لإشارة المحرك (بيانات بداية الملف على القرص).
+         */
         val warmedAt: Long = 0L, val warmedPieces: Int = 0,
         /** مشاركون بطيئون حُجبوا مؤقتًا لتتحرر قطعة عالقة (TorrentHotswap). */
         val swaps: Int = 0,
@@ -49,6 +52,7 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val waits: List<com.vantara.addons.torrent.ReadWait> = emptyList(),
         /** تقرير الذهب: إضافة التورنت للجلسة، وMetadata من ملف محفوظ، وأول مشارك معروف. */
         val addedAt: Long = 0L, val metadataCached: Boolean = false, val firstKnownAt: Long = 0L,
+        val warmReadyAt: Long = 0L, val warmTargets: List<Int> = emptyList(), val mkvClusterAt: Long = -1L, val mkvCuesAt: Long = -1L,
     )
     /** حقائق المشغّل لحظة كتابة التقرير. */
     class PlayerFacts(
@@ -66,8 +70,15 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
     @Volatile var openAt = 0L; private set
     @Volatile var readyAt = 0L; private set
     @Volatile var frameAt = 0L; private set
-    /** لحظة الضغط على التشغيل (elapsedRealtime من نية فتح المشغّل)، تبقى عبر تبديل المصادر. 0 = غير معروفة. */
+    /** لحظة إنشاء نية فتح المشغّل في `play` الأصلية (elapsedRealtime)، تبقى عبر تبديل المصادر. 0 = غير معروفة. ليست الضغطة. */
     @Volatile var launchedAt = 0L
+    /**
+     * ضغطة المستخدم الحقيقية في الورقة، ورجوع `pick`، ونداء `play` من الواجهة (elapsedRealtime محوّلة من ساعة الواجهة).
+     * 0 = لم تُرسل (واجهة أقدم، أو «شغّل الأفضل» بلا ضغطة سيرفر).
+     */
+    @Volatile var tappedAt = 0L
+    @Volatile var pickedAt = 0L
+    @Volatile var uiOpenAt = 0L
 
     private var preparationMs: Long? = null
     private var firstCandidateMs: Long? = null
@@ -181,28 +192,31 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         val prep = firstByte - openAt
         val reading = readyAt - firstByte
         val before = reads.filter { it.at <= readyAt }
-        val phases = before.joinToString("، ") { "${where(it.position, t?.fileBytes)} ${bytes(it.bytes)}" }
+        // البايتات تراكمية حتى لحظة التقرير (القراءة الجارية تكمل بعد الجاهزية): لا تُنسب للمرحلة. عينة المالك:
+        // «27MB في 8.2 ث» داخل بدء مدته 0.59 ث
+        val phases = before.joinToString("، ") { where(it.position, t?.fileBytes) }
         return if (reading >= prep)
-            "أطول مرحلة: من أول بايت إلى الجاهزية ${secs(reading)} ث، قرأ فيها المشغّل ${bytes(before.sumOf { it.bytes })} في ${before.size} طلب ($phases)"
+            "أطول مرحلة: من أول بايت إلى الجاهزية ${secs(reading)} ث، بدأ فيها المشغّل ${before.size} طلب قراءة ($phases)"
         else "أطول مرحلة: حتى أول بايت ${secs(prep)} ث (تجهيز التورنت وأول قطعة)"
     }
 
     /** مدخل تقرير الذهب من هذه الجلسة (ساعة واحدة: elapsedRealtime). */
-    @Synchronized fun goldInput(t: TorrentFacts?, nowMs: Long = now(), build: String = "—", patched: Boolean = false, critical: Int = 0) = GoldReport.Input(
-        tapAt = launchedAt, openAt = openAt, preparationMs = preparationMs,
+    @Synchronized fun goldInput(t: TorrentFacts?, nowMs: Long = now(), build: String = "—", patched: Boolean = false, critical: Int = 0, container: String? = null) = GoldReport.Input(
+        tapAt = tappedAt, intentAt = launchedAt, pickedAt = pickedAt, uiOpenAt = uiOpenAt, openAt = openAt, preparationMs = preparationMs, container = container,
         reads = reads.map { GoldReport.Read(it.at, it.openedAt, it.firstByteAt, it.position, it.bytes, it.endAt) },
         tracksAt = tracksAt, readyAt = readyAt, frameAt = frameAt, audioOnlyAt = audioOnlyAt,
         decoder = decoderName, decoderInitAt = decoderInitAt, decoderInitMs = decoderInitMs,
         torrent = t?.let { GoldReport.Torrent(it.addedAt, it.metadataCached, it.firstKnownAt, it.firstPeerAt, it.metadataAt, it.firstPayloadAt, it.firstPieceAt,
             it.warmedAt, it.warmedPieces, it.fileBytes, it.pieceBytes, it.waits, it.waitingPiece, it.waitingSince, it.waitingBlocks,
-            it.peers, it.downloadBps, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical) },
+            it.peers, it.downloadBps, it.turbo, it.earlyBytes, it.earlyFailures, it.hintsSent, it.hintsFailed, it.mkvSkipped, patched, critical,
+            warmReadyAt = it.warmReadyAt, warmTargets = it.warmTargets, clusterAt = it.mkvClusterAt, cuesAt = it.mkvCuesAt) },
         build = build, now = nowMs, readsFull = count > MAX_READS,
     )
 
     /** نص كامل للنسخ: تقرير الذهب أولًا ثم الحقائق الخام، بلا عنوان العمل ولا روابط ولا هويات. */
     @Synchronized fun report(t: TorrentFacts?, p: PlayerFacts, nowMs: Long = now(), build: String = "—"): String = buildString {
         appendLine("تشخيص VANTARA (نسخة الاختبار)")
-        appendLine(GoldReport.text(goldInput(t, nowMs, build, engine(), critical())))
+        appendLine(GoldReport.text(goldInput(t, nowMs, build, engine(), critical(), p.container)))
         appendLine()
         appendLine("[التفاصيل الخام]")
         val needBps = if (t != null && p.durationMs > 0 && t.fileBytes > 0) t.fileBytes * 1000 / p.durationMs else 0L
@@ -213,26 +227,45 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
                 if (needBps > 0) " · يحتاج الفيديو ${mbps(needBps)}" else "")
             if (t.waitingPiece >= 0) appendLine("ينتظر الآن: القطعة ${t.waitingPiece} منذ ${secs(nowMs - t.waitingSince)} ث" +
                 (t.waitingBlocks?.let { (d, n) -> " ($d/$n كتلة)" } ?: ""))
-            appendLine(when {
-                t.warmedAt <= 0 -> "التسخين المسبق: لم يُسخَّن هذا الخيار"
-                t.warmedAt <= openAt -> "التسخين المسبق: جاهز قبل التشغيل بـ ${secs(openAt - t.warmedAt)} ث · ${t.warmedPieces} قطعة"
-                else -> "التسخين المسبق: اكتمل بعد بدء التشغيل · ${t.warmedPieces} قطعة"
-            })
+            appendLine(warmLine(t))
             if (t.swaps > 0) appendLine("تبديل مشاركين بطيئين عن قطعة عالقة: ${t.swaps}")
             appendLine("قبل التحقق: " + (if (t.turbo) "مسموح" else "موثق فقط") + " · قُرئ ${bytes(t.earlyBytes)}" +
                 if (t.earlyFailures > 0) " · فشل تحقق ${t.earlyFailures} قطعة وأُعيد التشغيل موثقًا" else "")
             appendLine("المحرك: " + (if (com.vantara.addons.torrent.TorrentEngine.PATCHED) "libtorrent مخصص (نافذة حرجة ${com.vantara.addons.torrent.TorrentEngine.CRITICAL_PIECES})" else "libtorrent الأصلي 2.0.12") +
                 " · تلميح القراءة: " + hints(t))
-            if (t.waits.isNotEmpty()) {
-                appendLine("انتظار القطع (أطول من 0.1 ث، الأحدث آخرًا):")
-                for (w in t.waits) appendLine("  " + wait(w))
+            // السجل لكل تورنت لا لكل تشغيل: ما انتهى قبل فتح هذه الجلسة من تشغيل سابق للتورنت نفسه (عينة المالك:
+            // انتظارات القطعة 6 نفسها في تقريري «بلا كاش» و«مع كاش»)
+            val mine = GoldReport.sessionWaits(t.waits, openAt)
+            val startupEnd = if (readyAt > 0) readyAt else nowMs
+            val startup = mine.filter { it.endAt in 1..startupEnd }
+            val later = mine - startup.toSet()
+            if (startup.isNotEmpty()) {
+                appendLine("انتظار القطع حتى الجاهزية (أطول من 0.1 ث، الأحدث آخرًا):")
+                for (w in startup) appendLine("  " + wait(w))
             }
+            if (later.isNotEmpty()) {
+                appendLine("انتظار القطع بعد الجاهزية (أثناء المشاهدة، ليس من البدء):")
+                for (w in later) appendLine("  " + wait(w))
+            }
+            // بناء أقدم بلا وقت نهاية: لا يُعرف لأي تشغيل، فيُعرض وحده ولا يُنسب
+            val untimed = t.waits.filter { it.endAt <= 0 }
+            if (untimed.isNotEmpty()) {
+                appendLine("انتظار القطع (أطول من 0.1 ث، بلا وقت نهاية: لا يُعرف أي تشغيل):")
+                for (w in untimed) appendLine("  " + wait(w))
+            }
+            val foreign = t.waits.size - untimed.size - mine.size
+            if (foreign > 0) appendLine("استُبعد $foreign انتظارًا من تشغيل سابق للتورنت نفسه (قبل فتح هذه الجلسة)")
             t.mkvHead?.let { appendLine("بداية الملف: $it") }
             if (t.mkvSkipped > 0) appendLine("تخطّى بلا تنزيل: ${bytes(t.mkvSkipped)} (مرفقات MKV)")
         }
         val firstByte = reads.firstOrNull { it.firstByteAt > 0 }?.firstByteAt ?: 0L
-        if (launchedAt in 1..openAt) appendLine("من الضغط حتى فتح المصدر: ${secs(openAt - launchedAt)} ث" +
-            (if (frameAt > 0) " · من الضغط حتى أول صورة: ${secs(frameAt - launchedAt)} ث" else ""))
+        if (tappedAt in 1..openAt) appendLine("من الضغطة حتى فتح المصدر: ${secs(openAt - tappedAt)} ث" +
+            (if (frameAt > 0) " · من الضغطة حتى أول صورة: ${secs(frameAt - tappedAt)} ث" else "") +
+            (if (pickedAt >= tappedAt && pickedAt > 0) " · الضغطة ← رجوع pick ${secs(pickedAt - tappedAt)} ث" else "") +
+            (if (uiOpenAt >= tappedAt && uiOpenAt > 0) " · ← نداء play ${secs(uiOpenAt - tappedAt)} ث" else "") +
+            (if (launchedAt >= tappedAt && launchedAt > 0) " · ← نية المشغّل ${secs(launchedAt - tappedAt)} ث" else ""))
+        else if (launchedAt in 1..openAt) appendLine("من نية فتح المشغّل حتى فتح المصدر: ${secs(openAt - launchedAt)} ث (الضغطة نفسها لم تُقس)" +
+            (if (frameAt > 0) " · حتى أول صورة: ${secs(frameAt - launchedAt)} ث" else ""))
         appendLine("خط البدء: " + listOfNotNull(
             t?.let { "بيانات التورنت ${rel(it.metadataAt)}" }, t?.let { "أول مشارك ${rel(it.firstPeerAt)}" }, t?.let { "أول بيانات ${rel(it.firstPayloadAt)}" }, t?.let { "أول قطعة ${rel(it.firstPieceAt)}" },
             "أول بايت ${rel(firstByte)}", "جاهز ${rel(readyAt)}", "أول صورة ${rel(frameAt)}",
@@ -240,7 +273,9 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         appendLine("أول سيرفر ظهر بعد: ${firstCandidateMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من أي سيرفر)")
         appendLine("السيرفر المشغَّل ظهر بعد: ${preparationMs?.let { "${secs(it)} ث" } ?: "لم يُقس"} (من إنشاء جلسة التجهيز حتى توفر هذا المرشح، قبل الفحص والمشغّل)")
         val gap = if (preparationMs != null && firstCandidateMs != null) preparationMs!! - firstCandidateMs!! else null
-        if (gap != null && gap >= 1000) appendLine("الانتظار بعد أول سيرفر حتى المشغَّل: ${secs(gap)} ث (الاختناق في الاختيار لا الاستخراج)")
+        // كان «الاختناق في الاختيار لا الاستخراج»: بلا دليل. الفرق زمن استخراج هذا السيرفر نفسه بعد أول سيرفر من غيره؛
+        // متى ضغط المستخدم بعد توفره لا يُعرف من هذين الرقمين
+        if (gap != null && gap >= 1000) appendLine("هذا السيرفر توفر بعد أول سيرفر بـ ${secs(gap)} ث (استخراجه هو أبطأ؛ هل انتظر المستخدم قبل الضغط لا يُعرف من هذا)")
         appendLine("تهيئة المشغّل: ${if (readyAt > 0) "${secs(readyAt - openAt)} ث" else "لم تكتمل"} · أول صورة: ${if (frameAt > 0) "${secs(frameAt - openAt)} ث" else if (audioOnlyAt > 0) "صوت فقط — لا إطار منتظر" else "لم تظهر"}")
         appendLine("طلبات القراءة (${reads.size}):")
         for (r in reads) appendLine("  ${r.n}) ${rel(r.at)} ${where(r.position, t?.fileBytes)} → ${bytes(r.bytes)}" +
@@ -262,6 +297,18 @@ class PlaybackDiagnostics(private val now: () -> Long = { android.os.SystemClock
         appendLine("الأحداث:")
         for (e in events) appendLine("  $e")
         append("الحكم: ").append(verdict(t, p, nowMs))
+    }
+
+    /** التسخين: ما جُدول، وما استُهدف، وهل رُئيت إشارة الجاهزية قبل الفتح. «جُدول» ليس «جاهز». */
+    internal fun warmLine(t: TorrentFacts): String = when {
+        t.warmedAt <= 0 -> "التسخين المسبق: لم يُسخَّن هذا الخيار"
+        else -> "التسخين المسبق: جُدول " + (if (t.warmedAt <= openAt) "قبل الفتح بـ ${secs(openAt - t.warmedAt)} ث" else "بعد الفتح") +
+            " · قطع مستهدفة ${t.warmedPieces}" + (if (t.warmTargets.isNotEmpty()) " (${t.warmTargets.joinToString("، ")})" else "") +
+            " · إشارة الجاهزية (بداية الملف على القرص): " + when {
+                t.warmReadyAt <= 0 -> "لم تُرَ"
+                openAt > 0 && t.warmReadyAt <= openAt -> "رُئيت قبل الفتح بـ ${secs(openAt - t.warmReadyAt)} ث"
+                else -> "رُئيت بعد الفتح"
+            }
     }
 
     /** القفزة الأخيرة لم تعد READY: السبب من الحقائق وحدها، بترتيب ما يمنع الاستئناف أولًا. */

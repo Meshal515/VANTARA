@@ -2401,15 +2401,19 @@ export function createCinema(deps) {
         extraFoot.push(withFriends);
       }
 
-      const playRoute = async (r) => {
+      const playRoute = async (r, meta) => {
         if (sheet.closed || sheet.busy || !sheet.session) return;
         sheet.busy = true;
         queuePaint();
+        // من الضغطة نفسها: الحضور يبدأ مع pick لا بعده (كان كل انتظار يتلو الآخر قبل فتح المشغّل)
+        const marks = { tapAt: meta?.tapAt ?? Date.now() };
+        const presence = Promise.resolve().then(() => deps.playerPresence?.()).catch(() => null);
         try {
           const candidate = await waitFor(engine.pick(sheet.session, r.id), controller.signal, 15000);
+          marks.pickedAt = Date.now();
           if (sheet.closed) return;
           if (!candidate) return void toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
-          await launch(candidate, r.code);
+          await launch(candidate, r.code, { marks, presence });
         } catch (e) {
           if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
@@ -2450,7 +2454,7 @@ export function createCinema(deps) {
         pending: routePending,
         dead: (r) => isUnavailable(r),
         onBack: () => deps.closeSheet(),
-        onPick: (r) => playRoute(r),
+        onPick: (r, meta) => playRoute(r, meta),
         onBest: () => playBest(),
         onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
         onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
@@ -2463,6 +2467,8 @@ export function createCinema(deps) {
         ...(m._sourceCopy ? { pinnedSource: { name: routeSourceLabel({ sourceId: m._sourceCopy.sourceId }) || 'هذا المصدر', onAlternatives: m._officialIdentity && /^tt\d+$/.test(String(m.id)) ? () => { deps.closeSheet(); dropWarm(); state.works.delete(playKey(m, season)); const { _sourceCopy, _officialIdentity, ...plain } = m; void openWork(plain, { autoplay: true }); } : null } } : {}),
       });
       const best = ui.best;
+      // ما يحتاجه فتح المشغّل يُجهَّز الآن لا عند الضغطة (الإضافات ووحدتا اللون؛ السينما بلا ربط IMDb)
+      engine.warmOpen?.(null);
       // لا مصدر مشاهدة في الحساب: «أضف مصدرًا» بدل «غير متوفر»
       void deps.playableSources?.('cinema').then((count) => {
         if (count !== 0 || sheet.closed) return;
@@ -2537,7 +2543,7 @@ export function createCinema(deps) {
       };
     }, { tone: 'cinema', full: true });
 
-    async function launch(candidate, code) {
+    async function launch(candidate, code, { marks = null, presence: early = null } = {}) {
       sheet.launched = true;
       const w = sheet.warm;
       // الجلسة صارت للمشغّل: لا تُغلق من هنا، والتجهيز القادم يبدأ جلسة جديدة
@@ -2571,8 +2577,9 @@ export function createCinema(deps) {
       recordView(m, season, m.type === 'movie' ? 1 : n);
       const title = m.type === 'series' ? `${displayTitle(m)} · الموسم ${season}` : displayTitle(m);
       deps.setWatching?.({ ref: `cinema:${key}`, title, episode: m.type === 'series' ? n : null });
-      const presence = await deps.playerPresence?.();
+      const presence = await (early ?? deps.playerPresence?.());
       await engine.open({
+        marks,
         session: sheet.session,
         candidate,
         prefer: code ?? null,

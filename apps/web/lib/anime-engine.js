@@ -749,30 +749,55 @@ export async function subtitleContext(identity) {
   return { subtitleIdentity, addonSubtitleProviders };
 }
 
+async function addonSubtitleProvidersNow() {
+  if (!(globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine)) return null;
+  try { const a = await getAddonRuntime(); await a.ready; return a.nativeSubtitleProviders(); }
+  catch { return null; /* ترجمة الإضافة لا تمنع الفيديو */ }
+}
+async function playerAccent(section) {
+  try {
+    const [{ liveAccent }, { readStructure }] = await Promise.all([import('../v35/appearance.js'), import('../v35/experience.js')]);
+    return liveAccent(section === 'cinema' ? 'cinema' : 'anime', { unified: readStructure().unifyContent });
+  } catch { return null; /* اللون تحسين لا شرط */ }
+}
+
+/**
+ * يجهّز ما يحتاجه فتح المشغّل قبل الضغطة (يُنادى مع فتح ورقة السيرفرات): ربط الأنمي بـIMDb، وإضافات الترجمة، ووحدتا
+ * اللون. كلها مخزّنة بعد أول مرة، فالضغطة لا تنتظر شبكة ولا تهيئة. لا يغيّر شيئًا مما يصل المشغّل.
+ */
+export function warmOpen(identity) {
+  if (identity) void withImdbEpisode(identity).catch(() => {});
+  void addonSubtitleProvidersNow();
+  void playerAccent('anime');
+}
+
 export async function open(args) {
   const plugin = bridge();
   if (!plugin) return null;
+  // علامات الضغطة (تقرير الذهب): ساعة الواجهة، يحوّلها المشغّل لساعته
+  const { marks, ...rest } = args;
+  args = rest;
   const identity = addonDiscoverySessions.get(args.session)?.identity;
   if (identity && identity.canonicalId === args.subtitleIdentity?.canonicalId && identity.kind === args.subtitleIdentity?.kind) args = { ...args, subtitleIdentity: { ...args.subtitleIdentity, externalIds: { ...args.subtitleIdentity.externalIds, ...identity.externalIds } } };
-  // إضافات الترجمة تعرف الحلقة بـIMDb + الموسم: نربط الأنمي بهما قبل فتح المشغّل
-  if (args.subtitleIdentity) args = { ...args, subtitleIdentity: await withImdbEpisode(args.subtitleIdentity) };
+  // معًا لا واحدًا بعد الآخر: ربط IMDb (شبكة حتى 4 ث في أول مرة)، وتهيئة الإضافات، ووحدتا اللون كانت تنتظر بالتتابع قبل
+  // play، والمشغّل لا يُفتح حتى تنتهي كلها. ما يصل المشغّل هو نفسه
+  const [subtitleIdentity, addonSubtitleProviders, accent] = await Promise.all([
+    // إضافات الترجمة تعرف الحلقة بـIMDb + الموسم: نربط الأنمي بهما قبل فتح المشغّل
+    args.subtitleIdentity ? withImdbEpisode(args.subtitleIdentity).catch(() => args.subtitleIdentity) : Promise.resolve(args.subtitleIdentity),
+    addonSubtitleProvidersNow(),
+    // المشغّل الأصلي بلون الواجهة نفسه دائمًا: لون القسم المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد
+    playerAccent(args.section),
+  ]);
+  if (args.subtitleIdentity) args = { ...args, subtitleIdentity };
   // شعار وخلفية Stremio نفسيهما من رقم IMDb إن لم تمرّرهما الصفحة
   const imdb = args.subtitleIdentity?.externalIds?.imdb;
   if (/^tt\d+$/.test(imdb ?? '')) args = { ...args, logo: args.logo ?? `https://images.metahub.space/logo/medium/${imdb}/img`, backdrop: args.backdrop ?? `https://images.metahub.space/background/medium/${imdb}/img` };
-  if (globalThis.Capacitor?.isNativePlatform?.() && globalThis.Capacitor?.Plugins?.AddonEngine) {
-    try {
-      const a = await getAddonRuntime(); await a.ready;
-      args = {...args, addonSubtitleProviders: a.nativeSubtitleProviders()};
-    } catch { /* ترجمة الإضافة لا تمنع الفيديو */ }
-  }
-  // المشغّل الأصلي بلون الواجهة نفسه دائمًا: لون القسم المختار أو البنفسجي الأساسي، ومع التوحيد لون الموحد
-  try {
-    const [{ liveAccent }, { readStructure }] = await Promise.all([import('../v35/appearance.js'), import('../v35/experience.js')]);
-    args = { ...args, accent: liveAccent(args.section === 'cinema' ? 'cinema' : 'anime', { unified: readStructure().unifyContent }) };
-  } catch { /* اللون تحسين لا شرط */ }
+  if (addonSubtitleProviders) args = { ...args, addonSubtitleProviders };
+  if (accent) args = { ...args, accent };
   // التأثير الزجاجي كما يطبّقه الويب فعلًا (syncGlass يزيله مع «تقليل الشفافية» أو الدرجة off): المشغّل الأصلي يلبس
   // أزراره «مظهرًا زجاجيًا» (Ui.kt: Glass)، وغيره يبقى كما هو
   if (globalThis.document?.documentElement?.dataset?.material === 'glass') args = { ...args, material: 'glass' };
+  if (Number.isFinite(marks?.tapAt)) args = { ...args, tapAt: marks.tapAt, ...(Number.isFinite(marks.pickedAt) ? { pickedAt: marks.pickedAt } : {}), uiOpenAt: Date.now() };
   await plugin.play(args);
   return true;
 }

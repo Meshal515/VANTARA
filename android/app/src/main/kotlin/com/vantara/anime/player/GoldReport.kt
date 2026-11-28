@@ -18,14 +18,27 @@ object GoldReport {
         val waits: List<ReadWait> = emptyList(), val waitingPiece: Int = -1, val waitingSince: Long = 0L, val waitingBlocks: Pair<Int, Int>? = null,
         val peers: Int = 0, val downloadBps: Long = 0L, val turbo: Boolean = false, val earlyBytes: Long = 0L, val earlyFailures: Int = 0,
         val hintsSent: Int = 0, val hintsFailed: Int = 0, val mkvSkipped: Long = 0L, val patched: Boolean = false, val criticalPieces: Int = 0,
+        /** أول رؤية لإشارة جاهزية التسخين (0 = لم تُرَ)، والقطع التي استهدفها. [warmedAt] لحظة **الجدولة** لا الجاهزية. */
+        val warmReadyAt: Long = 0L, val warmTargets: List<Int> = emptyList(),
+        /** حدود MKV كما مرّت بالقارئ: بداية أول Cluster وموضع Cues من SeekHead (-1 = غير معروف). */
+        val clusterAt: Long = -1L, val cuesAt: Long = -1L,
     )
+    /**
+     * [tapAt] ضغطة المستخدم الحقيقية في الورقة (0 = لم تُقس). [pickedAt] رجوع `pick`، و[uiOpenAt] نداء `play` من الواجهة،
+     * و[intentAt] نية فتح المشغّل في `play` الأصلية. [container] نوع الحاوية من Media3 (video/mp4، video/x-matroska…).
+     */
     class Input(
         val tapAt: Long, val openAt: Long, val preparationMs: Long? = null, val reads: List<Read> = emptyList(),
         val tracksAt: Long = 0L, val readyAt: Long = 0L, val frameAt: Long = 0L, val audioOnlyAt: Long = 0L,
         val decoder: String? = null, val decoderInitAt: Long = 0L, val decoderInitMs: Long = 0L,
         val torrent: Torrent? = null, val build: String = "—", val now: Long = 0L, val readsFull: Boolean = false,
+        val intentAt: Long = 0L, val pickedAt: Long = 0L, val uiOpenAt: Long = 0L, val container: String? = null,
     )
-    class Cause(val code: String, val ar: String, val where: String?, val share: Double, val coverage: Double, val confidence: String, val needs: String? = null)
+    /**
+     * [ar] الحقيقة المقاسة (أين ذهب الوقت)، و[confidence] ثقتها. [hypothesis] لماذا، حين لا يثبته دليل: يُطبع «محتمل،
+     * غير مثبت» ولا يرفع الحكم. [where] مكان القرار في الكود: «مرجّح» إن كان السبب غير مثبت.
+     */
+    class Cause(val code: String, val ar: String, val where: String?, val share: Double, val coverage: Double, val confidence: String, val needs: String? = null, val hypothesis: String? = null)
     class Phase(val id: String, val ar: String, val start: Long, val end: Long, val beforeTap: Boolean = false, val ongoing: Boolean = false) {
         val ms: Long get() = end - start
         val evidence = mutableListOf<String>()
@@ -33,13 +46,17 @@ object GoldReport {
     }
     class Analysis(val phases: List<Phase>, val bottleneck: Phase?, val secondary: List<Phase>, val integrity: List<String>, val verdict: String, val total: Long, val origin: Long)
 
-    private class Kind(val code: String, val ar: String, val where: String?)
+    private class Kind(val code: String, val ar: String, val where: String?, val hypothesis: String? = null)
 
     // سبب انتظار القطعة من لقطته الأولى ([ReadWait]): ما يعرفه المحرك مكتوبًا وما يقوله libtorrent
-    private val NOT_STARTED = Kind("WAIT_PIECE_NOT_STARTED", "لم تبدأ أي كتلة من القطعة عند أول عيّنة (لم تُطلب أو لا مشارك يرسلها)",
-        "TorrentEngine.kt: State.prioritize (setPieceDeadline) ← libtorrent: request_time_critical_pieces")
-    private val PARTIAL = Kind("WAIT_BLOCK_RESPONSE", "القطعة تُنزَّل وكتلة القراءة لم تصل بعد",
-        "libtorrent: piece_picker (ترتيب الكتل، 0004) ← NativeReadHint.kt")
+    // «لم تبدأ» و«لم تصل» حقيقة اللقطة الأولى وحدها. هل طُلبت الكتلة ومتى ومن أي مشارك، وهل وصلت ولم تُكتب، لا يُسجَّل:
+    // السبب تفسير محتمل لا يُعلن مؤكدًا (عينات المالك: «مؤكد · تغطية 100%» بلا هذه المعلومات)
+    private val NOT_STARTED = Kind("WAIT_PIECE_NOT_STARTED", "انتظار قطعة لم تُكتب منها أي كتلة عند أول عيّنة",
+        "TorrentEngine.kt: State.prioritize (setPieceDeadline) ← libtorrent: request_time_critical_pieces",
+        "لم تُطلب بعد، أو طُلبت ولم يرد المشارك، أو لا مشارك متصل يملكها")
+    private val PARTIAL = Kind("WAIT_BLOCK_RESPONSE", "انتظار كتلة القراءة في قطعة بدأ تنزيلها",
+        "libtorrent: piece_picker (ترتيب الكتل، 0004) ← NativeReadHint.kt",
+        "الكتلة طُلبت متأخرة في ترتيب القطعة، أو المشارك المرسل بطيء، أو وصلت ولم تُكتب بعد")
     private val COMPLETE = Kind("WAIT_PIECE_VERIFICATION", "القطعة كلها على القرص وتنتظر التحقق والقراءة",
         "libtorrent: hash_piece ثم read_piece ← TorrentEngine.kt: State.piece")
     private val VERIFIED_ONLY = Kind("WAIT_VERIFIED_ONLY", "كتلة الموضع مكتوبة والقراءة انتظرت القطعة الموثقة",
@@ -48,13 +65,31 @@ object GoldReport {
         "TorrentEngine.kt: State (written ← block_finished_alert)")
     private val WAITS_KINDS = listOf(NOT_STARTED, PARTIAL, COMPLETE, VERIFIED_ONLY, GAP)
 
-    // ما كان المشغّل ينتظره من قراءات (المدة مقاسة؛ سبب بطئها من انتظارات القطع داخلها)
-    private val INDEX_READ = Kind("WAIT_INDEX_READ", "قراءة فهرس الحاوية (Cues) من ذيل الملف",
-        "Media3 MatroskaExtractor (يطلب Cues قبل موضع المتابعة) ← TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize")
-    private val HEAD_READ = Kind("WAIT_HEAD_READ", "قراءة رأس الملف (Tracks)",
-        "Media3 MatroskaExtractor ← TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize")
-    private val POSITION_READ = Kind("WAIT_POSITION_FIRST_BYTE", "انتظار أول بايت عند موضع التشغيل",
-        "TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize (setPieceDeadline)")
+    // ما كان المشغّل ينتظره من قراءات (المدة مقاسة؛ سبب بطئها من انتظارات القطع داخلها). نوع البيانات لا يُعلن إلا بدليل:
+    // رأس MKV حتى أول Cluster، وCues من SeekHead. MP4 من CloudStream ليس Matroska ولا تورنت (عينة المالك)
+    private fun extractor(container: String?) = when {
+        container == null -> "Media3 (المستخرج حسب الحاوية)"
+        container.contains("matroska") || container.contains("webm") -> "Media3 MatroskaExtractor"
+        container.contains("mp4") -> "Media3 Mp4Extractor"
+        container.contains("mpegurl") || container.contains("hls") -> "Media3 HlsMediaSource"
+        container.contains("mp2t") -> "Media3 TsExtractor"
+        else -> "Media3 ($container)"
+    }
+    private fun transport(torrent: Boolean) = if (torrent) "TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize" else "Media3 DefaultHttpDataSource ← خادم المصدر (شبكة)"
+    private fun readKind(code: String, input: Input): Kind {
+        val tor = input.torrent != null
+        val ex = extractor(input.container)
+        return when (code) {
+            "WAIT_HEADER_READ" -> Kind(code, "قراءة رأس MKV قبل أول Cluster (Tracks والمرفقات)", "$ex ← ${transport(tor)}")
+            "WAIT_INDEX_READ" -> Kind(code, "قراءة فهرس Cues (موضعه من SeekHead)", "$ex (يطلب Cues قبل موضع المتابعة) ← ${transport(tor)}")
+            "WAIT_START_READ" -> Kind(code, "قراءة متصلة من بداية الملف", "$ex ← ${transport(tor)}",
+                "رأس الحاوية (moov أو Tracks) أو بيانات الفيديو بعده: حدود الرأس غير مقاسة لهذا الملف")
+            "WAIT_TAIL_READ" -> Kind(code, "قراءة من ذيل الملف", "$ex ← ${transport(tor)}",
+                if (input.container?.contains("mp4") == true) "فهرس moov في آخر الملف" else "فهرس الحاوية (Cues) أو وسوم آخر الملف: موضع الفهرس غير مقاس")
+            else -> Kind("WAIT_POSITION_FIRST_BYTE", "انتظار أول بايت عند موضع التشغيل",
+                if (tor) "TorrentDataSource.kt: read ← TorrentEngine.kt: State.prioritize (setPieceDeadline)" else "Media3 DefaultHttpDataSource ← خادم المصدر (شبكة)")
+        }
+    }
 
     /** طول اتحاد فترات (تتداخل القراءات المتزامنة فلا تُعد مرتين). */
     private fun union(ranges: List<LongRange>): Long {
@@ -90,12 +125,37 @@ object GoldReport {
         return order[minOf(order.indexOf(c), order.indexOf(max))]
     }
 
-    /** أين في الملف قرأ الطلب: الرأس، أو الذيل (فهرس الحاوية)، أو موضع التشغيل. */
+    /** أين في الملف قرأ الطلب: بداية الملف، أو ذيله، أو موضع التشغيل. مكان فقط: ما الذي فيه يقرره [readCode] بدليل. */
     fun placeOf(position: Long, fileBytes: Long): String = when {
-        position <= 2L * 1024 * 1024 -> "رأس الملف"
-        fileBytes > 0 && (position >= fileBytes * 98 / 100 || (fileBytes - position <= 64L * 1024 * 1024 && position * 100 / fileBytes >= 90)) -> "ذيل الملف (الفهرس)"
+        position <= 2L * 1024 * 1024 -> "بداية الملف"
+        fileBytes > 0 && (position >= fileBytes * 98 / 100 || (fileBytes - position <= 64L * 1024 * 1024 && position * 100 / fileBytes >= 90)) -> "ذيل الملف"
         else -> "موضع التشغيل"
     }
+
+    /**
+     * نوع ما قرأه الطلب ومدة انتظاره: رأس MKV مثبت حين تبدأ القراءة قبل أول Cluster المعروف، وCues مثبت حين يقع موضعه
+     * (من SeekHead) داخل القراءة. غير ذلك مكانه فقط («بداية الملف»، «ذيل الملف») وتفسيره محتمل.
+     */
+    private fun readCode(r: Read, input: Input): String {
+        val t = input.torrent
+        val cluster = t?.clusterAt ?: -1L
+        val cues = t?.cuesAt ?: -1L
+        val span = maxOf(r.bytes, 1L)
+        if (cues >= 0 && r.position <= cues && cues < r.position + span) return "WAIT_INDEX_READ"
+        if (cluster > 0 && r.position < cluster) return "WAIT_HEADER_READ"
+        return when (placeOf(r.position, t?.fileBytes ?: 0)) {
+            "بداية الملف" -> if (cluster > 0) "WAIT_POSITION_FIRST_BYTE" else "WAIT_START_READ"
+            "ذيل الملف" -> "WAIT_TAIL_READ"
+            else -> "WAIT_POSITION_FIRST_BYTE"
+        }
+    }
+
+    /**
+     * انتظارات هذا التشغيل وحده: السجل في المحرك لكل تورنت لا لكل جلسة، فما بدأ قبل فتح هذا المصدر من تشغيل سابق
+     * للتورنت نفسه (عينة المالك: القطعة 6 نفسها في تقريري «بلا كاش» و«مع كاش»). بلا وقت نهاية (بناء أقدم): لا يُنسب.
+     */
+    fun sessionWaits(waits: List<ReadWait>, openAt: Long): List<ReadWait> =
+        if (openAt <= 0) emptyList() else waits.filter { it.endAt > 0 && it.endAt - it.ms >= openAt - 50 }
 
     private fun overlap(a0: Long, a1: Long, b0: Long, b1: Long) = (minOf(a1, b1) - maxOf(a0, b0)).coerceAtLeast(0L)
 
@@ -105,11 +165,22 @@ object GoldReport {
         val open = input.openAt
         if (open <= 0) return Analysis(emptyList(), null, emptyList(), listOf("لم يُفتح مصدر: لا مسار يُبنى"), "UNKNOWN", 0, 0)
         val tapKnown = input.tapAt in 1..open
-        if (!tapKnown) integrity += "زمن الضغط غير معروف: المدد من فتح المصدر لا من الضغط"
-        val origin = if (tapKnown) input.tapAt else open
+        val intentKnown = input.intentAt in 1..open
+        if (!tapKnown) integrity += if (intentKnown) "زمن الضغطة غير معروف (واجهة أقدم أو «شغّل الأفضل»): المدد من نية فتح المشغّل لا من الضغطة"
+            else "زمن الضغط غير معروف: المدد من فتح المصدر لا من الضغط"
+        val origin = if (tapKnown) input.tapAt else if (intentKnown) input.intentAt else open
         val firstByte = input.reads.filter { it.firstByteAt > 0 }.minOfOrNull { it.firstByteAt } ?: 0L
         val phases = mutableListOf<Phase>()
-        phases += Phase("source", "تجهيز المصدر وفتح المشغّل (من الضغط)", origin, open)
+        // قبل فتح المصدر: كل علامة مقاسة تفصل مرحلة (الضغطة، رجوع pick، نداء play، نية المشغّل)
+        var at = origin
+        if (tapKnown) {
+            for ((id, ar, mark) in listOf(
+                Triple("pick", "انتظار رد pick من المحرك بعد الضغطة", input.pickedAt),
+                Triple("ui-open", "تجهيز فتح المشغّل في الواجهة", input.uiOpenAt),
+                Triple("bridge", "من نداء play حتى نية فتح المشغّل", input.intentAt),
+            )) if (mark in at..open) { phases += Phase(id, ar, at, mark); at = mark }
+        }
+        phases += Phase("source", if (at == input.intentAt && intentKnown) "فتح المشغّل وتجهيز المصدر (من نية المشغّل)" else "تجهيز المصدر وفتح المشغّل (من الضغط)", at, open)
         var prev = open
         fun add(id: String, ar: String, at: Long, missing: String?) : Boolean {
             if (at <= 0) { missing?.let { integrity += it }; return false }
@@ -136,10 +207,15 @@ object GoldReport {
         }
         if (input.frameAt == 0L && input.audioOnlyAt > 0) integrity += "صوت فقط: لا إطار فيديو منتظر"
 
-        val waits = t?.waits.orEmpty()
-        if (waits.any { it.endAt <= 0 }) integrity += "انتظارات بلا وقت نهاية (بناء أقدم): لا تُنسب إلى مرحلة"
+        val allWaits = t?.waits.orEmpty()
+        if (allWaits.any { it.endAt <= 0 }) integrity += "انتظارات بلا وقت نهاية (بناء أقدم): لا تُنسب إلى مرحلة"
+        val waits = sessionWaits(allWaits, open)
+        val foreign = allWaits.count { it.endAt > 0 } - waits.size
+        if (foreign > 0) integrity += "استُبعد $foreign انتظارًا من تشغيل سابق للتورنت نفسه (سجل المحرك لكل تورنت لا لكل جلسة)"
+        if (t == null) integrity += "لا تورنت: القراءة من خادم المصدر عبر HTTP، ولا انتظار قطع"
         for (ph in phases) {
             when (ph.id) {
+                "pick", "ui-open", "bridge" -> preOpen(ph)
                 "source" -> source(ph, input)
                 "metadata" -> metadata(ph, t!!, open)
                 else -> engineWaits(ph, input, waits, firstByte, integrity)
@@ -150,13 +226,26 @@ object GoldReport {
         val bottleneck = ranked.firstOrNull()
         if (t != null) {
             integrity += "انتظارات القطع الأقصر من 0.1 ث لا تُسجَّل، وسبب كل انتظار من لقطته الأولى"
-            if (waits.size >= 64) integrity += "سجل الانتظارات ممتلئ (آخر 64): سقطت انتظارات أقدم"
+            if (allWaits.size >= 64) integrity += "سجل الانتظارات ممتلئ (آخر 64): سقطت انتظارات أقدم"
+            if (waits.any { it.ms > 1_000 }) integrity += "انتظار أطول من ثانية: حالة القطعة فيه من أول عيّنة فقط، وتغيّرها أثناءه غير مقاس"
             if (!t.metadataCached && t.metadataAt > open && t.firstKnownAt == 0L) integrity += "أول مشارك معروف: لم يُقس في هذه الجلسة"
         }
         if (input.readsFull) integrity += "سجل طلبات القراءة ممتلئ: سقطت طلبات قديمة"
         integrity += if (input.frameAt > 0) "أول صورة معروضة: مقاسة (onRenderedFirstFrame)" else "أول صورة معروضة: لم تُعرض بعد"
         val end = phases.maxOfOrNull { it.end } ?: open
         return Analysis(phases, bottleneck, ranked.drop(1).take(2), integrity, bottleneck?.cause?.confidence ?: "UNKNOWN", end - origin, origin)
+    }
+
+    /** مراحل ما قبل فتح المصدر: مقاسة مباشرة بين علامتين، ومكانها في الكود معروف. لماذا طالت غير مقاس. */
+    private fun preOpen(ph: Phase) {
+        if (ph.ms <= 0) return
+        ph.cause = when (ph.id) {
+            "pick" -> Cause("UI_PICK", ph.ar, "server-sheet.js: pick ← AnimeEnginePlugin.kt: pick (خيط Capacitor واحد لكل الإضافات)", 1.0, 1.0, "CONFIRMED",
+                hypothesis = "نداء آخر على خيط Capacitor أمامه، أو خيط الواجهة مشغول")
+            "ui-open" -> Cause("UI_OPEN", ph.ar, "cinema.js/anime.js: launch ← anime-engine.js: open (الهوية والترجمات واللون)", 1.0, 1.0, "CONFIRMED")
+            else -> Cause("BRIDGE_PLAY", ph.ar, "anime-engine.js: open ← AnimeEnginePlugin.kt: play (خيط Capacitor واحد لكل الإضافات)", 1.0, 1.0, "CONFIRMED",
+                hypothesis = "نداء آخر على خيط Capacitor أمام play")
+        }
     }
 
     private fun source(ph: Phase, input: Input) {
@@ -230,28 +319,33 @@ object GoldReport {
             val k = kindOf(w)
             sum[k] = (sum[k] ?: 0L) + o
             covered += o
-            if (w.ms > 2_000) longWait = true
-            ph.evidence += "القطعة ${w.piece}${if (w.tail) " (ذيل الملف)" else ""}: ${w.ms}ms · ${k.ar} · عند أول عيّنة مكتوب في libtorrent ${w.engine} من ${w.blocks} وعندنا ${w.known}" +
+            // اللقطة الأولى تتغير أثناء الانتظار في «لم تبدأ» و«تُنزَّل» وحدهما؛ الفجوة والاكتمال حقيقتان عند أخذها
+            if (w.ms > 1_000 && (k === NOT_STARTED || k === PARTIAL)) longWait = true
+            // المدة المنسوبة لهذه المرحلة وحدها (كان يطبع الانتظار كله: 437ms داخل مرحلة 170ms، عينة المالك)
+            ph.evidence += "القطعة ${w.piece}${if (w.tail) " (ذيل الملف)" else ""}: ${o}ms في هذه المرحلة" + (if (o < w.ms) " من انتظار ${w.ms}ms" else "") +
+                " · ${k.ar} · عند أول عيّنة مكتوب في libtorrent ${w.engine} من ${w.blocks} وعندنا ${w.known}" +
                 (if (w.early) " · انتهى بقراءة قبل التحقق" else " · انتهى بالقطعة الموثقة")
         }
         // القراءات التي كان المشغّل ينتظرها داخل المرحلة. رأس الملف وذيله (فهرس الحاوية) تُحلَّل كاملة قبل المتابعة، فكل
         // مدتها انتظار؛ قراءة موضع التشغيل تنتظر حتى أول بايت ثم تتدفق
-        val readKinds = LinkedHashMap<Kind, Long>()
+        val readKinds = LinkedHashMap<String, Long>()
         val blocking = mutableListOf<LongRange>()
+        val startupEnd = listOf(input.readyAt, input.frameAt).filter { it > 0 }.maxOrNull() ?: input.now
         for (r in input.reads) {
-            val place = placeOf(r.position, t?.fileBytes ?: 0)
+            val code = readCode(r, input)
             val end = if (r.endAt > 0) r.endAt else input.now
-            val until = if (place == "موضع التشغيل") (if (r.firstByteAt > 0) r.firstByteAt else input.now) else end
+            val until = if (code == "WAIT_POSITION_FIRST_BYTE") (if (r.firstByteAt > 0) r.firstByteAt else input.now) else end
             val o = overlap(ph.start, ph.end, r.openedAt, until)
             if (o < 100) continue
-            val k = when (place) { "ذيل الملف (الفهرس)" -> INDEX_READ; "رأس الملف" -> HEAD_READ; else -> POSITION_READ }
-            readKinds[k] = (readKinds[k] ?: 0L) + o
+            readKinds[code] = (readKinds[code] ?: 0L) + o
             blocking += maxOf(ph.start, r.openedAt)..minOf(ph.end, until)
             val dur = end - r.openedAt
-            val rate = if (dur > 0 && r.bytes > 0) " بمعدل ${String.format(Locale.US, "%.2f", r.bytes * 1000.0 / dur / (1 shl 20))}MB/ث" else ""
-            ph.evidence += "قراءة من $place (${bytes(r.position)}): ${bytes(r.bytes)} في ${dur}ms$rate" +
+            val k = readKind(code, input)
+            // المرحلة أولًا؛ المجموع تراكمي حتى لحظة التقرير ويُعلَّم إن امتد بعد البدء (كان «27MB في 8.2 ث» داخل بدء 0.59 ث)
+            ph.evidence += "${k.ar} (من ${bytes(r.position)}): ${o}ms في هذه المرحلة" +
                 (if (r.firstByteAt > 0) " · أول بايت بعد ${r.firstByteAt - r.openedAt}ms" else " · لم يصل بايت") +
-                (if (r.endAt <= 0) " · جارية" else "") + " · منها ${o}ms في هذه المرحلة"
+                " · مجموعها حتى لحظة التقرير ${bytes(r.bytes)} في ${dur}ms" + (if (r.endAt <= 0) " (جارية)" else "") +
+                (if (end > startupEnd + 100) " (يشمل ما بعد البدء)" else "")
         }
         val readCovered = union(blocking)
         if (readKinds.isNotEmpty() && t != null && t.downloadBps > 0) ph.evidence += "التحميل الآن ${String.format(Locale.US, "%.2f", t.downloadBps / 1048576.0)}MB/ث"
@@ -269,11 +363,15 @@ object GoldReport {
         // ما كان المشغّل ينتظره (القراءة) حين لا تغطي انتظارات القطع المسجلة نصف المرحلة: يقول أين ذهب الوقت، لا لماذا
         val readCoverage = minOf(1.0, readCovered.toDouble() / maxOf(1L, ph.ms))
         if (readKinds.isNotEmpty() && coverage < 0.5 && readCoverage > coverage) {
-            val (top, ms) = readKinds.maxBy { it.value }
+            val (code, ms) = readKinds.maxBy { it.value }
+            val top = readKind(code, input)
             val share = ms.toDouble() / readKinds.values.sum()
-            ph.cause = Cause(top.code, top.ar, top.where, share, readCoverage, confidence(readCoverage, share),
-                listOfNotNull(if (readCoverage < 0.7) "${pct(1 - readCoverage)} من المرحلة بلا قراءة منتظرة" else null,
-                    "لماذا بطؤت القراءة: انتظارات القطع داخلها" + if (covered > 0) " (المسجل منها ${pct(coverage)} من المرحلة)" else " (لم يُسجَّل منها شيء)").joinToString(" · "))
+            // نوع البيانات محتمل (لا حدود رأس ولا موضع فهرس مقاس): مكان الوقت مقاس، وما فيه لا يرفع الحكم فوق «محتمل»
+            val conf = if (top.hypothesis != null) capped(confidence(readCoverage, share), "POSSIBLE") else confidence(readCoverage, share)
+            val why = if (t != null) "لماذا بطؤت القراءة: انتظارات القطع داخلها" + if (covered > 0) " (المسجل منها ${pct(coverage)} من المرحلة)" else " (لم يُسجَّل منها شيء)"
+                else "لماذا بطؤت القراءة: سرعة خادم المصدر وما يحتاجه المستخرج منها (لا يُسجَّل)"
+            ph.cause = Cause(top.code, top.ar, top.where, share, readCoverage, conf,
+                listOfNotNull(if (readCoverage < 0.7) "${pct(1 - readCoverage)} من المرحلة بلا قراءة منتظرة" else null, why).joinToString(" · "), top.hypothesis)
             return
         }
         if (sum.isNotEmpty() && total > 0) {
@@ -282,16 +380,36 @@ object GoldReport {
             var conf = confidence(coverage, share)
             var needs: String? = if (coverage < 0.7) "${pct(1 - coverage)} من المرحلة بلا انتظار قطعة مسجل" else null
             // اللقطة الأولى تقول حال القطعة حينها، لا ما شغل بقية الانتظار
-            if (longWait) { conf = capped(conf, "STRONGLY_SUPPORTED"); needs = listOfNotNull(needs, "تقسيم الانتظار الطويل بعيّنات دورية (حالة كل كتلة كما في ويندوز)").joinToString(" · ") }
-            if (top === PARTIAL || top === NOT_STARTED) needs = listOfNotNull(needs, "هل طُلبت كتلة الموضع من مشارك ومن أيّها").joinToString(" · ")
-            ph.cause = Cause(top.code, top.ar, top.where, share, coverage, conf, needs)
+            if (longWait) { conf = capped(conf, "STRONGLY_SUPPORTED"); needs = listOfNotNull(needs, "حالة القطعة أثناء الانتظار الطويل (عيّنات دورية، كما في ويندوز)").joinToString(" · ") }
+            if (top === PARTIAL || top === NOT_STARTED) needs = listOfNotNull(needs, "هل طُلبت كتلة الموضع ومتى ومن أي مشارك، وهل وصلت ولم تُكتب").joinToString(" · ")
+            ph.cause = Cause(top.code, top.ar, top.where, share, coverage, conf, needs, top.hypothesis)
             return
         }
         if (ph.ms <= 0) return
         if (ph.id == "rendered") { rendered(ph, input); return }
         if (ph.id == "first-byte" && ph.cause != null) return
+        if (ph.id == "first-byte" && t == null) { httpOpen(ph, input); return }
         ph.cause = Cause("UNKNOWN", if (ph.id == "ready") "لا انتظار قطعة مسجل: Media3 يخزّن ما يكفي للبدء" else "لا انتظار قطعة مسجل", null, 0.0, 0.0, "UNKNOWN",
             "انتظارات القطع الأقصر من ثانية، ووقت Media3 في التحليل والتخزين (لم يُسجَّلا بعد)")
+    }
+
+    /** أول بايت من خادم المصدر (بلا تورنت): فتح الاتصال (DNS/TLS/تحويلات حتى الرؤوس) ثم أول بيانات، مقاسان من Media3. */
+    private fun httpOpen(ph: Phase, input: Input) {
+        val r = input.reads.firstOrNull() ?: run {
+            ph.cause = Cause("UNKNOWN", "لا طلب قراءة مسجل", null, 0.0, 0.0, "UNKNOWN", "فتح الاتصال بخادم المصدر")
+            return
+        }
+        val connect = overlap(ph.start, ph.end, r.at, r.openedAt)
+        val payload = if (r.firstByteAt > 0) overlap(ph.start, ph.end, r.openedAt, r.firstByteAt) else 0L
+        ph.evidence += "فتح الاتصال بخادم المصدر حتى الرؤوس ${connect}ms · ثم أول بيانات ${payload}ms"
+        val measured = connect + payload
+        if (measured <= 0) { ph.cause = Cause("UNKNOWN", "لا قياس داخل المرحلة", null, 0.0, 0.0, "UNKNOWN", "متى بدأ Media3 الاتصال"); return }
+        val coverage = minOf(1.0, measured.toDouble() / ph.ms)
+        val (code, ar, ms) = if (connect >= payload) Triple("HTTP_CONNECT", "فتح الاتصال بخادم المصدر (DNS وTLS والتحويلات حتى الرؤوس)", connect)
+            else Triple("HTTP_FIRST_PAYLOAD", "أول بيانات من خادم المصدر بعد الرؤوس", payload)
+        val share = ms.toDouble() / measured
+        ph.cause = Cause(code, ar, "Media3 DefaultHttpDataSource ← خادم المصدر (شبكة)", share, coverage, confidence(coverage, share),
+            "أي جزء من الاتصال أبطأ (DNS أو TLS أو تحويل): لا يُسجَّل", "بطء خادم المصدر أو الشبكة، لا محرك فانتارا")
     }
 
     /** أول بايت بلا انتظار مسجل: مقاطع المحرك المقاسة مباشرة بعد Metadata. */
@@ -334,7 +452,7 @@ object GoldReport {
         appendLine("البناء: ${input.build}")
         if (a.phases.isEmpty()) { a.integrity.forEach { appendLine(it) }; return@buildString }
         appendLine()
-        appendLine("[المسار الحرج من الضغط]")
+        appendLine(if (input.tapAt in 1..input.openAt) "[المسار الحرج من الضغطة]" else if (input.intentAt in 1..input.openAt) "[المسار الحرج من نية فتح المشغّل · الضغطة لم تُقس]" else "[المسار الحرج من فتح المصدر · الضغطة لم تُقس]")
         for (p in a.phases) appendLine("  ${p.ar}: ${s(p.ms)}" + (if (a.total > 0) " (${pct(p.ms.toDouble() / a.total)})" else "") +
             (if (p.beforeTap) " · قبل الفتح" else "") + (if (p.ongoing) " · جارية" else ""))
         appendLine("  المجموع (${a.phases.maxBy { it.end }.ar}): ${s(a.total)}")
@@ -346,9 +464,10 @@ object GoldReport {
         else {
             val c = b.cause!!
             appendLine("  ${b.ar}: ${s(b.ms)}")
-            appendLine("  السبب: ${c.ar} (${c.code})")
-            c.where?.let { appendLine("  أين يُتخذ القرار: $it") }
+            appendLine("  الحقيقة المقاسة: ${c.ar} (${c.code})")
             appendLine("  الثقة: ${CONFIDENCE_AR[c.confidence]} · تغطية الأدلة ${pct(c.coverage)} · حصة السبب ${pct(c.share)}")
+            c.hypothesis?.let { appendLine("  السبب المحتمل (غير مثبت): $it") }
+            c.where?.let { appendLine("  أين يُتخذ القرار" + (if (c.hypothesis != null) " (مرجّح)" else "") + ": $it") }
             for (e in b.evidence) appendLine("  دليل: $e")
             c.needs?.let { appendLine("  الدليل الناقص: $it") }
         }
@@ -366,13 +485,18 @@ object GoldReport {
             appendLine("  المحرك: " + (if (t.patched) "libtorrent مخصص (نافذة حرجة ${t.criticalPieces})" else "libtorrent الأصلي") +
                 " · تلميح القراءة: " + when { t.hintsSent > 0 -> "وصل ${t.hintsSent}" + if (t.hintsFailed > 0) "، فشل ${t.hintsFailed}" else ""; t.hintsFailed > 0 -> "لا يصل (فشل ${t.hintsFailed})"; else -> "لم يُرسل" })
             appendLine("  الخيار B: " + (if (t.turbo) "مسموح" else "موثق فقط") + " · قُرئ قبل التحقق ${bytes(t.earlyBytes)}" + if (t.earlyFailures > 0) " · فشل تحقق ${t.earlyFailures}" else "")
-            appendLine("  التسخين: " + when { t.warmedAt <= 0 -> "لا"; t.warmedAt <= input.openAt -> "جاهز قبل الفتح بـ${t.warmedPieces} قطعة"; else -> "اكتمل بعد الفتح" } +
-                " · القطعة ${bytes(t.pieceBytes.toLong())} · الملف ${bytes(t.fileBytes)} · مشاركون الآن ${t.peers}")
+            // «جاهز قبل الفتح بـ0 قطعة» كان لحظة الجدولة وعدد المستهدف: Metadata والقطع المكتملة والكتل الجزئية وإشارة
+            // الجاهزية أشياء مختلفة، وما احتاجه المشغّل فعلًا في «انتظار القطع»
+            appendLine("  التسخين: " + when { t.warmedAt <= 0 -> "لا"; t.warmedAt <= input.openAt -> "جُدول قبل الفتح بـ${s(input.openAt - t.warmedAt)} · مستهدف ${t.warmedPieces} قطعة"; else -> "جُدول بعد الفتح" } +
+                (if (t.warmedAt > 0) " · إشارة الجاهزية (بداية الملف على القرص): " + when { t.warmReadyAt <= 0 -> "لم تُرَ"; t.warmReadyAt <= input.openAt -> "قبل الفتح بـ${s(input.openAt - t.warmReadyAt)}"; else -> "بعد الفتح" } else "") +
+                " · Metadata " + (if (t.metadataAt in 1..input.openAt) "جاهزة قبل الفتح" else if (t.metadataAt > 0) "بعد الفتح" else "لم تكتمل"))
+            appendLine("  القطعة ${bytes(t.pieceBytes.toLong())} · الملف ${bytes(t.fileBytes)} · مشاركون الآن ${t.peers}" +
+                (if (t.clusterAt > 0) " · أول Cluster عند ${bytes(t.clusterAt)}" else "") + (if (t.cuesAt >= 0) " · Cues عند ${bytes(t.cuesAt)}" else ""))
         }
         appendLine()
         appendLine("[سلامة الأدلة]")
         for (x in a.integrity) appendLine("  $x")
         appendLine()
-        append("[الحكم] ").append(if (b != null) "${CONFIDENCE_AR[a.verdict]}: ${b.ar} بسبب ${b.cause!!.ar}" else "غير معروف")
+        append("[الحكم] ").append(if (b != null) "${CONFIDENCE_AR[a.verdict]}: ${b.ar} — ${b.cause!!.ar}" + (if (b.cause!!.hypothesis != null) " · السبب غير مثبت" else "") else "غير معروف")
     }
 }

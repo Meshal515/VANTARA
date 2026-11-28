@@ -85,6 +85,8 @@ data class TorrentStats(
     val pieceBytes: Int = 0, val metadataAt: Long = 0L, val waitingPiece: Int = -1, val waitingSince: Long = 0L,
     val mkvHead: String? = null, val mkvSkipped: Long = 0L,
     val warmedAt: Long = 0L, val warmedPieces: Int = 0, val swaps: Int = 0,
+    /** أول رؤية لإشارة جاهزية التسخين، والقطع المستهدفة، وحدود رأس MKV (بداية أول Cluster وموضع Cues). */
+    val warmReadyAt: Long = 0L, val warmTargets: List<Int> = emptyList(), val mkvClusterAt: Long = -1L, val mkvCuesAt: Long = -1L,
     /** خط البدء: أول مشارك متصل وأول بيانات من الشبكة (elapsedRealtime، 0 = لم يحدث). */
     val firstPeerAt: Long = 0L, val firstPayloadAt: Long = 0L,
     /** تقرير الذهب: إضافة التورنت للجلسة، وMetadata من ملف محفوظ، وأول مشارك معروف (elapsedRealtime، 0 = لم يحدث). */

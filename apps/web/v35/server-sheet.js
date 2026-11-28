@@ -152,6 +152,17 @@ export function warmRows(rows) {
 
 /** آخر صف تورنت لُمس: يُنسب إليه زمن بدء المشغّل الأصلي حين يصل (playstat). */
 let lastPick = null;
+/** زمن الحدث بساعة Date.now (timeStamp نسبي لبداية الصفحة)، أو الآن إن لم يُعرف. */
+export function tapTime(e, perf = globalThis.performance, now = Date.now()) {
+  const origin = perf?.timeOrigin;
+  const stamp = e?.timeStamp;
+  if (Number.isFinite(origin) && Number.isFinite(stamp) && stamp > 0) {
+    const at = Math.round(origin + stamp);
+    // ساعة الحدث من مصدر آخر (بعض WebView تعطيه من الإقلاع): لا يُقبل ما يتجاوز الآن أو أقدم من دقيقة
+    if (at <= now && now - at < 60_000) return at;
+  }
+  return now;
+}
 /**
  * زمن البدء الحقيقي من المشغّل الأصلي (`playstat` بمرحلة server): أول إطار، أو تعذّر/انقطاع.
  * يُنسب لصفات آخر تورنت لُمس في العشر دقائق الأخيرة فقط.
@@ -591,12 +602,13 @@ export function createServerSheet(body, o) {
   const wanted = { q: 'all', v: null, a: 'all' };
   // ما لمسه المستخدم: صفّه يقول «يبدأ…» حتى يفتح المشغّل
   let picked = null;
-  const pick = (r) => {
+  // tapAt: ضغطة المستخدم الحقيقية (ساعة الحدث لا لحظة فتح المصدر): تقرير الذهب يقيس منها ما قبل المشغّل
+  const pick = (r, e) => {
     if (destroyed) return;
     picked = r.id;
     const d = view(r);
     lastPick = d.torrent ? { features: startFeatures(d), at: Date.now() } : null;
-    return o.onPick(r);
+    return o.onPick(r, { tapAt: tapTime(e) });
   };
   const rows = new Map();
   const views = new Map();
@@ -822,11 +834,11 @@ export function createServerSheet(body, o) {
     // الصف لا يُعاد بناؤه إن لم يتغير ما يُرسم منه (كان كل update يعيد DOM كل صف، ومنها مئات المطوية في «نسخ إضافية»:
     // خُمس كلفة التحديث). البصمة: وصف السيرفر (مفتاح view نفسه) وحالته وما يغيّر سطره وطرفه. اللمس يُربط دائمًا بالحالة الحالية
     const sig = `${views.get(r.id)?.key}|${pending}|${selectable}|${top}|${starting}|${icon ?? ''}|${isTryable(r)}|${r.reason ?? ''}|${r.probeMs ?? ''}|${warm}|${warming}`;
-    b.onclick = () => {
+    b.onclick = (e) => {
       if (Date.now() - shiftedAt < TAP_GUARD_MS) return;
       const target = routeById(id);
       if (!target) return;
-      return isSelectable(target) || isTryable(target) ? pick(target) : o.onUnavailable?.(target);
+      return isSelectable(target) || isTryable(target) ? pick(target, e) : o.onUnavailable?.(target);
     };
     if (b.dataset.sig === sig) return b;
     b.dataset.sig = sig;
@@ -1353,9 +1365,9 @@ export function createServerSheet(body, o) {
         small.append(el('bdi', null, part));
       });
     }
-    best.onclick = () => {
+    best.onclick = (e) => {
       const target = top && routeById(top.id);
-      if (!best.disabled && target && isSelectable(target)) pick(target);
+      if (!best.disabled && target && isSelectable(target)) pick(target, e);
     };
   }
 

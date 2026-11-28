@@ -84,9 +84,9 @@ class AnimeEnginePlugin : Plugin() {
 
     /** ما أرسله المشغّل ولم يصل للمجلس بعد (لحظات وترشيحات). يُفرَّغ بالسحب. */
     @PluginMethod
-    fun outbox(call: PluginCall) {
+    fun outbox(call: PluginCall) = offBridge(call) {
         val userId = call.getString("userId")?.takeIf { it.isNotBlank() }
-            ?: return call.reject("userId مطلوب")
+            ?: return@offBridge call.reject("userId مطلوب")
         call.resolve(JSObject().put("items", JSArray(com.vantara.anime.player.Outbox.drain(context, userId).toString())))
     }
 
@@ -98,6 +98,10 @@ class AnimeEnginePlugin : Plugin() {
     fun play(call: PluginCall) {
         val session = call.getString("session") ?: return call.reject("session مطلوب")
         if (engine.session(session) == null) return call.reject("الجلسة انتهت، افتحها من جديد")
+        // علامات الضغطة من الواجهة (Date.now) إلى ساعة المشغّل (elapsedRealtime) هنا، حيث الساعتان معًا. للتشخيص وحده
+        val nowEpoch = System.currentTimeMillis()
+        val nowRealtime = android.os.SystemClock.elapsedRealtime()
+        fun realtime(key: String): Long = call.getDouble(key)?.toLong()?.takeIf { it in (nowEpoch - 600_000)..nowEpoch }?.let { nowRealtime - (nowEpoch - it) } ?: 0L
         val intent = com.vantara.anime.player.PlayerActivity.intent(
             context,
             com.vantara.anime.player.PlayerActivity.Launch(
@@ -133,6 +137,9 @@ class AnimeEnginePlugin : Plugin() {
                 clipStartMs = (call.getDouble("clipStart") ?: -1.0).toLong(),
                 clipEndMs = (call.getDouble("clipEnd") ?: -1.0).toLong(),
                 together = call.getObject("together")?.toString(),
+                tappedAt = realtime("tapAt"),
+                pickedAt = realtime("pickedAt"),
+                uiOpenAt = realtime("uiOpenAt"),
             ),
         )
         activity.startActivity(intent)
@@ -819,8 +826,9 @@ class AnimeEnginePlugin : Plugin() {
         })
     }
 
+    /** إطلاق التورنت وحفظ الصحة على القرص خارج خيط Capacitor المشترك: لا يؤخر `pick`/`play` خلفه. */
     @PluginMethod
-    fun closeSession(call: PluginCall) {
+    fun closeSession(call: PluginCall) = offBridge(call) {
         engine.closeSession(call.getString("session") ?: "")
         call.resolve()
     }

@@ -2659,20 +2659,24 @@ export function createAnime(deps) {
       // انتهى التجهيز بلا أي سيرفر جاهز: الزر يعيد المحاولة بدل أن يبقى معطّلًا
       const exhausted = () => sheet.done && !sheet.routes.some(isValid);
 
-      const playRoute = async (r) => {
+      const playRoute = async (r, meta) => {
         if (sheet.closed || sheet.busy) return;
         sheet.touched = true;
         sheet.busy = true;
         paint();
+        // من الضغطة نفسها: الحضور يبدأ مع pick لا بعده (كان كل انتظار يتلو الآخر قبل فتح المشغّل)
+        const marks = { tapAt: meta?.tapAt ?? Date.now() };
+        const presence = Promise.resolve().then(() => deps.playerPresence?.()).catch(() => null);
         try {
           const candidate = await wait(engine.pick(sheet.session, r.id), controller.signal, 15000);
+          marks.pickedAt = Date.now();
           if (sheet.closed) return;
           if (!candidate) {
             toast('هذا السيرفر لم يعد متاحًا — جرّب غيره');
             return;
           }
           rememberCode(m.id, r.code);
-          await launch(candidate, r.code);
+          await launch(candidate, r.code, { marks, presence });
         } catch (e) {
           if (!sheet.closed || sheet.launched) toast(`تعذّر التشغيل: ${e?.message ?? e}`);
         } finally {
@@ -2706,6 +2710,8 @@ export function createAnime(deps) {
       const totalMs = Number(saved.duration) > 0 ? Number(saved.duration) : Number(m.duration) > 0 ? Number(m.duration) * 60000 : 0;
       const tops = engine.topWarmer((facts) => { sheet.facts = facts; queuePaint(); }, { at: clip ? 0 : engine.resumeFraction(startAt, totalMs) });
       off.push(() => tops.stop());
+      // ما يحتاجه فتح المشغّل يُجهَّز الآن لا عند الضغطة: ربط IMDb (شبكة في أول مرة) والإضافات ووحدتا اللون
+      try { engine.warmOpen?.(animeAddonIdentity(m, n)); } catch { /* تحسين لا شرط */ }
       const ui = createServerSheet(body, {
         el,
         kicker: unitLabel(m, n),
@@ -2719,7 +2725,7 @@ export function createAnime(deps) {
         sourceName: (r) => sourceName(r.sourceId),
         sourceIcon: (r) => SOURCE_ICONS[r.sourceId] ?? null,
         onBack: () => deps.closeSheet(),
-        onPick: (r) => playRoute(r),
+        onPick: (r, meta) => playRoute(r, meta),
         onBest: () => playBest(),
         onTop: (r) => { if (sheet.session && !sheet.closed) tops.top(sheet.session, r.id); },
         onWarmRows: (ids) => { if (sheet.session && !sheet.closed) tops.rows(sheet.session, ids); },
@@ -2978,7 +2984,7 @@ export function createAnime(deps) {
       };
     }, { tone: 'anime', full: true });
 
-    async function launch(candidate, code) {
+    async function launch(candidate, code, { marks = null, presence: early = null } = {}) {
       sheet.launched = true;
       const session = sheet.session;
       deps.closeSheet();
@@ -2990,8 +2996,9 @@ export function createAnime(deps) {
       watchClock.at = null;
       state.playing = { session, m, n, userId: currentUser() };
       deps.setWatching?.({ ref: `anime:${m.id}`, title: m.title, episode: n });
-      const presence = await deps.playerPresence?.();
+      const presence = await (early ?? deps.playerPresence?.());
       await engine.open({
+        marks,
         session,
         candidate,
         prefer: code ?? prefer,

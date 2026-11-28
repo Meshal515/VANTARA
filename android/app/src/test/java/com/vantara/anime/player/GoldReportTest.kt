@@ -33,14 +33,15 @@ class GoldReportTest {
         assertEquals("STRONGLY_SUPPORTED", a.bottleneck!!.cause!!.confidence)
         assertTrue(a.bottleneck!!.cause!!.where!!.contains("NativeReadHint.kt"))
         val text = GoldReport.text(input)
-        assertTrue(text, text.contains("قراءة من ذيل الملف (الفهرس) (2.00GB): 1.0MB في 4200ms"))
-        assertTrue(text, text.contains("أول بايت بعد 4100ms · منها 4200ms في هذه المرحلة"))
-        assertTrue(text, text.contains("القطعة 255 (ذيل الملف): 4000ms"))
-        assertTrue(text, text.contains("تقسيم الانتظار الطويل بعيّنات دورية"))
+        // بلا موضع Cues من SeekHead: مكان القراءة فقط («ذيل الملف»)، لا «الفهرس» بلا دليل
+        assertTrue(text, text.contains("قراءة من ذيل الملف (من 2.00GB): 4200ms في هذه المرحلة · أول بايت بعد 4100ms · مجموعها حتى لحظة التقرير 1.0MB في 4200ms"))
+        assertTrue(text, text.contains("القطعة 255 (ذيل الملف): 4000ms في هذه المرحلة"))
+        assertTrue(text, text.contains("حالة القطعة أثناء الانتظار الطويل"))
+        assertTrue(text, text.contains("السبب المحتمل (غير مثبت):"))
         assertTrue(text, text.contains("تخطّى بلا تنزيل 614KB"))
         assertTrue(text, text.contains("المجموع (حتى أول صورة معروضة): 6.00 ث"))
         assertTrue(text, text.contains("أول صورة معروضة: مقاسة (onRenderedFirstFrame)"))
-        assertTrue(text, text.contains("[الحكم] مدعوم بقوة: قراءة الحاوية"))
+        assertTrue(text, text.contains("[الحكم] مدعوم بقوة: قراءة الحاوية (المسارات معروفة) — انتظار كتلة القراءة في قطعة بدأ تنزيلها · السبب غير مثبت"))
     }
 
     @Test fun `Metadata باردة 9 ث - اكتشاف أول مشارك أغلبها - مؤكد بمكان القرار`() {
@@ -114,8 +115,10 @@ class GoldReportTest {
             tracksAt = 16_850, readyAt = 18_860, frameAt = 18_100,
             torrent = GoldReport.Torrent(firstPeerAt = 9_000, metadataAt = 10_890, firstPayloadAt = 11_100, fileBytes = 295_000_000L, pieceBytes = 2 * MB.toInt(),
                 waits = listOf(wait(12575, 1_147, 12_090, engine = 9, blocks = 128, early = true)), peers = 41, downloadBps = 27_600_000L / 8,
-                turbo = true, earlyBytes = 5_200_000L, hintsSent = 98, mkvSkipped = 1_228_800L, patched = true, criticalPieces = 2),
-            now = 19_000,
+                turbo = true, earlyBytes = 5_200_000L, hintsSent = 98, mkvSkipped = 1_228_800L, patched = true, criticalPieces = 2,
+                // SeekHead أعلن Cues داخل طلب الذيل، وأول Cluster بعد الرأس
+                clusterAt = 640 * 1024L, cuesAt = 293_600_000L),
+            now = 19_000, container = "video/x-matroska",
         )
         val a = GoldReport.analyze(input)
         val b = a.bottleneck!!
@@ -127,7 +130,8 @@ class GoldReportTest {
         // أول صورة قبل READY: المسار بترتيب الوقوع
         assertEquals(listOf("source", "metadata", "first-byte", "container", "rendered", "ready"), a.phases.map { it.id })
         val text = GoldReport.text(input)
-        assertTrue(text, text.contains("قراءة من ذيل الملف (الفهرس) (279.9MB): 1.6MB في 4200ms بمعدل 0.38MB/ث"))
+        assertTrue(text, text.contains("قراءة فهرس Cues (موضعه من SeekHead) (من 279.9MB): 4200ms في هذه المرحلة"))
+        assertTrue(text, text.contains("Media3 MatroskaExtractor"))
         assertTrue(text, text.contains("التحميل الآن 3.29MB/ث"))
         assertTrue(text, text.contains("من الضغط حتى أول صورة معروضة: 8.33 ث · حتى التشغيل (READY): 9.09 ث"))
     }
@@ -146,5 +150,96 @@ class GoldReportTest {
         assertEquals(200L, rendered.ms)
         assertEquals("ready", a.phases.last().id)
     }
-}
 
+    // ───── عيوب تقرير الذهب من اختبارات المالك الإحدى عشرة (Debug 3492، S23 Ultra، بيانات الهاتف) ─────
+
+    @Test fun `CloudStream MP4 عبر HTTP - لا Matroska ولا تورنت، والقراءة المتصلة من البداية محتملة لا مؤكدة`() {
+        // التقرير 1: فتح بعد 1.3 ث، قراءة واحدة من البداية 48.6MB جارية حتى 7.8 ث، المسارات +2.9، صورة +3.2، جاهز +3.3
+        val input = GoldReport.Input(
+            tapAt = 0, intentAt = 9_800, openAt = 10_000,
+            reads = listOf(GoldReport.Read(10_000, 11_330, 11_355, 0, 48_600_000L, 0L)),
+            tracksAt = 12_920, frameAt = 13_190, readyAt = 13_330, now = 17_800, container = "video/mp4",
+        )
+        val a = GoldReport.analyze(input)
+        val b = a.bottleneck!!
+        assertEquals("container", b.id)
+        assertEquals("WAIT_START_READ", b.cause!!.code)
+        assertEquals("POSSIBLE", b.cause!!.confidence)
+        assertTrue(b.cause!!.where!!, b.cause!!.where!!.contains("Mp4Extractor"))
+        assertFalse(b.cause!!.where!!, b.cause!!.where!!.contains("Matroska"))
+        assertFalse(b.cause!!.where!!, b.cause!!.where!!.contains("Torrent"))
+        assertTrue(a.integrity.any { it.startsWith("لا تورنت") })
+        // أول بايت عبر HTTP: فتح الاتصال بالخادم مقاس، لا «غير معروف»
+        val first = a.phases.first { it.id == "first-byte" }
+        assertEquals("HTTP_CONNECT", first.cause!!.code)
+        val text = GoldReport.text(input)
+        assertTrue(text, text.contains("(يشمل ما بعد البدء)"))
+        assertTrue(text, text.contains("[المسار الحرج من نية فتح المشغّل · الضغطة لم تُقس]"))
+        assertFalse(text, text.contains("TorrentDataSource"))
+    }
+
+    @Test fun `انتظارات تشغيل سابق للتورنت نفسه لا تدخل هذه الجلسة`() {
+        // التقريران 3 و4: قائمة القطعة 6 نفسها في «بلا كاش» و«مع كاش» — السجل لكل تورنت لا لكل تشغيل
+        val old = listOf(wait(6, 1_100, 4_000, engine = 0, blocks = 64), wait(7, 600, 5_000, engine = 57, blocks = 64))
+        val mine = wait(75, 130, 10_200, engine = 41, blocks = 64)
+        val input = GoldReport.Input(tapAt = 9_910, openAt = 10_000, reads = listOf(read(10_010, 10_020, 0, 6 * MB, endAt = 10_030)),
+            tracksAt = 10_090, frameAt = 10_220, readyAt = 10_290,
+            torrent = GoldReport.Torrent(metadataAt = 2_000, fileBytes = 1_340 * MB, pieceBytes = MB.toInt(), waits = old + mine), now = 11_000)
+        val a = GoldReport.analyze(input)
+        assertTrue(a.integrity.toString(), a.integrity.any { it.startsWith("استُبعد 2 انتظارًا من تشغيل سابق") })
+        assertTrue(a.phases.flatMap { it.evidence }.none { it.startsWith("القطعة 6:") || it.startsWith("القطعة 7:") })
+        assertEquals(listOf(mine), GoldReport.sessionWaits(old + mine, 10_000))
+    }
+
+    @Test fun `الانتظار الواحد في مرحلتين - كل مرحلة بنصيبها لا بالانتظار كله`() {
+        // التقرير 7 (أنمي 518MB): انتظار القطعة 1 مدته 437ms ظهر كاملًا داخل مرحلة 170ms وأخرى 130ms
+        val input = GoldReport.Input(tapAt = 9_890, openAt = 10_000, reads = listOf(read(10_000, 10_014, 0, 27 * MB, endAt = 0L)),
+            tracksAt = 10_190, frameAt = 10_360, readyAt = 10_490,
+            torrent = GoldReport.Torrent(metadataAt = 5_000, fileBytes = 518 * MB, pieceBytes = MB.toInt(), waits = listOf(wait(1, 437, 10_490, engine = 0, blocks = 64))), now = 18_300)
+        val a = GoldReport.analyze(input)
+        val rendered = a.phases.first { it.id == "rendered" }
+        assertTrue(rendered.evidence.toString(), rendered.evidence.any { it.startsWith("القطعة 1: 170ms في هذه المرحلة من انتظار 437ms") })
+        val ready = a.phases.first { it.id == "ready" }
+        assertTrue(ready.evidence.toString(), ready.evidence.any { it.startsWith("القطعة 1: 130ms في هذه المرحلة من انتظار 437ms") })
+        // «لم تبدأ» حقيقة اللقطة الأولى؛ لماذا (لم تُطلب/لم يرد المشارك) غير مثبت
+        assertTrue(rendered.cause!!.hypothesis!!.contains("لم تُطلب بعد"))
+    }
+
+    @Test fun `التسخين المجدول ليس جاهزًا - 95GB بصفر قطع مستهدفة وبلا إشارة جاهزية`() {
+        // التقرير 6: «التسخين: جاهز قبل الفتح بـ0 قطعة» ثم انتظر أول بايت 12 ث. warmedAt لحظة الجدولة لا الجاهزية
+        val input = GoldReport.Input(tapAt = 9_940, openAt = 10_000, reads = listOf(read(10_000, 22_030, 0, 537 * 1024L, endAt = 22_740)),
+            tracksAt = 32_900, frameAt = 37_850, readyAt = 42_150,
+            torrent = GoldReport.Torrent(metadataAt = 1_000, warmedAt = 4_900, warmedPieces = 0, fileBytes = 95_630 * MB, pieceBytes = 16 * MB.toInt(),
+                waits = listOf(wait(0, 12_019, 22_020, engine = 0, blocks = 1024, early = true)), clusterAt = 537 * 1024L), now = 48_000)
+        val text = GoldReport.text(input)
+        assertFalse(text, text.contains("جاهز قبل الفتح بـ0 قطعة"))
+        assertTrue(text, text.contains("جُدول قبل الفتح بـ5.10 ث · مستهدف 0 قطعة · إشارة الجاهزية (بداية الملف على القرص): لم تُرَ · Metadata جاهزة قبل الفتح"))
+        val b = GoldReport.analyze(input).bottleneck!!
+        assertEquals("first-byte", b.id)
+        // انتظار 12 ث من لقطة أولى: لا «مؤكد»
+        assertEquals("STRONGLY_SUPPORTED", b.cause!!.confidence)
+    }
+
+    @Test fun `من الضغطة الحقيقية - pick ونداء play ونية المشغّل مراحل مقاسة قبل فتح المصدر`() {
+        val input = GoldReport.Input(tapAt = 5_000, pickedAt = 7_400, uiOpenAt = 7_450, intentAt = 7_480, openAt = 7_560,
+            reads = listOf(read(7_600, 7_700, 0)), tracksAt = 7_800, frameAt = 7_900, readyAt = 8_000, now = 9_000, container = "video/mp4")
+        val a = GoldReport.analyze(input)
+        assertEquals(listOf("pick", "ui-open", "bridge", "source"), a.phases.take(4).map { it.id })
+        assertEquals(2_400L, a.phases.first().ms)
+        assertEquals("pick", a.bottleneck!!.id)
+        assertEquals("UI_PICK", a.bottleneck!!.cause!!.code)
+        assertEquals(5_000L, a.origin)
+        assertTrue(GoldReport.text(input).contains("[المسار الحرج من الضغطة]"))
+    }
+
+    @Test fun `ذيل الملف بلا موضع Cues - المكان مقاس ونوع البيانات محتمل`() {
+        val a = GoldReport.analyze(GoldReport.Input(tapAt = 9_900, openAt = 10_000,
+            reads = listOf(read(10_000, 10_100, 0, 9 * 1024L, endAt = 10_200), read(10_300, 10_400, 33 * GB, 329 * 1024L, endAt = 11_500)),
+            tracksAt = 11_600, frameAt = 11_700, readyAt = 11_800,
+            torrent = GoldReport.Torrent(metadataAt = 9_000, fileBytes = 33 * GB + MB, pieceBytes = 8 * MB.toInt(), clusterAt = 8 * 1024L), now = 12_000, container = "video/x-matroska"))
+        val c = a.phases.first { it.id == "container" }.cause!!
+        assertEquals("WAIT_TAIL_READ", c.code)
+        assertEquals("POSSIBLE", c.confidence)
+        assertTrue(c.hypothesis!!.contains("Cues"))
+    }
+}

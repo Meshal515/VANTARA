@@ -71,9 +71,9 @@ it('recommends the fast direct Arabic server, then plays exactly what it shows',
   // ما تعذّر قبل أن يظهر مطويّ في الأسفل
   expect(body.querySelector('.ss-dead summary').textContent).toContain('1');
   body.querySelector('.an-pick-best').onclick();
-  expect(onPick).toHaveBeenCalledWith(routes[2]);
+  expect(onPick).toHaveBeenCalledWith(routes[2], { tapAt: expect.any(Number) });
   top[0].onclick();
-  expect(onPick).toHaveBeenLastCalledWith(routes[2]);
+  expect(onPick).toHaveBeenLastCalledWith(routes[2], { tapAt: expect.any(Number) });
 });
 
 const dom = () => {
@@ -170,7 +170,7 @@ it('filters by quality and source as two side-by-side menus, and language as two
   // المقترح والزر يتبعان المرشّح
   expect(body.querySelector('.ss-row--top .ss-name').textContent).toBe('Comet');
   body.querySelector('.an-pick-best').onclick();
-  expect(onPick).toHaveBeenLastCalledWith(routes[3]);
+  expect(onPick).toHaveBeenLastCalledWith(routes[3], { tapAt: expect.any(Number) });
   choose(body, 'all');
   [...body.querySelectorAll('.ss-tab')].find((b) => b.textContent === 'مدبلج').onclick();
   expect([...body.querySelectorAll('.ss-row')].map((b) => b.querySelector('.ss-host').textContent)).toEqual(['Mp4Upload']);
@@ -287,7 +287,7 @@ it('CloudStream sources that arrive after torrents join quietly below them (no j
   dropBtn(body, 1).onclick({ stopPropagation() {} });
   // No user filter interaction needed: all 3 are visible, directly selectable.
   body.querySelector('.ss-group--direct .ss-row').onclick();
-  expect(onPick).toHaveBeenCalledWith(rift);
+  expect(onPick).toHaveBeenCalledWith(rift, { tapAt: expect.any(Number) });
   choose(body, 'Anime4up');
   expect([...body.querySelectorAll('.ss-row')].map(r => r.querySelector('.ss-name').textContent)).toEqual(['Anime4up']);
   choose(body, 'all');
@@ -358,7 +358,7 @@ it('keeps existing direct rows under the finger and applies the latest ranking w
     ui.update({ routes: [first, second, { ...pending, state: 'UNAVAILABLE' }, best] });
     expect(rows()).toEqual(before);
     before[0].onclick();
-    expect(onPick).toHaveBeenCalledWith(first);
+    expect(onPick).toHaveBeenCalledWith(first, { tapAt: expect.any(Number) });
     ui.scroll.dispatchEvent(new document.defaultView.Event('touchend'));
     vi.advanceTimersByTime(181);
     expect(rows().slice(1)).toEqual(before);
@@ -713,4 +713,15 @@ it('ranks late stronger torrents after a touch gesture, independent of language 
     expect(displayed()).toEqual([381, 379, 258, 19, 1]);
     ui.destroy();
   } finally { vi.useRealTimers(); }
+});
+
+// تقرير الذهب يقيس من الضغطة الحقيقية: ساعة الحدث (timeOrigin + timeStamp)، لا لحظة فتح المصدر
+it('tapTime returns the event clock and rejects foreign or future stamps', async () => {
+  const { tapTime } = await import('./server-sheet.js');
+  const perf = { timeOrigin: 1_000_000 };
+  expect(tapTime({ timeStamp: 2_500 }, perf, 1_003_000)).toBe(1_002_500);
+  // ساعة حدث بعد الآن أو أقدم من دقيقة: الآن
+  expect(tapTime({ timeStamp: 9_000 }, perf, 1_003_000)).toBe(1_003_000);
+  expect(tapTime({ timeStamp: 1 }, perf, 1_100_000)).toBe(1_100_000);
+  expect(tapTime(null, perf, 42)).toBe(42);
 });

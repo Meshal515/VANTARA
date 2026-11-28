@@ -339,6 +339,29 @@ describe('Glass في المشغّل الأصلي', () => {
   });
 });
 
+describe('من الضغطة إلى المشغّل', () => {
+  afterEach(() => { delete globalThis.Capacitor; delete globalThis.document; });
+  it('يمرّر علامات الضغطة الحقيقية ورجوع pick ونداء play، ولا يمرّر marks نفسها', async () => {
+    const sent = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { play: async (a) => { sent.push(a); return {}; } } } };
+    globalThis.document = { documentElement: { dataset: {} } };
+    const before = Date.now();
+    await engine.open({ session: 's1', title: 'x', section: 'cinema', marks: { tapAt: before - 900, pickedAt: before - 100 } });
+    expect(sent[0].tapAt).toBe(before - 900);
+    expect(sent[0].pickedAt).toBe(before - 100);
+    expect(sent[0].uiOpenAt).toBeGreaterThanOrEqual(before);
+    expect(sent[0].marks).toBeUndefined();
+  });
+  it('بلا ضغطة (شغّل الأفضل): لا علامات مختلقة', async () => {
+    const sent = [];
+    globalThis.Capacitor = { Plugins: { AnimeEngine: { play: async (a) => { sent.push(a); return {}; } } } };
+    globalThis.document = { documentElement: { dataset: {} } };
+    await engine.open({ session: 's1', title: 'x', section: 'anime' });
+    expect(sent[0].tapAt).toBeUndefined();
+    expect(sent[0].uiOpenAt).toBeUndefined();
+  });
+});
+
 describe('watchFacts', () => {
   afterEach(() => vi.useRealTimers());
   it('يقرأ حقائق المحرك حتى ينتهي الامتداد، ويُبلغ عند التغير فقط، ويتوقف نهائيًا', async () => {

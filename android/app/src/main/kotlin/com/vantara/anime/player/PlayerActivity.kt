@@ -147,6 +147,10 @@ class PlayerActivity : Activity() {
         val clipEndMs: Long = -1,
         /** VANTARA Together (JSON: TogetherLaunch): المشغّل داخل غرفة مع الأصدقاء. */
         val together: String? = null,
+        /** تقرير الذهب: ضغطة السيرفر الحقيقية ورجوع pick ونداء play من الواجهة (elapsedRealtime؛ 0 = لم تُقس). */
+        val tappedAt: Long = 0L,
+        val pickedAt: Long = 0L,
+        val uiOpenAt: Long = 0L,
     ) {
         /** مرجع العمل في المرآة: `anime:<AniList>` أو `cinema:<IMDb>`. */
         fun ref() = "$section:$animeId"
@@ -625,6 +629,12 @@ class PlayerActivity : Activity() {
 
         launch = runCatching { json.decodeFromString(Launch.serializer(), intent.getStringExtra(EXTRA_LAUNCH).orEmpty()) }
             .getOrElse { Launch(session = intent.getStringExtra(EXTRA_SESSION).orEmpty(), title = "") }
+        // ما قبل نية المشغّل (الضغطة وpick ونداء play): لا تُقبل علامة بعد النية أو بترتيب معكوس
+        diag.launchedAt.takeIf { it > 0 }?.let { at ->
+            diag.tappedAt = launch.tappedAt.takeIf { it in 1..at } ?: 0L
+            diag.pickedAt = launch.pickedAt.takeIf { diag.tappedAt > 0 && it in diag.tappedAt..at } ?: 0L
+            diag.uiOpenAt = launch.uiOpenAt.takeIf { diag.tappedAt > 0 && it in maxOf(diag.tappedAt, diag.pickedAt)..at } ?: 0L
+        }
         Tone.use(launch.section, launch.accent)
         Glass.use(launch.material)
         sessionId = launch.session
@@ -2482,7 +2492,8 @@ class PlayerActivity : Activity() {
             PlaybackDiagnostics.TorrentFacts(it.peers, it.seeds, it.downloadBytesPerSecond, it.fileBytes, it.pieceBytes, it.metadataAt, it.firstPieceAt, it.waitingPiece, it.waitingSince, blocks, it.mkvHead, it.mkvSkipped, it.warmedAt, it.warmedPieces, it.swaps, it.firstPeerAt, it.firstPayloadAt,
                 turbo = it.turbo, earlyBytes = it.earlyBytes, earlyFailures = it.earlyFailures,
                 hintsSent = it.hintsSent, hintsFailed = it.hintsFailed, waits = it.waits,
-                addedAt = it.addedAt, metadataCached = it.metadataCached, firstKnownAt = it.firstKnownAt)
+                addedAt = it.addedAt, metadataCached = it.metadataCached, firstKnownAt = it.firstKnownAt,
+                warmReadyAt = it.warmReadyAt, warmTargets = it.warmTargets, mkvClusterAt = it.mkvClusterAt, mkvCuesAt = it.mkvCuesAt)
         }
         val f = player.videoFormat
         val groups = player.currentTracks.groups

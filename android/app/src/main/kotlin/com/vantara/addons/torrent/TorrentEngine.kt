@@ -506,6 +506,8 @@ class TorrentEngine internal constructor(
             metadataAt = state?.metadataAt ?: 0L, waitingPiece = state?.waitingPiece ?: -1, waitingSince = state?.waitingSince ?: 0L,
             mkvHead = state?.head?.describe(), mkvSkipped = state?.head?.skippedBytes ?: 0L,
             warmedAt = state?.warmedAt ?: 0L, warmedPieces = state?.warmedPieces ?: 0, swaps = state?.swaps ?: 0,
+            warmReadyAt = state?.warmReadyAt ?: 0L, warmTargets = state?.warmTargets ?: emptyList(),
+            mkvClusterAt = state?.head?.clusterAt ?: -1L, mkvCuesAt = state?.head?.cuesAt ?: -1L,
             firstPeerAt = state?.firstPeerAt ?: 0L, firstPayloadAt = state?.firstPayloadAt ?: 0L,
             addedAt = state?.addedAt ?: 0L, metadataCached = state?.metadataCached ?: false, firstKnownAt = state?.firstKnownAt ?: 0L,
             turbo = turboAllowed(hash), earlyBytes = state?.earlyBytes ?: 0L, earlyFailures = state?.earlyFailures ?: 0,
@@ -942,7 +944,7 @@ class TorrentEngine internal constructor(
                 NativeReadHint.set(current, WARM_READER, head, warmHeadOffset)
             }
             for (piece in pieces.drop(1)) current.piecePriority(piece, Priority.FIVE)
-            warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size
+            warmedAt = android.os.SystemClock.elapsedRealtime(); warmedPieces = pieces.size; warmTargets = pieces.take(8); warmReadyAt = 0L
             current.unsetFlags(TorrentFlags.STOP_WHEN_READY)
             current.resume()
         }
@@ -955,11 +957,18 @@ class TorrentEngine internal constructor(
          */
         fun warmReady(handle: TorrentHandle): Boolean = synchronized(monitor) {
             val head = warmHead.takeIf { it >= 0 } ?: return@synchronized false
-            if (runCatching { handle.havePiece(head) }.getOrDefault(false)) return@synchronized true
-            val size = pieceSizeOf(head).takeIf { it > warmHeadOffset } ?: return@synchronized false
-            val need = minOf(WARM_READY_BYTES, size - warmHeadOffset)
-            TurboRead.writtenSpan(written[head], warmHeadOffset, need, size) >= need
+            val ready = runCatching { handle.havePiece(head) }.getOrDefault(false) || run {
+                val size = pieceSizeOf(head).takeIf { it > warmHeadOffset } ?: return@synchronized false
+                val need = minOf(WARM_READY_BYTES, size - warmHeadOffset)
+                TurboRead.writtenSpan(written[head], warmHeadOffset, need, size) >= need
+            }
+            // للتشخيص فقط: أول مرة رأت فيها الورقة الإشارة (تسألها كل 1.5 ث)؛ لا يغيّر القرار
+            if (ready && warmReadyAt == 0L) warmReadyAt = android.os.SystemClock.elapsedRealtime()
+            ready
         }
+        /** تقرير الذهب: أول لحظة رُئيت فيها إشارة [warmReady] (دقة سؤال الورقة)، 0 = لم تُرَ. والقطع التي استهدفها التسخين. */
+        @Volatile var warmReadyAt = 0L; private set
+        @Volatile var warmTargets: List<Int> = emptyList(); private set
         fun handle(cancelled: () -> Boolean, request: TorrentRequest): TorrentHandle {
             synchronized(monitor) {
                 if (hash in permanentActive || states[hash] !== this) throw IOException("TORRENT_BUSY")

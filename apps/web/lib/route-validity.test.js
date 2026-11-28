@@ -42,7 +42,7 @@ it('الورقة: «قيد الفحص» الجاهز يُلمس فيُجرَّب
   expect(row.disabled).toBe(false);
   expect(row.textContent).toContain('قيد الفحص');
   row.onclick();
-  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 'u' }));
+  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ id: 'u' }), { tapAt: expect.any(Number) });
 });
 
 it('native CloudStream video readiness follows HTTP probes not torrent seeder counts', () => {

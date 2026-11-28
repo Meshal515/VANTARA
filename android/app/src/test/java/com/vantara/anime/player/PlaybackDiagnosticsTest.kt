@@ -30,7 +30,13 @@ class PlaybackDiagnosticsTest {
             firstPeerAt = 1_000_000L - 29_000, firstPayloadAt = 1_000_000L + 700,
         )
         val report = diag.report(warm, player(), clock)
-        assertTrue(report, report.contains("من الضغط حتى فتح المصدر: 1.5 ث · من الضغط حتى أول صورة: 3.9 ث"))
+        // نية المشغّل وحدها ليست الضغطة: يُقال ذلك صراحة
+        assertTrue(report, report.contains("من نية فتح المشغّل حتى فتح المصدر: 1.5 ث (الضغطة نفسها لم تُقس) · حتى أول صورة: 3.9 ث"))
+        // الضغطة الحقيقية من الواجهة: المدة منها، وما قبل المشغّل بأجزائه
+        diag.tappedAt = 1_000_000L - 4_000; diag.pickedAt = 1_000_000L - 1_700; diag.uiOpenAt = 1_000_000L - 1_600
+        val tapped = diag.report(warm, player(), clock)
+        assertTrue(tapped, tapped.contains("من الضغطة حتى فتح المصدر: 4.0 ث · من الضغطة حتى أول صورة: 6.4 ث · الضغطة ← رجوع pick 2.3 ث · ← نداء play 2.4 ث · ← نية المشغّل 2.5 ث"))
+        assertTrue(tapped, tapped.contains("[المسار الحرج من الضغطة]"))
         assertTrue(report, report.contains("خط البدء: بيانات التورنت قبل الفتح · أول مشارك قبل الفتح · أول بيانات +0.7 · أول قطعة +1.9"))
     }
 
@@ -45,7 +51,9 @@ class PlaybackDiagnosticsTest {
 
         val verdict = diag.verdict(torrent(), player(), clock)
         assertTrue(verdict, verdict.startsWith("أطول مرحلة: من أول بايت إلى الجاهزية 15.3 ث"))
-        assertTrue(verdict, verdict.contains("من البداية 10.4MB") && verdict.contains("من آخر الملف"))
+        // البايتات تراكمية حتى التقرير فلا تُنسب للمرحلة: الطلبات بأماكنها فقط
+        assertTrue(verdict, verdict.contains("بدأ فيها المشغّل 3 طلب قراءة") && verdict.contains("من البداية") && verdict.contains("من آخر الملف"))
+        assertFalse(verdict, verdict.contains("من البداية 10.4MB"))
         val report = diag.report(torrent(), player(), clock)
         assertTrue(report, report.contains("خط البدء: بيانات التورنت +1.2 · أول مشارك — · أول بيانات — · أول قطعة +4.6 · أول بايت +4.6 · جاهز +19.9 · أول صورة +19.9"))
         assertTrue(report, report.contains("1) +0.1 من البداية → 10.4MB · فتح بعد 4.5 ث · أول بايت بعد 0.0 ث · مدة 9.8 ث"))
