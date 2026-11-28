@@ -58,7 +58,7 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
   function require(item) {
     if (closed || !validHost(item?.host)) return;
     const host = item.host.toLowerCase(), previous = pending.get(host), job = active.get(host);
-    if (job?.replaying && item.state === 'required') { job.rechallenged = true; return; }
+    if (job?.replaying && item.state === 'required') { job.rechallenged = true; job.rechallengeItem = {...item,host}; return; }
     ledgerRevision++;
     if (!previous && pending.size >= 24) pending.delete(pending.keys().next().value);
     pending.set(host, {
@@ -108,8 +108,11 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
           return {ok:false,verified:true,error:'اكتمل التحقق، لكن تعذّر إعادة تحميل المحتوى'};
         }
         if (closed || job.discarded) return {ok:false,cancelled:true};
-        if (job.rechallenged || retried?.needsHuman) return failed('still_challenged');
+        if (retried?.needsHuman || (job.rechallenged && retried?.ok !== true)) return failed('still_challenged');
         pending.delete(host);
+        // A completed content request is not invalidated by another pending request.
+        // Keep that request visible; do not mark the entire host as accepted.
+        if (job.rechallengeItem) { job.replaying = false; require(job.rechallengeItem); }
         return retried ?? {ok:true,...result};
       } catch (error) {
         if (closed || job.discarded) return {ok:false,cancelled:true};
