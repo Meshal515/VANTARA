@@ -45,7 +45,7 @@ export function isSourceChallenge(error) {
 }
 
 export function createSourceVerification({plugin=nativeVerificationPlugin(),runtimePlugin=globalThis.Capacitor?.Plugins?.VantaraRuntime}={}) {
-  let closed = false;
+  let closed = false, ledgerRevision = 0;
   const pending = new Map(), active = new Map(), handles = [], listeners = new Set();
   const snapshot = () => [...pending.values()].map(({retry, ...item}) => ({...item}));
   function render() {
@@ -59,6 +59,7 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
     if (closed || !validHost(item?.host)) return;
     const host = item.host.toLowerCase(), previous = pending.get(host), job = active.get(host);
     if (job?.replaying && item.state === 'required') { job.rechallenged = true; return; }
+    ledgerRevision++;
     if (!previous && pending.size >= 24) pending.delete(pending.keys().next().value);
     pending.set(host, {
       ...previous, ...item, host, verifying: !!job || item.state === 'active',
@@ -127,6 +128,7 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
   function state(item) {
     if (closed || !validHost(item?.host)) return;
     if (item.state === 'discarded') {
+      ledgerRevision++;
       const host = item.host.toLowerCase();
       const job = active.get(host);
       if (job) job.discarded = true;
@@ -134,15 +136,29 @@ export function createSourceVerification({plugin=nativeVerificationPlugin(),runt
       render();
     } else if (item.state === 'verified') {
       const host = item.host.toLowerCase();
-      if (!active.has(host)) { pending.delete(host); render(); }
+      if (!active.has(host)) { ledgerRevision++; pending.delete(host); render(); }
     } else if (['active', 'required', 'expired', 'failed', 'cancelled'].includes(item.state)) require(item);
   }
   async function refresh() {
     if (!plugin || closed) return;
+    const revision = ledgerRevision;
     try {
       const out = await plugin.pending();
-      for (const item of out?.pending ?? []) {
-        const previous = pending.get(item.host);
+      // A complete native snapshot is authoritative, but not if a newer event
+      // changed the ledger while the bridge call was in flight.
+      if (closed || !Array.isArray(out?.pending) || revision !== ledgerRevision) return;
+      const rows = out.pending.filter(item => validHost(item?.host));
+      const hosts = new Set(rows.map(item => item.host.toLowerCase()));
+      let removed = false;
+      for (const host of pending.keys()) {
+        if (!hosts.has(host) && !active.has(host)) {
+          pending.delete(host);
+          removed = true;
+        }
+      }
+      if (removed) { ledgerRevision++; render(); }
+      for (const item of rows) {
+        const previous = pending.get(item.host.toLowerCase());
         if (!previous || previous.token !== item.token) require(item);
       }
     } catch { /* The previous observation remains visible if the bridge is unavailable. */ }
