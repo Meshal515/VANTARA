@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          git grep -nI -E -e '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+' -- \
+          git grep -lI -E -e '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk-(proj-)?[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]+' -- \
             ':!*.test.*' ':!**/tests/**' ':!.env.example' > /tmp/source-credential-scan 2>&1
           scan_status=$?
           set -e
