@@ -628,6 +628,14 @@ export default {
       if (request.method === 'POST' && (path === '/v1/updates/observe' || path.startsWith('/v1/source-latest'))) {
         const { mode } = await collectorPolicy(env);
         if (mode === 'exclusive') return json({ error: 'legacy_collectors_disabled' }, { status: 409 }, cors);
+        if (mode === 'manga-local') {
+          if (path.startsWith('/v1/source-latest')) return json({ error: 'legacy_manga_disabled' }, { status: 409 }, cors);
+          // Mixed legacy batches are rejected rather than falsely acknowledging lost manga observations.
+          const body = await request.clone().json().catch(() => null) as { works?: { section?: unknown }[] } | null;
+          if (Array.isArray(body?.works) && body.works.some(work => work?.section === 'manga')) {
+            return json({ error: 'legacy_manga_disabled' }, { status: 409 }, cors);
+          }
+        }
       }
 
       // لوحة المالك: الشارة تُفحص في القاعدة لكل عملية (admin.ts)
