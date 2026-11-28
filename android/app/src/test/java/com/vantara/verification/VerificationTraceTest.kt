@@ -22,6 +22,15 @@ class VerificationTraceTest {
         assertTrue(report.contains("PAGE_START=2"))
         assertTrue(report.contains("+20ms HTTP_MAIN_CHALLENGE code=403"))
     }
+    @Test fun includesStatusAndCoarseResourceScopeWithoutUrl() {
+        val trace = VerificationTrace({ 0L })
+        trace.record(Event.HTTP_RESOURCE_ERROR, 401, VerificationTrace.ResourceScope.OTHER_SITE)
+        trace.record(Event.HTTP_RESOURCE_ERROR, 401, VerificationTrace.ResourceScope.SAME_SITE)
+        val report = trace.report()
+        assertTrue(report.contains("HTTP_RESOURCE_ERROR=2"))
+        assertTrue(report.contains("HTTP_RESOURCE_ERROR code=401 scope=OTHER_SITE"))
+        assertTrue(report.contains("HTTP_RESOURCE_ERROR code=401 scope=SAME_SITE"))
+    }
     @Test fun retainsTotalsEvenWhenRecentEntriesAreEvicted() {
         var now = 0L
         val trace = VerificationTrace({ now }, capacity = 2)

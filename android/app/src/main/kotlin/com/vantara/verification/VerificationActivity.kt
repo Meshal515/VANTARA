@@ -39,7 +39,9 @@ import java.util.concurrent.Executors
 class VerificationActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private val trace = if (BuildConfig.DEBUG) VerificationTrace(SystemClock::elapsedRealtime) else null
-    private fun mark(event: Event, code: Int? = null) { trace?.record(event, code) }
+    private fun mark(event: Event, code: Int? = null, scope: VerificationTrace.ResourceScope? = null) {
+        trace?.record(event, code, scope)
+    }
     private val worker = Executors.newSingleThreadExecutor()
     private var browser: WebView? = null
     private var endpoint: VerificationPolicy.Endpoint? = null
@@ -106,8 +108,14 @@ class VerificationActivity : Activity() {
         main.postDelayed(timeout, SESSION_MS)
         showHeader(current)
         worker.execute {
-            if ((runtimeProfile != null || intent.getBooleanExtra("engineNetwork", false)) && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE))
-                tunnel = runCatching { VerificationTunnel(com.vantara.anime.net.AnimeDns({ true })::lookup).start() }.getOrNull()
+            val engineNetworkRequested = runtimeProfile != null || intent.getBooleanExtra("engineNetwork", false)
+            mark(if (engineNetworkRequested) Event.ENGINE_NETWORK_REQUESTED else Event.DEFAULT_NETWORK_REQUESTED)
+            if (engineNetworkRequested) {
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+                    tunnel = runCatching { VerificationTunnel(com.vantara.anime.net.AnimeDns({ true })::lookup).start() }.getOrNull()
+                    if (tunnel == null) mark(Event.PROXY_START_FAILED)
+                } else mark(Event.PROXY_FEATURE_UNAVAILABLE)
+            }
             val safe = isPublic(current.host)
             main.post {
                 if (!completed && !isFinishing && !isDestroyed) {
@@ -116,10 +124,16 @@ class VerificationActivity : Activity() {
                         // يُطبَّق على WebView هذه العملية المعزولة وحدها، ويُزال عند الإغلاق
                         runCatching {
                             ProxyController.getInstance().setProxyOverride(ProxyConfig.Builder().addProxyRule("127.0.0.1:${t.port}").build(), mainExecutor) {
-                                if (!completed && !isFinishing && !isDestroyed) createBrowser()
+                                if (!completed && !isFinishing && !isDestroyed) {
+                                    mark(Event.PROXY_APPLIED)
+                                    createBrowser()
+                                }
                             }
-                        }.onFailure { complete("failed", "proxy_unavailable") }
-                    } ?: createBrowser()
+                        }.onFailure { mark(Event.PROXY_APPLY_FAILED); complete("failed", "proxy_unavailable") }
+                    } ?: run {
+                        mark(Event.DEFAULT_NETWORK_USED)
+                        createBrowser()
+                    }
                 }
             }
         }
@@ -179,6 +193,7 @@ class VerificationActivity : Activity() {
                 WebViewCompat.getProfile(view).cookieManager
             } else CookieManager.getInstance()
             initialClearance=VerificationPolicy.clearance(selectedCookies?.getCookie(current.origin+"/"))
+            mark(if (initialClearance != null) Event.SESSION_PRESENT_AT_OPEN else Event.SESSION_ABSENT_AT_OPEN)
             view.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -251,7 +266,14 @@ class VerificationActivity : Activity() {
                     } else {
                         if (challenged) Event.HTTP_RESOURCE_CHALLENGE else Event.HTTP_RESOURCE_ERROR
                     }
-                    mark(event, errorResponse.statusCode)
+                    // Only a coarse scope label; never record the request URL or headers.
+                    val target = VerificationPolicy.endpoint(request.url.toString())
+                    val scope = when {
+                        target == null -> VerificationTrace.ResourceScope.UNKNOWN
+                        VerificationPolicy.sameSite(current, target) -> VerificationTrace.ResourceScope.SAME_SITE
+                        else -> VerificationTrace.ResourceScope.OTHER_SITE
+                    }
+                    mark(event, errorResponse.statusCode, scope)
                 }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                     mark(Event.TLS_ERROR, error.primaryError)

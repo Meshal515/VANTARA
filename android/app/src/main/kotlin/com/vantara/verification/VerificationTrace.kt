@@ -11,17 +11,21 @@ internal class VerificationTrace(private val clock: () -> Long, private val capa
         BLOCKED_MAIN_ENDPOINT, BLOCKED_RESOURCE_ENDPOINT, BLOCKED_MAIN_DNS, BLOCKED_RESOURCE_DNS,
         HTTP_MAIN_ERROR, HTTP_RESOURCE_ERROR, HTTP_MAIN_CHALLENGE, HTTP_RESOURCE_CHALLENGE,
         NETWORK_MAIN_ERROR, NETWORK_RESOURCE_ERROR, TLS_ERROR, RENDERER_GONE,
-        PAGE_READY, PAGE_NOT_READY, COMPLETE_VERIFIED, COMPLETE_FAILED, COMPLETE_CANCELLED
+        PAGE_READY, PAGE_NOT_READY, COMPLETE_VERIFIED, COMPLETE_FAILED, COMPLETE_CANCELLED,
+        ENGINE_NETWORK_REQUESTED, DEFAULT_NETWORK_REQUESTED, PROXY_FEATURE_UNAVAILABLE,
+        PROXY_START_FAILED, PROXY_APPLIED, PROXY_APPLY_FAILED, DEFAULT_NETWORK_USED,
+        SESSION_PRESENT_AT_OPEN, SESSION_ABSENT_AT_OPEN
     }
+    enum class ResourceScope { SAME_SITE, OTHER_SITE, UNKNOWN }
     private val started = clock()
     private val counts = linkedMapOf<Event, Int>()
     private val entries = ArrayDeque<String>()
     init { require(capacity > 0) }
-    @Synchronized fun record(event: Event, code: Int? = null) {
+    @Synchronized fun record(event: Event, code: Int? = null, scope: ResourceScope? = null) {
         counts[event] = (counts[event] ?: 0) + 1
         if (entries.size >= capacity) entries.removeFirst()
         entries.addLast("+${(clock() - started).coerceAtLeast(0)}ms ${event.name}" +
-            (code?.let { " code=$it" } ?: ""))
+            (code?.let { " code=$it" } ?: "") + (scope?.let { " scope=${it.name}" } ?: ""))
     }
     @Synchronized fun report(): String = buildString {
         appendLine("VANTARA verification lifecycle (debug)")
