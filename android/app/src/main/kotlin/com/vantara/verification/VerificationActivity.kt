@@ -2,6 +2,11 @@ package com.vantara.verification
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.widget.Toast
+import com.vantara.app.BuildConfig
+import com.vantara.verification.VerificationTrace.Event
 import android.content.Intent
 import android.graphics.Color
 import android.net.http.SslError
@@ -33,6 +38,8 @@ import java.util.concurrent.Executors
 /** Only runs in :verification. It never creates or touches the Capacitor WebView. */
 class VerificationActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
+    private val trace = if (BuildConfig.DEBUG) VerificationTrace(SystemClock::elapsedRealtime) else null
+    private fun mark(event: Event, code: Int? = null) { trace?.record(event, code) }
     private val worker = Executors.newSingleThreadExecutor()
     private var browser: WebView? = null
     private var endpoint: VerificationPolicy.Endpoint? = null
@@ -78,6 +85,7 @@ class VerificationActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        mark(if (savedInstanceState == null) Event.ACTIVITY_CREATE else Event.ACTIVITY_RECREATED)
         endpoint = VerificationPolicy.endpoint(intent.getStringExtra("url").orEmpty())
         token = intent.getStringExtra("token").orEmpty()
         runtimeProfile = intent.getStringExtra("runtimeProfile")
@@ -144,6 +152,14 @@ class VerificationActivity : Activity() {
             }
         }
         container.addView(continueButton)
+        if (trace != null) container.addView(Button(this).apply {
+            text = "نسخ تشخيص التحقق (Debug)"
+            setOnClickListener {
+                val report = trace.report()
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Verification diagnostics", report))
+                Toast.makeText(this@VerificationActivity, "نُسخ التشخيص", Toast.LENGTH_SHORT).show()
+            }
+        })
         setContentView(container)
     }
 
@@ -152,6 +168,7 @@ class VerificationActivity : Activity() {
         val current = endpoint ?: return
         try {
             val view = WebView(this)
+            mark(Event.WEBVIEW_CREATE)
             view.isVerticalScrollBarEnabled = false
             view.isHorizontalScrollBarEnabled = false
             browser = view
@@ -181,18 +198,25 @@ class VerificationActivity : Activity() {
                     val target = VerificationPolicy.endpoint(request.url.toString())
                     // A moved site hops between its own subdomains during the challenge; another site stays blocked.
                     val blocked = target == null || !VerificationPolicy.sameSite(current, target) || ++navigations > 30
+                    mark(if (blocked) Event.NAVIGATION_BLOCKED else Event.NAVIGATION)
                     if (blocked) complete("failed", "navigation_blocked")
                     return blocked
                 }
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val target = VerificationPolicy.endpoint(request.url.toString())
                     if (target == null || !isPublic(target.host)) {
+                        mark(if (target == null) {
+                            if (request.isForMainFrame) Event.BLOCKED_MAIN_ENDPOINT else Event.BLOCKED_RESOURCE_ENDPOINT
+                        } else {
+                            if (request.isForMainFrame) Event.BLOCKED_MAIN_DNS else Event.BLOCKED_RESOURCE_DNS
+                        })
                         if (request.isForMainFrame) main.post { complete("failed", "unsafe_endpoint") }
                         return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                     }
                     return null
                 }
                 override fun onPageStarted(view: WebView, url: String?, icon: android.graphics.Bitmap?) {
+                    mark(Event.PAGE_START)
                     val target = VerificationPolicy.endpoint(url.orEmpty())
                     if (target == null || !VerificationPolicy.sameSite(current, target)) complete("failed", "navigation_blocked")
                     else {
@@ -203,6 +227,7 @@ class VerificationActivity : Activity() {
                     }
                 }
                 override fun onPageFinished(view: WebView, url: String?) {
+                    mark(Event.PAGE_FINISH)
                     val target = VerificationPolicy.endpoint(url.orEmpty()) ?: return
                     if (!VerificationPolicy.sameSite(current, target)) return
                     // صفحة بلا تحدٍّ؟ (نموذج Cloudflare أو Turnstile أو عنوان «لحظة») — تُفحص بعد كل تحميل كامل
@@ -210,16 +235,34 @@ class VerificationActivity : Activity() {
                     view.evaluateJavascript(CHALLENGE_PROBE) { r ->
                         if (completed || revision != pageRevision || view.url != url) return@evaluateJavascript
                         pageReady = r == "true"
+                        mark(if (pageReady) Event.PAGE_READY else Event.PAGE_NOT_READY)
                         if (pageReady && resumed && !completed) { main.removeCallbacks(poll); main.post(poll) }
                     }
                 }
+                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                    mark(if (isReload) Event.HISTORY_RELOAD else Event.HISTORY_NAVIGATION)
+                }
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                    val challenged = errorResponse.responseHeaders?.entries?.any {
+                        it.key.equals("cf-mitigated", ignoreCase = true) && it.value.equals("challenge", ignoreCase = true)
+                    } == true
+                    val event = if (request.isForMainFrame) {
+                        if (challenged) Event.HTTP_MAIN_CHALLENGE else Event.HTTP_MAIN_ERROR
+                    } else {
+                        if (challenged) Event.HTTP_RESOURCE_CHALLENGE else Event.HTTP_RESOURCE_ERROR
+                    }
+                    mark(event, errorResponse.statusCode)
+                }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                    mark(Event.TLS_ERROR, error.primaryError)
                     handler.cancel(); complete("failed", "tls_error")
                 }
                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                    mark(if (request.isForMainFrame) Event.NETWORK_MAIN_ERROR else Event.NETWORK_RESOURCE_ERROR, error.errorCode)
                     if (request.isForMainFrame) complete("failed", "network_error")
                 }
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    mark(Event.RENDERER_GONE)
                     // Claim and destroy only this isolated WebView; do not reload or kill any process.
                     complete("failed", "renderer_gone")
                     return true
@@ -236,6 +279,7 @@ class VerificationActivity : Activity() {
             fun load() {
                 if (completed || browser !== view) return
                 initialClearance = null
+                mark(Event.APP_LOAD_URL)
                 view.loadUrl(intent.getStringExtra("url")!!)
                 if (resumed) main.post(poll)
             }
@@ -247,6 +291,11 @@ class VerificationActivity : Activity() {
 
     private fun complete(state: String, reason: String?, clearance: String? = null) {
         if (completed) return
+        mark(when (state) {
+            "verified" -> Event.COMPLETE_VERIFIED
+            "cancelled" -> Event.COMPLETE_CANCELLED
+            else -> Event.COMPLETE_FAILED
+        })
         if (state == "verified") selectedCookies?.flush()
         completed = true
         main.removeCallbacks(timeout); main.removeCallbacks(poll)
@@ -276,6 +325,7 @@ class VerificationActivity : Activity() {
 
     private fun releaseBrowser() {
         val view = browser ?: return
+        mark(Event.WEBVIEW_DESTROY)
         browser = null
         (view.parent as? ViewGroup)?.removeView(view)
         // A dead renderer can throw from stopLoading; destruction must still run.
@@ -283,11 +333,12 @@ class VerificationActivity : Activity() {
         runCatching { view.webViewClient = WebViewClient() }
         runCatching { view.destroy() }
     }
-    override fun onResume() { super.onResume(); resumed = true; browser?.onResume(); if (browser != null && !completed) main.post(poll) }
-    override fun onPause() { resumed = false; main.removeCallbacks(poll); browser?.onPause(); super.onPause() }
+    override fun onResume() { super.onResume(); mark(Event.ACTIVITY_RESUME); resumed = true; browser?.onResume(); if (browser != null && !completed) main.post(poll) }
+    override fun onPause() { mark(Event.ACTIVITY_PAUSE); resumed = false; main.removeCallbacks(poll); browser?.onPause(); super.onPause() }
     @Deprecated("Activity back navigation")
     override fun onBackPressed() { complete("cancelled", "user_cancelled") }
     override fun onDestroy() {
+        mark(Event.ACTIVITY_DESTROY)
         main.removeCallbacksAndMessages(null)
         releaseBrowser()
         tunnel?.close(); tunnel = null
