@@ -48,7 +48,17 @@ class VerificationActivity : Activity() {
     private var selectedCookies: CookieManager? = null
     private var runtimeProfile: String? = null
     /** CloudStream: شبكة المحرك نفسها (DoH وتجزئة SNI) لصفحة التحقق؛ غيره يبقى على شبكة النظام كما هو. */
+    private val tunnelLifecycle = Any()
+    private var tunnelReleased = false
     @Volatile private var tunnel: VerificationTunnel? = null
+
+    private fun ownTunnel(candidate: VerificationTunnel?) {
+        if (candidate == null) return
+        val accepted = synchronized(tunnelLifecycle) {
+            if (tunnelReleased) false else { tunnel = candidate; true }
+        }
+        if (!accepted) candidate.close()
+    }
     private fun isPublic(host: String): Boolean = tunnel?.let { it.publicAddress(host) != null } ?: VerificationPolicy.publicDns(host)
     private var completed = false
     private var resumed = false
@@ -76,10 +86,10 @@ class VerificationActivity : Activity() {
             if (completed || !resumed) return
             val current = endpoint ?: return
             val clearance = clearanceNow(current.origin)
-            continueButton?.isEnabled = true
-            // كما في Stable 224 (المرجع العامل): cf_clearance جديد يكفي. «صفحة بلا تحدٍّ» تخطئ: Cloudflare يضع سكربت
-            // challenge-platform في صفحات المواقع العادية أيضًا، فكان الشرط لا يتحقق والنافذة لا تُغلق أبدًا
-            if (clearance != null && (clearance != initialClearance || pageReady)) {
+            continueButton?.isEnabled = pageReady
+            // A cookie alone is not evidence that the visible check completed.
+            // Source acceptance is still determined by the original request, not this UI.
+            if (clearance != null && pageReady) {
                 complete("verified", null, clearance)
             } else if (SystemClock.elapsedRealtime() >= deadline) complete("failed", "timeout")
             else main.postDelayed(this, 500)
@@ -111,7 +121,7 @@ class VerificationActivity : Activity() {
         showHeader(current)
         worker.execute {
             if ((runtimeProfile != null || intent.getBooleanExtra("engineNetwork", false)) && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE))
-                tunnel = runCatching { VerificationTunnel(com.vantara.anime.net.AnimeDns({ true })::lookup).start() }.getOrNull()
+                ownTunnel(runCatching { VerificationTunnel(com.vantara.anime.net.AnimeDns({ true })::lookup).start() }.getOrNull())
             val safe = isPublic(current.host)
             main.post {
                 if (!completed && !isFinishing && !isDestroyed) {
@@ -149,11 +159,9 @@ class VerificationActivity : Activity() {
         // الكوكي الصالح يُرسَل وإن لم يتغير؛ والمضيف يعيد طلب المصدر ويتحقق منه، فإن بقي التحدي طُلب من جديد.
         continueButton = Button(this).apply {
             text = "متابعة إلى المصدر"
-            isEnabled = true
+            isEnabled = false
             setOnClickListener {
-                val value = clearanceNow(current.origin)
-                // كما في 224: الزر يعمل دائمًا؛ كوكي موجود أو صفحة مفتوحة = تم، والحكم لإعادة طلب المصدر بعدها
-                if (value != null || pageReady) complete("verified", null, value) else complete("cancelled", "user_cancelled")
+                if (pageReady) complete("verified", null, clearanceNow(current.origin))
             }
         }
         container.addView(continueButton)
@@ -230,6 +238,7 @@ class VerificationActivity : Activity() {
                     else {
                         landed = target.origin
                         pageReady = false
+                        continueButton?.isEnabled = false
                         pageRevision++
 
                     }
@@ -243,6 +252,7 @@ class VerificationActivity : Activity() {
                     view.evaluateJavascript(CHALLENGE_PROBE) { r ->
                         if (completed || revision != pageRevision || view.url != url) return@evaluateJavascript
                         pageReady = r == "true"
+                        continueButton?.isEnabled = pageReady
                         mark(if (pageReady) Event.PAGE_READY else Event.PAGE_NOT_READY)
                         if (pageReady && resumed && !completed) { main.removeCallbacks(poll); main.post(poll) }
                     }
@@ -301,8 +311,8 @@ class VerificationActivity : Activity() {
                 "request{${DebugVerificationLog.describe(e?.let { runCatching { selectedCookies?.getCookie(it.origin + "/") }.getOrNull() }, null)}} " +
                 "landed{${landed?.takeIf { it != e?.origin }?.let { DebugVerificationLog.describe(runCatching { selectedCookies?.getCookie("$it/") }.getOrNull(), null) } ?: "-"}}")
         }
-        if (state == "verified") selectedCookies?.flush()
         completed = true
+        if (state == "verified") selectedCookies?.flush()
         main.removeCallbacks(timeout); main.removeCallbacks(poll)
         val result = Intent().putExtra("host", endpoint?.host).putExtra("token", token).putExtra("state", state)
         if (reason != null) result.putExtra("reason", reason)
@@ -323,10 +333,13 @@ class VerificationActivity : Activity() {
     }
 
     private fun releaseTunnel() {
-        val t = tunnel ?: return
-        tunnel = null
+        val t = synchronized(tunnelLifecycle) {
+            tunnelReleased = true
+            tunnel.also { tunnel = null }
+        } ?: return
         runCatching { ProxyController.getInstance().clearProxyOverride(mainExecutor) {} }
-        worker.execute { t.close() }
+        // Do not enqueue cleanup on the executor that onDestroy is about to stop.
+        t.close()
     }
 
     private fun releaseBrowser() {
@@ -347,7 +360,7 @@ class VerificationActivity : Activity() {
         mark(Event.ACTIVITY_DESTROY)
         main.removeCallbacksAndMessages(null)
         releaseBrowser()
-        tunnel?.close(); tunnel = null
+        releaseTunnel()
         worker.shutdownNow()
         super.onDestroy()
     }

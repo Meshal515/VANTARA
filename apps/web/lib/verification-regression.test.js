@@ -14,16 +14,13 @@ it('the visible verification page never overrides the WebView client-hint brand'
   expect(kotlin('eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt')).toMatch(/setMatchingUserAgentMetadata\(view, userAgent\)/);
 });
 
-/**
- * انحدار Debug بعد 224: «صفحة بلا تحدٍّ» شرطًا للإغلاق، وCloudflare يضع challenge-platform في الصفحات العادية، فلا تُغلق
- * النافذة أبدًا؛ وبوابات no_clearance/cookie_scope_mismatch/فحص القبول ترفض تحققًا ناجحًا. المرجع 224.
- */
-it('the window completes on a new cf_clearance and the plugin does not reject a completed check (Stable 224 rules)', () => {
+it('visible verification does not finish solely on a cookie or a premature click', () => {
   const activity = kotlin('com/vantara/verification/VerificationActivity.kt');
-  expect(activity).toMatch(/clearance != null && \(clearance != initialClearance \|\| pageReady\)/);
-  expect(activity).not.toMatch(/if \(clearance != null && pageReady\)/);
-  const plugin = kotlin('com/vantara/verification/VerificationPlugin.kt').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  for (const gate of ['no_clearance', 'cookie_scope_mismatch', 'no_session_cookie', 'confirm(item, call)']) expect(plugin).not.toContain(gate);
+  expect(activity).toMatch(/if \(clearance != null && pageReady\)/);
+  expect(activity).not.toMatch(/clearance != null && \(clearance != initialClearance \|\| pageReady\)/);
+  expect(activity).toMatch(/if \(pageReady\) complete\("verified", null, clearanceNow\(current.origin\)\)/);
+  expect(activity).toMatch(/continueButton\?\.isEnabled = false/);
+  expect(activity).not.toMatch(/if \(value != null \|\| pageReady\)/);
 });
 
 /**

@@ -2,11 +2,13 @@ package com.vantara.verification
 
 import com.vantara.anime.net.FragmentingSocket
 import java.io.InputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * نفق CONNECT محلي لصفحة تحقق مصادر CloudStream وحدها (عملية :verification).
@@ -26,7 +28,26 @@ class VerificationTunnel(
 ) : AutoCloseable {
     private val server = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
     private val pool = Executors.newCachedThreadPool { r -> Thread(r, "verification-tunnel").apply { isDaemon = true } }
+    private val lifecycle = Any()
+    private val sockets = mutableSetOf<Socket>()
     @Volatile private var open = true
+    private var started = false
+
+    private fun track(socket: Socket): Boolean = synchronized(lifecycle) {
+        if (!open) false else { sockets.add(socket); true }
+    }
+
+    private fun release(socket: Socket) {
+        synchronized(lifecycle) { sockets.remove(socket) }
+        runCatching { socket.close() }
+    }
+
+    /** Submission can race close(); a rejected task never owns a socket. */
+    private fun submit(task: () -> Unit): Boolean {
+        if (!open) return false
+        return try { pool.execute { task() }; true }
+        catch (_: RejectedExecutionException) { false }
+    }
     val port: Int get() = server.localPort
 
     /** عنوان عام لهذا الاسم بمسار المحرك نفسه، أو null. */
@@ -34,10 +55,19 @@ class VerificationTunnel(
         runCatching { resolve(host) }.getOrNull()?.takeIf { it.isNotEmpty() && it.all(allowed) }?.first()
 
     fun start(): VerificationTunnel {
-        pool.execute {
-            while (open) {
-                val client = runCatching { server.accept() }.getOrNull() ?: break
-                pool.execute { serve(client) }
+        synchronized(lifecycle) {
+            if (!open || started) return this
+            started = true
+            submit {
+                while (open) {
+                    val client = try { server.accept() } catch (_: IOException) { break }
+                    if (!track(client)) { release(client); break }
+                    if (!submit {
+                        try { serve(client) }
+                        catch (_: IOException) { /* closed or disconnected peer */ }
+                        finally { release(client) }
+                    }) release(client)
+                }
             }
         }
         return this
@@ -50,15 +80,21 @@ class VerificationTunnel(
         val host = line.groupValues[1].lowercase()
         if (line.groupValues[2] != "443" || VerificationPolicy.endpoint("https://$host/") == null) return@use refuse(c)
         val address = publicAddress(host) ?: return@use refuse(c)
-        FragmentingSocket().use { upstream ->
+        val upstream = FragmentingSocket()
+        if (!track(upstream)) { release(upstream); return@use }
+        try { upstream.use {
             if (runCatching { upstream.connect(InetSocketAddress(address, upstreamPort), 10_000) }.isFailure) return@use refuse(c)
             c.getOutputStream().apply { write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray()); flush() }
             c.soTimeout = 0
             // أول ما يكتبه WebView بعد الرد هو ClientHello: FragmentingSocket يقسّمه كما في وسيط المحرك.
-            pool.execute { runCatching { upstream.getInputStream().copyTo(c.getOutputStream()) }; runCatching { c.close() } }
+            if (!submit {
+                try { upstream.getInputStream().copyTo(c.getOutputStream()) }
+                catch (_: IOException) { /* peer closed */ }
+                finally { release(c) }
+            }) return@use
             runCatching { input.copyTo(upstream.getOutputStream()) }
             Unit
-        }
+        } } finally { release(upstream) }
     }
 
     /** رأس الطلب حتى سطر فارغ، بلا قراءة ما بعده (بايتات TLS). */
@@ -78,8 +114,13 @@ class VerificationTunnel(
     }
 
     override fun close() {
-        open = false
+        val active = synchronized(lifecycle) {
+            if (!open) return
+            open = false
+            sockets.toList().also { sockets.clear() }
+        }
         runCatching { server.close() }
+        active.forEach { runCatching { it.close() } }
         pool.shutdownNow()
     }
 

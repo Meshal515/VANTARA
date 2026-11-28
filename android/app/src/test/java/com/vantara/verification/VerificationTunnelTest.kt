@@ -7,6 +7,9 @@ import org.junit.Test
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 /**
@@ -48,6 +51,27 @@ class VerificationTunnelTest {
         }
         echo.join(5000)
         upstream.close()
+    }
+
+    @Test fun closingWhileARequestIsBeingResolvedReleasesAcceptedSocket() {
+        val resolving = CountDownLatch(1)
+        val unblock = CountDownLatch(1)
+        val tunnel = VerificationTunnel({
+            resolving.countDown()
+            try { unblock.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+            emptyList()
+        }).start()
+        try {
+            Socket("127.0.0.1", tunnel.port).use { client ->
+                client.soTimeout = 3000
+                client.getOutputStream().write("CONNECT example.org:443 HTTP/1.1\r\n\r\n".toByteArray())
+                assertTrue(resolving.await(3, TimeUnit.SECONDS))
+                tunnel.close()
+                tunnel.close()
+                val closed = try { client.getInputStream().read() == -1 } catch (_: SocketException) { true }
+                assertTrue("accepted socket must close with its owner", closed)
+            }
+        } finally { unblock.countDown(); tunnel.close() }
     }
 
     @Test fun refusesOtherPortsPrivateAddressesAndPlainRequests() {
