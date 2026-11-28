@@ -117,7 +117,7 @@ describe('server collectors', () => {
   it('collects dated movies without opening them and ignores undated or future catalog entries', async () => {
     const { env } = setup();
     // Pick the movie collection minute and let the other providers return empty feeds.
-    const now = NOW + ((2 - Math.floor(NOW / 60_000) % 4 + 4) % 4) * 60_000;
+    const now = NOW + ((10 - Math.floor(NOW / 60_000) % 360 + 360) % 360) * 60_000;
     await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
       if (!String(input).includes('/catalog/movie/')) return reply(String(input).includes('anilist') ? { data: { Page: { airingSchedules: [] } } } : { metas: [] });
       return reply({ metas: [
@@ -144,7 +144,7 @@ describe('server collectors', () => {
     errors.mockRestore();
   });
   it('keeps scheduled ingestion under the 50-query D1 Free limit during a full catch-up', async () => {
-    for (let slot = 0; slot < 4; slot++) {
+    for (const slot of [0, 1, 2, 3, 6, 10]) {
       const { env } = setup();
       let queries = 0;
       const prepare = env.DB.prepare.bind(env.DB);
@@ -153,7 +153,7 @@ describe('server collectors', () => {
         statement.bind=(...values:unknown[])=>{expect(values.length).toBeLessThanOrEqual(100);return bind(...values);};
         return statement;
       };
-      const now = NOW + ((slot - Math.floor(NOW / 60_000) % 4 + 4) % 4) * 60_000;
+      const now = NOW + ((slot - Math.floor(NOW / 60_000) % 360 + 360) % 360) * 60_000;
       await collectTimelines(env, { now, scheduled: true, fetchImpl: (async input => {
         const url = String(input);
         // مواقع المانجا العربية بقوائم كاملة (20 عملًا لكل موقع)
