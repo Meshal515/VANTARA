@@ -29,6 +29,18 @@ const MAX_QUEUE_UNITS = 50_000;
 const MAX_STORAGE_BYTES = 1_000_000;
 
 let transport = null;
+let collectorMode = 'hybrid';
+export function legacyUpdatesAllowed(section) {
+  return collectorMode === 'hybrid' || (collectorMode === 'manga-local' && section !== 'manga');
+}
+export function setLegacyUpdateMode(mode) {
+  if (!['hybrid', 'manga-local', 'exclusive'].includes(mode)) return false;
+  collectorMode = mode;
+  clearTimeout(timer); timer = null;
+  schedule();
+  return true;
+}
+const pendingLegacy = () => [...queue.values()].some(work => legacyUpdatesAllowed(work.section));
 const queue = new Map();
 /** حجم كل مدخل محفوظ ووحداته: الإجمالي بعدّاد، لا بتحويل الطابور كله مع كل تقرير. */
 const sizes = new Map();
@@ -112,17 +124,18 @@ export function connectUpdates(send) {
 }
 
 function schedule() {
-  if (!timer && transport) timer = setTimeout(() => void flush(), FLUSH_MS);
+  if (!timer && transport && pendingLegacy()) timer = setTimeout(() => void flush(), FLUSH_MS);
 }
 
 export async function flush() {
   if (inFlight) return inFlight;
   clearTimeout(timer);
   timer = null;
-  if (!transport || !queue.size) return;
+  if (!transport || !pendingLegacy()) return;
   const works = [];
   let units = 0;
   for (const work of queue.values()) {
+    if (!legacyUpdatesAllowed(work.section)) continue;
     const chunk = { ...work, units: work.units.slice(0, MAX_UNITS) };
     const count = chunk.units.length || 1;
     if (works.length >= MAX_BATCH || (works.length && units + count > MAX_BATCH_UNITS)) break;
@@ -154,6 +167,7 @@ export async function flush() {
 
 /** يضيف تقريرًا (يدمج وحداته مع ما ينتظر للعمل نفسه من نفس المصدر). */
 export function report(r) {
+  if (!legacyUpdatesAllowed(r?.section)) return false;
   if (!r?.work || !r.title || (r.kind !== 'movie' && !r.units?.length)) return;
   const key = keyOf(r);
   const prev = queue.get(key);
@@ -230,6 +244,7 @@ export function observeMangaChapters(sourceId, manga, chapters) {
 
 /** أعلى فصل لكل عمل مانجا كما يعرفه الخادم: [مفتاح، فصل]، أو null. */
 export async function topChapters() {
+  if (!legacyUpdatesAllowed('manga')) return null;
   if (!transport) return null;
   const res = await transport('/v1/updates/twins').catch(() => null);
   return res?.status === 200 && Array.isArray(res.body?.works) ? res.body.works : null;
@@ -249,12 +264,12 @@ const MIRROR_MS = 60_000;
 export async function timeline(section, { before = null, limit = 40 } = {}) {
   if (local?.ready?.()) {
     try {
-      if (!before && Date.now() - (mirrored.get(section) ?? 0) > MIRROR_MS) { mirrored.set(section, Date.now()); await local.mirror(section).catch(() => {}); }
+      if (legacyUpdatesAllowed(section) && !before && Date.now() - (mirrored.get(section) ?? 0) > MIRROR_MS) { mirrored.set(section, Date.now()); await local.mirror(section).catch(() => {}); }
       const page = await local.store.timeline(section, { before, limit });
       return { ...page, snapshotAt: Date.now(), local: true };
     } catch { /* المخزن المحلي غير متاح: الخادم كما كان */ }
   }
-  if (!transport) return null;
+  if (!legacyUpdatesAllowed(section) || !transport) return null;
   const q = new URLSearchParams({ section, limit: String(limit), ...(before ? { before } : {}) });
   const res = await transport(`/v1/updates?${q}`).catch(() => null);
   return res?.status === 200 ? res.body : null;
