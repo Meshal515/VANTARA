@@ -493,6 +493,12 @@ for (const path of ["tools/libtorrent-patches/0004-vantara-read-hints.patch", "t
 seams.add("android/app/src/test/java/com/vantara/anime/player/PlaybackSeekBudgetTest.kt");
 // DeepTrace «تقرير الذهب» (المحلل المشترك واختباره)
 for (const path of ["apps/web/lib/deeptrace.js", "apps/web/lib/deeptrace.test.js", "android/app/src/main/kotlin/com/vantara/anime/player/GoldReport.kt", "android/app/src/test/java/com/vantara/anime/player/GoldReportTest.kt", "tools/torrent-host/deeptrace-session.mjs", "tools/ui-qa/server-sheet-anchor.mjs"]) seams.add(path);
+// جولة الإضافات في Debug: قراءة شعار Stremio وتحديث حالة المصدر من الطلب الفعلي.
+for (const path of [
+  "apps/web/addons/manifest.js",
+  "apps/web/addons/manifest.test.js",
+  "apps/web/addons/source-pulse.js",
+]) seams.add(path);
 const reviewedPrefixes=["docs/audit/ux-2026-11-12/", "docs/design/2026-11-12/", "tools/ui-qa/"];
 for(const row of lines){if(moved(...row.split('\t')))continue;const [status,path]=row.split('\t');if(path.startsWith('.claude/'))continue;if(reviewedPrefixes.some(p=>path.startsWith(p))&&status!=='D')continue;if(seams.has(path)&&['A','M'].includes(status))continue;if(status==='D'&&(removed.has(path)||removedPrefixes.some(p=>path.startsWith(p))))continue;if(status!=='A'||!(prefixes.some(p=>path.startsWith(p))||path==='.github/workflows/repository-compat.yml'||path==='.github/workflows/runtime-android.yml'||path==='.github/workflows/runtime-app-debug.yml'||path==='.github/workflows/runtime-live-sweep.yml'||path==='docs/superpowers/plans/2026-10-28-vantara-runtime-worker.md'||path==='docs/superpowers/plans/2026-10-28-repository-compat-runtime.md'))throw Error('Forbidden legacy/scope change: '+row);}
 console.log(`Scope verified: ${lines.length} isolated additions and enumerated Debug integration seams; torrent, subtitles and accounts protected; player changes limited to enumerated video seams against ${base}`);
